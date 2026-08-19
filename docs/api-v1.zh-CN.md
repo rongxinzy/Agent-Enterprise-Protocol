@@ -2,12 +2,16 @@
 
 简体中文 | [English](api-v1.md)
 
-本文说明 AEP v1 HTTPS REST API。机器可读契约位于
-[`../openapi/aep-v1.openapi.yaml`](../openapi/aep-v1.openapi.yaml)。
+本文说明 AEP v1 HTTP(S) REST API。机器可读契约分为
+[核心 OpenAPI 文档](../openapi/aep-v1.openapi.yaml)、
+[管控事件 OpenAPI 文档](../openapi/aep-v1-control-events.openapi.yaml)和
+[认证 OpenAPI 文档](../openapi/aep-v1-authentication.openapi.yaml)。
 
 ## 1. 通用约定
 
-基础地址：`https://enterprise.example.com/aep/v1`
+HTTPS 部署示例：`https://enterprise.example.com/aep/v1`
+HTTP 部署示例：`http://enterprise.example.com/aep/v1`
+本地示例：`http://localhost:8080/aep/v1`
 
 Agent 请求头：
 
@@ -28,7 +32,10 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/metadata` | 查询 AEP 版本和服务能力 |
-| POST | `/auth/exchange` | 交换一次性授权码 |
+| GET | `/auth/methods` | 查询企业可用登录方式 |
+| POST | `/auth/password/login` | 使用管理员创建的知远平台账号登录 |
+| POST | `/auth/federated/start` | 发起甲方联合登录 |
+| POST | `/auth/exchange` | 交换联合登录一次性授权码 |
 | POST | `/auth/refresh` | 刷新会话 |
 | POST | `/auth/logout` | 撤销当前 refresh 会话 |
 
@@ -41,6 +48,10 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 | GET | `/agent/skills/{skillId}/versions/{version}/package` | 下载 Skill ZIP 包 |
 | POST | `/agent/skills/sync-results` | 上报 Skill 同步结果 |
 | POST | `/agent/events/batch` | 幂等批量上传事件 |
+| POST | `/agent/heartbeat` | 上报存活状态并发现待处理管控事件 |
+| GET | `/agent/control-events` | 获取当前 Agent 未确认的适用管控事件 |
+| POST | `/agent/control-events/{deliveryId}/acknowledge` | 确认事件已持久化接收 |
+| POST | `/agent/control-events/{deliveryId}/result` | 上报 Task 执行状态 |
 | GET | `/agent/credentials` | 查询已授权的凭证元数据 |
 | POST | `/agent/credentials/{credentialId}/resolve` | 获取可下发到 Agent 的凭证 |
 | GET | `/agent/models` | 查询当前用户可见模型 |
@@ -59,12 +70,68 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 }
 ```
 
+### `GET /auth/methods`
+
+示例：`GET /auth/methods?enterpriseHint=example`
+
+```json
+{
+  "enterprise": {"id": "enterprise_001", "name": "示例企业"},
+  "preferredMethodId": "enterprise-sso",
+  "methods": [
+    {"id": "enterprise-sso", "type": "federated", "protocol": "oidc", "displayName": "企业统一登录"},
+    {"id": "zhiyuan-password", "type": "password", "displayName": "知远账号"}
+  ]
+}
+```
+
+### `POST /auth/password/login`
+
+```json
+{
+  "enterpriseId": "enterprise_001",
+  "username": "liming",
+  "password": "user-entered-password",
+  "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
+  "agentVersion": "1.8.0",
+  "platform": "windows"
+}
+```
+
+账号由管理员手动创建或批量导入，不代表开放自助注册。任何部署阶段的密码登录都可以使用
+HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token，因此在可信内网之外
+强烈建议使用 HTTPS。
+
+### `POST /auth/federated/start`
+
+```json
+{
+  "enterpriseId": "enterprise_001",
+  "methodId": "enterprise-sso",
+  "redirectUri": "zhiyuan://auth/callback",
+  "codeChallenge": "base64url-sha256-challenge"
+}
+```
+
+```json
+{
+  "transactionId": "login_tx_123",
+  "authorizationUrl": "https://idp.example.com/authorize?...",
+  "state": "opaque-state",
+  "expiresIn": 300
+}
+```
+
+Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。甲方账号密码不经过 Agent。
+
 ### `POST /auth/exchange`
 
 ```json
 {
+  "transactionId": "login_tx_123",
   "authorizationCode": "one-time-code",
   "redirectUri": "zhiyuan://auth/callback",
+  "codeVerifier": "pkce-verifier",
   "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
   "agentVersion": "1.8.0",
   "platform": "windows"
@@ -75,12 +142,15 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 {
   "accessToken": "eyJ...",
   "refreshToken": "refresh-token",
+  "modelAccessToken": "eyJ-model...",
   "tokenType": "Bearer",
-  "expiresIn": 7200
+  "expiresIn": 7200,
+  "modelAccessExpiresIn": 7200
 }
 ```
 
-授权码只能使用一次。
+密码登录和联合登录交换返回相同的会话结构。授权码只能使用一次。model access token 在
+有效期内可直接用于模型网关。
 
 ### `POST /auth/refresh`
 
@@ -163,7 +233,7 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 }
 ```
 
-## 6. 事件上传
+## 6. 遥测事件上传
 
 ### `POST /agent/events/batch`
 
@@ -187,7 +257,102 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 被拒绝的项目包含 `eventId`、`code` 和 `message`。重复事件 ID 按已接受处理，客户端
 可以安全重试。
 
-## 7. 凭证
+## 7. 管控事件
+
+### `POST /agent/heartbeat`
+
+心跳用于上报存活状态，响应只返回管控事件发现信息。
+
+```json
+{
+  "agentVersion": "1.8.0",
+  "platform": "windows",
+  "lastControlEventCursor": "142",
+  "status": "online"
+}
+```
+
+```json
+{
+  "serverTime": "2026-08-19T08:00:00Z",
+  "controlEvents": {
+    "pending": true,
+    "watermark": "147"
+  },
+  "nextHeartbeatAfterSeconds": 30
+}
+```
+
+pending 标志只用于查询优化，不是可靠性边界。Agent 仍需定期查询管控事件，避免错误或
+过期标志导致事件永久不可见。
+
+### `GET /agent/control-events`
+
+查询参数为 `afterCursor` 和 `limit`。服务端根据已认证会话计算适用的全局、组织、用户和
+Agent 作用域。
+
+```json
+{
+  "items": [{
+    "deliveryId": "delivery_001",
+    "eventId": "event_001",
+    "cursor": "143",
+    "type": "skill.manifest.changed",
+    "scope": {"type": "organization", "id": "org_001"},
+    "resource": {"type": "skill", "id": "docx", "revision": "18"},
+    "task": {"type": "skill.reconcile"},
+    "createdAt": "2026-08-19T07:59:00Z",
+    "expiresAt": "2026-08-20T07:59:00Z"
+  }],
+  "nextCursor": "143",
+  "watermark": "147"
+}
+```
+
+读取响应不代表消费。在 Agent 确认接收前，服务端可以再次返回该投递。Agent 使用
+`deliveryId` 和 `eventId` 去重。
+
+### `POST /agent/control-events/{deliveryId}/acknowledge`
+
+Agent 只有在事件已经提交到本地持久化收件箱后才能调用该接口。该操作必须幂等。
+
+```json
+{
+  "status": "received",
+  "receivedAt": "2026-08-19T08:00:01Z"
+}
+```
+
+成功返回 `204 No Content`。接收确认会停止网络重复投递，但不代表 Task 执行成功。
+
+### `POST /agent/control-events/{deliveryId}/result`
+
+Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和结果必须幂等。
+
+```json
+{
+  "status": "succeeded",
+  "completedAt": "2026-08-19T08:00:03Z",
+  "appliedRevision": "18"
+}
+```
+
+失败示例：
+
+```json
+{
+  "status": "failed",
+  "completedAt": "2026-08-19T08:00:03Z",
+  "errorCode": "SKILL_RECONCILE_FAILED",
+  "message": "The Skill package could not be installed.",
+  "retryable": true
+}
+```
+
+服务端分别维护接收状态和执行状态。即使源事件的作用域是全局、组织或用户，每个适用
+Agent 也必须拥有独立的投递记录。
+
+## 8. 凭证
 
 ### `GET /agent/credentials`
 
@@ -220,7 +385,7 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 响应包含 `Cache-Control: no-store`。获取 `server_only` 凭证时返回
 `CREDENTIAL_NOT_DELIVERABLE`。
 
-## 8. 模型
+## 9. 模型
 
 ### `GET /agent/models`
 
@@ -243,12 +408,22 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 }
 ```
 
-对于远程模型，Agent 使用身份凭证访问模型描述中声明的网关地址，网关逐次检查权限。
-AEP 不重新定义推理请求和响应格式。
+对于远程模型，Agent 使用登录或刷新时获得的 model access token 访问模型描述中声明的
+网关地址。网关逐次在本地校验 token，不同步调用管控服务重新授权。AEP 不重新定义推理
+请求和响应格式。
 
-## 9. 管理端 API
+## 10. 管理端 API
 
 管理端端点必须使用管理员身份。
+
+### 平台账号
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET, POST | `/admin/users` | 查询或手动创建知远平台账号 |
+| POST | `/admin/users/import` | 批量导入知远平台账号 |
+| PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
+| POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
 ### Skill
 
@@ -304,12 +479,39 @@ AEP 不重新定义推理请求和响应格式。
 
 管理端使用的 `credentialId` 不得出现在 Agent 模型目录中。
 
-### 事件
+### 管控事件
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET, POST | `/admin/control-events` | 查询或发布管控事件 |
+| GET | `/admin/control-events/{eventId}` | 查询事件及聚合状态 |
+| POST | `/admin/control-events/{eventId}/cancel` | 取消尚未接收的投递 |
+| GET | `/admin/control-events/{eventId}/deliveries` | 查询每个 Agent 的投递状态 |
+
+发布示例：
+
+```json
+{
+  "type": "skill.manifest.changed",
+  "scope": {"type": "organization", "id": "org_001", "includeDescendants": true},
+  "resource": {"type": "skill", "id": "docx", "revision": "18"},
+  "task": {"type": "skill.reconcile"},
+  "expiresAt": "2026-08-20T07:59:00Z",
+  "supersedesKey": "skill:docx:org_001"
+}
+```
+
+服务端负责解析适用 Agent。取消操作只影响尚未进入 `received` 的投递，不能撤销 Agent
+已经接收并执行的工作。
+发布具有相同 `supersedesKey` 的新事件时，服务端将旧事件中尚未接收的投递标记为
+`superseded`。
+
+### 遥测事件
 
 `GET /admin/events` 支持 `cursor`、`limit`、`userId`、`agentId`、`type`、
 `resourceType`、`resourceId`、`result`、`occurredAfter` 和 `occurredBefore`。
 
-## 10. 错误与重试
+## 11. 错误与重试
 
 ```json
 {

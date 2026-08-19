@@ -8,7 +8,9 @@ Agent Enterprise Protocol（AEP，Agent 企业协议）定义企业托管的 Age
 AEP v1 覆盖：
 
 - 用户身份识别与会话交换；
-- Agent 事件上报；
+- 知远平台账号密码登录与甲方联合登录适配；
+- Agent 遥测事件上报；
+- 通过心跳发现并可靠投递具有不同作用域的服务端管控事件；
 - 托管 Skill 的发现、下载、更新、删除与同步结果上报；
 - 可下发到客户端的 API 凭证授权与获取；
 - 模型目录发现与模型访问权限控制。
@@ -21,6 +23,8 @@ AEP 是管理协议，不重新定义模型推理、MCP 或 Agent-to-Agent 协�
 - [AEP v1 协议说明](docs/aep-v1.zh-CN.md)
 - [AEP v1 API 指南](docs/api-v1.zh-CN.md)
 - [OpenAPI 3.1 规范](openapi/aep-v1.openapi.yaml)
+- [管控事件 OpenAPI 3.1 规范](openapi/aep-v1-control-events.openapi.yaml)
+- [认证 OpenAPI 3.1 规范](openapi/aep-v1-authentication.openapi.yaml)
 
 ## 状态
 

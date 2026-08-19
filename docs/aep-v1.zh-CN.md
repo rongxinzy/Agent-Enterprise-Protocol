@@ -17,10 +17,11 @@ AEP v1 定义：
 
 1. 用户身份识别与 Agent 会话交换；
 2. 托管 Skill 同步；
-3. Agent 事件上传；
-4. API 凭证授权及客户端下发；
-5. 模型目录发现与访问权限判定；
-6. 上述资源的管理端 API。
+3. Agent 遥测事件上传；
+4. 通过心跳发现并可靠投递具有不同作用域的管控事件；
+5. API 凭证授权及客户端下发；
+6. 模型目录发现与访问权限判定；
+7. 上述资源的管理端 API。
 
 AEP v1 不定义模型推理数据格式、MCP 调用、Agent 间任务协作、设备证明、签名策略工件
 或甲方特定业务规则。
@@ -33,9 +34,9 @@ AEP v1 不定义模型推理数据格式、MCP 调用、Agent 间任务协作、
 | 企业 Agent SDK | 在 Agent 主进程内实现 AEP |
 | 管控服务 | 管理身份、授权关系、Skill 元数据和模型权限 |
 | 资产服务 | 存储和提供 Skill 包及可选用户产物 |
-| 事件服务 | 接收并索引 Agent 事件 |
+| 事件服务 | 接收遥测事件并向 Agent 投递作用域管控事件 |
 | 模型网关 | 强制执行远程模型权限并调用模型服务商 |
-| 身份提供方 | 认证用户并提供授权码 |
+| 身份服务 | 认证知远平台账号并适配甲方身份提供方 |
 
 管控、资产和事件服务可以部署为一个模块化服务。
 
@@ -48,7 +49,7 @@ Renderer UI
     | IPC
     v
 Electron 主进程 / 企业 Agent SDK
-    | HTTPS REST API
+    | HTTP(S) REST API
     v
 企业服务端
 ```
@@ -58,9 +59,13 @@ Token 和可下发到客户端的凭证不得暴露给 Renderer。网关使用�
 
 ## 5. REST 传输协议
 
-AEP 的数据交互统一使用 HTTPS REST API。
+AEP 的数据交互统一使用 HTTP 或 HTTPS REST API。
 
-- 生产环境必须使用 HTTPS。
+- 开发和生产环境均可使用 HTTP 或 HTTPS，AEP 实现不得仅因部署阶段为生产环境而拒绝 HTTP。
+- 账号密码或 bearer token 经过不可信网络时强烈建议使用 HTTPS。选择 HTTP 时，应使用可信
+  内网、专线或 AEP 之外的传输保护。
+- 本地开发不得强制配置 TLS。使用明文 HTTP 进行密码登录时，
+  应仅限回环地址或隔离的测试网络。
 - 资源 URL 统一位于 `/aep/v1` 下。
 - `GET` 读取资源，不得改变业务状态。
 - `POST` 创建资源或执行明确命令。
@@ -72,8 +77,8 @@ AEP 的数据交互统一使用 HTTPS REST API。
 - 时间使用 RFC 3339 UTC。
 - 标识符是不可推断语义的不透明字符串。
 
-AEP v1 不使用 SSE、WebSocket 或自定义长连接。客户端通过带条件请求的 REST 轮询发现
-变更。模型流式输出可以使用模型 API 自身的协议，但不属于 AEP。
+AEP v1 不使用 SSE、WebSocket 或自定义长连接。客户端通过心跳标志、管控事件轮询和
+资源条件轮询发现变更。模型流式输出可以使用模型 API 自身的协议，但不属于 AEP。
 
 ## 6. 请求头
 
@@ -93,18 +98,37 @@ X-Request-ID: <request-id>
 
 ## 7. 身份认证
 
-标准登录顺序为：
+服务端按企业返回可用登录方式。AEP v1 支持：
 
-```text
-Agent 打开企业登录页面
-  -> 身份提供方认证用户
-  -> Agent 获得一次性授权码
-  -> Agent 通过 REST API 交换授权码
-  -> 服务端返回 access token 和 refresh token
-```
+| 方式 | 行为 |
+| --- | --- |
+| `password` | Agent 将知远平台账号密码提交给身份服务 |
+| `federated` | Agent 使用系统浏览器进入甲方 OIDC 或服务端自定义适配器，再交换一次性授权码 |
+
+知远平台账号由管理员逐个创建或批量导入，AEP v1 不提供公开自助注册。密码必须使用自适应
+密码哈希存储，管理员也不得读取原密码。
+
+上游支持 OIDC 时，联合登录使用 Authorization Code + PKCE。甲方账号密码只在甲方登录
+页面输入，不得经过 Agent 或 AEP 密码登录接口。其他甲方登录系统可以通过服务端适配器
+接入，只要最终签发相同的短生命周期、单次使用交换码。
+
+两种登录方式最终建立相同的 AEP 会话，并返回：
+
+- 调用管理 API 的 AEP access token；
+- 用于会话续期的 refresh token；
+- 调用模型网关的 model access token。
+
+model access token 在登录和刷新时签发，包含明确的模型网关 audience、有效期、企业身份、
+用户身份和模型授权声明。有效期内，Agent 直接向模型网关出示该凭证；模型网关使用受信任
+签名密钥在本地完成校验，不得为每次推理请求同步调用管控服务重新做授权决策。
+
+这不等于取消逐请求认证：网关仍须在每次请求中校验凭证签名、audience、有效期及目标模型
+范围。权限变更最迟在凭证到期时生效；需要更快收敛时，可以投递
+`model.catalog.changed` 管控事件并要求刷新会话。
 
 access token 用于普通请求，refresh token 仅用于刷新接口。退出登录时撤销 refresh 会话。
-当前身份接口是客户端展示用户和企业信息的唯一可信来源。
+刷新会同时轮换 AEP token 与模型 token。退出登录或禁用账号会撤销 refresh 会话，已签发
+的短期 token 则由有效期限制。当前身份接口是客户端展示用户和企业信息的唯一可信来源。
 
 ## 8. Skill 同步
 
@@ -141,20 +165,65 @@ Skill 包是 ZIP 文件，根目录必须包含 `SKILL.md`，可以包含脚本�
 - 删除 Skill 会使其从后续所有清单中消失。
 - 已下发并被复制为非托管副本的内容无法保证被删除。
 
-## 9. 事件上传
+## 9. 事件
 
-Agent 通过 REST API 批量上传事件。每个事件拥有全局唯一的 `eventId`，服务端依据该值去重，
-因此客户端可以安全重试。
+AEP 明确区分两个事件方向：
+
+| 方向 | 名称 | 用途 |
+| --- | --- | --- |
+| Agent 到服务端 | 遥测事件 | 上报 Agent 活动和执行结果 |
+| 服务端到 Agent | 管控事件 | 通知 Agent 托管状态或任务发生变化 |
+
+### 9.1 遥测事件上传
+
+Agent 通过 REST API 批量上传遥测事件。每个事件拥有全局唯一的 `eventId`，服务端依据
+该值去重，因此客户端可以安全重试。
 
 每批最多 100 个事件，建议不超过 1 MiB。服务端分别返回已接受和被拒绝的事件 ID。
 Agent 将可重试失败保留在本地 outbox 中。
 
-标准事件类型包括 `auth.login`、`auth.logout`、`skill.sync.started`、
+标准遥测事件类型包括 `auth.login`、`auth.logout`、`skill.sync.started`、
 `skill.installed`、`skill.updated`、`skill.removed`、`skill.sync.failed`、
-`credential.resolved`、`credential.resolve_failed`、`model.request.completed`、
-`model.request.failed` 和 `agent.heartbeat`。
+`credential.resolved`、`credential.resolve_failed`、`model.request.completed` 和
+`model.request.failed`。
 
-事件元数据不得包含 token、API Key 或完整模型输入输出，除非另有企业策略明确启用。
+遥测事件元数据不得包含 token、API Key 或完整模型输入输出，除非另有企业策略明确启用。
+
+### 9.2 管控事件作用域
+
+管控事件支持 `global`、`organization`、`user` 和 `agent` 四种作用域。服务端根据经过
+认证的身份和已注册 Agent 实例计算适用作用域，客户端不得自行选择所属组织或用户。
+
+全局、组织或个人事件必须为每个适用 Agent 分别维护投递状态，事件本身不存在共享的
+`consumed` 标志。
+
+### 9.3 发现与投递
+
+Agent 通过 REST API 发送心跳，响应只包含待处理标志和服务端水位。标志为 true 时，Agent
+调用管控事件查询接口。
+
+读取事件不代表消费。Agent 必须先将事件持久化到本地收件箱，再确认状态为 `received`。
+服务端会重新投递尚未确认的事件。Agent 执行完成后，再独立上报 `succeeded` 或 `failed`。
+
+投递状态包括 `pending`、`received`、`running`、`succeeded`、`failed`、`expired` 和
+`superseded`。接收确认与结果上报必须幂等。
+
+### 9.4 事件作为失效通知
+
+管控事件应作为轻量变更通知，而不是托管数据本身。例如 `skill.manifest.changed` 通知
+Agent 重新获取最新 Skill 清单并收敛状态。事件中不得包含凭证明文、完整 Skill 包或大型
+配置对象。
+
+标准映射包括：
+
+| 事件类型 | Task |
+| --- | --- |
+| `skill.manifest.changed` | 拉取并同步 Skill 清单 |
+| `plugin.manifest.changed` | 在支持插件管理时拉取并同步插件清单 |
+| `credential.assignments.changed` | 刷新凭证授权清单 |
+| `model.catalog.changed` | 刷新模型目录 |
+
+详细 REST 契约见 API 指南和管控事件 OpenAPI 文档。
 
 ## 10. API 凭证
 
@@ -183,8 +252,10 @@ AEP 定义两种下发模式：
 | `enterprise_open_source` | 企业托管的开源模型 |
 | `local` | 在 Agent 设备本地运行的模型 |
 
-模型网关必须在每次远程推理请求时再次检查权限，仅过滤模型目录不足以形成服务端授权。本地模型
-权限属于产品功能控制，无法对抗完全控制本机的用户。
+Agent 使用登录或刷新时取得的 model access token 进行远程推理。模型网关每次请求都在本地
+校验该 token 的签名、有效期、audience 和模型授权范围，但不得为每次模型调用同步请求管控
+服务。仅过滤模型目录不足以形成服务端约束，而本地 token 校验也避免在推理链路增加一次
+控制面往返。本地模型权限属于产品功能控制，无法对抗完全控制本机的用户。
 
 AEP 不重新定义模型推理数据。模型描述中的 `protocol` 指示 SDK 使用哪种模型客户端。
 
@@ -225,9 +296,12 @@ AEP Problem Details。
 
 AEP v1 不要求签名策略工件或设备证明，但仍要求：
 
-- 除本地开发外使用 HTTPS；
+- 同时支持 HTTP 与 HTTPS 部署，不在协议层强制 HTTPS；
+- 使用 HTTP 时明确接受凭证可能被链路窃取的风险，并强烈建议使用可信内网、专线或外层
+  传输保护；
 - 依据经过认证的身份执行授权；
-- 每次包下载、凭证获取和远程模型调用均执行服务端授权；
+- 每次包下载和凭证获取均执行服务端授权；
+- 每次远程模型调用在模型网关本地校验登录时签发的 model access token，不同步调用管控服务；
 - 对可获取的凭证明文进行加密存储；
 - 日志和事件中隐藏敏感值；
 - 解压 Skill 前校验归档路径；
