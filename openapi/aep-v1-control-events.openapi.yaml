@@ -1,0 +1,441 @@
+openapi: 3.1.0
+info:
+  title: Agent Enterprise Protocol - Control Events
+  version: 1.0.0-draft
+  description: REST heartbeat discovery and reliable scoped control-event delivery for AEP v1.
+  license: {name: Apache 2.0, identifier: Apache-2.0}
+servers:
+  - url: https://enterprise.example.com/aep/v1
+security:
+  - bearerAuth: []
+tags:
+  - {name: Agent Control Events}
+  - {name: Admin Control Events}
+paths:
+  /agent/heartbeat:
+    post:
+      tags: [Agent Control Events]
+      operationId: reportAgentHeartbeat
+      parameters:
+        - {$ref: '#/components/parameters/AepAgentId'}
+        - {$ref: '#/components/parameters/AepProtocolVersion'}
+        - {$ref: '#/components/parameters/RequestId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HeartbeatRequest'}
+      responses:
+        '200':
+          description: Liveness accepted and discovery metadata returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HeartbeatResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /agent/control-events:
+    get:
+      tags: [Agent Control Events]
+      operationId: listAgentControlEvents
+      description: Reading does not consume an event. Unacknowledged deliveries may be returned again.
+      parameters:
+        - {$ref: '#/components/parameters/AepAgentId'}
+        - {$ref: '#/components/parameters/AepProtocolVersion'}
+        - {$ref: '#/components/parameters/RequestId'}
+        - name: afterCursor
+          in: query
+          schema: {type: [string, 'null']}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Applicable unacknowledged control events
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ControlEventPage'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /agent/control-events/{deliveryId}/acknowledge:
+    post:
+      tags: [Agent Control Events]
+      operationId: acknowledgeControlEvent
+      description: Call only after the delivery is committed to the durable local inbox.
+      parameters:
+        - {$ref: '#/components/parameters/DeliveryId'}
+        - {$ref: '#/components/parameters/AepAgentId'}
+        - {$ref: '#/components/parameters/AepProtocolVersion'}
+        - {$ref: '#/components/parameters/RequestId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AcknowledgeRequest'}
+      responses:
+        '204': {description: Durable receipt recorded}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /agent/control-events/{deliveryId}/result:
+    post:
+      tags: [Agent Control Events]
+      operationId: reportControlEventResult
+      parameters:
+        - {$ref: '#/components/parameters/DeliveryId'}
+        - {$ref: '#/components/parameters/AepAgentId'}
+        - {$ref: '#/components/parameters/AepProtocolVersion'}
+        - {$ref: '#/components/parameters/RequestId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ControlEventResult'}
+      responses:
+        '204': {description: Execution state recorded}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/control-events:
+    get:
+      tags: [Admin Control Events]
+      operationId: listControlEvents
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: type
+          in: query
+          schema: {$ref: '#/components/schemas/ControlEventType'}
+        - name: scopeType
+          in: query
+          schema: {$ref: '#/components/schemas/ControlEventScopeType'}
+        - name: scopeId
+          in: query
+          schema: {type: string}
+        - name: createdAfter
+          in: query
+          schema: {type: string, format: date-time}
+        - name: createdBefore
+          in: query
+          schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: Control events
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminControlEventPage'}
+    post:
+      tags: [Admin Control Events]
+      operationId: createControlEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateControlEventRequest'}
+      responses:
+        '201':
+          description: Control event published
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminControlEvent'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /admin/control-events/{eventId}:
+    get:
+      tags: [Admin Control Events]
+      operationId: getControlEvent
+      parameters:
+        - {$ref: '#/components/parameters/EventId'}
+      responses:
+        '200':
+          description: Control event and aggregate delivery status
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminControlEvent'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /admin/control-events/{eventId}/cancel:
+    post:
+      tags: [Admin Control Events]
+      operationId: cancelControlEvent
+      description: Cancels only deliveries that have not reached received.
+      parameters:
+        - {$ref: '#/components/parameters/EventId'}
+      responses:
+        '200':
+          description: Event after cancellation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminControlEvent'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/control-events/{eventId}/deliveries:
+    get:
+      tags: [Admin Control Events]
+      operationId: listControlEventDeliveries
+      parameters:
+        - {$ref: '#/components/parameters/EventId'}
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: state
+          in: query
+          schema: {$ref: '#/components/schemas/DeliveryState'}
+        - name: agentId
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: Per-Agent delivery states
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeliveryPage'}
+        '404': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    AepAgentId:
+      name: X-AEP-Agent-ID
+      in: header
+      required: true
+      schema: {type: string}
+    AepProtocolVersion:
+      name: X-AEP-Protocol-Version
+      in: header
+      required: true
+      schema: {type: string, const: '1.0'}
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema: {type: string}
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: {type: string}
+    DeliveryId:
+      name: deliveryId
+      in: path
+      required: true
+      schema: {type: string}
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: [string, 'null']}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+  responses:
+    Problem:
+      description: AEP Problem Details
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    HeartbeatRequest:
+      type: object
+      required: [agentVersion, platform, status]
+      properties:
+        agentVersion: {type: string}
+        platform: {type: string, enum: [windows, macos, linux]}
+        lastControlEventCursor: {type: [string, 'null']}
+        status: {type: string, enum: [online, idle, busy]}
+    HeartbeatResponse:
+      type: object
+      required: [serverTime, controlEvents, nextHeartbeatAfterSeconds]
+      properties:
+        serverTime: {type: string, format: date-time}
+        controlEvents:
+          type: object
+          required: [pending, watermark]
+          properties:
+            pending: {type: boolean}
+            watermark: {type: string}
+        nextHeartbeatAfterSeconds: {type: integer, minimum: 5, maximum: 3600}
+    ControlEventPage:
+      type: object
+      required: [items, nextCursor, watermark]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ControlEventDelivery'}
+        nextCursor: {type: [string, 'null']}
+        watermark: {type: string}
+    ControlEventDelivery:
+      type: object
+      required: [deliveryId, eventId, cursor, type, scope, task, createdAt, expiresAt]
+      properties:
+        deliveryId: {type: string}
+        eventId: {type: string}
+        cursor: {type: string}
+        type: {$ref: '#/components/schemas/ControlEventType'}
+        scope: {$ref: '#/components/schemas/ControlEventScope'}
+        resource: {$ref: '#/components/schemas/ControlEventResource'}
+        task: {$ref: '#/components/schemas/ControlTask'}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+    ControlEventType:
+      type: string
+      enum:
+        - skill.manifest.changed
+        - plugin.manifest.changed
+        - credential.assignments.changed
+        - model.catalog.changed
+    ControlEventScopeType:
+      type: string
+      enum: [global, organization, user, agent]
+    ControlEventScope:
+      oneOf:
+        - {$ref: '#/components/schemas/GlobalScope'}
+        - {$ref: '#/components/schemas/OrganizationScope'}
+        - {$ref: '#/components/schemas/UserScope'}
+        - {$ref: '#/components/schemas/AgentScope'}
+      discriminator:
+        propertyName: type
+    GlobalScope:
+      type: object
+      required: [type]
+      properties:
+        type: {type: string, const: global}
+      additionalProperties: false
+    OrganizationScope:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, const: organization}
+        id: {type: string}
+        includeDescendants: {type: boolean, default: false}
+      additionalProperties: false
+    UserScope:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, const: user}
+        id: {type: string}
+      additionalProperties: false
+    AgentScope:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, const: agent}
+        id: {type: string}
+      additionalProperties: false
+    ControlEventResource:
+      type: object
+      required: [type, id, revision]
+      properties:
+        type: {type: string, enum: [skill, plugin, credential, model]}
+        id: {type: string}
+        revision: {type: string}
+    ControlTask:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [skill.reconcile, plugin.reconcile, credential.reconcile, model.reconcile]
+    AcknowledgeRequest:
+      type: object
+      required: [status, receivedAt]
+      properties:
+        status: {type: string, const: received}
+        receivedAt: {type: string, format: date-time}
+    ControlEventResult:
+      oneOf:
+        - {$ref: '#/components/schemas/RunningResult'}
+        - {$ref: '#/components/schemas/SucceededResult'}
+        - {$ref: '#/components/schemas/FailedResult'}
+      discriminator:
+        propertyName: status
+    RunningResult:
+      type: object
+      required: [status, startedAt]
+      properties:
+        status: {type: string, const: running}
+        startedAt: {type: string, format: date-time}
+    SucceededResult:
+      type: object
+      required: [status, completedAt]
+      properties:
+        status: {type: string, const: succeeded}
+        completedAt: {type: string, format: date-time}
+        appliedRevision: {type: string}
+    FailedResult:
+      type: object
+      required: [status, completedAt, errorCode, message, retryable]
+      properties:
+        status: {type: string, const: failed}
+        completedAt: {type: string, format: date-time}
+        errorCode: {type: string}
+        message: {type: string}
+        retryable: {type: boolean}
+    CreateControlEventRequest:
+      type: object
+      required: [type, scope, task, expiresAt]
+      properties:
+        type: {$ref: '#/components/schemas/ControlEventType'}
+        scope: {$ref: '#/components/schemas/ControlEventScope'}
+        resource: {$ref: '#/components/schemas/ControlEventResource'}
+        task: {$ref: '#/components/schemas/ControlTask'}
+        expiresAt: {type: string, format: date-time}
+        supersedesKey: {type: [string, 'null'], maxLength: 500}
+    AdminControlEvent:
+      allOf:
+        - {$ref: '#/components/schemas/CreateControlEventRequest'}
+        - type: object
+          required: [eventId, state, createdAt, createdBy, deliverySummary]
+          properties:
+            eventId: {type: string}
+            state: {type: string, enum: [active, cancelled, expired, superseded]}
+            createdAt: {type: string, format: date-time}
+            createdBy: {type: string}
+            deliverySummary: {$ref: '#/components/schemas/DeliverySummary'}
+    AdminControlEventPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AdminControlEvent'}
+        nextCursor: {type: [string, 'null']}
+    DeliverySummary:
+      type: object
+      required: [pending, received, running, succeeded, failed, expired, superseded]
+      properties:
+        pending: {type: integer, minimum: 0}
+        received: {type: integer, minimum: 0}
+        running: {type: integer, minimum: 0}
+        succeeded: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
+        expired: {type: integer, minimum: 0}
+        superseded: {type: integer, minimum: 0}
+    DeliveryState:
+      type: string
+      enum: [pending, received, running, succeeded, failed, expired, superseded]
+    AdminDelivery:
+      type: object
+      required: [deliveryId, eventId, agentId, state, createdAt, updatedAt]
+      properties:
+        deliveryId: {type: string}
+        eventId: {type: string}
+        agentId: {type: string}
+        state: {$ref: '#/components/schemas/DeliveryState'}
+        attemptCount: {type: integer, minimum: 0}
+        createdAt: {type: string, format: date-time}
+        receivedAt: {type: [string, 'null'], format: date-time}
+        completedAt: {type: [string, 'null'], format: date-time}
+        updatedAt: {type: string, format: date-time}
+        errorCode: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+    DeliveryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AdminDelivery'}
+        nextCursor: {type: [string, 'null']}
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string}
+        code: {type: string}
+        requestId: {type: string}

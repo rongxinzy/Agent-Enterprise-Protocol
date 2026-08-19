@@ -19,10 +19,11 @@ AEP v1 defines:
 
 1. user identity and Agent session exchange;
 2. managed Skill synchronization;
-3. Agent event upload;
-4. API credential assignment and client delivery;
-5. model catalog discovery and access decisions;
-6. administrative APIs for these resources.
+3. Agent telemetry event upload;
+4. heartbeat-based discovery and reliable delivery of scoped control events;
+5. API credential assignment and client delivery;
+6. model catalog discovery and access decisions;
+7. administrative APIs for these resources.
 
 AEP v1 does not define model inference payloads, MCP invocation, Agent-to-Agent
 collaboration, device attestation, signed policy artifacts, or
@@ -36,7 +37,7 @@ customer-specific business rules.
 | Enterprise Agent SDK | Implements AEP in the Agent main process |
 | Control Service | Owns identities, assignments, Skill metadata, and model permissions |
 | Asset Service | Stores and serves Skill packages and optional artifacts |
-| Event Service | Accepts and indexes Agent events |
+| Event Service | Accepts telemetry and delivers scoped control events |
 | Model Gateway | Enforces remote model permissions and invokes providers |
 | Identity Provider | Authenticates users and supplies authorization codes |
 
@@ -77,8 +78,9 @@ AEP data exchange uses REST APIs over HTTPS.
 - Identifiers are opaque strings.
 
 AEP v1 does not use SSE, WebSocket, or a custom persistent connection.
-Clients discover changes by conditional REST polling. Model streaming may use
-the model API's own protocol and is outside AEP.
+Clients discover changes through heartbeat flags, control-event polling, and
+conditional resource polling. Model streaming may use the model API's own
+protocol and is outside AEP.
 
 ## 6. Request Headers
 
@@ -153,22 +155,74 @@ the exact ZIP bytes served by the asset service.
 - Deleting a Skill removes it from future manifests.
 - Previously delivered unmanaged copies cannot be guaranteed to disappear.
 
-## 9. Event Upload
+## 9. Events
 
-Agents upload events in REST batches. Every event has a globally unique
-`eventId`; the server deduplicates by this value, allowing safe retries.
+AEP distinguishes two event directions:
+
+| Direction | Name | Purpose |
+| --- | --- | --- |
+| Agent to server | Telemetry event | Report Agent activity and outcomes |
+| Server to Agent | Control event | Notify an Agent that managed state or a task changed |
+
+### 9.1 Telemetry Upload
+
+Agents upload telemetry events in REST batches. Every event has a globally
+unique `eventId`; the server deduplicates by this value, allowing safe retries.
 
 A batch contains at most 100 events and SHOULD remain below 1 MiB. The server
 returns accepted and rejected event IDs. The Agent retains retryable failures
 in a local outbox.
 
-Standard event types include `auth.login`, `auth.logout`,
+Standard telemetry event types include `auth.login`, `auth.logout`,
 `skill.sync.started`, `skill.installed`, `skill.updated`, `skill.removed`,
 `skill.sync.failed`, `credential.resolved`, `credential.resolve_failed`,
-`model.request.completed`, `model.request.failed`, and `agent.heartbeat`.
+`model.request.completed`, and `model.request.failed`.
 
-Event metadata MUST NOT contain tokens, API keys, or complete model prompts
-and responses unless a separate enterprise policy explicitly enables it.
+Telemetry metadata MUST NOT contain tokens, API keys, or complete model
+prompts and responses unless a separate enterprise policy explicitly enables it.
+
+### 9.2 Control Event Scope
+
+Control events use one of four scopes: `global`, `organization`, `user`, or
+`agent`. The server derives applicable scopes from the authenticated identity
+and registered Agent instance. A client MUST NOT select its own organization
+or user scope.
+
+A global, organization, or user event has an independent delivery state for
+every applicable Agent. There is no shared `consumed` flag on the event itself.
+
+### 9.3 Discovery and Delivery
+
+The Agent sends a REST heartbeat. The response contains only a pending flag
+and server watermark. When the flag is true, the Agent queries the control
+event endpoint.
+
+Reading an event does not consume it. The Agent first writes the event to a
+durable local inbox, then acknowledges it as `received`. The server redelivers
+unacknowledged events. After execution, the Agent reports `succeeded` or
+`failed` independently from receipt acknowledgement.
+
+Delivery states are `pending`, `received`, `running`, `succeeded`, `failed`,
+`expired`, and `superseded`. Acknowledgement and result requests are idempotent.
+
+### 9.4 Event as Invalidation Signal
+
+A control event SHOULD be a small invalidation signal rather than the source
+of managed data. For example, `skill.manifest.changed` instructs the Agent to
+retrieve the latest Skill manifest and reconcile it. Secrets, complete Skill
+packages, and large configuration objects MUST NOT be embedded in an event.
+
+Standard mappings include:
+
+| Event type | Task |
+| --- | --- |
+| `skill.manifest.changed` | Pull and reconcile the Skill manifest |
+| `plugin.manifest.changed` | Pull and reconcile the plugin manifest when supported |
+| `credential.assignments.changed` | Refresh credential assignments |
+| `model.catalog.changed` | Refresh the model catalog |
+
+The detailed REST contract is defined in the API guide and the Control Events
+OpenAPI document.
 
 ## 10. API Credentials
 

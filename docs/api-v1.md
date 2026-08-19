@@ -2,8 +2,9 @@
 
 [简体中文](api-v1.zh-CN.md) | English
 
-This guide documents the AEP v1 HTTPS REST API. The machine-readable contract
-is [`../openapi/aep-v1.openapi.yaml`](../openapi/aep-v1.openapi.yaml).
+This guide documents the AEP v1 HTTPS REST API. The machine-readable contracts
+are the [core OpenAPI document](../openapi/aep-v1.openapi.yaml) and the
+[Control Events OpenAPI document](../openapi/aep-v1-control-events.openapi.yaml).
 
 ## 1. Conventions
 
@@ -42,6 +43,10 @@ WebSocket.
 | GET | `/agent/skills/{skillId}/versions/{version}/package` | Download Skill ZIP |
 | POST | `/agent/skills/sync-results` | Report Skill synchronization |
 | POST | `/agent/events/batch` | Upload an idempotent event batch |
+| POST | `/agent/heartbeat` | Report liveness and discover pending control events |
+| GET | `/agent/control-events` | Retrieve applicable unacknowledged control events |
+| POST | `/agent/control-events/{deliveryId}/acknowledge` | Confirm durable receipt |
+| POST | `/agent/control-events/{deliveryId}/result` | Report task execution state |
 | GET | `/agent/credentials` | List assigned credential metadata |
 | POST | `/agent/credentials/{credentialId}/resolve` | Retrieve an Agent-deliverable secret |
 | GET | `/agent/models` | List visible models |
@@ -166,7 +171,7 @@ verifies the manifest SHA-256 before extraction.
 }
 ```
 
-## 6. Event Upload
+## 6. Telemetry Event Upload
 
 ### `POST /agent/events/batch`
 
@@ -190,7 +195,108 @@ verifies the manifest SHA-256 before extraction.
 Rejected items contain `eventId`, `code`, and `message`. Duplicate IDs are
 accepted, allowing safe retry.
 
-## 7. Credentials
+## 7. Control Events
+
+### `POST /agent/heartbeat`
+
+The heartbeat reports liveness and returns only control-event discovery metadata.
+
+```json
+{
+  "agentVersion": "1.8.0",
+  "platform": "windows",
+  "lastControlEventCursor": "142",
+  "status": "online"
+}
+```
+
+```json
+{
+  "serverTime": "2026-08-19T08:00:00Z",
+  "controlEvents": {
+    "pending": true,
+    "watermark": "147"
+  },
+  "nextHeartbeatAfterSeconds": 30
+}
+```
+
+The pending flag is an optimization, not a correctness boundary. The Agent
+still performs periodic control-event queries so that a stale flag cannot
+permanently hide an event.
+
+### `GET /agent/control-events`
+
+Query parameters are `afterCursor` and `limit`. The server derives applicable
+global, organization, user, and Agent scopes from the authenticated session.
+
+```json
+{
+  "items": [{
+    "deliveryId": "delivery_001",
+    "eventId": "event_001",
+    "cursor": "143",
+    "type": "skill.manifest.changed",
+    "scope": {"type": "organization", "id": "org_001"},
+    "resource": {"type": "skill", "id": "docx", "revision": "18"},
+    "task": {"type": "skill.reconcile"},
+    "createdAt": "2026-08-19T07:59:00Z",
+    "expiresAt": "2026-08-20T07:59:00Z"
+  }],
+  "nextCursor": "143",
+  "watermark": "147"
+}
+```
+
+Reading this response does not consume an event. Until receipt is
+acknowledged, the server may return the delivery again. The Agent deduplicates
+by `deliveryId` and `eventId`.
+
+### `POST /agent/control-events/{deliveryId}/acknowledge`
+
+The Agent calls this endpoint only after committing the event to its durable
+local inbox. The operation is idempotent.
+
+```json
+{
+  "status": "received",
+  "receivedAt": "2026-08-19T08:00:01Z"
+}
+```
+
+A successful acknowledgement returns `204 No Content`. Receipt acknowledgement
+ends network redelivery but does not mean the Task succeeded.
+
+### `POST /agent/control-events/{deliveryId}/result`
+
+The Agent reports `running`, `succeeded`, or `failed`. Repeating the same state
+and result is idempotent.
+
+```json
+{
+  "status": "succeeded",
+  "completedAt": "2026-08-19T08:00:03Z",
+  "appliedRevision": "18"
+}
+```
+
+Failure example:
+
+```json
+{
+  "status": "failed",
+  "completedAt": "2026-08-19T08:00:03Z",
+  "errorCode": "SKILL_RECONCILE_FAILED",
+  "message": "The Skill package could not be installed.",
+  "retryable": true
+}
+```
+
+The server keeps receipt and execution states separately. Each applicable
+Agent has its own delivery record even when the source event has global,
+organization, or user scope.
+
+## 8. Credentials
 
 ### `GET /agent/credentials`
 
@@ -223,7 +329,7 @@ Request: `{"purpose":"Connect to the internal search service"}`.
 The response includes `Cache-Control: no-store`. `server_only` credentials
 return `CREDENTIAL_NOT_DELIVERABLE`.
 
-## 8. Models
+## 9. Models
 
 ### `GET /agent/models`
 
@@ -250,7 +356,7 @@ For remote models, the Agent authenticates to the declared gateway endpoint.
 The gateway enforces permission per request. AEP does not redefine inference
 payloads.
 
-## 9. Administration API
+## 10. Administration API
 
 Administrative endpoints require an administrator identity.
 
@@ -308,12 +414,39 @@ Read responses never return `value`. Rotation accepts a new `value`.
 
 Administrative `credentialId` MUST NOT appear in the Agent model catalog.
 
-### Events
+### Control Events
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET, POST | `/admin/control-events` | Search or publish control events |
+| GET | `/admin/control-events/{eventId}` | Read one event and aggregate status |
+| POST | `/admin/control-events/{eventId}/cancel` | Cancel pending deliveries |
+| GET | `/admin/control-events/{eventId}/deliveries` | Inspect per-Agent delivery status |
+
+Publish example:
+
+```json
+{
+  "type": "skill.manifest.changed",
+  "scope": {"type": "organization", "id": "org_001", "includeDescendants": true},
+  "resource": {"type": "skill", "id": "docx", "revision": "18"},
+  "task": {"type": "skill.reconcile"},
+  "expiresAt": "2026-08-20T07:59:00Z",
+  "supersedesKey": "skill:docx:org_001"
+}
+```
+
+The server resolves recipients. Cancellation affects only deliveries that have
+not reached `received`; it does not undo work already accepted by an Agent.
+Publishing a newer event with the same `supersedesKey` marks older pending
+deliveries as `superseded`.
+
+### Telemetry Events
 
 `GET /admin/events` supports `cursor`, `limit`, `userId`, `agentId`, `type`,
 `resourceType`, `resourceId`, `result`, `occurredAfter`, and `occurredBefore`.
 
-## 10. Errors and Retry
+## 11. Errors and Retry
 
 ```json
 {

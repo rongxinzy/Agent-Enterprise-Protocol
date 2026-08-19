@@ -8,7 +8,8 @@ enterprise-managed Agent client and enterprise services.
 AEP v1 covers:
 
 - user identity and session exchange;
-- Agent event reporting;
+- Agent telemetry event reporting;
+- heartbeat-based discovery and reliable delivery of scoped control events;
 - managed Skill discovery, download, update, removal, and sync reporting;
 - client-deliverable API credential assignment and retrieval;
 - model catalog discovery and model access control.
@@ -23,6 +24,7 @@ to use MCP.
 - [AEP v1 protocol](docs/aep-v1.md)
 - [AEP v1 API guide](docs/api-v1.md)
 - [OpenAPI 3.1 specification](openapi/aep-v1.openapi.yaml)
+- [Control Events OpenAPI 3.1 specification](openapi/aep-v1-control-events.openapi.yaml)
 
 ## Status
 

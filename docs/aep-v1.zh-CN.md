@@ -17,10 +17,11 @@ AEP v1 定义：
 
 1. 用户身份识别与 Agent 会话交换；
 2. 托管 Skill 同步；
-3. Agent 事件上传；
-4. API 凭证授权及客户端下发；
-5. 模型目录发现与访问权限判定；
-6. 上述资源的管理端 API。
+3. Agent 遥测事件上传；
+4. 通过心跳发现并可靠投递具有不同作用域的管控事件；
+5. API 凭证授权及客户端下发；
+6. 模型目录发现与访问权限判定；
+7. 上述资源的管理端 API。
 
 AEP v1 不定义模型推理数据格式、MCP 调用、Agent 间任务协作、设备证明、签名策略工件
 或甲方特定业务规则。
@@ -33,7 +34,7 @@ AEP v1 不定义模型推理数据格式、MCP 调用、Agent 间任务协作、
 | 企业 Agent SDK | 在 Agent 主进程内实现 AEP |
 | 管控服务 | 管理身份、授权关系、Skill 元数据和模型权限 |
 | 资产服务 | 存储和提供 Skill 包及可选用户产物 |
-| 事件服务 | 接收并索引 Agent 事件 |
+| 事件服务 | 接收遥测事件并向 Agent 投递作用域管控事件 |
 | 模型网关 | 强制执行远程模型权限并调用模型服务商 |
 | 身份提供方 | 认证用户并提供授权码 |
 
@@ -72,8 +73,8 @@ AEP 的数据交互统一使用 HTTPS REST API。
 - 时间使用 RFC 3339 UTC。
 - 标识符是不可推断语义的不透明字符串。
 
-AEP v1 不使用 SSE、WebSocket 或自定义长连接。客户端通过带条件请求的 REST 轮询发现
-变更。模型流式输出可以使用模型 API 自身的协议，但不属于 AEP。
+AEP v1 不使用 SSE、WebSocket 或自定义长连接。客户端通过心跳标志、管控事件轮询和
+资源条件轮询发现变更。模型流式输出可以使用模型 API 自身的协议，但不属于 AEP。
 
 ## 6. 请求头
 
@@ -141,20 +142,65 @@ Skill 包是 ZIP 文件，根目录必须包含 `SKILL.md`，可以包含脚本�
 - 删除 Skill 会使其从后续所有清单中消失。
 - 已下发并被复制为非托管副本的内容无法保证被删除。
 
-## 9. 事件上传
+## 9. 事件
 
-Agent 通过 REST API 批量上传事件。每个事件拥有全局唯一的 `eventId`，服务端依据该值去重，
-因此客户端可以安全重试。
+AEP 明确区分两个事件方向：
+
+| 方向 | 名称 | 用途 |
+| --- | --- | --- |
+| Agent 到服务端 | 遥测事件 | 上报 Agent 活动和执行结果 |
+| 服务端到 Agent | 管控事件 | 通知 Agent 托管状态或任务发生变化 |
+
+### 9.1 遥测事件上传
+
+Agent 通过 REST API 批量上传遥测事件。每个事件拥有全局唯一的 `eventId`，服务端依据
+该值去重，因此客户端可以安全重试。
 
 每批最多 100 个事件，建议不超过 1 MiB。服务端分别返回已接受和被拒绝的事件 ID。
 Agent 将可重试失败保留在本地 outbox 中。
 
-标准事件类型包括 `auth.login`、`auth.logout`、`skill.sync.started`、
+标准遥测事件类型包括 `auth.login`、`auth.logout`、`skill.sync.started`、
 `skill.installed`、`skill.updated`、`skill.removed`、`skill.sync.failed`、
-`credential.resolved`、`credential.resolve_failed`、`model.request.completed`、
-`model.request.failed` 和 `agent.heartbeat`。
+`credential.resolved`、`credential.resolve_failed`、`model.request.completed` 和
+`model.request.failed`。
 
-事件元数据不得包含 token、API Key 或完整模型输入输出，除非另有企业策略明确启用。
+遥测事件元数据不得包含 token、API Key 或完整模型输入输出，除非另有企业策略明确启用。
+
+### 9.2 管控事件作用域
+
+管控事件支持 `global`、`organization`、`user` 和 `agent` 四种作用域。服务端根据经过
+认证的身份和已注册 Agent 实例计算适用作用域，客户端不得自行选择所属组织或用户。
+
+全局、组织或个人事件必须为每个适用 Agent 分别维护投递状态，事件本身不存在共享的
+`consumed` 标志。
+
+### 9.3 发现与投递
+
+Agent 通过 REST API 发送心跳，响应只包含待处理标志和服务端水位。标志为 true 时，Agent
+调用管控事件查询接口。
+
+读取事件不代表消费。Agent 必须先将事件持久化到本地收件箱，再确认状态为 `received`。
+服务端会重新投递尚未确认的事件。Agent 执行完成后，再独立上报 `succeeded` 或 `failed`。
+
+投递状态包括 `pending`、`received`、`running`、`succeeded`、`failed`、`expired` 和
+`superseded`。接收确认与结果上报必须幂等。
+
+### 9.4 事件作为失效通知
+
+管控事件应作为轻量变更通知，而不是托管数据本身。例如 `skill.manifest.changed` 通知
+Agent 重新获取最新 Skill 清单并收敛状态。事件中不得包含凭证明文、完整 Skill 包或大型
+配置对象。
+
+标准映射包括：
+
+| 事件类型 | Task |
+| --- | --- |
+| `skill.manifest.changed` | 拉取并同步 Skill 清单 |
+| `plugin.manifest.changed` | 在支持插件管理时拉取并同步插件清单 |
+| `credential.assignments.changed` | 刷新凭证授权清单 |
+| `model.catalog.changed` | 刷新模型目录 |
+
+详细 REST 契约见 API 指南和管控事件 OpenAPI 文档。
 
 ## 10. API 凭证
 
