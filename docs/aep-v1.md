@@ -39,7 +39,7 @@ customer-specific business rules.
 | Asset Service | Stores and serves Skill packages and optional artifacts |
 | Event Service | Accepts telemetry and delivers scoped control events |
 | Model Gateway | Enforces remote model permissions and invokes providers |
-| Identity Provider | Authenticates users and supplies authorization codes |
+| Identity Service | Authenticates ZhiYuan accounts and adapts customer identity providers |
 
 Control, asset, and event services may be deployed as one modular service.
 
@@ -53,7 +53,7 @@ Renderer UI
     | IPC
     v
 Electron Main Process / Enterprise Agent SDK
-    | HTTPS REST API
+    | HTTP(S) REST API
     v
 Enterprise Services
 ```
@@ -63,9 +63,15 @@ Provider credentials used by a gateway MUST remain on the server.
 
 ## 5. REST Transport
 
-AEP data exchange uses REST APIs over HTTPS.
+AEP data exchange uses REST APIs over HTTP or HTTPS.
 
-- Production deployments MUST use HTTPS.
+- Development and production deployments MAY use either HTTP or HTTPS. AEP
+  implementations MUST NOT reject HTTP solely because of the deployment stage.
+- HTTPS is strongly recommended whenever passwords or bearer tokens cross an
+  untrusted network. An HTTP deployment SHOULD use a trusted private network,
+  dedicated link, or transport protection outside AEP.
+- Local development MUST NOT require a development TLS setup.
+  Plain HTTP password login SHOULD be limited to loopback or an isolated test network.
 - Resources are identified by URLs under `/aep/v1`.
 - `GET` reads resources and MUST NOT change business state.
 - `POST` creates resources or executes explicit commands.
@@ -102,18 +108,47 @@ Conditional requests use standard HTTP headers such as `ETag` and
 
 ## 7. Authentication
 
-The normal login sequence is:
+The server exposes available login methods for an enterprise. AEP v1 supports:
 
-```text
-Agent opens enterprise login page
-  -> Identity Provider authenticates user
-  -> Agent receives one-time authorization code
-  -> Agent exchanges code through REST API
-  -> Server returns access and refresh tokens
-```
+| Method | Behavior |
+| --- | --- |
+| `password` | The Agent submits a ZhiYuan platform account and password to the Identity Service |
+| `federated` | The Agent opens a system browser for a customer OIDC or server-side custom adapter and exchanges the resulting one-time code |
+
+ZhiYuan platform accounts are provisioned by an administrator, either
+individually or through a batch import. Public self-registration is outside
+AEP v1. Passwords MUST be stored using an adaptive password hash and MUST NOT
+be retrievable by administrators.
+
+Federated login uses Authorization Code with PKCE when the upstream supports
+OIDC. Customer credentials are entered only on the customer identity page;
+they MUST NOT pass through the Agent or AEP password-login endpoint. Other
+customer login systems MAY be integrated by a server-side adapter that
+produces the same short-lived, single-use exchange code.
+
+Both login methods create the same AEP session and return:
+
+- an AEP access token for management APIs;
+- a refresh token for session renewal; and
+- a model access token for the Model Gateway.
+
+The model access token is issued at login and refresh time with an explicit
+Model Gateway audience, expiry, enterprise identity, user identity, and model
+grant claims. During its validity period, the Agent presents it directly to
+the Model Gateway. The gateway validates the token locally using trusted
+signing keys and MUST NOT call the Control Service for a new authorization
+decision on each inference request.
+
+This does not remove per-request authentication: the gateway still validates
+the presented token's signature, audience, validity window, and requested
+model scope on every request. Permission changes take effect no later than
+token expiry; deployments requiring faster convergence can issue a
+`model.catalog.changed` control event and require session refresh.
 
 Access tokens authenticate normal requests. Refresh tokens are used only at
-the refresh endpoint. Logout revokes the refresh session. The current-identity
+the refresh endpoint. Refresh rotates the model token as well as the AEP token.
+Logout or account disablement revokes the refresh session, while already
+issued short-lived tokens remain bounded by their expiry. The current-identity
 endpoint is the canonical source for displayed user and enterprise data.
 
 ## 8. Skill Synchronization
@@ -254,9 +289,13 @@ Source types are:
 | `enterprise_open_source` | Enterprise-hosted open-source model |
 | `local` | Model executed on the Agent device |
 
-The model gateway MUST enforce remote permissions again on every inference
-request. Catalog filtering alone is insufficient. Local-model permissions are
-product controls and cannot resist a user who controls the machine.
+The Agent uses the model access token obtained during login or refresh for
+remote inference. The Model Gateway validates that token locally on every
+request, including signature, expiry, audience, and model grant. It MUST NOT
+make a synchronous authorization call to the Control Service for every model
+request. Catalog filtering alone is insufficient, but token validation avoids
+lengthening the inference path with a control-plane round trip. Local-model
+permissions are product controls and cannot resist a user who controls the machine.
 
 AEP does not redefine inference data. The descriptor's `protocol` tells the
 SDK which model client to use.
@@ -302,10 +341,13 @@ clients receive `426 Upgrade Required` with AEP Problem Details.
 AEP v1 does not require signed policy artifacts or device attestation, but it
 does require:
 
-- HTTPS outside local development;
+- support for both HTTP and HTTPS deployment without a protocol-level HTTPS mandate;
+- explicit acceptance of the credential-exposure risk when HTTP is used, with
+  a trusted private network or external transport protection strongly recommended;
 - authorization based on authenticated identity;
-- authorization on every package download, credential resolution, and remote
-  model request;
+- authorization on every package download and credential resolution;
+- local validation of the login-issued model access token on every remote
+  model request, without a synchronous Control Service authorization call;
 - encrypted storage for retrievable secrets;
 - secret redaction in logs and events;
 - archive path validation before Skill extraction;

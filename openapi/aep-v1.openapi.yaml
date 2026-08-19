@@ -6,6 +6,11 @@ info:
   license: {name: Apache 2.0, identifier: Apache-2.0}
 servers:
   - url: https://enterprise.example.com/aep/v1
+    description: HTTPS deployment
+  - url: http://enterprise.example.com/aep/v1
+    description: HTTP deployment
+  - url: http://localhost:8080/aep/v1
+    description: Local development
 security:
   - bearerAuth: []
 tags:
@@ -526,10 +531,12 @@ components:
         features: {type: array, items: {type: string}}
     AuthExchangeRequest:
       type: object
-      required: [authorizationCode, redirectUri, agentId, agentVersion, platform]
+      required: [transactionId, authorizationCode, redirectUri, codeVerifier, agentId, agentVersion, platform]
       properties:
+        transactionId: {type: string, minLength: 1}
         authorizationCode: {type: string, minLength: 1}
         redirectUri: {type: string, format: uri}
+        codeVerifier: {type: string, minLength: 43, maxLength: 128}
         agentId: {type: string}
         agentVersion: {type: string}
         platform: {type: string, enum: [windows, macos, linux]}
@@ -546,12 +553,14 @@ components:
         refreshToken: {type: string, minLength: 1}
     TokenResponse:
       type: object
-      required: [accessToken, refreshToken, tokenType, expiresIn]
+      required: [accessToken, refreshToken, modelAccessToken, tokenType, expiresIn, modelAccessExpiresIn]
       properties:
         accessToken: {type: string}
         refreshToken: {type: string}
+        modelAccessToken: {type: string}
         tokenType: {type: string, const: Bearer}
         expiresIn: {type: integer, minimum: 1}
+        modelAccessExpiresIn: {type: integer, minimum: 1}
     CurrentIdentity:
       type: object
       required: [user, enterprise, roles, sessionExpiresAt]

@@ -2,13 +2,16 @@
 
 [简体中文](api-v1.zh-CN.md) | English
 
-This guide documents the AEP v1 HTTPS REST API. The machine-readable contracts
-are the [core OpenAPI document](../openapi/aep-v1.openapi.yaml) and the
-[Control Events OpenAPI document](../openapi/aep-v1-control-events.openapi.yaml).
+This guide documents the AEP v1 HTTP(S) REST API. The machine-readable
+contracts are the [core OpenAPI document](../openapi/aep-v1.openapi.yaml), the
+[Control Events OpenAPI document](../openapi/aep-v1-control-events.openapi.yaml),
+and the [Authentication OpenAPI document](../openapi/aep-v1-authentication.openapi.yaml).
 
 ## 1. Conventions
 
-Base URL: `https://enterprise.example.com/aep/v1`
+HTTPS deployment example: `https://enterprise.example.com/aep/v1`
+HTTP deployment example: `http://enterprise.example.com/aep/v1`
+Local example: `http://localhost:8080/aep/v1`
 
 Agent request headers:
 
@@ -30,7 +33,10 @@ WebSocket.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/metadata` | Supported AEP versions and features |
-| POST | `/auth/exchange` | Exchange a one-time authorization code |
+| GET | `/auth/methods` | Discover login methods for an enterprise |
+| POST | `/auth/password/login` | Sign in with an administrator-provisioned ZhiYuan account |
+| POST | `/auth/federated/start` | Start customer federated login |
+| POST | `/auth/exchange` | Exchange a federated one-time authorization code |
 | POST | `/auth/refresh` | Refresh a session |
 | POST | `/auth/logout` | Revoke the current refresh session |
 
@@ -65,12 +71,70 @@ WebSocket.
 }
 ```
 
+### `GET /auth/methods`
+
+Example: `GET /auth/methods?enterpriseHint=example`
+
+```json
+{
+  "enterprise": {"id": "enterprise_001", "name": "Example Enterprise"},
+  "preferredMethodId": "enterprise-sso",
+  "methods": [
+    {"id": "enterprise-sso", "type": "federated", "protocol": "oidc", "displayName": "Enterprise SSO"},
+    {"id": "zhiyuan-password", "type": "password", "displayName": "ZhiYuan account"}
+  ]
+}
+```
+
+### `POST /auth/password/login`
+
+```json
+{
+  "enterpriseId": "enterprise_001",
+  "username": "liming",
+  "password": "user-entered-password",
+  "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
+  "agentVersion": "1.8.0",
+  "platform": "windows"
+}
+```
+
+The account is created or batch-imported by an administrator. Public
+registration is not implied. Password login may use HTTP or HTTPS in every
+deployment stage. HTTPS is strongly recommended outside a trusted private
+network because plain HTTP exposes credentials and bearer tokens in transit.
+
+### `POST /auth/federated/start`
+
+```json
+{
+  "enterpriseId": "enterprise_001",
+  "methodId": "enterprise-sso",
+  "redirectUri": "zhiyuan://auth/callback",
+  "codeChallenge": "base64url-sha256-challenge"
+}
+```
+
+```json
+{
+  "transactionId": "login_tx_123",
+  "authorizationUrl": "https://idp.example.com/authorize?...",
+  "state": "opaque-state",
+  "expiresIn": 300
+}
+```
+
+The Agent opens `authorizationUrl` in the system browser and verifies `state`
+on callback. Customer credentials never pass through the Agent.
+
 ### `POST /auth/exchange`
 
 ```json
 {
+  "transactionId": "login_tx_123",
   "authorizationCode": "one-time-code",
   "redirectUri": "zhiyuan://auth/callback",
+  "codeVerifier": "pkce-verifier",
   "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
   "agentVersion": "1.8.0",
   "platform": "windows"
@@ -81,12 +145,16 @@ WebSocket.
 {
   "accessToken": "eyJ...",
   "refreshToken": "refresh-token",
+  "modelAccessToken": "eyJ-model...",
   "tokenType": "Bearer",
-  "expiresIn": 7200
+  "expiresIn": 7200,
+  "modelAccessExpiresIn": 7200
 }
 ```
 
-The authorization code is single use.
+Password login and federated exchange return this same session structure. The
+authorization code is single use. The model token is accepted directly by the
+Model Gateway during its validity period.
 
 ### `POST /auth/refresh`
 
@@ -353,12 +421,23 @@ return `CREDENTIAL_NOT_DELIVERABLE`.
 ```
 
 For remote models, the Agent authenticates to the declared gateway endpoint.
-The gateway enforces permission per request. AEP does not redefine inference
-payloads.
+It sends the model access token obtained at login or refresh. The gateway
+validates the token locally per request and does not synchronously call the
+Control Service for a new authorization decision. AEP does not redefine
+inference payloads.
 
 ## 10. Administration API
 
 Administrative endpoints require an administrator identity.
+
+### Platform accounts
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET, POST | `/admin/users` | List or manually create ZhiYuan platform accounts |
+| POST | `/admin/users/import` | Batch-import ZhiYuan platform accounts |
+| PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
+| POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
 ### Skills
 

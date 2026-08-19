@@ -2,13 +2,16 @@
 
 简体中文 | [English](api-v1.md)
 
-本文说明 AEP v1 HTTPS REST API。机器可读契约分为
-[核心 OpenAPI 文档](../openapi/aep-v1.openapi.yaml)和
-[管控事件 OpenAPI 文档](../openapi/aep-v1-control-events.openapi.yaml)。
+本文说明 AEP v1 HTTP(S) REST API。机器可读契约分为
+[核心 OpenAPI 文档](../openapi/aep-v1.openapi.yaml)、
+[管控事件 OpenAPI 文档](../openapi/aep-v1-control-events.openapi.yaml)和
+[认证 OpenAPI 文档](../openapi/aep-v1-authentication.openapi.yaml)。
 
 ## 1. 通用约定
 
-基础地址：`https://enterprise.example.com/aep/v1`
+HTTPS 部署示例：`https://enterprise.example.com/aep/v1`
+HTTP 部署示例：`http://enterprise.example.com/aep/v1`
+本地示例：`http://localhost:8080/aep/v1`
 
 Agent 请求头：
 
@@ -29,7 +32,10 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/metadata` | 查询 AEP 版本和服务能力 |
-| POST | `/auth/exchange` | 交换一次性授权码 |
+| GET | `/auth/methods` | 查询企业可用登录方式 |
+| POST | `/auth/password/login` | 使用管理员创建的知远平台账号登录 |
+| POST | `/auth/federated/start` | 发起甲方联合登录 |
+| POST | `/auth/exchange` | 交换联合登录一次性授权码 |
 | POST | `/auth/refresh` | 刷新会话 |
 | POST | `/auth/logout` | 撤销当前 refresh 会话 |
 
@@ -64,12 +70,68 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 }
 ```
 
+### `GET /auth/methods`
+
+示例：`GET /auth/methods?enterpriseHint=example`
+
+```json
+{
+  "enterprise": {"id": "enterprise_001", "name": "示例企业"},
+  "preferredMethodId": "enterprise-sso",
+  "methods": [
+    {"id": "enterprise-sso", "type": "federated", "protocol": "oidc", "displayName": "企业统一登录"},
+    {"id": "zhiyuan-password", "type": "password", "displayName": "知远账号"}
+  ]
+}
+```
+
+### `POST /auth/password/login`
+
+```json
+{
+  "enterpriseId": "enterprise_001",
+  "username": "liming",
+  "password": "user-entered-password",
+  "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
+  "agentVersion": "1.8.0",
+  "platform": "windows"
+}
+```
+
+账号由管理员手动创建或批量导入，不代表开放自助注册。任何部署阶段的密码登录都可以使用
+HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token，因此在可信内网之外
+强烈建议使用 HTTPS。
+
+### `POST /auth/federated/start`
+
+```json
+{
+  "enterpriseId": "enterprise_001",
+  "methodId": "enterprise-sso",
+  "redirectUri": "zhiyuan://auth/callback",
+  "codeChallenge": "base64url-sha256-challenge"
+}
+```
+
+```json
+{
+  "transactionId": "login_tx_123",
+  "authorizationUrl": "https://idp.example.com/authorize?...",
+  "state": "opaque-state",
+  "expiresIn": 300
+}
+```
+
+Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。甲方账号密码不经过 Agent。
+
 ### `POST /auth/exchange`
 
 ```json
 {
+  "transactionId": "login_tx_123",
   "authorizationCode": "one-time-code",
   "redirectUri": "zhiyuan://auth/callback",
+  "codeVerifier": "pkce-verifier",
   "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
   "agentVersion": "1.8.0",
   "platform": "windows"
@@ -80,12 +142,15 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 {
   "accessToken": "eyJ...",
   "refreshToken": "refresh-token",
+  "modelAccessToken": "eyJ-model...",
   "tokenType": "Bearer",
-  "expiresIn": 7200
+  "expiresIn": 7200,
+  "modelAccessExpiresIn": 7200
 }
 ```
 
-授权码只能使用一次。
+密码登录和联合登录交换返回相同的会话结构。授权码只能使用一次。model access token 在
+有效期内可直接用于模型网关。
 
 ### `POST /auth/refresh`
 
@@ -343,12 +408,22 @@ Agent 也必须拥有独立的投递记录。
 }
 ```
 
-对于远程模型，Agent 使用身份凭证访问模型描述中声明的网关地址，网关逐次检查权限。
-AEP 不重新定义推理请求和响应格式。
+对于远程模型，Agent 使用登录或刷新时获得的 model access token 访问模型描述中声明的
+网关地址。网关逐次在本地校验 token，不同步调用管控服务重新授权。AEP 不重新定义推理
+请求和响应格式。
 
 ## 10. 管理端 API
 
 管理端端点必须使用管理员身份。
+
+### 平台账号
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET, POST | `/admin/users` | 查询或手动创建知远平台账号 |
+| POST | `/admin/users/import` | 批量导入知远平台账号 |
+| PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
+| POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
 ### Skill
 

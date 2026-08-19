@@ -8,6 +8,7 @@ enterprise-managed Agent client and enterprise services.
 AEP v1 covers:
 
 - user identity and session exchange;
+- ZhiYuan platform password login and customer federated-login adapters;
 - Agent telemetry event reporting;
 - heartbeat-based discovery and reliable delivery of scoped control events;
 - managed Skill discovery, download, update, removal, and sync reporting;
@@ -25,6 +26,7 @@ to use MCP.
 - [AEP v1 API guide](docs/api-v1.md)
 - [OpenAPI 3.1 specification](openapi/aep-v1.openapi.yaml)
 - [Control Events OpenAPI 3.1 specification](openapi/aep-v1-control-events.openapi.yaml)
+- [Authentication OpenAPI 3.1 specification](openapi/aep-v1-authentication.openapi.yaml)
 
 ## Status
 
