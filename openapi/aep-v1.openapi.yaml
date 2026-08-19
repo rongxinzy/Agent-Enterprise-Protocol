@@ -1,0 +1,855 @@
+openapi: 3.1.0
+info:
+  title: Agent Enterprise Protocol
+  version: 1.0.0-draft
+  description: AEP v1 Agent and administration API contract.
+  license: {name: Apache 2.0, identifier: Apache-2.0}
+servers:
+  - url: https://enterprise.example.com/aep/v1
+security:
+  - bearerAuth: []
+tags:
+  - {name: Service}
+  - {name: Authentication}
+  - {name: Agent}
+  - {name: Admin Skills}
+  - {name: Admin Credentials}
+  - {name: Admin Models}
+  - {name: Admin Events}
+paths:
+  /metadata:
+    get:
+      tags: [Service]
+      operationId: getMetadata
+      security: []
+      responses:
+        '200':
+          description: Service metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServiceMetadata'}
+  /auth/exchange:
+    post:
+      tags: [Authentication]
+      operationId: exchangeAuthorizationCode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthExchangeRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/TokenResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      operationId: refreshSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefreshRequest'}
+      responses:
+        '200': {$ref: '#/components/responses/TokenResponse'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LogoutRequest'}
+      responses:
+        '204': {description: Session revoked}
+        '401': {$ref: '#/components/responses/Problem'}
+  /agent/me:
+    get:
+      tags: [Agent]
+      operationId: getCurrentIdentity
+      responses:
+        '200':
+          description: Current identity
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CurrentIdentity'}
+        '401': {$ref: '#/components/responses/Problem'}
+  /agent/skills/manifest:
+    get:
+      tags: [Agent]
+      operationId: getSkillManifest
+      parameters:
+        - {name: If-None-Match, in: header, schema: {type: string}}
+      responses:
+        '200':
+          description: Complete desired Skill manifest
+          headers:
+            ETag: {schema: {type: string}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SkillManifest'}
+        '304': {description: Manifest unchanged}
+        '401': {$ref: '#/components/responses/Problem'}
+  /agent/skills/{skillId}/versions/{version}/package:
+    get:
+      tags: [Agent]
+      operationId: downloadSkillPackage
+      parameters:
+        - {$ref: '#/components/parameters/SkillId'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Skill ZIP package
+          content:
+            application/zip:
+              schema: {type: string, format: binary}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /agent/skills/sync-results:
+    post:
+      tags: [Agent]
+      operationId: reportSkillSyncResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SkillSyncResult'}
+      responses:
+        '202': {description: Result accepted}
+        '400': {$ref: '#/components/responses/Problem'}
+  /agent/events/batch:
+    post:
+      tags: [Agent]
+      operationId: uploadEventBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventBatchRequest'}
+      responses:
+        '200':
+          description: Per-event result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventBatchResponse'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '413': {$ref: '#/components/responses/Problem'}
+  /agent/credentials:
+    get:
+      tags: [Agent]
+      operationId: listAgentCredentials
+      responses:
+        '200':
+          description: Assigned credential metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CredentialList'}
+  /agent/credentials/{credentialId}/resolve:
+    post:
+      tags: [Agent]
+      operationId: resolveAgentCredential
+      parameters:
+        - {$ref: '#/components/parameters/CredentialId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResolveCredentialRequest'}
+      responses:
+        '200':
+          description: Secret material; do not cache
+          headers:
+            Cache-Control: {schema: {type: string}, example: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ResolvedCredential'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /agent/models:
+    get:
+      tags: [Agent]
+      operationId: listAgentModels
+      responses:
+        '200':
+          description: Visible model catalog
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentModelList'}
+  /admin/skills:
+    get:
+      tags: [Admin Skills]
+      operationId: listSkills
+      responses:
+        '200':
+          description: Skill list
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminSkillList'}
+    post:
+      tags: [Admin Skills]
+      operationId: createSkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SkillWrite'}
+      responses:
+        '201': {$ref: '#/components/responses/AdminSkill'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/skills/{skillId}:
+    parameters:
+      - {$ref: '#/components/parameters/SkillId'}
+    get:
+      tags: [Admin Skills]
+      operationId: getSkill
+      responses:
+        '200': {$ref: '#/components/responses/AdminSkill'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Admin Skills]
+      operationId: updateSkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SkillPatch'}
+      responses:
+        '200': {$ref: '#/components/responses/AdminSkill'}
+    delete:
+      tags: [Admin Skills]
+      operationId: deleteSkill
+      responses:
+        '204': {description: Skill withdrawn}
+  /admin/skills/{skillId}/versions:
+    post:
+      tags: [Admin Skills]
+      operationId: uploadSkillVersion
+      parameters:
+        - {$ref: '#/components/parameters/SkillId'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [version, package]
+              properties:
+                version: {type: string}
+                releaseNotes: {type: string}
+                package: {type: string, format: binary}
+      responses:
+        '201':
+          description: Draft version uploaded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SkillVersion'}
+  /admin/skills/{skillId}/versions/{version}/publish:
+    post:
+      tags: [Admin Skills]
+      operationId: publishSkillVersion
+      parameters:
+        - {$ref: '#/components/parameters/SkillId'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '200':
+          description: Version published
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SkillVersion'}
+  /admin/skills/{skillId}/versions/{version}:
+    delete:
+      tags: [Admin Skills]
+      operationId: deleteSkillVersion
+      parameters:
+        - {$ref: '#/components/parameters/SkillId'}
+        - {$ref: '#/components/parameters/Version'}
+      responses:
+        '204': {description: Version withdrawn}
+  /admin/skill-assignments:
+    get:
+      tags: [Admin Skills]
+      operationId: listSkillAssignments
+      responses:
+        '200': {$ref: '#/components/responses/AssignmentList'}
+    post:
+      tags: [Admin Skills]
+      operationId: createSkillAssignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SkillAssignmentWrite'}
+      responses:
+        '201': {$ref: '#/components/responses/Assignment'}
+  /admin/skill-assignments/{assignmentId}:
+    delete:
+      tags: [Admin Skills]
+      operationId: deleteSkillAssignment
+      parameters:
+        - {$ref: '#/components/parameters/AssignmentId'}
+      responses:
+        '204': {description: Assignment removed}
+  /admin/credentials:
+    get:
+      tags: [Admin Credentials]
+      operationId: listCredentials
+      responses:
+        '200':
+          description: Masked credential metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CredentialList'}
+    post:
+      tags: [Admin Credentials]
+      operationId: createCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CredentialCreate'}
+      responses:
+        '201': {$ref: '#/components/responses/CredentialMetadata'}
+  /admin/credentials/{credentialId}:
+    parameters:
+      - {$ref: '#/components/parameters/CredentialId'}
+    get:
+      tags: [Admin Credentials]
+      operationId: getCredential
+      responses:
+        '200': {$ref: '#/components/responses/CredentialMetadata'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Admin Credentials]
+      operationId: updateCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CredentialPatch'}
+      responses:
+        '200': {$ref: '#/components/responses/CredentialMetadata'}
+    delete:
+      tags: [Admin Credentials]
+      operationId: deleteCredential
+      responses:
+        '204': {description: Credential revoked and deleted}
+  /admin/credentials/{credentialId}/rotate:
+    post:
+      tags: [Admin Credentials]
+      operationId: rotateCredential
+      parameters:
+        - {$ref: '#/components/parameters/CredentialId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {type: string, minLength: 1}
+      responses:
+        '200': {$ref: '#/components/responses/CredentialMetadata'}
+  /admin/credential-assignments:
+    get:
+      tags: [Admin Credentials]
+      operationId: listCredentialAssignments
+      responses:
+        '200': {$ref: '#/components/responses/AssignmentList'}
+    post:
+      tags: [Admin Credentials]
+      operationId: createCredentialAssignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CredentialAssignmentWrite'}
+      responses:
+        '201': {$ref: '#/components/responses/Assignment'}
+  /admin/credential-assignments/{assignmentId}:
+    delete:
+      tags: [Admin Credentials]
+      operationId: deleteCredentialAssignment
+      parameters:
+        - {$ref: '#/components/parameters/AssignmentId'}
+      responses:
+        '204': {description: Assignment removed}
+  /admin/models:
+    get:
+      tags: [Admin Models]
+      operationId: listModels
+      responses:
+        '200':
+          description: Model descriptors
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminModelList'}
+    post:
+      tags: [Admin Models]
+      operationId: createModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminModelWrite'}
+      responses:
+        '201': {$ref: '#/components/responses/AdminModel'}
+  /admin/models/{modelId}:
+    parameters:
+      - {$ref: '#/components/parameters/ModelId'}
+    get:
+      tags: [Admin Models]
+      operationId: getModel
+      responses:
+        '200': {$ref: '#/components/responses/AdminModel'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Admin Models]
+      operationId: updateModel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminModelPatch'}
+      responses:
+        '200': {$ref: '#/components/responses/AdminModel'}
+    delete:
+      tags: [Admin Models]
+      operationId: deleteModel
+      responses:
+        '204': {description: Model removed}
+  /admin/model-assignments:
+    get:
+      tags: [Admin Models]
+      operationId: listModelAssignments
+      responses:
+        '200': {$ref: '#/components/responses/AssignmentList'}
+    post:
+      tags: [Admin Models]
+      operationId: createModelAssignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ModelAssignmentWrite'}
+      responses:
+        '201': {$ref: '#/components/responses/Assignment'}
+  /admin/model-assignments/{assignmentId}:
+    delete:
+      tags: [Admin Models]
+      operationId: deleteModelAssignment
+      parameters:
+        - {$ref: '#/components/parameters/AssignmentId'}
+      responses:
+        '204': {description: Assignment removed}
+  /admin/events:
+    get:
+      tags: [Admin Events]
+      operationId: searchEvents
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: userId, in: query, schema: {type: string}}
+        - {name: agentId, in: query, schema: {type: string}}
+        - {name: type, in: query, schema: {type: string}}
+        - {name: resourceType, in: query, schema: {type: string}}
+        - {name: resourceId, in: query, schema: {type: string}}
+        - {name: result, in: query, schema: {$ref: '#/components/schemas/EventResult'}}
+        - {name: occurredAfter, in: query, schema: {type: string, format: date-time}}
+        - {name: occurredBefore, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: Event search result
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventSearchResult'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    SkillId: {name: skillId, in: path, required: true, schema: {type: string}}
+    Version: {name: version, in: path, required: true, schema: {type: string}}
+    CredentialId: {name: credentialId, in: path, required: true, schema: {type: string}}
+    ModelId: {name: modelId, in: path, required: true, schema: {type: string}}
+    AssignmentId: {name: assignmentId, in: path, required: true, schema: {type: string}}
+    Cursor: {name: cursor, in: query, schema: {type: [string, 'null']}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+  responses:
+    Problem:
+      description: AEP Problem Details
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    TokenResponse:
+      description: Agent session tokens
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/TokenResponse'}
+    AdminSkill:
+      description: Skill resource
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AdminSkill'}
+    CredentialMetadata:
+      description: Masked credential metadata
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CredentialMetadata'}
+    AdminModel:
+      description: Model descriptor
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AdminModel'}
+    Assignment:
+      description: Assignment resource
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Assignment'}
+    AssignmentList:
+      description: Assignment list
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AssignmentList'}
+  schemas:
+    ServiceMetadata:
+      type: object
+      required: [service, protocol, minimumVersion, maximumVersion, features]
+      properties:
+        service: {type: string}
+        protocol: {type: string, const: aep}
+        minimumVersion: {type: string}
+        maximumVersion: {type: string}
+        features: {type: array, items: {type: string}}
+    AuthExchangeRequest:
+      type: object
+      required: [authorizationCode, redirectUri, agentId, agentVersion, platform]
+      properties:
+        authorizationCode: {type: string, minLength: 1}
+        redirectUri: {type: string, format: uri}
+        agentId: {type: string}
+        agentVersion: {type: string}
+        platform: {type: string, enum: [windows, macos, linux]}
+    RefreshRequest:
+      type: object
+      required: [refreshToken, agentId]
+      properties:
+        refreshToken: {type: string, minLength: 1}
+        agentId: {type: string}
+    LogoutRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: {type: string, minLength: 1}
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn]
+      properties:
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        tokenType: {type: string, const: Bearer}
+        expiresIn: {type: integer, minimum: 1}
+    CurrentIdentity:
+      type: object
+      required: [user, enterprise, roles, sessionExpiresAt]
+      properties:
+        user: {$ref: '#/components/schemas/User'}
+        enterprise: {$ref: '#/components/schemas/Enterprise'}
+        roles: {type: array, items: {type: string}}
+        sessionExpiresAt: {type: string, format: date-time}
+    User:
+      type: object
+      required: [id, displayName]
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        email: {type: [string, 'null'], format: email}
+    Enterprise:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+    SkillManifest:
+      type: object
+      required: [revision, generatedAt, skills]
+      properties:
+        revision: {type: string}
+        generatedAt: {type: string, format: date-time}
+        skills: {type: array, items: {$ref: '#/components/schemas/SkillManifestItem'}}
+    SkillManifestItem:
+      type: object
+      required: [id, name, version, enabled, package]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        version: {type: string}
+        enabled: {type: boolean}
+        package: {$ref: '#/components/schemas/SkillPackage'}
+    SkillPackage:
+      type: object
+      required: [url, sha256, size]
+      properties:
+        url: {type: string, format: uri-reference}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        size: {type: integer, minimum: 0}
+    SkillSyncResult:
+      type: object
+      required: [manifestRevision, startedAt, completedAt, status, items]
+      properties:
+        manifestRevision: {type: string}
+        startedAt: {type: string, format: date-time}
+        completedAt: {type: string, format: date-time}
+        status: {type: string, enum: [success, partial, failed]}
+        items: {type: array, items: {$ref: '#/components/schemas/SkillSyncItem'}}
+    SkillSyncItem:
+      type: object
+      required: [skillId, version, action, status]
+      properties:
+        skillId: {type: string}
+        version: {type: string}
+        action: {type: string, enum: [install, update, remove, unchanged]}
+        status: {type: string, enum: [success, failed]}
+        errorCode: {type: string}
+        message: {type: string}
+    EventBatchRequest:
+      type: object
+      required: [events]
+      properties:
+        events: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/AgentEvent'}}
+    AgentEvent:
+      type: object
+      required: [eventId, type, occurredAt, result]
+      properties:
+        eventId: {type: string}
+        type: {type: string}
+        occurredAt: {type: string, format: date-time}
+        resource: {$ref: '#/components/schemas/EventResource'}
+        result: {$ref: '#/components/schemas/EventResult'}
+        metadata: {type: object, additionalProperties: true}
+    EventResource:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string}
+        id: {type: string}
+    EventResult: {type: string, enum: [success, failure, info]}
+    EventBatchResponse:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        accepted: {type: array, items: {type: string}}
+        rejected: {type: array, items: {$ref: '#/components/schemas/RejectedEvent'}}
+    RejectedEvent:
+      type: object
+      required: [eventId, code, message]
+      properties:
+        eventId: {type: string}
+        code: {type: string}
+        message: {type: string}
+    CredentialMetadata:
+      type: object
+      required: [id, name, service, type, deliveryMode, maskedValue, enabled, updatedAt]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        service: {type: string}
+        type: {type: string, enum: [api_key]}
+        deliveryMode: {type: string, enum: [server_only, agent]}
+        maskedValue: {type: string}
+        enabled: {type: boolean}
+        updatedAt: {type: string, format: date-time}
+    CredentialList:
+      type: object
+      required: [credentials]
+      properties:
+        credentials: {type: array, items: {$ref: '#/components/schemas/CredentialMetadata'}}
+    ResolveCredentialRequest:
+      type: object
+      required: [purpose]
+      properties:
+        purpose: {type: string, minLength: 1, maxLength: 500}
+    ResolvedCredential:
+      type: object
+      required: [credentialId, type, value, expiresAt]
+      properties:
+        credentialId: {type: string}
+        type: {type: string, enum: [api_key]}
+        value: {type: string}
+        expiresAt: {type: [string, 'null'], format: date-time}
+    AgentModel:
+      type: object
+      required: [id, displayName, sourceType, protocol, capabilities, isDefault, enabled]
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        sourceType: {$ref: '#/components/schemas/ModelSourceType'}
+        protocol: {type: string, enum: [openai-compatible]}
+        endpoint: {type: string, format: uri}
+        upstreamModel: {type: string}
+        localModelRef: {type: string}
+        capabilities: {type: array, items: {type: string}}
+        contextWindow: {type: integer, minimum: 1}
+        isDefault: {type: boolean}
+        enabled: {type: boolean}
+    AgentModelList:
+      type: object
+      required: [models]
+      properties:
+        models: {type: array, items: {$ref: '#/components/schemas/AgentModel'}}
+    ModelSourceType: {type: string, enum: [gateway, enterprise_open_source, local]}
+    AdminSkill:
+      type: object
+      required: [id, name, description, state, versions, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        state: {type: string, enum: [active, withdrawn]}
+        versions: {type: array, items: {$ref: '#/components/schemas/SkillVersion'}}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    AdminSkillList:
+      type: object
+      required: [skills]
+      properties:
+        skills: {type: array, items: {$ref: '#/components/schemas/AdminSkill'}}
+    SkillWrite:
+      type: object
+      required: [id, name, description]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+    SkillPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: {type: string}
+        description: {type: string}
+        state: {type: string, enum: [active, withdrawn]}
+    SkillVersion:
+      type: object
+      required: [version, state, sha256, size, createdAt]
+      properties:
+        version: {type: string}
+        state: {type: string, enum: [draft, published, withdrawn]}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        size: {type: integer, minimum: 0}
+        releaseNotes: {type: string}
+        createdAt: {type: string, format: date-time}
+    Subject:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, enum: [user, role]}
+        id: {type: string}
+    Assignment:
+      type: object
+      required: [id, resourceType, resourceId, subject, createdAt]
+      properties:
+        id: {type: string}
+        resourceType: {type: string, enum: [skill, credential, model]}
+        resourceId: {type: string}
+        subject: {$ref: '#/components/schemas/Subject'}
+        createdAt: {type: string, format: date-time}
+    AssignmentList:
+      type: object
+      required: [assignments]
+      properties:
+        assignments: {type: array, items: {$ref: '#/components/schemas/Assignment'}}
+    SkillAssignmentWrite:
+      type: object
+      required: [skillId, subject]
+      properties:
+        skillId: {type: string}
+        subject: {$ref: '#/components/schemas/Subject'}
+    CredentialAssignmentWrite:
+      type: object
+      required: [credentialId, subject]
+      properties:
+        credentialId: {type: string}
+        subject: {$ref: '#/components/schemas/Subject'}
+    ModelAssignmentWrite:
+      type: object
+      required: [modelId, subject]
+      properties:
+        modelId: {type: string}
+        subject: {$ref: '#/components/schemas/Subject'}
+    CredentialCreate:
+      type: object
+      required: [name, service, type, deliveryMode, value, enabled]
+      properties:
+        name: {type: string}
+        service: {type: string}
+        type: {type: string, enum: [api_key]}
+        deliveryMode: {type: string, enum: [server_only, agent]}
+        value: {type: string, minLength: 1}
+        enabled: {type: boolean}
+    CredentialPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: {type: string}
+        service: {type: string}
+        deliveryMode: {type: string, enum: [server_only, agent]}
+        enabled: {type: boolean}
+    AdminModelWrite:
+      allOf:
+        - {$ref: '#/components/schemas/AgentModel'}
+        - type: object
+          properties:
+            credentialId: {type: [string, 'null']}
+    AdminModelPatch:
+      type: object
+      minProperties: 1
+      properties:
+        displayName: {type: string}
+        endpoint: {type: string, format: uri}
+        upstreamModel: {type: string}
+        localModelRef: {type: string}
+        credentialId: {type: [string, 'null']}
+        capabilities: {type: array, items: {type: string}}
+        contextWindow: {type: integer, minimum: 1}
+        isDefault: {type: boolean}
+        enabled: {type: boolean}
+    AdminModel:
+      allOf:
+        - {$ref: '#/components/schemas/AgentModel'}
+        - type: object
+          properties:
+            credentialId: {type: [string, 'null']}
+    AdminModelList:
+      type: object
+      required: [models]
+      properties:
+        models: {type: array, items: {$ref: '#/components/schemas/AdminModel'}}
+    StoredEvent:
+      allOf:
+        - {$ref: '#/components/schemas/AgentEvent'}
+        - type: object
+          required: [receivedAt, userId, agentId]
+          properties:
+            receivedAt: {type: string, format: date-time}
+            userId: {type: string}
+            agentId: {type: string}
+    EventSearchResult:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/StoredEvent'}}
+        nextCursor: {type: [string, 'null']}
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer, minimum: 400, maximum: 599}
+        detail: {type: string}
+        code: {type: string}
+        requestId: {type: string}
