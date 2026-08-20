@@ -1,0 +1,147 @@
+CREATE TABLE IF NOT EXISTS enterprises (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS organizations (
+  id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  name text NOT NULL,
+  parent_id text REFERENCES organizations(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  username text NOT NULL,
+  display_name text NOT NULL,
+  email text,
+  password_hash text NOT NULL,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  require_password_change boolean NOT NULL DEFAULT true,
+  is_admin boolean NOT NULL DEFAULT false,
+  organization_ids text[] NOT NULL DEFAULT '{}',
+  role_ids text[] NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (enterprise_id, username)
+);
+
+CREATE TABLE IF NOT EXISTS agents (
+  agent_id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  user_id text NOT NULL REFERENCES users(id),
+  agent_version text NOT NULL,
+  platform text NOT NULL CHECK (platform IN ('windows', 'macos', 'linux')),
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  applied_skill_revision text,
+  installed_skill_ids text[] NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS refresh_sessions (
+  token_hash text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  user_id text NOT NULL REFERENCES users(id),
+  agent_id text NOT NULL REFERENCES agents(agent_id),
+  expires_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS skills (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS skill_versions (
+  skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  version text NOT NULL,
+  object_key text NOT NULL,
+  sha256 text NOT NULL,
+  size_bytes bigint NOT NULL,
+  published boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  published_at timestamptz,
+  PRIMARY KEY (skill_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS skill_assignments (
+  id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent')),
+  subject_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (enterprise_id, skill_id, subject_type, subject_id)
+);
+
+CREATE TABLE IF NOT EXISTS control_events (
+  event_id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  type text NOT NULL,
+  scope_type text NOT NULL CHECK (scope_type IN ('global', 'organization', 'user', 'agent')),
+  scope_id text,
+  resource_type text,
+  resource_id text,
+  resource_revision text,
+  task_type text NOT NULL,
+  supersedes_key text,
+  state text NOT NULL DEFAULT 'active',
+  expires_at timestamptz NOT NULL,
+  created_by text NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS control_deliveries (
+  cursor bigserial UNIQUE,
+  delivery_id text PRIMARY KEY,
+  event_id text NOT NULL REFERENCES control_events(event_id) ON DELETE CASCADE,
+  agent_id text NOT NULL REFERENCES agents(agent_id),
+  state text NOT NULL DEFAULT 'pending',
+  attempt_count integer NOT NULL DEFAULT 0,
+  received_at timestamptz,
+  started_at timestamptz,
+  completed_at timestamptz,
+  applied_revision text,
+  error_code text,
+  message text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (event_id, agent_id)
+);
+
+CREATE TABLE IF NOT EXISTS telemetry_events (
+  event_id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  user_id text NOT NULL REFERENCES users(id),
+  agent_id text NOT NULL REFERENCES agents(agent_id),
+  type text NOT NULL,
+  resource_type text,
+  resource_id text,
+  result text,
+  payload jsonb NOT NULL DEFAULT '{}',
+  occurred_at timestamptz NOT NULL,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS skill_sync_results (
+  id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  user_id text NOT NULL REFERENCES users(id),
+  agent_id text NOT NULL REFERENCES agents(agent_id),
+  revision text NOT NULL,
+  status text NOT NULL,
+  installed_skill_ids text[] NOT NULL DEFAULT '{}',
+  payload jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_user ON agents (enterprise_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_agent_state ON control_deliveries (agent_id, state, cursor);
+CREATE INDEX IF NOT EXISTS idx_telemetry_search ON telemetry_events (enterprise_id, agent_id, occurred_at DESC);
