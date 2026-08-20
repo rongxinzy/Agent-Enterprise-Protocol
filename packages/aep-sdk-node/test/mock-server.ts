@@ -8,6 +8,7 @@ export class MockAepServer {
   #expireAccess = false;
   #failRefresh = false;
   #metadataFailures = 0;
+  #unauthorizedResponseDelays: number[] = [];
   readonly requests: Array<{method: string; path: string; headers: IncomingMessage['headers']}> = [];
   refreshCount = 0;
   baseUrl = '';
@@ -39,6 +40,10 @@ export class MockAepServer {
 
   failMetadata(times: number): void {
     this.#metadataFailures = times;
+  }
+
+  delayUnauthorizedResponses(delays: number[]): void {
+    this.#unauthorizedResponseDelays = [...delays];
   }
 
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -83,7 +88,11 @@ export class MockAepServer {
       return json(response, 200, tokens(this.#validAccessToken, this.#validRefreshToken));
     }
 
-    if (!this.#authorized(request)) return json(response, 401, problem(401, 'TOKEN_INVALID'));
+    if (!this.#authorized(request)) {
+      const delay = this.#unauthorizedResponseDelays.shift() ?? 0;
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+      return json(response, 401, problem(401, 'TOKEN_INVALID'));
+    }
 
     if (path === '/aep/v1/agent/me') {
       return json(response, 200, {

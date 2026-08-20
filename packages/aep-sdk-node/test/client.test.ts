@@ -45,6 +45,7 @@ describe('AepClient SDK gate', () => {
 
   test('single-flights concurrent 401 refreshes', async () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    server.delayUnauthorizedResponses([0, 0, 0, 0, 50, 50, 50, 50]);
     server.expireAccessToken();
     const identities = await Promise.all(Array.from({length: 8}, () => client.getCurrentIdentity()));
     expect(identities).toHaveLength(8);

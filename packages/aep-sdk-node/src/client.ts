@@ -331,17 +331,21 @@ export class AepClient {
 
   async #request<T>(request: AepRequest, authenticated = true): Promise<AepResponse<T>> {
     const headers = {...request.headers, ...this.#agentHeaders()};
+    let usedAccessToken: string | null = null;
     if (authenticated) {
       const tokens = await this.#tokenStore.get();
-      if (tokens) headers.Authorization = `Bearer ${tokens.accessToken}`;
+      if (tokens) {
+        usedAccessToken = tokens.accessToken;
+        headers.Authorization = `Bearer ${tokens.accessToken}`;
+      }
     }
 
     let response = await this.#transport.request<T>(this.#baseUrl, {...request, headers});
     if (authenticated && response.status === 401 && request.path !== '/aep/v1/auth/refresh') {
       const tokens = await this.#tokenStore.get();
       if (tokens) {
-        const refreshed = await this.#refresh();
-        headers.Authorization = `Bearer ${refreshed.accessToken}`;
+        const retryTokens = tokens.accessToken === usedAccessToken ? await this.#refresh() : tokens;
+        headers.Authorization = `Bearer ${retryTokens.accessToken}`;
         response = await this.#transport.request<T>(this.#baseUrl, {...request, headers});
       }
     }
