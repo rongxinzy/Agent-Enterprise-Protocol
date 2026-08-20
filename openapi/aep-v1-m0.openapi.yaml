@@ -1,0 +1,208 @@
+openapi: 3.1.0
+info:
+  title: Agent Enterprise Protocol M0
+  version: 1.0.0-m0
+  description: Bundled M0 contract for SDK, Control Service, CLI, and example Agent.
+  license: {name: Apache 2.0, identifier: Apache-2.0}
+servers:
+  - url: http://localhost:8080
+    description: Local M0 deployment
+  - url: https://enterprise.example.com
+    description: Protected deployment
+security:
+  - bearerAuth: []
+tags:
+  - {name: Service}
+  - {name: Authentication}
+  - {name: Agent}
+  - {name: Agent Control Events}
+  - {name: Admin Users}
+  - {name: Admin Skills}
+  - {name: Admin Control Events}
+  - {name: Admin Agents}
+paths:
+  /.well-known/jwks.json:
+    get:
+      tags: [Service]
+      operationId: getJsonWebKeySet
+      security: []
+      responses:
+        '200':
+          description: Public keys used to validate AEP and model access tokens
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JsonWebKeySet'}
+  /aep/v1/metadata:
+    get:
+      tags: [Service]
+      operationId: getMetadata
+      security: []
+      responses:
+        '200':
+          description: M0 service metadata and implemented capabilities
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServiceMetadata'}
+  /aep/v1/auth/methods:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1methods'
+  /aep/v1/auth/password/login:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1password~1login'
+  /aep/v1/auth/password/change:
+    post:
+      tags: [Authentication]
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PasswordChangeRequest'}
+      responses:
+        '200':
+          description: Rotated AEP session
+          content:
+            application/json:
+              schema: {$ref: './aep-v1-authentication.openapi.yaml#/components/schemas/TokenResponse'}
+        '400': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+        '401': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/auth/federated/start:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1federated~1start'
+  /aep/v1/auth/exchange:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1exchange'
+  /aep/v1/auth/refresh:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1refresh'
+  /aep/v1/auth/logout:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1logout'
+  /aep/v1/agent/me:
+    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1me'
+  /aep/v1/agent/heartbeat:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1heartbeat'
+  /aep/v1/agent/control-events:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1control-events'
+  /aep/v1/agent/control-events/{deliveryId}/acknowledge:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1control-events~1{deliveryId}~1acknowledge'
+  /aep/v1/agent/control-events/{deliveryId}/result:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1control-events~1{deliveryId}~1result'
+  /aep/v1/agent/skills/manifest:
+    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1skills~1manifest'
+  /aep/v1/agent/skills/{skillId}/versions/{version}/package:
+    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1skills~1{skillId}~1versions~1{version}~1package'
+  /aep/v1/agent/skills/sync-results:
+    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1skills~1sync-results'
+  /aep/v1/agent/events/batch:
+    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1events~1batch'
+  /aep/v1/admin/users:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users'
+  /aep/v1/admin/users/import:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users~1import'
+  /aep/v1/admin/users/{userId}:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users~1{userId}'
+  /aep/v1/admin/users/{userId}/reset-password:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users~1{userId}~1reset-password'
+  /aep/v1/admin/skills:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills'
+  /aep/v1/admin/skills/{skillId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}'
+  /aep/v1/admin/skills/{skillId}/versions:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions'
+  /aep/v1/admin/skills/{skillId}/versions/{version}/publish:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions~1{version}~1publish'
+  /aep/v1/admin/skill-assignments:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skill-assignments'
+  /aep/v1/admin/skill-assignments/{assignmentId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skill-assignments~1{assignmentId}'
+  /aep/v1/admin/control-events:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1admin~1control-events'
+  /aep/v1/admin/control-events/{eventId}:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1admin~1control-events~1{eventId}'
+  /aep/v1/admin/control-events/{eventId}/cancel:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1admin~1control-events~1{eventId}~1cancel'
+  /aep/v1/admin/control-events/{eventId}/deliveries:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1admin~1control-events~1{eventId}~1deliveries'
+  /aep/v1/admin/agents:
+    get:
+      tags: [Admin Agents]
+      operationId: listAgents
+      parameters:
+        - {name: cursor, in: query, schema: {type: [string, 'null']}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: userId, in: query, schema: {type: string}}
+      responses:
+        '200':
+          description: Registered Agent instances
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentPage'}
+  /aep/v1/admin/agents/{agentId}:
+    get:
+      tags: [Admin Agents]
+      operationId: getAgent
+      parameters:
+        - {name: agentId, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Agent state and latest synchronization summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminAgent'}
+        '404': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/events:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1events'
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    ServiceMetadata:
+      type: object
+      required: [service, supportedProtocolVersions, capabilities, jwksUri]
+      properties:
+        service: {type: string}
+        supportedProtocolVersions: {type: array, items: {type: string}}
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [password_auth, federated_auth, skills, telemetry, control_events, model_gateway, credentials, mcp, plugins]
+        jwksUri: {type: string, format: uri-reference}
+    PasswordChangeRequest:
+      type: object
+      required: [currentPassword, newPassword, agentId]
+      properties:
+        currentPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+        newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
+        agentId: {type: string, minLength: 1}
+    AdminAgent:
+      type: object
+      required: [agentId, enterpriseId, userId, agentVersion, platform, firstSeenAt, lastSeenAt]
+      properties:
+        agentId: {type: string}
+        enterpriseId: {type: string}
+        userId: {type: string}
+        agentVersion: {type: string}
+        platform: {type: string, enum: [windows, macos, linux]}
+        firstSeenAt: {type: string, format: date-time}
+        lastSeenAt: {type: string, format: date-time}
+        appliedSkillRevision: {type: [string, 'null']}
+        installedSkillIds: {type: array, items: {type: string}}
+    AgentPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/AdminAgent'}}
+        nextCursor: {type: [string, 'null']}
+    JsonWebKeySet:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, kid, use, alg, crv, x]
+            properties:
+              kty: {type: string, const: OKP}
+              kid: {type: string}
+              use: {type: string, const: sig}
+              alg: {type: string, const: EdDSA}
+              crv: {type: string, const: Ed25519}
+              x: {type: string}
