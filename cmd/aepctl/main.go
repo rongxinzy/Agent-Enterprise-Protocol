@@ -67,8 +67,9 @@ func userCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})})
 	var username, displayName, password, email string
+	var requirePasswordChange bool
 	create := &cobra.Command{Use: "create", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		body := map[string]any{"enterpriseId": opts.enterpriseID, "username": username, "displayName": displayName, "temporaryPassword": password, "requirePasswordChange": true, "organizationIds": []string{}, "roleIds": []string{}}
+		body := map[string]any{"enterpriseId": opts.enterpriseID, "username": username, "displayName": displayName, "temporaryPassword": password, "requirePasswordChange": requirePasswordChange, "organizationIds": []string{}, "roleIds": []string{}}
 		if email != "" {
 			body["email"] = email
 		}
@@ -79,6 +80,7 @@ func userCommand(opts *options) *cobra.Command {
 	create.Flags().StringVar(&displayName, "display-name", "", "display name")
 	create.Flags().StringVar(&password, "temporary-password", "", "temporary password")
 	create.Flags().StringVar(&email, "email", "", "email address")
+	create.Flags().BoolVar(&requirePasswordChange, "require-password-change", true, "require a password change at next login")
 	_ = create.MarkFlagRequired("user")
 	_ = create.MarkFlagRequired("display-name")
 	_ = create.MarkFlagRequired("temporary-password")

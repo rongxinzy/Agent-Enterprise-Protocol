@@ -42,6 +42,11 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 		databaseFailure(response, request, err)
 		return
 	}
+	_, err = s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.agent_id=$1 AND d.state='pending' AND e.expires_at<=now()`, claims.AgentID)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	var pending bool
 	var watermark *string
 	err = s.app.Pool.QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.agent_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM control_deliveries WHERE agent_id=$1)`, claims.AgentID).Scan(&pending, &watermark)
@@ -55,6 +60,11 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 func (s *Server) listAgentControlEvents(response http.ResponseWriter, request *http.Request) {
 	after, _ := strconv.ParseInt(request.URL.Query().Get("afterCursor"), 10, 64)
 	claims := claimsFrom(request)
+	_, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.agent_id=$1 AND d.state='pending' AND e.expires_at<=now()`, claims.AgentID)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.created_at,e.expires_at FROM control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.agent_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now() AND d.cursor>$2 ORDER BY d.cursor LIMIT $3`, claims.AgentID, after, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
@@ -101,7 +111,7 @@ func (s *Server) acknowledgeControlEvent(response http.ResponseWriter, request *
 	}
 	deliveryID := chi.URLParam(request, "deliveryId")
 	claims := claimsFrom(request)
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries SET state='received',received_at=COALESCE(received_at,$3),updated_at=now(),attempt_count=attempt_count+1 WHERE delivery_id=$1 AND agent_id=$2 AND state='pending'`, deliveryID, claims.AgentID, input.ReceivedAt)
+	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries SET state='received',received_at=COALESCE(received_at,$3),updated_at=now(),attempt_count=attempt_count+1 WHERE delivery_id=$1 AND agent_id=$2 AND state IN ('pending','failed')`, deliveryID, claims.AgentID, input.ReceivedAt)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -140,7 +150,7 @@ func (s *Server) reportControlEventResult(response http.ResponseWriter, request 
 	}
 	deliveryID := chi.URLParam(request, "deliveryId")
 	claims := claimsFrom(request)
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries SET state=$3,started_at=COALESCE($4,started_at),completed_at=COALESCE($5,completed_at),applied_revision=COALESCE($6,applied_revision),error_code=COALESCE($7,error_code),message=COALESCE($8,message),updated_at=now() WHERE delivery_id=$1 AND agent_id=$2 AND (state IN ('received','running') OR state=$3)`, deliveryID, claims.AgentID, input.Status, input.StartedAt, input.CompletedAt, input.AppliedRevision, input.ErrorCode, input.Message)
+	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries SET state=$3,started_at=CASE WHEN $3='running' THEN COALESCE($4,now()) ELSE COALESCE($4,started_at) END,completed_at=CASE WHEN $3='running' THEN NULL ELSE COALESCE($5,completed_at) END,applied_revision=CASE WHEN $3='running' THEN NULL ELSE COALESCE($6,applied_revision) END,error_code=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($7,error_code) END,message=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($8,message) END,updated_at=now() WHERE delivery_id=$1 AND agent_id=$2 AND (state IN ('received','running') OR state=$3)`, deliveryID, claims.AgentID, input.Status, input.StartedAt, input.CompletedAt, input.AppliedRevision, input.ErrorCode, input.Message)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -290,7 +300,14 @@ func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.
 }
 
 func (s *Server) listControlEventDeliveries(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.agent_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.enterprise_id=$2 ORDER BY d.cursor LIMIT $3`, chi.URLParam(request, "eventId"), claimsFrom(request).Tenant, limit(request))
+	eventID := chi.URLParam(request, "eventId")
+	tenant := claimsFrom(request).Tenant
+	_, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.enterprise_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.agent_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.enterprise_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

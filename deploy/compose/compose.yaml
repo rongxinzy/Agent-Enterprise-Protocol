@@ -1,0 +1,59 @@
+name: aep-m0
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: aep
+      POSTGRES_USER: aep
+      POSTGRES_PASSWORD: aep
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U aep -d aep]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - ${AEP_MINIO_CONSOLE_PORT:-9001}:9001
+    volumes:
+      - minio-data:/data
+
+  control-service:
+    build:
+      context: ../..
+      dockerfile: services/control-service/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      AEP_ADDRESS: :8080
+      AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
+      AEP_MINIO_ENDPOINT: minio:9000
+      AEP_MINIO_ACCESS_KEY: minioadmin
+      AEP_MINIO_SECRET_KEY: minioadmin
+      AEP_MINIO_BUCKET: aep-skills
+      AEP_ISSUER: http://localhost:${AEP_PORT:-8080}
+      AEP_SIGNING_KEY_BASE64: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      AEP_BOOTSTRAP_ENTERPRISE_ID: demo
+      AEP_BOOTSTRAP_ENTERPRISE_NAME: Demo Enterprise
+      AEP_BOOTSTRAP_ADMIN_USERNAME: admin
+      AEP_BOOTSTRAP_ADMIN_PASSWORD: change-this-admin-password
+    ports:
+      - ${AEP_PORT:-8080}:8080
+
+volumes:
+  postgres-data:
+  minio-data:

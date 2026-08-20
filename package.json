@@ -14,8 +14,11 @@
     "openapi:lint": "redocly lint openapi/aep-v1-m0.openapi.yaml",
     "openapi:types": "openapi-typescript openapi/dist/aep-v1-m0.bundle.yaml -o packages/aep-sdk-node/src/generated/aep-v1.ts",
     "openapi:build": "npm run openapi:bundle && npm run openapi:types",
-    "build": "npm run openapi:build && npm run build --workspace @aep/sdk-node",
-    "test": "npm run openapi:bundle && npm run test --workspace @aep/sdk-node",
+    "build": "npm run openapi:build && npm run build --workspaces --if-present",
+    "test": "npm run openapi:bundle && npm run test --workspaces --if-present",
+    "test:e2e": "node tests/e2e/m0.mjs",
+    "compose:up": "docker compose -f deploy/compose/compose.yaml up -d --build",
+    "compose:down": "docker compose -f deploy/compose/compose.yaml down",
     "check": "npm run openapi:lint && npm run build && npm test"
   },
   "devDependencies": {
