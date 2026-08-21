@@ -66,12 +66,26 @@ go run ./cmd/aepctl credential revoke --assignment-id ASSIGNMENT_ID
 
 密钥已经挂载为文件时使用 `--value-file`。`--value` 仅适合本地自动化，因为它可能出现在进程列表和 shell 历史中。
 
+## 参考 Agent
+
+Node 参考 Agent 在每次使用前同步 Credential 元数据，并仅在真正使用时解析密钥。解析值最多在进程内存中保留 30 秒；服务端过期、轮换、撤销或进程退出时会提前失效。密钥不会写入 SQLite、遥测、日志或命令输出。
+
+```sh
+export AEP_USERNAME=agent-user AEP_PASSWORD=agent-password AEP_AGENT_ID=agent-id
+export AEP_CREDENTIAL_ID=credential-id
+export AEP_CREDENTIAL_URL=https://service.example.test/protected
+npm run start --workspace @aep/example-node-agent -- credential
+```
+
+解析值仅作为 Bearer 请求头发送。输出只包含 Credential ID、服务名与 HTTP 状态。需要更短缓存时间时可设置正数 `AEP_CREDENTIAL_CACHE_MS`。
+
 ## 验证
 
 运行 Credential 专项集成测试：
 
 ```sh
 npm run test:e2e:m2-control
+npm run test:e2e:m2-agent
 ```
 
-该场景覆盖四级作用域授权并集、`server_only` 与禁用拒绝、密钥轮换、服务重启恢复、PostgreSQL 密文存储、解析审计、模型引用完整性和 `aepctl` 输出脱敏。
+管控与 Agent 场景覆盖授权、server-only 隔离、密文存储、轮换与撤销收敛、重启恢复、审计与 CLI 脱敏，以及 SQLite、遥测和进程输出不包含 Credential 明文。

@@ -66,12 +66,26 @@ go run ./cmd/aepctl credential revoke --assignment-id ASSIGNMENT_ID
 
 Use `--value-file` when the secret is already mounted as a file. `--value` is supported for local automation but can be visible in process listings and shell history.
 
+## Reference Agent
+
+The Node reference Agent synchronizes Credential metadata before each use and resolves material only on demand. Values stay in process memory for at most 30 seconds, or until server expiry, rotation, revocation, or process shutdown. They are never written to SQLite, telemetry, logs, or command output.
+
+```sh
+export AEP_USERNAME=agent-user AEP_PASSWORD=agent-password AEP_AGENT_ID=agent-id
+export AEP_CREDENTIAL_ID=credential-id
+export AEP_CREDENTIAL_URL=https://service.example.test/protected
+npm run start --workspace @aep/example-node-agent -- credential
+```
+
+The value is sent only as the Bearer header. Output contains Credential ID, service, and HTTP status. Set a shorter positive `AEP_CREDENTIAL_CACHE_MS` when needed.
+
 ## Validation
 
 Run the focused Credential integration scenario:
 
 ```sh
 npm run test:e2e:m2-control
+npm run test:e2e:m2-agent
 ```
 
-The scenario validates four-scope authorization, server-only and disabled denial, secret rotation, restart recovery, encrypted PostgreSQL storage, resolution audit records, model reference integrity, and `aepctl` output redaction.
+The control and Agent scenarios validate authorization, server-only isolation, encryption, rotation and revocation convergence, restart recovery, audit and CLI redaction, and absence of Credential material in SQLite, telemetry, and process output.
