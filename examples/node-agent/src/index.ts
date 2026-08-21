@@ -4,6 +4,7 @@ import path from 'node:path';
 import {AepClient} from '@aep/sdk-node';
 
 import {ExampleAgent} from './agent.js';
+import {OpenAIModelClient} from './models.js';
 import {SkillReconciler} from './skills.js';
 import {AgentState} from './state.js';
 
@@ -31,11 +32,30 @@ const agent = new ExampleAgent({
     password: required('AEP_PASSWORD'),
   },
 });
+const models = new OpenAIModelClient(client, state, {
+  timeoutMs: Number(process.env.AEP_MODEL_TIMEOUT_MS ?? 120_000),
+});
 
 const command = process.argv[2] ?? 'once';
 try {
   if (command === 'reconcile') {
     await agent.reconcileSkills();
+  } else if (command === 'chat') {
+    await client.loginWithPassword({
+      enterpriseId: process.env.AEP_ENTERPRISE_ID ?? 'demo',
+      username: required('AEP_USERNAME'),
+      password: required('AEP_PASSWORD'),
+    });
+    try {
+      const result = await models.chat({
+        prompt: required('AEP_CHAT_PROMPT'),
+        modelId: process.env.AEP_MODEL_ID || undefined,
+        stream: parseBoolean(process.env.AEP_CHAT_STREAM),
+      });
+      process.stdout.write(JSON.stringify(result) + '\n');
+    } finally {
+      await agent.flushTelemetry();
+    }
   } else if (command === 'once') {
     await agent.runOnce();
   } else if (command === 'run') {
@@ -61,4 +81,11 @@ function normalizePlatform(value: NodeJS.Platform): 'windows' | 'macos' | 'linux
   if (value === 'win32') return 'windows';
   if (value === 'darwin') return 'macos';
   return 'linux';
+}
+
+function parseBoolean(value: string | undefined): boolean {
+  if (!value) return false;
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  throw new Error('AEP_CHAT_STREAM must be true, false, 1, or 0');
 }

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@aep/sdk-node": "*",
+    "openai": "^7.5.0",
     "yauzl": "^3.2.0"
   },
   "devDependencies": {
