@@ -26,6 +26,7 @@ AEP 是管理协议，不重新定义模型推理、MCP 或 Agent-to-Agent 协�
 - [AEP M1 Higress 网关运行手册](docs/m1-gateway-runbook.zh-CN.md)
 - [AEP M1 Node Agent 模型运行手册](docs/m1-client-runbook.zh-CN.md)
 - [AEP M2 Credential 运行手册](docs/m2-credential-runbook.zh-CN.md)
+- [AEP 生产运行基线](docs/production-runtime.zh-CN.md)
 - [OpenAPI 3.1 规范](openapi/aep-v1.openapi.yaml)
 - [M2 Credential OpenAPI Profile](openapi/aep-v1-m2.openapi.yaml)
 - [管控事件 OpenAPI 3.1 规范](openapi/aep-v1-control-events.openapi.yaml)

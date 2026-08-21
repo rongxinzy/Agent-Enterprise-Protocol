@@ -4,6 +4,7 @@ COPY go.mod go.sum ./
 ARG GOPROXY=https://proxy.golang.org,direct
 RUN GOPROXY="${GOPROXY}" go mod download
 COPY services/gateway-authorizer ./services/gateway-authorizer
+COPY services/internal ./services/internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/aep-gateway-authorizer ./services/gateway-authorizer/cmd/server
 
 FROM gcr.io/distroless/static-debian12:nonroot

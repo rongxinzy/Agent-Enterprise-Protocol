@@ -35,12 +35,18 @@ type Server struct {
 	transactionMu sync.Mutex
 }
 
-func New(application *app.App) *Server {
+func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Handler) *Server {
 	server := &Server{app: application, transactions: make(map[string]federatedTransaction)}
 	router := chi.NewRouter()
-	router.Use(middleware.Recoverer, server.requestID)
+	router.Use(server.requestID)
+	for _, use := range runtimeMiddleware {
+		router.Use(use)
+	}
+	router.Use(middleware.Recoverer)
 	router.Get("/.well-known/jwks.json", server.getJWKS)
-	router.Get("/healthz", server.health)
+	router.Get("/livez", server.liveness)
+	router.Get("/readyz", server.readiness)
+	router.Get("/healthz", server.readiness)
 	router.Get("/aep/v1/metadata", server.metadata)
 	router.Get("/aep/v1/auth/methods", server.authenticationMethods)
 	router.Post("/aep/v1/auth/password/login", server.passwordLogin)
@@ -118,12 +124,27 @@ func (s *Server) Handler() http.Handler { return s.router }
 func (s *Server) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requestID := request.Header.Get("X-Request-ID")
-		if requestID == "" {
+		if !validRequestID(requestID) {
 			requestID = uuid.NewString()
 		}
 		response.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), contextKey("request-id"), requestID)))
 	})
+}
+
+func validRequestID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') &&
+			(character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') &&
+			!strings.ContainsRune("-_.:", character) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) authenticate(next http.Handler) http.Handler {
@@ -208,11 +229,25 @@ func limit(request *http.Request) int32 {
 	return value
 }
 
-func (s *Server) health(response http.ResponseWriter, request *http.Request) {
-	ctx, cancel := context.WithTimeout(request.Context(), time.Second)
+func (s *Server) liveness(response http.ResponseWriter, _ *http.Request) {
+	writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) readiness(response http.ResponseWriter, request *http.Request) {
+	ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
 	defer cancel()
+	if s.app.Pool == nil || s.app.Blobs == nil {
+		writeProblem(response, request, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "A required service dependency is unavailable.")
+		return
+	}
 	if err := s.app.Pool.Ping(ctx); err != nil {
-		writeProblem(response, request, http.StatusServiceUnavailable, "DATABASE_UNAVAILABLE", "PostgreSQL is unavailable.")
+		slog.Warn("readiness check failed", "dependency", "postgres", "error", err)
+		writeProblem(response, request, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "A required service dependency is unavailable.")
+		return
+	}
+	if err := s.app.Blobs.Ready(ctx); err != nil {
+		slog.Warn("readiness check failed", "dependency", "minio", "error", err)
+		writeProblem(response, request, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "A required service dependency is unavailable.")
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})

@@ -93,6 +93,65 @@ func TestVerifierRefreshesFreshJWKSForUnknownKID(t *testing.T) {
 	}
 }
 
+func TestVerifierReadinessRefreshDoesNotBlockCachedVerification(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	release := func() {
+		select {
+		case <-releaseRefresh:
+		default:
+			close(releaseRefresh)
+		}
+	}
+	defer release()
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) > 1 {
+			close(refreshStarted)
+			<-releaseRefresh
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{"keys": []map[string]string{{
+			"kty": "OKP", "kid": "test-key", "use": "sig", "alg": "EdDSA", "crv": "Ed25519",
+			"x": base64.RawURLEncoding.EncodeToString(public),
+		}}})
+	}))
+	defer server.Close()
+
+	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
+	raw := signModelToken(t, private, "test-key", ModelClaims{
+		Tenant: "enterprise-a", AgentID: "agent-a", TokenUse: "model",
+		RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway"),
+	})
+	if _, err := verifier.Verify(context.Background(), raw); err != nil {
+		t.Fatalf("prime verifier: %v", err)
+	}
+	readyResult := make(chan error, 1)
+	go func() { readyResult <- verifier.Ready(context.Background()) }()
+	<-refreshStarted
+
+	verificationResult := make(chan error, 1)
+	go func() {
+		_, err := verifier.Verify(context.Background(), raw)
+		verificationResult <- err
+	}()
+	select {
+	case err := <-verificationResult:
+		if err != nil {
+			t.Fatalf("verify cached token: %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("cached token verification blocked on readiness refresh")
+	}
+	release()
+	if err := <-readyResult; err != nil {
+		t.Fatalf("readiness refresh: %v", err)
+	}
+}
+
 func TestVerifierRejectsInvalidModelClaims(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
