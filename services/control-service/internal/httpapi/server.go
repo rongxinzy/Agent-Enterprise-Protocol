@@ -54,6 +54,8 @@ func New(application *app.App) *Server {
 		protected.Post("/aep/v1/auth/logout", server.logout)
 		protected.Get("/aep/v1/agent/me", server.currentIdentity)
 		protected.Get("/aep/v1/agent/models", server.listAgentModels)
+		protected.Get("/aep/v1/agent/credentials", server.listAgentCredentials)
+		protected.Post("/aep/v1/agent/credentials/{credentialId}/resolve", server.resolveAgentCredential)
 		protected.Post("/aep/v1/agent/heartbeat", server.heartbeat)
 		protected.Get("/aep/v1/agent/control-events", server.listAgentControlEvents)
 		protected.Post("/aep/v1/agent/control-events/{deliveryId}/acknowledge", server.acknowledgeControlEvent)
@@ -96,6 +98,15 @@ func New(application *app.App) *Server {
 			admin.Get("/aep/v1/admin/model-assignments", server.listModelAssignments)
 			admin.Post("/aep/v1/admin/model-assignments", server.createModelAssignment)
 			admin.Delete("/aep/v1/admin/model-assignments/{assignmentId}", server.deleteModelAssignment)
+			admin.Get("/aep/v1/admin/credentials", server.listCredentials)
+			admin.Post("/aep/v1/admin/credentials", server.createCredential)
+			admin.Get("/aep/v1/admin/credentials/{credentialId}", server.getCredential)
+			admin.Patch("/aep/v1/admin/credentials/{credentialId}", server.updateCredential)
+			admin.Delete("/aep/v1/admin/credentials/{credentialId}", server.deleteCredential)
+			admin.Post("/aep/v1/admin/credentials/{credentialId}/rotate", server.rotateCredential)
+			admin.Get("/aep/v1/admin/credential-assignments", server.listCredentialAssignments)
+			admin.Post("/aep/v1/admin/credential-assignments", server.createCredentialAssignment)
+			admin.Delete("/aep/v1/admin/credential-assignments/{assignmentId}", server.deleteCredentialAssignment)
 		})
 	})
 	server.router = router
@@ -223,6 +234,10 @@ func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
 		metadata["modelGateway"] = map[string]string{
 			"baseUrl": s.app.Config.ModelGatewayBaseURL, "protocol": "openai-compatible", "apiVersion": "v1",
 		}
+	}
+	if s.app.Credentials != nil {
+		capabilities = append(capabilities, "credentials")
+		metadata["capabilities"] = capabilities
 	}
 	writeJSON(response, http.StatusOK, metadata)
 }

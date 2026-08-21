@@ -128,6 +128,7 @@ describe('AepClient SDK gate', () => {
     await expect(client.updateCredential('credential-1', {enabled: false})).resolves.toMatchObject({id: 'credential-1'});
     await expect(client.rotateCredential('credential-1', {value: 'rotated-secret'})).resolves.toMatchObject({id: 'credential-1'});
     await client.deleteCredential('credential-1');
+    await expect(client.deleteCredential('credential-in-use')).rejects.toMatchObject({status: 409, code: 'CREDENTIAL_IN_USE'});
 
     expect((await client.listCredentialAssignments()).assignments).toHaveLength(1);
     const subjectTypes = ['enterprise', 'organization', 'user', 'agent'] as const;

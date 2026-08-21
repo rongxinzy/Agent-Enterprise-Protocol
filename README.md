@@ -27,6 +27,7 @@ to use MCP.
 - [AEP M0 runbook and release checklist](docs/m0-runbook.md)
 - [AEP M1 Higress gateway runbook](docs/m1-gateway-runbook.md)
 - [AEP M1 Node Agent model runbook](docs/m1-client-runbook.md)
+- [AEP M2 Credential runbook](docs/m2-credential-runbook.md)
 - [OpenAPI 3.1 specification](openapi/aep-v1.openapi.yaml)
 - [M2 Credential OpenAPI profile](openapi/aep-v1-m2.openapi.yaml)
 - [Control Events OpenAPI 3.1 specification](openapi/aep-v1-control-events.openapi.yaml)

@@ -30,6 +30,10 @@ async function runScenario() {
   const adminStore = new MemoryTokenStore();
   const admin = new AepClient({baseUrl, agentId: `m1-admin-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: adminStore});
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const modelCredential = await admin.createCredential({
+    name: 'M1 control provider', service: 'mock-openai', type: 'api_key',
+    deliveryMode: 'server_only', value: 'm1-control-provider-secret', enabled: true,
+  });
 
   const metadata = await admin.getMetadata();
   assert(metadata.capabilities.includes('model_gateway'), 'Configured model gateway capability was not advertised');
@@ -62,7 +66,7 @@ async function runScenario() {
       protocol: 'openai-compatible',
       endpoint: 'https://models.example.test/v1',
       upstreamModel: `upstream-${descriptor.suffix}`,
-      credentialId: index === 0 ? 'credential-placeholder' : null,
+      credentialId: index === 0 ? modelCredential.id : null,
       capabilities: ['text', 'streaming', 'text'],
       contextWindow: 32768,
       isDefault: index === 0,

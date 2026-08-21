@@ -14,6 +14,7 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/blob"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 	database "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db"
 	db "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db/generated"
 )
@@ -24,11 +25,12 @@ var (
 )
 
 type App struct {
-	Config config.Config
-	Pool   *pgxpool.Pool
-	DB     *db.Queries
-	Blobs  blob.Store
-	Tokens *auth.Service
+	Config      config.Config
+	Pool        *pgxpool.Pool
+	DB          *db.Queries
+	Blobs       blob.Store
+	Tokens      *auth.Service
+	Credentials *credential.Sealer
 }
 
 type AgentContext struct {
@@ -69,7 +71,16 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 		pool.Close()
 		return nil, err
 	}
-	application := &App{Config: cfg, Pool: pool, DB: db.New(pool), Blobs: blobs, Tokens: tokens}
+	provider, credentialsEnabled, err := credential.NewProvider(cfg.CredentialMasterKeyBase64, cfg.CredentialMasterKeyFile)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	var credentials *credential.Sealer
+	if credentialsEnabled {
+		credentials = credential.NewSealer(provider)
+	}
+	application := &App{Config: cfg, Pool: pool, DB: db.New(pool), Blobs: blobs, Tokens: tokens, Credentials: credentials}
 	if err := application.bootstrap(ctx); err != nil {
 		pool.Close()
 		return nil, err

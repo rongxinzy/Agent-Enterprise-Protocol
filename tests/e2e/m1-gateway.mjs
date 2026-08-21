@@ -43,6 +43,10 @@ async function runScenario() {
     platform: platform(), tokenStore: new MemoryTokenStore(),
   });
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const modelCredential = await admin.createCredential({
+    name: 'M1 gateway provider', service: 'mock-openai', type: 'api_key',
+    deliveryMode: 'server_only', value: 'm1-e2e-provider-secret', enabled: true,
+  });
   const connection = await admin.getModelConnection();
   assert(connection.baseUrl === gatewayBaseUrl, 'Expected gateway URL ' + gatewayBaseUrl + ', got ' + connection.baseUrl);
 
@@ -55,7 +59,7 @@ async function runScenario() {
   await admin.createModel({
     id: 'enterprise-chat', displayName: 'Enterprise Chat', sourceType: 'gateway',
     protocol: 'openai-compatible', endpoint: gatewayBaseUrl, upstreamModel: 'mock-upstream-chat',
-    credentialId: 'server-only-mock', capabilities: ['text', 'streaming'], contextWindow: 32768,
+    credentialId: modelCredential.id, capabilities: ['text', 'streaming'], contextWindow: 32768,
     isDefault: true, enabled: true,
   });
   await admin.createModel({

@@ -90,9 +90,16 @@ function retryDelay(response: Response, attempt: number): number {
 }
 
 async function parseResponse<T>(response: Response, responseType?: AepRequest['responseType']): Promise<T> {
-  if (responseType === 'empty' || response.status === 204 || response.status === 304) {
+  if (response.status === 204 || response.status === 304) {
     return undefined as T;
   }
+  if (!response.ok) {
+    const text = await response.text();
+    if (!text) return undefined as T;
+    const contentType = response.headers.get('Content-Type') ?? '';
+    return (contentType.includes('json') ? JSON.parse(text) : text) as T;
+  }
+  if (responseType === 'empty') return undefined as T;
   if (responseType === 'bytes') return new Uint8Array(await response.arrayBuffer()) as T;
   const text = await response.text();
   if (!text) return undefined as T;
