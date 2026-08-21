@@ -201,10 +201,27 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 }
 
 func (a *App) bootstrap(ctx context.Context) error {
-	if _, err := a.DB.CreateEnterprise(ctx, db.CreateEnterpriseParams{ID: a.Config.BootstrapEnterpriseID, Name: a.Config.BootstrapEnterpriseName}); err != nil {
+	connection, err := a.Pool.Acquire(ctx)
+	if err != nil {
 		return err
 	}
-	_, err := a.DB.GetUserByUsername(ctx, db.GetUserByUsernameParams{EnterpriseID: a.Config.BootstrapEnterpriseID, Username: a.Config.BootstrapAdminUsername})
+	defer connection.Release()
+	const lockID int64 = 0x4145505F424F4F54
+	if _, err := connection.Exec(ctx, `SELECT pg_advisory_lock($1)`, lockID); err != nil {
+		return fmt.Errorf("acquire bootstrap lock: %w", err)
+	}
+	defer func() {
+		unlockContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := connection.Exec(unlockContext, `SELECT pg_advisory_unlock($1)`, lockID); err != nil {
+			_ = connection.Conn().Close(unlockContext)
+		}
+	}()
+	queries := db.New(connection)
+	if _, err := queries.CreateEnterprise(ctx, db.CreateEnterpriseParams{ID: a.Config.BootstrapEnterpriseID, Name: a.Config.BootstrapEnterpriseName}); err != nil {
+		return err
+	}
+	_, err = queries.GetUserByUsername(ctx, db.GetUserByUsernameParams{EnterpriseID: a.Config.BootstrapEnterpriseID, Username: a.Config.BootstrapAdminUsername})
 	if err == nil {
 		return nil
 	}
@@ -215,7 +232,7 @@ func (a *App) bootstrap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = a.DB.CreateUser(ctx, db.CreateUserParams{ID: uuid.NewString(), EnterpriseID: a.Config.BootstrapEnterpriseID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true, OrganizationIds: []string{}, RoleIds: []string{"admin"}})
+	_, err = queries.CreateUser(ctx, db.CreateUserParams{ID: uuid.NewString(), EnterpriseID: a.Config.BootstrapEnterpriseID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true, OrganizationIds: []string{}, RoleIds: []string{"admin"}})
 	if err != nil {
 		return fmt.Errorf("bootstrap administrator: %w", err)
 	}

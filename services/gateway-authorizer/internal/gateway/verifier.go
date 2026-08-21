@@ -31,6 +31,7 @@ type Verifier struct {
 	ttl    time.Duration
 	client *http.Client
 
+	refreshMu sync.Mutex
 	mu        sync.RWMutex
 	keys      map[string]ed25519.PublicKey
 	fetchedAt time.Time
@@ -71,6 +72,10 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (*ModelClaims, error)
 	return claims, nil
 }
 
+func (v *Verifier) Ready(ctx context.Context) error {
+	return v.refresh(ctx, true)
+}
+
 func (v *Verifier) key(ctx context.Context, kid string) (ed25519.PublicKey, error) {
 	v.mu.RLock()
 	key, found := v.keys[kid]
@@ -92,9 +97,12 @@ func (v *Verifier) key(ctx context.Context, kid string) (ed25519.PublicKey, erro
 }
 
 func (v *Verifier) refresh(ctx context.Context, force bool) error {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if !force && !v.fetchedAt.IsZero() && time.Since(v.fetchedAt) < v.ttl {
+	v.refreshMu.Lock()
+	defer v.refreshMu.Unlock()
+	v.mu.RLock()
+	fresh := !v.fetchedAt.IsZero() && time.Since(v.fetchedAt) < v.ttl
+	v.mu.RUnlock()
+	if !force && fresh {
 		return nil
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, v.url, nil)
@@ -143,7 +151,9 @@ func (v *Verifier) refresh(ctx context.Context, force bool) error {
 	if len(keys) == 0 {
 		return errors.New("JWKS contains no usable Ed25519 signing keys")
 	}
+	v.mu.Lock()
 	v.keys = keys
 	v.fetchedAt = time.Now()
+	v.mu.Unlock()
 	return nil
 }

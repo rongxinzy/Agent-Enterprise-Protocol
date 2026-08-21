@@ -54,13 +54,28 @@ services:
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     depends_on:
       control-service:
-        condition: service_started
+        condition: service_healthy
       higress:
         condition: service_healthy
     environment:
+      AEP_ENVIRONMENT: ${AEP_ENVIRONMENT:-development}
+      AEP_LOG_FORMAT: ${AEP_LOG_FORMAT:-text}
+      AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
       AEP_GATEWAY_ADDRESS: :8090
       AEP_GATEWAY_UPSTREAM_URL: http://higress:8080
       AEP_GATEWAY_JWKS_URL: http://control-service:8080/.well-known/jwks.json
       AEP_GATEWAY_ISSUER: http://localhost:${AEP_PORT:-8080}
     ports:
       - ${AEP_GATEWAY_PORT:-8090}:8090
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test: [CMD, /aep-gateway-authorizer, healthcheck, http://127.0.0.1:8090/readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s

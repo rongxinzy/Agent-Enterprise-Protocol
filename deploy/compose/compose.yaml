@@ -32,13 +32,21 @@ services:
       dockerfile: services/control-service/Dockerfile
       args:
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
-    restart: on-failure
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_started
     environment:
+      AEP_ENVIRONMENT: ${AEP_ENVIRONMENT:-development}
+      AEP_LOG_FORMAT: ${AEP_LOG_FORMAT:-text}
+      AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
       AEP_ADDRESS: :8080
       AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
       AEP_MINIO_ENDPOINT: minio:9000
@@ -55,6 +63,12 @@ services:
       AEP_BOOTSTRAP_ADMIN_PASSWORD: change-this-admin-password
     ports:
       - ${AEP_PORT:-8080}:8080
+    healthcheck:
+      test: [CMD, /aep-control, healthcheck, http://127.0.0.1:8080/readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
 volumes:
   postgres-data:

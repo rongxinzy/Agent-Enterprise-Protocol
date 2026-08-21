@@ -17,6 +17,7 @@ import (
 
 type TokenVerifier interface {
 	Verify(ctx context.Context, raw string) (*ModelClaims, error)
+	Ready(ctx context.Context) error
 }
 
 type Handler struct {
@@ -41,7 +42,16 @@ func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
 
 func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	request = withRequestID(response, request)
-	if request.URL.Path == "/healthz" {
+	if request.URL.Path == "/livez" {
+		writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	if request.URL.Path == "/healthz" || request.URL.Path == "/readyz" {
+		if err := h.verifier.Ready(request.Context()); err != nil {
+			slog.Warn("gateway readiness check failed", "dependency", "jwks", "error", err)
+			writeProblem(response, request, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "A required service dependency is unavailable.")
+			return
+		}
 		writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
@@ -129,12 +139,27 @@ func setTrustedHeader(header http.Header, name, value string) {
 
 func withRequestID(response http.ResponseWriter, request *http.Request) *http.Request {
 	id := request.Header.Get("X-Request-ID")
-	if id == "" {
+	if !validRequestID(id) {
 		id = uuid.NewString()
 	}
 	request.Header.Set("X-Request-ID", id)
 	response.Header().Set("X-Request-ID", id)
 	return request
+}
+
+func validRequestID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') &&
+			(character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') &&
+			!strings.ContainsRune("-_.:", character) {
+			return false
+		}
+	}
+	return true
 }
 
 func requestID(request *http.Request) string {

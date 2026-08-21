@@ -20,6 +20,10 @@ func (v verifierStub) Verify(context.Context, string) (*ModelClaims, error) {
 	return v.claims, v.err
 }
 
+func (v verifierStub) Ready(context.Context) error {
+	return v.err
+}
+
 func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") != "" {
@@ -98,6 +102,30 @@ func TestHandlerRejectsOversizedAndInvalidRequests(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		if response.Code != test.status {
 			t.Fatalf("expected %d, got %d: %s", test.status, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestHandlerSeparatesLivenessAndReadiness(t *testing.T) {
+	handler, err := NewHandler(
+		Config{UpstreamURL: "http://example.test", RequestLimit: 1024},
+		verifierStub{err: context.DeadlineExceeded},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path   string
+		status int
+	}{
+		{path: "/livez", status: http.StatusOK},
+		{path: "/readyz", status: http.StatusServiceUnavailable},
+		{path: "/healthz", status: http.StatusServiceUnavailable},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if response.Code != test.status {
+			t.Fatalf("%s status = %d, want %d", test.path, response.Code, test.status)
 		}
 	}
 }

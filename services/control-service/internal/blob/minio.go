@@ -3,6 +3,7 @@ package blob
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 
 	"github.com/minio/minio-go/v7"
@@ -12,6 +13,7 @@ import (
 type Store interface {
 	Put(ctx context.Context, key string, content []byte) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Ready(ctx context.Context) error
 }
 
 type MinioStore struct {
@@ -30,10 +32,24 @@ func NewMinioStore(ctx context.Context, endpoint, accessKey, secretKey, bucket s
 	}
 	if !exists {
 		if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
-			return nil, err
+			existsAfterCreate, checkErr := client.BucketExists(ctx, bucket)
+			if checkErr != nil || !existsAfterCreate {
+				return nil, err
+			}
 		}
 	}
 	return &MinioStore{client: client, bucket: bucket}, nil
+}
+
+func (s *MinioStore) Ready(ctx context.Context) error {
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("configured MinIO bucket does not exist")
+	}
+	return nil
 }
 
 func (s *MinioStore) Put(ctx context.Context, key string, content []byte) error {
