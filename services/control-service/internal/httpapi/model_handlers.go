@@ -232,6 +232,13 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
 	tenant := claimsFrom(request).Tenant
+	if exists, err := validateCredentialReference(request.Context(), tx, tenant, input.CredentialID); err != nil {
+		databaseFailure(response, request, err)
+		return
+	} else if !exists {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The referenced credential was not found.")
+		return
+	}
 	if *input.IsDefault {
 		if _, err := tx.Exec(request.Context(), "UPDATE models SET is_default=false,updated_at=now() WHERE enterprise_id=$1 AND is_default=true", tenant); err != nil {
 			databaseFailure(response, request, err)
@@ -294,6 +301,15 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
+	if input.CredentialID.Set {
+		if exists, err := validateCredentialReference(request.Context(), tx, tenant, input.CredentialID.Value); err != nil {
+			databaseFailure(response, request, err)
+			return
+		} else if !exists {
+			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The referenced credential was not found.")
+			return
+		}
+	}
 	if input.IsDefault != nil && *input.IsDefault {
 		if _, err := tx.Exec(request.Context(), "UPDATE models SET is_default=false,updated_at=now() WHERE enterprise_id=$1 AND id<>$2 AND is_default=true", tenant, modelID); err != nil {
 			databaseFailure(response, request, err)

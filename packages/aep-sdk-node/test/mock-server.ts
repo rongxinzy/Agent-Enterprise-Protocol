@@ -157,6 +157,9 @@ export class MockAepServer {
       if (request.method === 'DELETE') return empty(response, 204);
       return json(response, 200, credential('agent'));
     }
+    if (path === '/aep/v1/admin/credentials/credential-in-use' && request.method === 'DELETE') {
+      return json(response, 409, problem(409, 'CREDENTIAL_IN_USE'));
+    }
     if (path === '/aep/v1/admin/credential-assignments') {
       const assignment = credentialAssignment();
       if (request.method === 'GET') return json(response, 200, {assignments: [assignment]});

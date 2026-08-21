@@ -55,6 +55,11 @@ async function runScenario() {
     password: 'change-this-admin-password',
   });
 
+  const modelCredential = await admin.createCredential({
+    name: 'M1 client provider', service: 'mock-openai', type: 'api_key',
+    deliveryMode: 'server_only', value: 'm1-e2e-provider-secret', enabled: true,
+  });
+
   const username = 'client-user-' + runId;
   const password = 'temporary-password-123';
   const agentId = 'real-client-agent-' + runId;
@@ -74,7 +79,7 @@ async function runScenario() {
     protocol: 'openai-compatible',
     endpoint: gatewayBaseUrl,
     upstreamModel: 'mock-upstream-chat',
-    credentialId: 'server-only-mock',
+    credentialId: modelCredential.id,
     capabilities: ['text', 'streaming'],
     contextWindow: 32768,
     isDefault: true,
