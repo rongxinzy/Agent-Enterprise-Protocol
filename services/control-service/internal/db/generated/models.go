@@ -59,6 +59,33 @@ type Enterprise struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type Model struct {
+	EnterpriseID  string             `json:"enterprise_id"`
+	ID            string             `json:"id"`
+	DisplayName   string             `json:"display_name"`
+	SourceType    string             `json:"source_type"`
+	Protocol      string             `json:"protocol"`
+	Endpoint      pgtype.Text        `json:"endpoint"`
+	UpstreamModel pgtype.Text        `json:"upstream_model"`
+	LocalModelRef pgtype.Text        `json:"local_model_ref"`
+	CredentialID  pgtype.Text        `json:"credential_id"`
+	Capabilities  []string           `json:"capabilities"`
+	ContextWindow pgtype.Int4        `json:"context_window"`
+	IsDefault     bool               `json:"is_default"`
+	Enabled       bool               `json:"enabled"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModelAssignment struct {
+	ID           string             `json:"id"`
+	EnterpriseID string             `json:"enterprise_id"`
+	ModelID      string             `json:"model_id"`
+	SubjectType  string             `json:"subject_type"`
+	SubjectID    string             `json:"subject_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Organization struct {
 	ID           string             `json:"id"`
 	EnterpriseID string             `json:"enterprise_id"`

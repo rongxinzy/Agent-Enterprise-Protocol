@@ -42,13 +42,13 @@ func main() {
 
 func newRootCommand() *cobra.Command {
 	opts := &options{}
-	root := &cobra.Command{Use: "aepctl", Short: "Manage an AEP M0 deployment", SilenceUsage: true}
+	root := &cobra.Command{Use: "aepctl", Short: "Manage an AEP deployment", SilenceUsage: true}
 	root.PersistentFlags().StringVar(&opts.baseURL, "base-url", env("AEPCTL_BASE_URL", "http://localhost:8080"), "AEP service origin")
 	root.PersistentFlags().StringVar(&opts.enterpriseID, "enterprise", env("AEPCTL_ENTERPRISE", "demo"), "enterprise identifier")
 	root.PersistentFlags().StringVar(&opts.username, "username", env("AEPCTL_USERNAME", "admin"), "administrator username")
 	root.PersistentFlags().StringVar(&opts.password, "password", os.Getenv("AEPCTL_PASSWORD"), "administrator password (prefer AEPCTL_PASSWORD)")
 	root.PersistentFlags().StringVar(&opts.agentID, "agent-id", env("AEPCTL_AGENT_ID", "aepctl"), "stable CLI Agent identifier")
-	root.AddCommand(userCommand(opts), skillCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
+	root.AddCommand(userCommand(opts), skillCommand(opts), modelCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
 	return root
 }
 

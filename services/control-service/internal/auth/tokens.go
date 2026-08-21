@@ -62,18 +62,26 @@ func (s *Service) Issue(userID, enterpriseID, agentID string, admin bool, roles 
 }
 
 func (s *Service) ParseAccess(raw string) (*Claims, error) {
+	return s.parse(raw, "aep-control", "aep")
+}
+
+func (s *Service) ParseModel(raw string) (*Claims, error) {
+	return s.parse(raw, "model-gateway", "model")
+}
+
+func (s *Service) parse(raw, audience, tokenUse string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(raw, &Claims{}, func(token *jwt.Token) (any, error) {
 		if token.Method.Alg() != jwt.SigningMethodEdDSA.Alg() {
 			return nil, fmt.Errorf("unexpected signing algorithm %s", token.Method.Alg())
 		}
 		return s.public, nil
-	}, jwt.WithAudience("aep-control"), jwt.WithIssuer(s.issuer), jwt.WithExpirationRequired())
+	}, jwt.WithAudience(audience), jwt.WithIssuer(s.issuer), jwt.WithExpirationRequired())
 	if err != nil {
 		return nil, err
 	}
 	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid || claims.TokenUse != "aep" {
-		return nil, errors.New("invalid AEP access token")
+	if !ok || !token.Valid || claims.TokenUse != tokenUse {
+		return nil, errors.New("invalid token use")
 	}
 	return claims, nil
 }

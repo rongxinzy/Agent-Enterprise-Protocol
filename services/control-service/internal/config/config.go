@@ -18,6 +18,7 @@ type Config struct {
 	SigningKeyBase64          string
 	AccessTTL                 time.Duration
 	ModelAccessTTL            time.Duration
+	ModelGatewayBaseURL       string
 	RefreshTTL                time.Duration
 	BootstrapEnterpriseID     string
 	BootstrapEnterpriseName   string
@@ -39,6 +40,7 @@ func Load() Config {
 		SigningKeyBase64:          os.Getenv("AEP_SIGNING_KEY_BASE64"),
 		AccessTTL:                 duration("AEP_ACCESS_TTL", 15*time.Minute),
 		ModelAccessTTL:            duration("AEP_MODEL_ACCESS_TTL", 15*time.Minute),
+		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
 		RefreshTTL:                duration("AEP_REFRESH_TTL", 30*24*time.Hour),
 		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"),
 		BootstrapEnterpriseName:   value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Enterprise"),
