@@ -296,6 +296,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/agent/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAgentCredentials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/agent/credentials/{credentialId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolveAgentCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/agent/models": {
         parameters: {
             query?: never;
@@ -583,6 +615,88 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCredentials"];
+        put?: never;
+        post: operations["createCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/credentials/{credentialId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: components["parameters"]["CredentialId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getCredential"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteCredential"];
+        options?: never;
+        head?: never;
+        patch: operations["updateCredential"];
+        trace?: never;
+    };
+    "/aep/v1/admin/credentials/{credentialId}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rotateCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/credential-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCredentialAssignments"];
+        put?: never;
+        post: operations["createCredentialAssignment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/credential-assignments/{assignmentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteCredentialAssignment"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1005,6 +1119,33 @@ export interface components {
             accepted: string[];
             rejected: components["schemas"]["RejectedEvent"][];
         };
+        CredentialMetadata: {
+            id: string;
+            name: string;
+            service: string;
+            /** @enum {string} */
+            type: "api_key";
+            /** @enum {string} */
+            deliveryMode: "server_only" | "agent";
+            maskedValue: string;
+            enabled: boolean;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CredentialList: {
+            credentials: components["schemas"]["CredentialMetadata"][];
+        };
+        ResolveCredentialRequest: {
+            purpose: string;
+        };
+        ResolvedCredential: {
+            credentialId: string;
+            /** @enum {string} */
+            type: "api_key";
+            value: string;
+            /** Format: date-time */
+            expiresAt: string | null;
+        };
         /** @enum {string} */
         ModelSourceType: "gateway" | "enterprise_open_source" | "local";
         AgentModel: {
@@ -1219,6 +1360,47 @@ export interface components {
             items: components["schemas"]["StoredEvent"][];
             nextCursor: string | null;
         };
+        CredentialCreate: {
+            name: string;
+            service: string;
+            /** @enum {string} */
+            type: "api_key";
+            /** @enum {string} */
+            deliveryMode: "server_only" | "agent";
+            value: string;
+            enabled: boolean;
+        };
+        CredentialPatch: {
+            name?: string;
+            service?: string;
+            /** @enum {string} */
+            deliveryMode?: "server_only" | "agent";
+            enabled?: boolean;
+        };
+        CredentialRotate: {
+            value: string;
+        };
+        CredentialSubject: {
+            /** @enum {string} */
+            type: "enterprise" | "organization" | "user" | "agent";
+            id: string;
+        };
+        CredentialAssignment: {
+            id: string;
+            /** @constant */
+            resourceType: "credential";
+            resourceId: string;
+            subject: components["schemas"]["CredentialSubject"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CredentialAssignmentList: {
+            assignments: components["schemas"]["CredentialAssignment"][];
+        };
+        CredentialAssignmentWrite: {
+            credentialId: string;
+            subject: components["schemas"]["CredentialSubject"];
+        };
         AdminModel: components["schemas"]["AgentModel"] & {
             credentialId?: string | null;
         };
@@ -1317,6 +1499,33 @@ export interface components {
                 "application/json": components["schemas"]["Assignment"];
             };
         };
+        /** @description Masked credential metadata */
+        CredentialMetadata: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CredentialMetadata"];
+            };
+        };
+        /** @description Credential assignment list */
+        CredentialAssignmentList: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CredentialAssignmentList"];
+            };
+        };
+        /** @description Credential assignment resource */
+        CredentialAssignment: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CredentialAssignment"];
+            };
+        };
         /** @description Model descriptor */
         AdminModel: {
             headers: {
@@ -1353,6 +1562,7 @@ export interface components {
         DeliveryId: string;
         SkillId: string;
         Version: string;
+        CredentialId: string;
         Cursor: string | null;
         "Limit-2": number;
         UserId: string;
@@ -1395,7 +1605,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description M1 service metadata and implemented capabilities */
+            /** @description M2 service metadata and implemented capabilities */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1800,6 +2010,55 @@ export interface operations {
             };
             400: components["responses"]["Problem-2"];
             413: components["responses"]["Problem-2"];
+        };
+    };
+    listAgentCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assigned credential metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialList"];
+                };
+            };
+        };
+    };
+    resolveAgentCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: components["parameters"]["CredentialId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Secret material; do not cache */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedCredential"];
+                };
+            };
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
         };
     };
     listAgentModels: {
@@ -2351,6 +2610,162 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EventSearchResult"];
                 };
+            };
+        };
+    };
+    listCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Masked credential metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialList"];
+                };
+            };
+        };
+    };
+    createCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialCreate"];
+            };
+        };
+        responses: {
+            201: components["responses"]["CredentialMetadata"];
+        };
+    };
+    getCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: components["parameters"]["CredentialId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["CredentialMetadata"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    deleteCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: components["parameters"]["CredentialId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credential revoked and deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: components["parameters"]["CredentialId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialPatch"];
+            };
+        };
+        responses: {
+            200: components["responses"]["CredentialMetadata"];
+        };
+    };
+    rotateCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credentialId: components["parameters"]["CredentialId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialRotate"];
+            };
+        };
+        responses: {
+            200: components["responses"]["CredentialMetadata"];
+        };
+    };
+    listCredentialAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["CredentialAssignmentList"];
+        };
+    };
+    createCredentialAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialAssignmentWrite"];
+            };
+        };
+        responses: {
+            201: components["responses"]["CredentialAssignment"];
+            409: components["responses"]["Problem-2"];
+        };
+    };
+    deleteCredentialAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignment removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -168,7 +168,7 @@ paths:
         '200':
           description: Secret material; do not cache
           headers:
-            Cache-Control: {schema: {type: string}, example: no-store}
+            Cache-Control: {required: true, schema: {type: string, const: no-store}}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ResolvedCredential'}
@@ -352,11 +352,7 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [value]
-              properties:
-                value: {type: string, minLength: 1}
+            schema: {$ref: '#/components/schemas/CredentialRotate'}
       responses:
         '200': {$ref: '#/components/responses/CredentialMetadata'}
   /admin/credential-assignments:
@@ -364,7 +360,7 @@ paths:
       tags: [Admin Credentials]
       operationId: listCredentialAssignments
       responses:
-        '200': {$ref: '#/components/responses/AssignmentList'}
+        '200': {$ref: '#/components/responses/CredentialAssignmentList'}
     post:
       tags: [Admin Credentials]
       operationId: createCredentialAssignment
@@ -374,7 +370,8 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/CredentialAssignmentWrite'}
       responses:
-        '201': {$ref: '#/components/responses/Assignment'}
+        '201': {$ref: '#/components/responses/CredentialAssignment'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/credential-assignments/{assignmentId}:
     delete:
       tags: [Admin Credentials]
@@ -519,6 +516,16 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/AssignmentList'}
+    CredentialAssignment:
+      description: Credential assignment resource
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CredentialAssignment'}
+    CredentialAssignmentList:
+      description: Credential assignment list
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CredentialAssignmentList'}
     ModelAssignment:
       description: Model assignment resource
       content:
@@ -801,6 +808,26 @@ components:
       required: [assignments]
       properties:
         assignments: {type: array, items: {$ref: '#/components/schemas/ModelAssignment'}}
+    CredentialSubject:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, enum: [enterprise, organization, user, agent]}
+        id: {type: string, minLength: 1}
+    CredentialAssignment:
+      type: object
+      required: [id, resourceType, resourceId, subject, createdAt]
+      properties:
+        id: {type: string}
+        resourceType: {type: string, const: credential}
+        resourceId: {type: string}
+        subject: {$ref: '#/components/schemas/CredentialSubject'}
+        createdAt: {type: string, format: date-time}
+    CredentialAssignmentList:
+      type: object
+      required: [assignments]
+      properties:
+        assignments: {type: array, items: {$ref: '#/components/schemas/CredentialAssignment'}}
     SkillAssignmentWrite:
       type: object
       required: [skillId, subject]
@@ -812,7 +839,7 @@ components:
       required: [credentialId, subject]
       properties:
         credentialId: {type: string}
-        subject: {$ref: '#/components/schemas/Subject'}
+        subject: {$ref: '#/components/schemas/CredentialSubject'}
     ModelAssignmentWrite:
       type: object
       required: [modelId, subject]
@@ -827,7 +854,7 @@ components:
         service: {type: string}
         type: {type: string, enum: [api_key]}
         deliveryMode: {type: string, enum: [server_only, agent]}
-        value: {type: string, minLength: 1}
+        value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
         enabled: {type: boolean}
     CredentialPatch:
       type: object
@@ -837,6 +864,11 @@ components:
         service: {type: string}
         deliveryMode: {type: string, enum: [server_only, agent]}
         enabled: {type: boolean}
+    CredentialRotate:
+      type: object
+      required: [value]
+      properties:
+        value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
     AdminModelWrite:
       allOf:
         - {$ref: '#/components/schemas/AgentModel'}

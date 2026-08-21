@@ -15,6 +15,14 @@ import type {
   AgentModelList,
   AuthenticationMethods,
   ControlEventPage,
+  CredentialAssignment,
+  CredentialAssignmentList,
+  CredentialAssignmentWrite,
+  CredentialCreate,
+  CredentialList,
+  CredentialMetadata,
+  CredentialPatch,
+  CredentialRotate,
   CurrentIdentity,
   HeartbeatResponse,
   JsonObject,
@@ -26,6 +34,7 @@ import type {
   Page,
   PlatformUser,
   Query,
+  ResolvedCredential,
   ServiceMetadata,
   SkillManifest,
   SkillManifestResult,
@@ -143,6 +152,29 @@ export class AepClient {
 
   getCurrentIdentity(): Promise<CurrentIdentity> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/me'});
+  }
+
+  listAgentCredentials(): Promise<CredentialList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/credentials'});
+  }
+
+  async resolveAgentCredential(credentialId: string, purpose: string): Promise<ResolvedCredential> {
+    const response = await this.#request<ResolvedCredential>({
+      method: HttpMethod.Post,
+      path: '/aep/v1/agent/credentials/' + segment(credentialId) + '/resolve',
+      body: {purpose},
+      retry: false,
+    });
+    this.#assertSuccess(response);
+    if (!hasNoStore(response.headers)) {
+      throw new AepProblem({
+        type: 'https://aep.example/problems/credential-response-cacheable',
+        title: 'Credential response is missing Cache-Control: no-store',
+        status: 502,
+        code: 'CREDENTIAL_RESPONSE_CACHEABLE',
+      });
+    }
+    return response.data;
   }
 
   listAgentModels(): Promise<AgentModelList> {
@@ -339,6 +371,63 @@ export class AepClient {
     });
   }
 
+  listCredentials(): Promise<CredentialList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/credentials'});
+  }
+
+  createCredential(input: CredentialCreate): Promise<CredentialMetadata> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/credentials', body: asJson(input)});
+  }
+
+  getCredential(credentialId: string): Promise<CredentialMetadata> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/credentials/' + segment(credentialId)});
+  }
+
+  updateCredential(credentialId: string, input: CredentialPatch): Promise<CredentialMetadata> {
+    return this.#send({
+      method: HttpMethod.Patch,
+      path: '/aep/v1/admin/credentials/' + segment(credentialId),
+      body: asJson(input),
+    });
+  }
+
+  rotateCredential(credentialId: string, input: CredentialRotate): Promise<CredentialMetadata> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/credentials/' + segment(credentialId) + '/rotate',
+      body: asJson(input),
+      retry: false,
+    });
+  }
+
+  deleteCredential(credentialId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: '/aep/v1/admin/credentials/' + segment(credentialId),
+      responseType: 'empty',
+    });
+  }
+
+  listCredentialAssignments(): Promise<CredentialAssignmentList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/credential-assignments'});
+  }
+
+  createCredentialAssignment(input: CredentialAssignmentWrite): Promise<CredentialAssignment> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/credential-assignments',
+      body: asJson(input),
+    });
+  }
+
+  deleteCredentialAssignment(assignmentId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: '/aep/v1/admin/credential-assignments/' + segment(assignmentId),
+      responseType: 'empty',
+    });
+  }
+
   listAdminModels(): Promise<AdminModelList> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/models'});
   }
@@ -480,6 +569,12 @@ export class AepClient {
   #agentContext(): object {
     return {agentId: this.#agentId, agentVersion: this.#agentVersion, platform: this.#platform};
   }
+}
+
+function hasNoStore(headers: Headers): boolean {
+  return (headers.get('Cache-Control') ?? '')
+    .split(',')
+    .some(value => value.trim().toLowerCase() === 'no-store');
 }
 
 function segment(value: string): string {

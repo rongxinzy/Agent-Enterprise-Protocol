@@ -60,6 +60,16 @@ export interface ServiceMetadata {
   modelGateway?: ModelGatewayMetadata;
 }
 
+export type CredentialMetadata = components['schemas']['CredentialMetadata'];
+export type CredentialList = components['schemas']['CredentialList'];
+export type ResolveCredentialRequest = components['schemas']['ResolveCredentialRequest'];
+export type ResolvedCredential = components['schemas']['ResolvedCredential'];
+export type CredentialCreate = components['schemas']['CredentialCreate'];
+export type CredentialPatch = components['schemas']['CredentialPatch'];
+export type CredentialRotate = components['schemas']['CredentialRotate'];
+export type CredentialAssignment = components['schemas']['CredentialAssignment'];
+export type CredentialAssignmentList = components['schemas']['CredentialAssignmentList'];
+export type CredentialAssignmentWrite = components['schemas']['CredentialAssignmentWrite'];
 export type ModelGatewayMetadata = components['schemas']['ModelGatewayMetadata'];
 export type AgentModel = components['schemas']['AgentModel'];
 export type AgentModelList = components['schemas']['AgentModelList'];
