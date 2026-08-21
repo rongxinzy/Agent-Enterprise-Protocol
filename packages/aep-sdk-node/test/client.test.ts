@@ -97,6 +97,57 @@ describe('AepClient SDK gate', () => {
     await client.deleteModelAssignment('assignment-1');
   });
 
+  test('covers Credential delivery and administration without caching secrets', async () => {
+    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+
+    expect((await client.listAgentCredentials()).credentials).toEqual([
+      expect.objectContaining({id: 'credential-1', deliveryMode: 'agent', maskedValue: '****cdef'}),
+    ]);
+    await expect(client.resolveAgentCredential('credential-1', 'Call the example service')).resolves.toEqual({
+      credentialId: 'credential-1',
+      type: 'api_key',
+      value: 'resolved-secret',
+      expiresAt: null,
+    });
+    await expect(client.resolveAgentCredential('server-only', 'Call the gateway')).rejects.toMatchObject({
+      status: 403,
+      code: 'CREDENTIAL_NOT_DELIVERABLE',
+    });
+
+    expect((await client.listCredentials()).credentials).toHaveLength(2);
+    const input = {
+      name: 'Agent API key',
+      service: 'example-service',
+      type: 'api_key' as const,
+      deliveryMode: 'agent' as const,
+      value: 'new-secret',
+      enabled: true,
+    };
+    await expect(client.createCredential(input)).resolves.toMatchObject({id: 'credential-1'});
+    await expect(client.getCredential('credential-1')).resolves.toMatchObject({maskedValue: '****cdef'});
+    await expect(client.updateCredential('credential-1', {enabled: false})).resolves.toMatchObject({id: 'credential-1'});
+    await expect(client.rotateCredential('credential-1', {value: 'rotated-secret'})).resolves.toMatchObject({id: 'credential-1'});
+    await client.deleteCredential('credential-1');
+
+    expect((await client.listCredentialAssignments()).assignments).toHaveLength(1);
+    const subjectTypes = ['enterprise', 'organization', 'user', 'agent'] as const;
+    for (const type of subjectTypes) {
+      await expect(
+        client.createCredentialAssignment({
+          credentialId: 'credential-1',
+          subject: {type, id: type + '-1'},
+        }),
+      ).resolves.toMatchObject({resourceType: 'credential'});
+    }
+    await client.deleteCredentialAssignment('credential-assignment-1');
+
+    server.omitCredentialNoStore();
+    await expect(client.resolveAgentCredential('credential-1', 'Unsafe response')).rejects.toMatchObject({
+      status: 502,
+      code: 'CREDENTIAL_RESPONSE_CACHEABLE',
+    });
+  });
+
   test('single-flights concurrent 401 refreshes', async () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
     server.delayUnauthorizedResponses([0, 0, 0, 0, 50, 50, 50, 50]);

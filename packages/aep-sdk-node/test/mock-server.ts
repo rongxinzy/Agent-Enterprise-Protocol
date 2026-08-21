@@ -10,6 +10,7 @@ export class MockAepServer {
   #metadataFailures = 0;
   #unauthorizedResponseDelays: number[] = [];
   #modelGatewayEnabled = true;
+  #credentialNoStore = true;
   readonly requests: Array<{method: string; path: string; headers: IncomingMessage['headers']}> = [];
   refreshCount = 0;
   baseUrl = '';
@@ -51,6 +52,10 @@ export class MockAepServer {
     this.#modelGatewayEnabled = false;
   }
 
+  omitCredentialNoStore(): void {
+    this.#credentialNoStore = false;
+  }
+
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const path = new URL(request.url ?? '/', this.baseUrl).pathname;
     this.requests.push({method: request.method ?? 'GET', path, headers: request.headers});
@@ -63,7 +68,7 @@ export class MockAepServer {
       return json(response, 200, {
         service: 'mock-aep',
         supportedProtocolVersions: ['1.0'],
-        capabilities: ['password_auth', 'federated_auth', 'skills', 'telemetry', 'control_events', ...(this.#modelGatewayEnabled ? ['model_gateway'] : [])],
+        capabilities: ['password_auth', 'federated_auth', 'skills', 'telemetry', 'control_events', ...(this.#modelGatewayEnabled ? ['model_gateway'] : []), 'credentials'],
         jwksUri: '/.well-known/jwks.json',
         ...(this.#modelGatewayEnabled ? {modelGateway: {baseUrl: '/openai/v1', protocol: 'openai-compatible', apiVersion: 'v1'}} : {}),
       });
@@ -107,6 +112,16 @@ export class MockAepServer {
         roles: ['user'],
       });
     }
+    if (path === '/aep/v1/agent/credentials') {
+      return json(response, 200, {credentials: [credential('agent')]});
+    }
+    if (path === '/aep/v1/agent/credentials/credential-1/resolve') {
+      if (this.#credentialNoStore) response.setHeader('Cache-Control', 'no-store');
+      return json(response, 200, {credentialId: 'credential-1', type: 'api_key', value: 'resolved-secret', expiresAt: null});
+    }
+    if (path === '/aep/v1/agent/credentials/server-only/resolve') {
+      return json(response, 403, problem(403, 'CREDENTIAL_NOT_DELIVERABLE'));
+    }
     if (path === '/aep/v1/agent/models') {
       return json(response, 200, {models: [model(false)]});
     }
@@ -133,6 +148,21 @@ export class MockAepServer {
     if (path === '/aep/v1/agent/events/batch') return json(response, 200, {accepted: ['event-1'], rejected: []});
     if (path === '/aep/v1/admin/agents') return json(response, 200, {items: [], nextCursor: null});
     if (path === '/aep/v1/admin/agents/missing') return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
+    if (path === '/aep/v1/admin/credentials') {
+      if (request.method === 'GET') return json(response, 200, {credentials: [credential('agent'), credential('server_only')]});
+      return json(response, 201, credential('agent'));
+    }
+    if (path === '/aep/v1/admin/credentials/credential-1/rotate') return json(response, 200, credential('agent'));
+    if (path === '/aep/v1/admin/credentials/credential-1') {
+      if (request.method === 'DELETE') return empty(response, 204);
+      return json(response, 200, credential('agent'));
+    }
+    if (path === '/aep/v1/admin/credential-assignments') {
+      const assignment = credentialAssignment();
+      if (request.method === 'GET') return json(response, 200, {assignments: [assignment]});
+      return json(response, 201, assignment);
+    }
+    if (path === '/aep/v1/admin/credential-assignments/credential-assignment-1') return empty(response, 204);
     if (path === '/aep/v1/admin/models') {
       if (request.method === 'GET') return json(response, 200, {models: [model(true)]});
       return json(response, 201, model(true));
@@ -159,6 +189,29 @@ export class MockAepServer {
 
 function tokens(accessToken: string, refreshToken: string): object {
   return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300};
+}
+
+function credential(deliveryMode: 'agent' | 'server_only'): object {
+  return {
+    id: deliveryMode === 'agent' ? 'credential-1' : 'server-only',
+    name: deliveryMode === 'agent' ? 'Agent API key' : 'Gateway API key',
+    service: 'example-service',
+    type: 'api_key',
+    deliveryMode,
+    maskedValue: '****cdef',
+    enabled: true,
+    updatedAt: '2026-08-21T00:00:00Z',
+  };
+}
+
+function credentialAssignment(): object {
+  return {
+    id: 'credential-assignment-1',
+    resourceType: 'credential',
+    resourceId: 'credential-1',
+    subject: {type: 'user', id: 'user-1'},
+    createdAt: '2026-08-21T00:00:00Z',
+  };
 }
 
 function model(admin: boolean): object {
