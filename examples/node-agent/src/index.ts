@@ -4,6 +4,7 @@ import path from 'node:path';
 import {AepClient} from '@aep/sdk-node';
 
 import {ExampleAgent} from './agent.js';
+import {CredentialHttpClient, CredentialManager} from './credentials.js';
 import {OpenAIModelClient} from './models.js';
 import {SkillReconciler} from './skills.js';
 import {AgentState} from './state.js';
@@ -35,6 +36,10 @@ const agent = new ExampleAgent({
 const models = new OpenAIModelClient(client, state, {
   timeoutMs: Number(process.env.AEP_MODEL_TIMEOUT_MS ?? 120_000),
 });
+const credentials = new CredentialManager(client, {
+  maxCacheMs: Number(process.env.AEP_CREDENTIAL_CACHE_MS ?? 30_000),
+});
+const credentialHttp = new CredentialHttpClient(credentials, state);
 
 const command = process.argv[2] ?? 'once';
 try {
@@ -54,6 +59,23 @@ try {
       });
       process.stdout.write(JSON.stringify(result) + '\n');
     } finally {
+      await agent.flushTelemetry();
+    }
+  } else if (command === 'credential') {
+    await client.loginWithPassword({
+      enterpriseId: process.env.AEP_ENTERPRISE_ID ?? 'demo',
+      username: required('AEP_USERNAME'),
+      password: required('AEP_PASSWORD'),
+    });
+    try {
+      const result = await credentialHttp.get(
+        required('AEP_CREDENTIAL_ID'),
+        required('AEP_CREDENTIAL_URL'),
+        process.env.AEP_CREDENTIAL_PURPOSE ?? 'Reference Agent HTTP request',
+      );
+      process.stdout.write(JSON.stringify(result) + '\n');
+    } finally {
+      credentials.clear();
       await agent.flushTelemetry();
     }
   } else if (command === 'once') {
