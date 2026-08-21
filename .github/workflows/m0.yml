@@ -1,4 +1,4 @@
-name: M0
+name: AEP
 
 on:
   pull_request:
@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - codex/m0-*
+      - codex/m1-*
 
 permissions:
   contents: read
@@ -23,7 +24,7 @@ jobs:
       - run: npm run openapi:lint
       - run: npm run openapi:build
       - name: Verify generated contract files
-        run: git diff --exit-code -- openapi/dist/aep-v1-m0.bundle.yaml packages/aep-sdk-node/src/generated/aep-v1.ts
+        run: git diff --exit-code -- openapi/dist/aep-v1-m0.bundle.yaml openapi/dist/aep-v1-m1.bundle.yaml packages/aep-sdk-node/src/generated/aep-v1.ts
       - run: npm run build --workspace @aep/sdk-node
       - run: npm run test --workspace @aep/sdk-node
 

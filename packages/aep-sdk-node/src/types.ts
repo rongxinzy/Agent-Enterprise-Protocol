@@ -1,4 +1,5 @@
 import type { AepCapability, HttpMethod } from './constants.js';
+import type {components} from './generated/aep-v1.js';
 
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | {[key: string]: JsonValue};
@@ -56,6 +57,23 @@ export interface ServiceMetadata {
   supportedProtocolVersions: string[];
   capabilities: AepCapability[];
   jwksUri: string;
+  modelGateway?: ModelGatewayMetadata;
+}
+
+export type ModelGatewayMetadata = components['schemas']['ModelGatewayMetadata'];
+export type AgentModel = components['schemas']['AgentModel'];
+export type AgentModelList = components['schemas']['AgentModelList'];
+export type AdminModel = components['schemas']['AdminModel'];
+export type AdminModelList = components['schemas']['AdminModelList'];
+export type AdminModelWrite = components['schemas']['AdminModelWrite'];
+export type AdminModelPatch = components['schemas']['AdminModelPatch'];
+export type ModelAssignment = components['schemas']['ModelAssignment'];
+export type ModelAssignmentList = components['schemas']['ModelAssignmentList'];
+export type ModelAssignmentWrite = components['schemas']['ModelAssignmentWrite'];
+
+export interface ModelConnection extends ModelGatewayMetadata {
+  apiKey: string;
+  expiresIn: number;
 }
 
 export interface AuthenticationMethod {

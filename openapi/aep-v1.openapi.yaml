@@ -432,7 +432,7 @@ paths:
       tags: [Admin Models]
       operationId: listModelAssignments
       responses:
-        '200': {$ref: '#/components/responses/AssignmentList'}
+        '200': {$ref: '#/components/responses/ModelAssignmentList'}
     post:
       tags: [Admin Models]
       operationId: createModelAssignment
@@ -442,7 +442,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/ModelAssignmentWrite'}
       responses:
-        '201': {$ref: '#/components/responses/Assignment'}
+        '201': {$ref: '#/components/responses/ModelAssignment'}
   /admin/model-assignments/{assignmentId}:
     delete:
       tags: [Admin Models]
@@ -519,6 +519,16 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/AssignmentList'}
+    ModelAssignment:
+      description: Model assignment resource
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ModelAssignment'}
+    ModelAssignmentList:
+      description: Model assignment list
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ModelAssignmentList'}
   schemas:
     ServiceMetadata:
       type: object
@@ -771,6 +781,26 @@ components:
       required: [assignments]
       properties:
         assignments: {type: array, items: {$ref: '#/components/schemas/Assignment'}}
+    ModelSubject:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, enum: [enterprise, organization, user, agent]}
+        id: {type: string}
+    ModelAssignment:
+      type: object
+      required: [id, resourceType, resourceId, subject, createdAt]
+      properties:
+        id: {type: string}
+        resourceType: {type: string, const: model}
+        resourceId: {type: string}
+        subject: {$ref: '#/components/schemas/ModelSubject'}
+        createdAt: {type: string, format: date-time}
+    ModelAssignmentList:
+      type: object
+      required: [assignments]
+      properties:
+        assignments: {type: array, items: {$ref: '#/components/schemas/ModelAssignment'}}
     SkillAssignmentWrite:
       type: object
       required: [skillId, subject]
@@ -788,7 +818,7 @@ components:
       required: [modelId, subject]
       properties:
         modelId: {type: string}
-        subject: {$ref: '#/components/schemas/Subject'}
+        subject: {$ref: '#/components/schemas/ModelSubject'}
     CredentialCreate:
       type: object
       required: [name, service, type, deliveryMode, value, enabled]

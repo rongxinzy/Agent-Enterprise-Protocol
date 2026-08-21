@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!openapi/dist/
+!openapi/dist/*.bundle.yaml
 coverage/
 *.log
 .env
