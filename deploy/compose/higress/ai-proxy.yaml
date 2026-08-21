@@ -1,0 +1,33 @@
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  annotations:
+    higress.io/wasm-plugin-title: AEP AI Proxy
+  labels:
+    higress.io/resource-definer: higress
+    higress.io/wasm-plugin-built-in: "true"
+    higress.io/wasm-plugin-category: ai
+    higress.io/wasm-plugin-name: ai-proxy
+    higress.io/wasm-plugin-version: 2.0.1
+  name: aep-ai-proxy
+  namespace: higress-system
+  resourceVersion: "1"
+spec:
+  defaultConfig: {}
+  defaultConfigDisable: true
+  matchRules:
+    - config:
+        provider:
+          type: openai
+          openaiCustomUrl: http://mock-openai.aep.internal/v1
+          apiTokens:
+            - m1-e2e-provider-secret
+          modelMapping:
+            enterprise-chat: mock-upstream-chat
+      configDisable: false
+      ingress:
+        - aep-model-gateway
+  failStrategy: FAIL_CLOSE
+  phase: UNSPECIFIED_PHASE
+  priority: 100
+  url: http://localhost:8002/plugins/ai-proxy/2.0.1/plugin.wasm

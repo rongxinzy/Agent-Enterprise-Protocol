@@ -1,0 +1,66 @@
+services:
+  control-service:
+    environment:
+      AEP_MODEL_GATEWAY_BASE_URL: http://localhost:${AEP_GATEWAY_PORT:-8090}/v1
+      AEP_MODEL_ACCESS_TTL: ${AEP_MODEL_ACCESS_TTL:-15m}
+
+  mock-openai:
+    image: node:24-alpine
+    command: [node, /app/mock-openai.mjs]
+    environment:
+      MOCK_OPENAI_PORT: "8080"
+      MOCK_OPENAI_API_KEY: m1-e2e-provider-secret
+      MOCK_OPENAI_MODEL: mock-upstream-chat
+    volumes:
+      - ../../tests/e2e/mock-openai.mjs:/app/mock-openai.mjs:ro
+    networks:
+      default:
+        aliases:
+          - mock-openai.aep.internal
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  higress:
+    image: higress-registry.cn-hangzhou.cr.aliyuncs.com/higress/all-in-one:2.2.4@sha256:930b314be06e4b435617a39ac8dc8f17c9d60a4faf2c96aa7aafe9e85381ad9b
+    depends_on:
+      mock-openai:
+        condition: service_healthy
+    environment:
+      MODE: full
+      O11Y: "off"
+      USE_PLUGIN_SERVER: "on"
+      ENABLE_CONSOLE_ROUTE: "0"
+      GATEWAY_HTTP_PORT: "8080"
+      GATEWAY_HTTPS_PORT: "8443"
+      GATEWAY_AUTO_HTTPS_ENABLED: "false"
+    volumes:
+      - ./higress/mcpbridge.yaml:/data/mcpbridges/default.yaml:ro
+      - ./higress/ingress.yaml:/data/ingresses/aep-model-gateway.yaml:ro
+      - ./higress/ai-proxy.yaml:/data/wasmplugins/aep-ai-proxy.yaml:ro
+    healthcheck:
+      test: [CMD, curl, -f, http://127.0.0.1:15021/healthz/ready]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  gateway-authorizer:
+    build:
+      context: ../..
+      dockerfile: services/gateway-authorizer/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    depends_on:
+      control-service:
+        condition: service_started
+      higress:
+        condition: service_healthy
+    environment:
+      AEP_GATEWAY_ADDRESS: :8090
+      AEP_GATEWAY_UPSTREAM_URL: http://higress:8080
+      AEP_GATEWAY_JWKS_URL: http://control-service:8080/.well-known/jwks.json
+      AEP_GATEWAY_ISSUER: http://localhost:${AEP_PORT:-8080}
+    ports:
+      - ${AEP_GATEWAY_PORT:-8090}:8090

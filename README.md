@@ -25,6 +25,7 @@ to use MCP.
 - [AEP v1 protocol](docs/aep-v1.md)
 - [AEP v1 API guide](docs/api-v1.md)
 - [AEP M0 runbook and release checklist](docs/m0-runbook.md)
+- [AEP M1 Higress gateway runbook](docs/m1-gateway-runbook.md)
 - [OpenAPI 3.1 specification](openapi/aep-v1.openapi.yaml)
 - [Control Events OpenAPI 3.1 specification](openapi/aep-v1-control-events.openapi.yaml)
 - [Authentication OpenAPI 3.1 specification](openapi/aep-v1-authentication.openapi.yaml)
