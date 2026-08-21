@@ -91,7 +91,7 @@ export class ExampleAgent {
     });
   }
 
-  private async flushTelemetry(): Promise<void> {
+  async flushTelemetry(): Promise<void> {
     const events = this.options.state.listTelemetry();
     if (events.length === 0) return;
     const result = (await this.options.client.uploadEventBatch(events)) as {accepted?: unknown};

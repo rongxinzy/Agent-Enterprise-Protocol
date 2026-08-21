@@ -26,6 +26,10 @@ const server = http.createServer(async (request, response) => {
     sendJSON(response, 400, {error: {message: 'trusted AEP identity headers are missing'}});
     return;
   }
+  if (body.messages?.[0]?.content === 'force upstream failure') {
+    sendJSON(response, 503, {error: {message: 'forced upstream failure', type: 'upstream_error'}});
+    return;
+  }
   response.setHeader('X-Mock-Provider-Auth', 'accepted');
   if (body.stream === true) {
     response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
