@@ -26,6 +26,7 @@ jobs:
       - run: npm run openapi:build
       - name: Verify generated contract files
         run: git diff --exit-code -- openapi/dist/aep-v1-m0.bundle.yaml openapi/dist/aep-v1-m1.bundle.yaml openapi/dist/aep-v1-m2.bundle.yaml packages/aep-sdk-node/src/generated/aep-v1.ts
+      - run: npm run release:audit
       - run: npm run build --workspace @aep/sdk-node
       - run: npm run test --workspace @aep/sdk-node
 
@@ -39,6 +40,7 @@ jobs:
           go-version: 1.26.x
           cache: true
       - run: go test ./...
+      - run: go test -race ./...
       - run: go vet ./...
       - run: go build ./...
 
@@ -75,3 +77,12 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:e2e
+  release-gate:
+    needs:
+      - sdk-gate
+      - control-service
+      - example-agent
+      - compose-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "AEP 85% release gate passed."

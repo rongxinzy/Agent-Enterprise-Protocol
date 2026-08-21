@@ -8,7 +8,7 @@ import (
 )
 
 var environmentKeys = []string{
-	"AEP_ENVIRONMENT", "AEP_LOG_FORMAT", "AEP_LOG_LEVEL", "AEP_DATABASE_URL",
+	"AEP_ENVIRONMENT", "AEP_LOG_FORMAT", "AEP_LOG_LEVEL", "AEP_ENABLE_MOCK_FEDERATED_AUTH", "AEP_DATABASE_URL",
 	"AEP_DATABASE_URL_FILE", "AEP_MINIO_ACCESS_KEY", "AEP_MINIO_ACCESS_KEY_FILE",
 	"AEP_MINIO_SECRET_KEY", "AEP_MINIO_SECRET_KEY_FILE", "AEP_MINIO_SECURE",
 	"AEP_SIGNING_KEY_BASE64", "AEP_SIGNING_KEY_BASE64_FILE",
@@ -23,7 +23,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || cfg.HTTPReadTimeout <= 0 {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
 	}
 }
@@ -54,6 +54,7 @@ func TestLoadProductionGuardrails(t *testing.T) {
 		match  string
 	}{
 		{name: "ephemeral signing key", mutate: func(t *testing.T) { t.Setenv("AEP_SIGNING_KEY_BASE64", "") }, match: "SIGNING_KEY"},
+		{name: "mock federated authentication", mutate: func(t *testing.T) { t.Setenv("AEP_ENABLE_MOCK_FEDERATED_AUTH", "true") }, match: "MOCK_FEDERATED_AUTH"},
 		{name: "development database", mutate: func(t *testing.T) { t.Setenv("AEP_DATABASE_URL", defaultDatabaseURL) }, match: "DATABASE_URL"},
 		{name: "development object credentials", mutate: func(t *testing.T) { t.Setenv("AEP_MINIO_SECRET_KEY", "minioadmin") }, match: "MinIO"},
 		{name: "development administrator password", mutate: func(t *testing.T) { t.Setenv("AEP_BOOTSTRAP_ADMIN_PASSWORD", defaultAdminPassword) }, match: "administrator password"},

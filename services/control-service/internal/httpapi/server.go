@@ -20,7 +20,10 @@ import (
 
 type contextKey string
 
-const claimsContextKey contextKey = "aep-claims"
+const (
+	claimsContextKey         contextKey = "aep-claims"
+	supportedProtocolVersion            = "1.0"
+)
 
 type federatedTransaction struct {
 	EnterpriseID string
@@ -42,6 +45,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 	for _, use := range runtimeMiddleware {
 		router.Use(use)
 	}
+	router.Use(server.protocolVersion)
 	router.Use(middleware.Recoverer)
 	router.Get("/.well-known/jwks.json", server.getJWKS)
 	router.Get("/livez", server.liveness)
@@ -132,6 +136,20 @@ func (s *Server) requestID(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) protocolVersion(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/aep/v1/metadata" || !strings.HasPrefix(request.URL.Path, "/aep/v1/") {
+			next.ServeHTTP(response, request)
+			return
+		}
+		if request.Header.Get("X-AEP-Protocol-Version") != supportedProtocolVersion {
+			response.Header().Set("X-AEP-Supported-Protocol-Versions", supportedProtocolVersion)
+			writeProblem(response, request, http.StatusUpgradeRequired, "PROTOCOL_VERSION_UNSUPPORTED", "The AEP protocol version is missing or unsupported.")
+			return
+		}
+		next.ServeHTTP(response, request)
+	})
+}
 func validRequestID(value string) bool {
 	if len(value) == 0 || len(value) > 128 {
 		return false
@@ -258,7 +276,11 @@ func (s *Server) getJWKS(response http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
-	capabilities := []string{"password_auth", "federated_auth", "skills", "telemetry", "control_events"}
+	capabilities := []string{"password_auth"}
+	if s.app.Config.EnableMockFederatedAuth {
+		capabilities = append(capabilities, "federated_auth")
+	}
+	capabilities = append(capabilities, "skills", "telemetry", "control_events")
 	metadata := map[string]any{
 		"service": "aep-control-service", "supportedProtocolVersions": []string{"1.0"},
 		"capabilities": capabilities, "jwksUri": "/.well-known/jwks.json",

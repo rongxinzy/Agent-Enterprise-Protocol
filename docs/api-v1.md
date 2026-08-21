@@ -26,6 +26,8 @@ JSON properties use `camelCase`. Timestamps use RFC 3339 UTC. Errors use RFC
 9457 `application/problem+json`. AEP v1 uses REST polling rather than SSE or
 WebSocket.
 
+Service metadata may be queried without a protocol-version header so a client can discover compatibility. Every other /aep/v1 request must send X-AEP-Protocol-Version: 1.0. A missing or unsupported value returns RFC 9457 status 426 with X-AEP-Supported-Protocol-Versions.
+
 ## 2. Endpoints
 
 ### Service and authentication
