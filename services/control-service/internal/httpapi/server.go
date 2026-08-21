@@ -53,6 +53,7 @@ func New(application *app.App) *Server {
 		protected.Post("/aep/v1/auth/password/change", server.changePassword)
 		protected.Post("/aep/v1/auth/logout", server.logout)
 		protected.Get("/aep/v1/agent/me", server.currentIdentity)
+		protected.Get("/aep/v1/agent/models", server.listAgentModels)
 		protected.Post("/aep/v1/agent/heartbeat", server.heartbeat)
 		protected.Get("/aep/v1/agent/control-events", server.listAgentControlEvents)
 		protected.Post("/aep/v1/agent/control-events/{deliveryId}/acknowledge", server.acknowledgeControlEvent)
@@ -87,6 +88,14 @@ func New(application *app.App) *Server {
 			admin.Get("/aep/v1/admin/agents", server.listAgents)
 			admin.Get("/aep/v1/admin/agents/{agentId}", server.getAgent)
 			admin.Get("/aep/v1/admin/events", server.searchTelemetryEvents)
+			admin.Get("/aep/v1/admin/models", server.listModels)
+			admin.Post("/aep/v1/admin/models", server.createModel)
+			admin.Get("/aep/v1/admin/models/{modelId}", server.getModel)
+			admin.Patch("/aep/v1/admin/models/{modelId}", server.updateModel)
+			admin.Delete("/aep/v1/admin/models/{modelId}", server.deleteModel)
+			admin.Get("/aep/v1/admin/model-assignments", server.listModelAssignments)
+			admin.Post("/aep/v1/admin/model-assignments", server.createModelAssignment)
+			admin.Delete("/aep/v1/admin/model-assignments/{assignmentId}", server.deleteModelAssignment)
 		})
 	})
 	server.router = router
@@ -203,9 +212,17 @@ func (s *Server) getJWKS(response http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
-	writeJSON(response, http.StatusOK, map[string]any{
+	capabilities := []string{"password_auth", "federated_auth", "skills", "telemetry", "control_events"}
+	metadata := map[string]any{
 		"service": "aep-control-service", "supportedProtocolVersions": []string{"1.0"},
-		"capabilities": []string{"password_auth", "federated_auth", "skills", "telemetry", "control_events"},
-		"jwksUri":      "/.well-known/jwks.json",
-	})
+		"capabilities": capabilities, "jwksUri": "/.well-known/jwks.json",
+	}
+	if s.app.Config.ModelGatewayBaseURL != "" {
+		capabilities = append(capabilities, "model_gateway")
+		metadata["capabilities"] = capabilities
+		metadata["modelGateway"] = map[string]string{
+			"baseUrl": s.app.Config.ModelGatewayBaseURL, "protocol": "openai-compatible", "apiVersion": "v1",
+		}
+	}
+	writeJSON(response, http.StatusOK, metadata)
 }

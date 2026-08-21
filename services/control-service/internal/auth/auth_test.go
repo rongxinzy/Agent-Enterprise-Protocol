@@ -34,6 +34,19 @@ func TestAccessAndModelClaims(t *testing.T) {
 	if claims.Tenant != "tenant-1" || claims.AgentID != "agent-1" || !claims.Admin {
 		t.Fatalf("unexpected claims: %#v", claims)
 	}
+	modelClaims, err := service.ParseModel(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelClaims.Tenant != "tenant-1" || modelClaims.AgentID != "agent-1" || len(modelClaims.ModelScopes) != 1 || modelClaims.ModelScopes[0] != "model-a" {
+		t.Fatalf("unexpected model claims: %#v", modelClaims)
+	}
+	if _, err := service.ParseAccess(model); err == nil {
+		t.Fatal("model token was accepted as an AEP access token")
+	}
+	if _, err := service.ParseModel(access); err == nil {
+		t.Fatal("AEP access token was accepted as a model token")
+	}
 }
 
 func TestRefreshTokenHashesAreStableAndUnique(t *testing.T) {

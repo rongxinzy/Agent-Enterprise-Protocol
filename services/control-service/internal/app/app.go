@@ -95,11 +95,42 @@ func (a *App) BindAgent(ctx context.Context, user db.User, agent AgentContext) (
 	return a.DB.CreateAgent(ctx, db.CreateAgentParams{AgentID: agent.AgentID, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
 }
 
+func (a *App) ModelScopes(ctx context.Context, enterpriseID, userID, agentID string) ([]string, error) {
+	rows, err := a.Pool.Query(ctx, `SELECT DISTINCT m.id
+FROM models m
+JOIN model_assignments ma ON ma.enterprise_id=m.enterprise_id AND ma.model_id=m.id
+JOIN users u ON u.id=$2 AND u.enterprise_id=$1
+WHERE m.enterprise_id=$1 AND m.enabled=true AND (
+  (ma.subject_type='enterprise' AND ma.subject_id=$1)
+  OR (ma.subject_type='organization' AND ma.subject_id=ANY(u.organization_ids))
+  OR (ma.subject_type='user' AND ma.subject_id=$2)
+  OR (ma.subject_type='agent' AND ma.subject_id=$3)
+)
+ORDER BY m.id`, enterpriseID, userID, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	scopes := make([]string, 0)
+	for rows.Next() {
+		var modelID string
+		if err := rows.Scan(&modelID); err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, modelID)
+	}
+	return scopes, rows.Err()
+}
+
 func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext) (TokenResponse, error) {
 	if _, err := a.BindAgent(ctx, user, agent); err != nil {
 		return TokenResponse{}, err
 	}
-	access, model, err := a.Tokens.Issue(user.ID, user.EnterpriseID, agent.AgentID, user.IsAdmin, user.RoleIds, []string{})
+	modelScopes, err := a.ModelScopes(ctx, user.EnterpriseID, user.ID, agent.AgentID)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	access, model, err := a.Tokens.Issue(user.ID, user.EnterpriseID, agent.AgentID, user.IsAdmin, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -137,7 +168,11 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	if _, err := tx.Exec(ctx, `UPDATE refresh_sessions SET revoked_at=now() WHERE token_hash=$1`, hash); err != nil {
 		return TokenResponse{}, err
 	}
-	access, model, err := a.Tokens.Issue(user.ID, enterpriseID, agentID, user.IsAdmin, user.RoleIds, []string{})
+	modelScopes, err := a.ModelScopes(ctx, enterpriseID, user.ID, agentID)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	access, model, err := a.Tokens.Issue(user.ID, enterpriseID, agentID, user.IsAdmin, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
