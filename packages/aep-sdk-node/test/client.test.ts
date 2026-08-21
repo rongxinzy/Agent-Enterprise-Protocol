@@ -43,6 +43,60 @@ describe('AepClient SDK gate', () => {
     expect((await client.getCurrentIdentity()).user.id).toBe('user-1');
   });
 
+  test('discovers models and returns an OpenAI-compatible gateway connection', async () => {
+    await expect(client.getModelConnection()).rejects.toMatchObject({code: 'NO_SESSION', status: 401});
+    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+
+    expect((await client.listAgentModels()).models[0]).toMatchObject({
+      id: 'model-1',
+      protocol: 'openai-compatible',
+      upstreamModel: 'qwen3-32b',
+    });
+    await expect(client.getModelConnection()).resolves.toEqual({
+      baseUrl: `${server.baseUrl}/openai/v1`,
+      protocol: 'openai-compatible',
+      apiVersion: 'v1',
+      apiKey: 'model-1',
+      expiresIn: 300,
+    });
+
+    server.disableModelGateway();
+    await expect(client.getModelConnection()).rejects.toMatchObject({
+      code: 'CAPABILITY_NOT_SUPPORTED',
+      status: 501,
+    });
+  });
+
+  test('covers model administration APIs', async () => {
+    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    const write = {
+      id: 'model-1',
+      displayName: 'Enterprise Model',
+      sourceType: 'gateway' as const,
+      protocol: 'openai-compatible' as const,
+      endpoint: '/openai/v1',
+      upstreamModel: 'qwen3-32b',
+      capabilities: ['text', 'tools', 'streaming'],
+      contextWindow: 131072,
+      isDefault: true,
+      enabled: true,
+      credentialId: null,
+    };
+
+    expect((await client.listAdminModels()).models).toHaveLength(1);
+    await expect(client.createModel(write)).resolves.toMatchObject({id: 'model-1'});
+    await expect(client.getModel('model-1')).resolves.toMatchObject({id: 'model-1'});
+    await expect(client.updateModel('model-1', {enabled: false})).resolves.toMatchObject({id: 'model-1'});
+    await client.deleteModel('model-1');
+
+    expect((await client.listModelAssignments()).assignments).toHaveLength(1);
+    const subjectTypes = ['enterprise', 'organization', 'user', 'agent'] as const;
+    for (const type of subjectTypes) {
+      await expect(client.createModelAssignment({modelId: 'model-1', subject: {type, id: type + '-1'}})).resolves.toMatchObject({id: 'assignment-1'});
+    }
+    await client.deleteModelAssignment('assignment-1');
+  });
+
   test('single-flights concurrent 401 refreshes', async () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
     server.delayUnauthorizedResponses([0, 0, 0, 0, 50, 50, 50, 50]);

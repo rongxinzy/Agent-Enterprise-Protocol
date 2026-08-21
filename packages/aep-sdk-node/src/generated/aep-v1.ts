@@ -296,6 +296,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/agent/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAgentModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/users": {
         parameters: {
             query?: never;
@@ -572,6 +588,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listModels"];
+        put?: never;
+        post: operations["createModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/models/{modelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getModel"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteModel"];
+        options?: never;
+        head?: never;
+        patch: operations["updateModel"];
+        trace?: never;
+    };
+    "/aep/v1/admin/model-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listModelAssignments"];
+        put?: never;
+        post: operations["createModelAssignment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-assignments/{assignmentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteModelAssignment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -582,6 +664,16 @@ export interface components {
             capabilities: ("password_auth" | "federated_auth" | "skills" | "telemetry" | "control_events" | "model_gateway" | "credentials" | "mcp" | "plugins")[];
             /** Format: uri-reference */
             jwksUri: string;
+            /** @description Present when the model_gateway capability is enabled. */
+            modelGateway?: components["schemas"]["ModelGatewayMetadata"];
+        };
+        ModelGatewayMetadata: {
+            /** Format: uri-reference */
+            baseUrl: string;
+            /** @constant */
+            protocol: "openai-compatible";
+            /** @constant */
+            apiVersion: "v1";
         };
         PasswordChangeRequest: {
             currentPassword: string;
@@ -913,6 +1005,26 @@ export interface components {
             accepted: string[];
             rejected: components["schemas"]["RejectedEvent"][];
         };
+        /** @enum {string} */
+        ModelSourceType: "gateway" | "enterprise_open_source" | "local";
+        AgentModel: {
+            id: string;
+            displayName: string;
+            sourceType: components["schemas"]["ModelSourceType"];
+            /** @enum {string} */
+            protocol: "openai-compatible";
+            /** Format: uri */
+            endpoint?: string;
+            upstreamModel?: string;
+            localModelRef?: string;
+            capabilities: string[];
+            contextWindow?: number;
+            isDefault: boolean;
+            enabled: boolean;
+        };
+        AgentModelList: {
+            models: components["schemas"]["AgentModel"][];
+        };
         PlatformUser: {
             id: string;
             enterpriseId: string;
@@ -1107,6 +1219,48 @@ export interface components {
             items: components["schemas"]["StoredEvent"][];
             nextCursor: string | null;
         };
+        AdminModel: components["schemas"]["AgentModel"] & {
+            credentialId?: string | null;
+        };
+        AdminModelList: {
+            models: components["schemas"]["AdminModel"][];
+        };
+        AdminModelWrite: components["schemas"]["AgentModel"] & {
+            credentialId?: string | null;
+        };
+        AdminModelPatch: {
+            displayName?: string;
+            /** Format: uri */
+            endpoint?: string;
+            upstreamModel?: string;
+            localModelRef?: string;
+            credentialId?: string | null;
+            capabilities?: string[];
+            contextWindow?: number;
+            isDefault?: boolean;
+            enabled?: boolean;
+        };
+        ModelSubject: {
+            /** @enum {string} */
+            type: "enterprise" | "organization" | "user" | "agent";
+            id: string;
+        };
+        ModelAssignment: {
+            id: string;
+            /** @constant */
+            resourceType: "model";
+            resourceId: string;
+            subject: components["schemas"]["ModelSubject"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ModelAssignmentList: {
+            assignments: components["schemas"]["ModelAssignment"][];
+        };
+        ModelAssignmentWrite: {
+            modelId: string;
+            subject: components["schemas"]["ModelSubject"];
+        };
     };
     responses: {
         /** @description AEP Problem Details */
@@ -1163,6 +1317,33 @@ export interface components {
                 "application/json": components["schemas"]["Assignment"];
             };
         };
+        /** @description Model descriptor */
+        AdminModel: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AdminModel"];
+            };
+        };
+        /** @description Model assignment list */
+        ModelAssignmentList: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ModelAssignmentList"];
+            };
+        };
+        /** @description Model assignment resource */
+        ModelAssignment: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ModelAssignment"];
+            };
+        };
     };
     parameters: {
         AepAgentId: string;
@@ -1177,6 +1358,7 @@ export interface components {
         UserId: string;
         AssignmentId: string;
         EventId: string;
+        ModelId: string;
     };
     requestBodies: never;
     headers: never;
@@ -1213,7 +1395,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description M0 service metadata and implemented capabilities */
+            /** @description M1 service metadata and implemented capabilities */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1618,6 +1800,26 @@ export interface operations {
             };
             400: components["responses"]["Problem-2"];
             413: components["responses"]["Problem-2"];
+        };
+    };
+    listAgentModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visible model catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentModelList"];
+                };
+            };
         };
     };
     listPlatformUsers: {
@@ -2149,6 +2351,143 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EventSearchResult"];
                 };
+            };
+        };
+    };
+    listModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model descriptors */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminModelList"];
+                };
+            };
+        };
+    };
+    createModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminModelWrite"];
+            };
+        };
+        responses: {
+            201: components["responses"]["AdminModel"];
+        };
+    };
+    getModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["AdminModel"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    deleteModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminModelPatch"];
+            };
+        };
+        responses: {
+            200: components["responses"]["AdminModel"];
+        };
+    };
+    listModelAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["ModelAssignmentList"];
+        };
+    };
+    createModelAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelAssignmentWrite"];
+            };
+        };
+        responses: {
+            201: components["responses"]["ModelAssignment"];
+        };
+    };
+    deleteModelAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignment removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

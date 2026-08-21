@@ -9,6 +9,7 @@ export class MockAepServer {
   #failRefresh = false;
   #metadataFailures = 0;
   #unauthorizedResponseDelays: number[] = [];
+  #modelGatewayEnabled = true;
   readonly requests: Array<{method: string; path: string; headers: IncomingMessage['headers']}> = [];
   refreshCount = 0;
   baseUrl = '';
@@ -46,6 +47,10 @@ export class MockAepServer {
     this.#unauthorizedResponseDelays = [...delays];
   }
 
+  disableModelGateway(): void {
+    this.#modelGatewayEnabled = false;
+  }
+
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const path = new URL(request.url ?? '/', this.baseUrl).pathname;
     this.requests.push({method: request.method ?? 'GET', path, headers: request.headers});
@@ -58,8 +63,9 @@ export class MockAepServer {
       return json(response, 200, {
         service: 'mock-aep',
         supportedProtocolVersions: ['1.0'],
-        capabilities: ['password_auth', 'federated_auth', 'skills', 'telemetry', 'control_events'],
+        capabilities: ['password_auth', 'federated_auth', 'skills', 'telemetry', 'control_events', ...(this.#modelGatewayEnabled ? ['model_gateway'] : [])],
         jwksUri: '/.well-known/jwks.json',
+        ...(this.#modelGatewayEnabled ? {modelGateway: {baseUrl: '/openai/v1', protocol: 'openai-compatible', apiVersion: 'v1'}} : {}),
       });
     }
     if (path === '/.well-known/jwks.json') {
@@ -101,6 +107,9 @@ export class MockAepServer {
         roles: ['user'],
       });
     }
+    if (path === '/aep/v1/agent/models') {
+      return json(response, 200, {models: [model(false)]});
+    }
     if (path === '/aep/v1/agent/skills/manifest') {
       response.setHeader('ETag', '"skills-1"');
       if (request.headers['if-none-match'] === '"skills-1"') return empty(response, 304);
@@ -124,6 +133,20 @@ export class MockAepServer {
     if (path === '/aep/v1/agent/events/batch') return json(response, 200, {accepted: ['event-1'], rejected: []});
     if (path === '/aep/v1/admin/agents') return json(response, 200, {items: [], nextCursor: null});
     if (path === '/aep/v1/admin/agents/missing') return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
+    if (path === '/aep/v1/admin/models') {
+      if (request.method === 'GET') return json(response, 200, {models: [model(true)]});
+      return json(response, 201, model(true));
+    }
+    if (path === '/aep/v1/admin/models/model-1') {
+      if (request.method === 'DELETE') return empty(response, 204);
+      return json(response, 200, model(true));
+    }
+    if (path === '/aep/v1/admin/model-assignments') {
+      const assignment = modelAssignment();
+      if (request.method === 'GET') return json(response, 200, {assignments: [assignment]});
+      return json(response, 201, assignment);
+    }
+    if (path === '/aep/v1/admin/model-assignments/assignment-1') return empty(response, 204);
     if (path.startsWith('/aep/v1/admin/')) return json(response, 200, {items: [], nextCursor: null});
 
     return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
@@ -136,6 +159,32 @@ export class MockAepServer {
 
 function tokens(accessToken: string, refreshToken: string): object {
   return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300};
+}
+
+function model(admin: boolean): object {
+  return {
+    id: 'model-1',
+    displayName: 'Enterprise Model',
+    sourceType: 'gateway',
+    protocol: 'openai-compatible',
+    endpoint: '/openai/v1',
+    upstreamModel: 'qwen3-32b',
+    capabilities: ['text', 'tools', 'streaming'],
+    contextWindow: 131072,
+    isDefault: true,
+    enabled: true,
+    ...(admin ? {credentialId: null} : {}),
+  };
+}
+
+function modelAssignment(): object {
+  return {
+    id: 'assignment-1',
+    resourceType: 'model',
+    resourceId: 'model-1',
+    subject: {type: 'user', id: 'user-1'},
+    createdAt: '2026-08-21T00:00:00Z',
+  };
 }
 
 function problem(status: number, code: string): object {

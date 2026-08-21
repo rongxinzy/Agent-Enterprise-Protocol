@@ -1,0 +1,2436 @@
+openapi: 3.1.0
+info:
+  title: Agent Enterprise Protocol M0
+  version: 1.0.0-m0
+  description: Bundled M0 contract for SDK, Control Service, CLI, and example Agent.
+  license:
+    name: Apache 2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://localhost:8080
+    description: Local M0 deployment
+  - url: https://enterprise.example.com
+    description: Protected deployment
+security:
+  - bearerAuth: []
+tags:
+  - name: Service
+  - name: Authentication
+  - name: Agent
+  - name: Agent Control Events
+  - name: Admin Users
+  - name: Admin Skills
+  - name: Admin Control Events
+  - name: Admin Agents
+paths:
+  /.well-known/jwks.json:
+    get:
+      tags:
+        - Service
+      operationId: getJsonWebKeySet
+      security: []
+      responses:
+        '200':
+          description: Public keys used to validate AEP and model access tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonWebKeySet'
+  /aep/v1/metadata:
+    get:
+      tags:
+        - Service
+      operationId: getMetadata
+      security: []
+      responses:
+        '200':
+          description: M0 service metadata and implemented capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMetadata'
+  /aep/v1/auth/methods:
+    get:
+      tags:
+        - Authentication
+      operationId: getAuthenticationMethods
+      security: []
+      parameters:
+        - name: enterpriseHint
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Available authentication methods
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationMethods'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/password/login:
+    post:
+      tags:
+        - Authentication
+      operationId: loginWithPassword
+      description: Authenticates an administrator-provisioned ZhiYuan platform account. HTTP and HTTPS are valid in development and production. HTTPS is strongly recommended outside a trusted private network because plain HTTP exposes credentials and bearer tokens in transit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordLoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/password/change:
+    post:
+      tags:
+        - Authentication
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChangeRequest'
+      responses:
+        '200':
+          description: Rotated AEP session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/federated/start:
+    post:
+      tags:
+        - Authentication
+      operationId: startFederatedLogin
+      description: Starts a system-browser login through a customer OIDC provider or another server-side identity adapter.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FederatedLoginStartRequest'
+      responses:
+        '200':
+          description: Federated login transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FederatedLoginStartResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/exchange:
+    post:
+      tags:
+        - Authentication
+      operationId: exchangeFederatedAuthorizationCode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FederatedExchangeRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/refresh:
+    post:
+      tags:
+        - Authentication
+      operationId: refreshAuthenticationSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/logout:
+    post:
+      tags:
+        - Authentication
+      operationId: logoutAuthenticationSession
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: Session revoked
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/agent/me:
+    get:
+      tags:
+        - Agent
+      operationId: getCurrentIdentity
+      responses:
+        '200':
+          description: Current identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentIdentity'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/heartbeat:
+    post:
+      tags:
+        - Agent Control Events
+      operationId: reportAgentHeartbeat
+      parameters:
+        - $ref: '#/components/parameters/AepAgentId'
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Liveness accepted and discovery metadata returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/control-events:
+    get:
+      tags:
+        - Agent Control Events
+      operationId: listAgentControlEvents
+      description: Reading does not consume an event. Unacknowledged deliveries may be returned again.
+      parameters:
+        - $ref: '#/components/parameters/AepAgentId'
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+        - name: afterCursor
+          in: query
+          schema:
+            type:
+              - string
+              - 'null'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Applicable unacknowledged control events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlEventPage'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/control-events/{deliveryId}/acknowledge:
+    post:
+      tags:
+        - Agent Control Events
+      operationId: acknowledgeControlEvent
+      description: Call only after the delivery is committed to the durable local inbox.
+      parameters:
+        - $ref: '#/components/parameters/DeliveryId'
+        - $ref: '#/components/parameters/AepAgentId'
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcknowledgeRequest'
+      responses:
+        '204':
+          description: Durable receipt recorded
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/control-events/{deliveryId}/result:
+    post:
+      tags:
+        - Agent Control Events
+      operationId: reportControlEventResult
+      parameters:
+        - $ref: '#/components/parameters/DeliveryId'
+        - $ref: '#/components/parameters/AepAgentId'
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControlEventResult'
+      responses:
+        '204':
+          description: Execution state recorded
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/skills/manifest:
+    get:
+      tags:
+        - Agent
+      operationId: getSkillManifest
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Complete desired Skill manifest
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillManifest'
+        '304':
+          description: Manifest unchanged
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/skills/{skillId}/versions/{version}/package:
+    get:
+      tags:
+        - Agent
+      operationId: downloadSkillPackage
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Version'
+      responses:
+        '200':
+          description: Skill ZIP package
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/skills/sync-results:
+    post:
+      tags:
+        - Agent
+      operationId: reportSkillSyncResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSyncResult'
+      responses:
+        '202':
+          description: Result accepted
+        '400':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/agent/events/batch:
+    post:
+      tags:
+        - Agent
+      operationId: uploadEventBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatchRequest'
+      responses:
+        '200':
+          description: Per-event result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatchResponse'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '413':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/users:
+    get:
+      tags:
+        - Admin Users
+      operationId: listPlatformUsers
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Platform user page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUserPage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags:
+        - Admin Users
+      operationId: createPlatformUser
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlatformUserRequest'
+      responses:
+        '201':
+          description: Platform user created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/users/import:
+    post:
+      tags:
+        - Admin Users
+      operationId: importPlatformUsers
+      description: Imports at most 1000 administrator-provisioned accounts.
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportPlatformUsersRequest'
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportPlatformUsersResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/users/{userId}:
+    patch:
+      tags:
+        - Admin Users
+      operationId: updatePlatformUser
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlatformUserRequest'
+      responses:
+        '200':
+          description: Platform user updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/users/{userId}/reset-password:
+    post:
+      tags:
+        - Admin Users
+      operationId: resetPlatformUserPassword
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '204':
+          description: Temporary password set and refresh sessions revoked
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/skills:
+    get:
+      tags:
+        - Admin Skills
+      operationId: listSkills
+      responses:
+        '200':
+          description: Skill list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSkillList'
+    post:
+      tags:
+        - Admin Skills
+      operationId: createSkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillWrite'
+      responses:
+        '201':
+          $ref: '#/components/responses/AdminSkill'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/skills/{skillId}:
+    parameters:
+      - $ref: '#/components/parameters/SkillId'
+    get:
+      tags:
+        - Admin Skills
+      operationId: getSkill
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminSkill'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+    patch:
+      tags:
+        - Admin Skills
+      operationId: updateSkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillPatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/AdminSkill'
+    delete:
+      tags:
+        - Admin Skills
+      operationId: deleteSkill
+      responses:
+        '204':
+          description: Skill withdrawn
+  /aep/v1/admin/skills/{skillId}/versions:
+    post:
+      tags:
+        - Admin Skills
+      operationId: uploadSkillVersion
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - version
+                - package
+              properties:
+                version:
+                  type: string
+                releaseNotes:
+                  type: string
+                package:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Draft version uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillVersion'
+  /aep/v1/admin/skills/{skillId}/versions/{version}/publish:
+    post:
+      tags:
+        - Admin Skills
+      operationId: publishSkillVersion
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Version'
+      responses:
+        '200':
+          description: Version published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillVersion'
+  /aep/v1/admin/skill-assignments:
+    get:
+      tags:
+        - Admin Skills
+      operationId: listSkillAssignments
+      responses:
+        '200':
+          $ref: '#/components/responses/AssignmentList'
+    post:
+      tags:
+        - Admin Skills
+      operationId: createSkillAssignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillAssignmentWrite'
+      responses:
+        '201':
+          $ref: '#/components/responses/Assignment'
+  /aep/v1/admin/skill-assignments/{assignmentId}:
+    delete:
+      tags:
+        - Admin Skills
+      operationId: deleteSkillAssignment
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      responses:
+        '204':
+          description: Assignment removed
+  /aep/v1/admin/control-events:
+    get:
+      tags:
+        - Admin Control Events
+      operationId: listControlEvents
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/ControlEventType'
+        - name: scopeType
+          in: query
+          schema:
+            $ref: '#/components/schemas/ControlEventScopeType'
+        - name: scopeId
+          in: query
+          schema:
+            type: string
+        - name: createdAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Control events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminControlEventPage'
+    post:
+      tags:
+        - Admin Control Events
+      operationId: createControlEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateControlEventRequest'
+      responses:
+        '201':
+          description: Control event published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminControlEvent'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/control-events/{eventId}:
+    get:
+      tags:
+        - Admin Control Events
+      operationId: getControlEvent
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Control event and aggregate delivery status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminControlEvent'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/control-events/{eventId}/cancel:
+    post:
+      tags:
+        - Admin Control Events
+      operationId: cancelControlEvent
+      description: Cancels only deliveries that have not reached received.
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Event after cancellation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminControlEvent'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/control-events/{eventId}/deliveries:
+    get:
+      tags:
+        - Admin Control Events
+      operationId: listControlEventDeliveries
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/DeliveryState'
+        - name: agentId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Per-Agent delivery states
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryPage'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/agents:
+    get:
+      tags:
+        - Admin Agents
+      operationId: listAgents
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type:
+              - string
+              - 'null'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: userId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Registered Agent instances
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPage'
+  /aep/v1/admin/agents/{agentId}:
+    get:
+      tags:
+        - Admin Agents
+      operationId: getAgent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent state and latest synchronization summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAgent'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/events:
+    get:
+      tags:
+        - Admin Events
+      operationId: searchEvents
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: agentId
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: result
+          in: query
+          schema:
+            $ref: '#/components/schemas/EventResult'
+        - name: occurredAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: occurredBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Event search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventSearchResult'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ServiceMetadata:
+      type: object
+      required:
+        - service
+        - supportedProtocolVersions
+        - capabilities
+        - jwksUri
+      properties:
+        service:
+          type: string
+        supportedProtocolVersions:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - password_auth
+              - federated_auth
+              - skills
+              - telemetry
+              - control_events
+              - model_gateway
+              - credentials
+              - mcp
+              - plugins
+        jwksUri:
+          type: string
+          format: uri-reference
+    PasswordChangeRequest:
+      type: object
+      required:
+        - currentPassword
+        - newPassword
+        - agentId
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        newPassword:
+          type: string
+          minLength: 12
+          maxLength: 1024
+          writeOnly: true
+        agentId:
+          type: string
+          minLength: 1
+    AdminAgent:
+      type: object
+      required:
+        - agentId
+        - enterpriseId
+        - userId
+        - agentVersion
+        - platform
+        - firstSeenAt
+        - lastSeenAt
+      properties:
+        agentId:
+          type: string
+        enterpriseId:
+          type: string
+        userId:
+          type: string
+        agentVersion:
+          type: string
+        platform:
+          type: string
+          enum:
+            - windows
+            - macos
+            - linux
+        firstSeenAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        appliedSkillRevision:
+          type:
+            - string
+            - 'null'
+        installedSkillIds:
+          type: array
+          items:
+            type: string
+    AgentPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAgent'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    JsonWebKeySet:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required:
+              - kty
+              - kid
+              - use
+              - alg
+              - crv
+              - x
+            properties:
+              kty:
+                type: string
+                const: OKP
+              kid:
+                type: string
+              use:
+                type: string
+                const: sig
+              alg:
+                type: string
+                const: EdDSA
+              crv:
+                type: string
+                const: Ed25519
+              x:
+                type: string
+    Enterprise:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    AuthenticationMethod:
+      type: object
+      required:
+        - id
+        - type
+        - displayName
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - password
+            - federated
+        protocol:
+          type:
+            - string
+            - 'null'
+          enum:
+            - oidc
+            - saml
+            - custom
+            - null
+        displayName:
+          type: string
+    AuthenticationMethods:
+      type: object
+      required:
+        - enterprise
+        - methods
+      properties:
+        enterprise:
+          $ref: '#/components/schemas/Enterprise'
+        preferredMethodId:
+          type:
+            - string
+            - 'null'
+        methods:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AuthenticationMethod'
+    Problem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - code
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+        requestId:
+          type: string
+    AgentContext:
+      type: object
+      required:
+        - agentId
+        - agentVersion
+        - platform
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+        agentVersion:
+          type: string
+          minLength: 1
+        platform:
+          type: string
+          enum:
+            - windows
+            - macos
+            - linux
+    PasswordLoginRequest:
+      allOf:
+        - $ref: '#/components/schemas/AgentContext'
+        - type: object
+          required:
+            - enterpriseId
+            - username
+            - password
+          properties:
+            enterpriseId:
+              type: string
+              minLength: 1
+            username:
+              type: string
+              minLength: 1
+              maxLength: 256
+            password:
+              type: string
+              minLength: 1
+              maxLength: 1024
+              writeOnly: true
+    TokenResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - modelAccessToken
+        - tokenType
+        - expiresIn
+        - modelAccessExpiresIn
+      properties:
+        accessToken:
+          type: string
+          description: Bearer token for AEP management APIs.
+        refreshToken:
+          type: string
+          writeOnly: true
+        modelAccessToken:
+          type: string
+          description: Bearer token with a Model Gateway audience and model grant claims. The gateway validates it locally on each inference request.
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          minimum: 1
+        modelAccessExpiresIn:
+          type: integer
+          minimum: 1
+    FederatedLoginStartRequest:
+      type: object
+      required:
+        - enterpriseId
+        - methodId
+        - redirectUri
+        - codeChallenge
+      properties:
+        enterpriseId:
+          type: string
+          minLength: 1
+        methodId:
+          type: string
+          minLength: 1
+        redirectUri:
+          type: string
+          format: uri
+        codeChallenge:
+          type: string
+          minLength: 43
+          maxLength: 128
+        codeChallengeMethod:
+          type: string
+          const: S256
+          default: S256
+    FederatedLoginStartResponse:
+      type: object
+      required:
+        - transactionId
+        - authorizationUrl
+        - state
+        - expiresIn
+      properties:
+        transactionId:
+          type: string
+        authorizationUrl:
+          type: string
+          format: uri
+        state:
+          type: string
+          minLength: 16
+        expiresIn:
+          type: integer
+          minimum: 1
+          maximum: 600
+    FederatedExchangeRequest:
+      allOf:
+        - $ref: '#/components/schemas/AgentContext'
+        - type: object
+          required:
+            - transactionId
+            - authorizationCode
+            - redirectUri
+            - codeVerifier
+          properties:
+            transactionId:
+              type: string
+              minLength: 1
+            authorizationCode:
+              type: string
+              minLength: 1
+            redirectUri:
+              type: string
+              format: uri
+            codeVerifier:
+              type: string
+              minLength: 43
+              maxLength: 128
+              writeOnly: true
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+        - agentId
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+          writeOnly: true
+        agentId:
+          type: string
+          minLength: 1
+    LogoutRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+          writeOnly: true
+    User:
+      type: object
+      required:
+        - id
+        - displayName
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        email:
+          type:
+            - string
+            - 'null'
+          format: email
+    CurrentIdentity:
+      type: object
+      required:
+        - user
+        - enterprise
+        - roles
+        - sessionExpiresAt
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        enterprise:
+          $ref: '#/components/schemas/Enterprise'
+        roles:
+          type: array
+          items:
+            type: string
+        sessionExpiresAt:
+          type: string
+          format: date-time
+    Problem-2:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - code
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        code:
+          type: string
+        requestId:
+          type: string
+    HeartbeatRequest:
+      type: object
+      required:
+        - agentVersion
+        - platform
+        - status
+      properties:
+        agentVersion:
+          type: string
+        platform:
+          type: string
+          enum:
+            - windows
+            - macos
+            - linux
+        lastControlEventCursor:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - online
+            - idle
+            - busy
+    HeartbeatResponse:
+      type: object
+      required:
+        - serverTime
+        - controlEvents
+        - nextHeartbeatAfterSeconds
+      properties:
+        serverTime:
+          type: string
+          format: date-time
+        controlEvents:
+          type: object
+          required:
+            - pending
+            - watermark
+          properties:
+            pending:
+              type: boolean
+            watermark:
+              type: string
+        nextHeartbeatAfterSeconds:
+          type: integer
+          minimum: 5
+          maximum: 3600
+    ControlEventType:
+      type: string
+      enum:
+        - skill.manifest.changed
+        - plugin.manifest.changed
+        - credential.assignments.changed
+        - model.catalog.changed
+    GlobalScope:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: global
+      additionalProperties: false
+    OrganizationScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: organization
+        id:
+          type: string
+        includeDescendants:
+          type: boolean
+          default: false
+      additionalProperties: false
+    UserScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: user
+        id:
+          type: string
+      additionalProperties: false
+    AgentScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: agent
+        id:
+          type: string
+      additionalProperties: false
+    ControlEventScope:
+      oneOf:
+        - $ref: '#/components/schemas/GlobalScope'
+        - $ref: '#/components/schemas/OrganizationScope'
+        - $ref: '#/components/schemas/UserScope'
+        - $ref: '#/components/schemas/AgentScope'
+      discriminator:
+        propertyName: type
+    ControlEventResource:
+      type: object
+      required:
+        - type
+        - id
+        - revision
+      properties:
+        type:
+          type: string
+          enum:
+            - skill
+            - plugin
+            - credential
+            - model
+        id:
+          type: string
+        revision:
+          type: string
+    ControlTask:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - skill.reconcile
+            - plugin.reconcile
+            - credential.reconcile
+            - model.reconcile
+    ControlEventDelivery:
+      type: object
+      required:
+        - deliveryId
+        - eventId
+        - cursor
+        - type
+        - scope
+        - task
+        - createdAt
+        - expiresAt
+      properties:
+        deliveryId:
+          type: string
+        eventId:
+          type: string
+        cursor:
+          type: string
+        type:
+          $ref: '#/components/schemas/ControlEventType'
+        scope:
+          $ref: '#/components/schemas/ControlEventScope'
+        resource:
+          $ref: '#/components/schemas/ControlEventResource'
+        task:
+          $ref: '#/components/schemas/ControlTask'
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    ControlEventPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+        - watermark
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControlEventDelivery'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+        watermark:
+          type: string
+    AcknowledgeRequest:
+      type: object
+      required:
+        - status
+        - receivedAt
+      properties:
+        status:
+          type: string
+          const: received
+        receivedAt:
+          type: string
+          format: date-time
+    RunningResult:
+      type: object
+      required:
+        - status
+        - startedAt
+      properties:
+        status:
+          type: string
+          const: running
+        startedAt:
+          type: string
+          format: date-time
+    SucceededResult:
+      type: object
+      required:
+        - status
+        - completedAt
+      properties:
+        status:
+          type: string
+          const: succeeded
+        completedAt:
+          type: string
+          format: date-time
+        appliedRevision:
+          type: string
+    FailedResult:
+      type: object
+      required:
+        - status
+        - completedAt
+        - errorCode
+        - message
+        - retryable
+      properties:
+        status:
+          type: string
+          const: failed
+        completedAt:
+          type: string
+          format: date-time
+        errorCode:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+    ControlEventResult:
+      oneOf:
+        - $ref: '#/components/schemas/RunningResult'
+        - $ref: '#/components/schemas/SucceededResult'
+        - $ref: '#/components/schemas/FailedResult'
+      discriminator:
+        propertyName: status
+    SkillPackage:
+      type: object
+      required:
+        - url
+        - sha256
+        - size
+      properties:
+        url:
+          type: string
+          format: uri-reference
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        size:
+          type: integer
+          minimum: 0
+    SkillManifestItem:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - enabled
+        - package
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        enabled:
+          type: boolean
+        package:
+          $ref: '#/components/schemas/SkillPackage'
+    SkillManifest:
+      type: object
+      required:
+        - revision
+        - generatedAt
+        - skills
+      properties:
+        revision:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillManifestItem'
+    SkillSyncItem:
+      type: object
+      required:
+        - skillId
+        - version
+        - action
+        - status
+      properties:
+        skillId:
+          type: string
+        version:
+          type: string
+        action:
+          type: string
+          enum:
+            - install
+            - update
+            - remove
+            - unchanged
+        status:
+          type: string
+          enum:
+            - success
+            - failed
+        errorCode:
+          type: string
+        message:
+          type: string
+    SkillSyncResult:
+      type: object
+      required:
+        - manifestRevision
+        - startedAt
+        - completedAt
+        - status
+        - items
+      properties:
+        manifestRevision:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - success
+            - partial
+            - failed
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillSyncItem'
+    EventResource:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+        id:
+          type: string
+    EventResult:
+      type: string
+      enum:
+        - success
+        - failure
+        - info
+    AgentEvent:
+      type: object
+      required:
+        - eventId
+        - type
+        - occurredAt
+        - result
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        resource:
+          $ref: '#/components/schemas/EventResource'
+        result:
+          $ref: '#/components/schemas/EventResult'
+        metadata:
+          type: object
+          additionalProperties: true
+    EventBatchRequest:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/AgentEvent'
+    RejectedEvent:
+      type: object
+      required:
+        - eventId
+        - code
+        - message
+      properties:
+        eventId:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+    EventBatchResponse:
+      type: object
+      required:
+        - accepted
+        - rejected
+      properties:
+        accepted:
+          type: array
+          items:
+            type: string
+        rejected:
+          type: array
+          items:
+            $ref: '#/components/schemas/RejectedEvent'
+    PlatformUser:
+      type: object
+      required:
+        - id
+        - enterpriseId
+        - username
+        - displayName
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        enterpriseId:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        email:
+          type:
+            - string
+            - 'null'
+          format: email
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+        organizationIds:
+          type: array
+          items:
+            type: string
+        roleIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PlatformUserPage:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformUser'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    CreatePlatformUserRequest:
+      type: object
+      required:
+        - enterpriseId
+        - username
+        - displayName
+        - temporaryPassword
+      properties:
+        enterpriseId:
+          type: string
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        email:
+          type:
+            - string
+            - 'null'
+          format: email
+        temporaryPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        organizationIds:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        roleIds:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        requirePasswordChange:
+          type: boolean
+          default: true
+    ImportPlatformUser:
+      type: object
+      required:
+        - externalRowId
+        - username
+        - displayName
+        - temporaryPassword
+      properties:
+        externalRowId:
+          type: string
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        email:
+          type:
+            - string
+            - 'null'
+          format: email
+        temporaryPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        organizationIds:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        roleIds:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        requirePasswordChange:
+          type: boolean
+          default: true
+    ImportPlatformUsersRequest:
+      type: object
+      required:
+        - enterpriseId
+        - users
+      properties:
+        enterpriseId:
+          type: string
+        users:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/ImportPlatformUser'
+    ImportPlatformUsersResponse:
+      type: object
+      required:
+        - created
+        - rejected
+      properties:
+        created:
+          type: integer
+          minimum: 0
+        rejected:
+          type: integer
+          minimum: 0
+        errors:
+          type: array
+          items:
+            type: object
+            required:
+              - externalRowId
+              - code
+              - detail
+            properties:
+              externalRowId:
+                type: string
+              code:
+                type: string
+              detail:
+                type: string
+    UpdatePlatformUserRequest:
+      type: object
+      minProperties: 1
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        email:
+          type:
+            - string
+            - 'null'
+          format: email
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+        organizationIds:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        roleIds:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    ResetPasswordRequest:
+      type: object
+      required:
+        - temporaryPassword
+      properties:
+        temporaryPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        requirePasswordChange:
+          type: boolean
+          default: true
+    SkillVersion:
+      type: object
+      required:
+        - version
+        - state
+        - sha256
+        - size
+        - createdAt
+      properties:
+        version:
+          type: string
+        state:
+          type: string
+          enum:
+            - draft
+            - published
+            - withdrawn
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        size:
+          type: integer
+          minimum: 0
+        releaseNotes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AdminSkill:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - state
+        - versions
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          enum:
+            - active
+            - withdrawn
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillVersion'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AdminSkillList:
+      type: object
+      required:
+        - skills
+      properties:
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminSkill'
+    SkillWrite:
+      type: object
+      required:
+        - id
+        - name
+        - description
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+    SkillPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          enum:
+            - active
+            - withdrawn
+    Subject:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          enum:
+            - user
+            - role
+        id:
+          type: string
+    Assignment:
+      type: object
+      required:
+        - id
+        - resourceType
+        - resourceId
+        - subject
+        - createdAt
+      properties:
+        id:
+          type: string
+        resourceType:
+          type: string
+          enum:
+            - skill
+            - credential
+            - model
+        resourceId:
+          type: string
+        subject:
+          $ref: '#/components/schemas/Subject'
+        createdAt:
+          type: string
+          format: date-time
+    AssignmentList:
+      type: object
+      required:
+        - assignments
+      properties:
+        assignments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Assignment'
+    SkillAssignmentWrite:
+      type: object
+      required:
+        - skillId
+        - subject
+      properties:
+        skillId:
+          type: string
+        subject:
+          $ref: '#/components/schemas/Subject'
+    ControlEventScopeType:
+      type: string
+      enum:
+        - global
+        - organization
+        - user
+        - agent
+    CreateControlEventRequest:
+      type: object
+      required:
+        - type
+        - scope
+        - task
+        - expiresAt
+      properties:
+        type:
+          $ref: '#/components/schemas/ControlEventType'
+        scope:
+          $ref: '#/components/schemas/ControlEventScope'
+        resource:
+          $ref: '#/components/schemas/ControlEventResource'
+        task:
+          $ref: '#/components/schemas/ControlTask'
+        expiresAt:
+          type: string
+          format: date-time
+        supersedesKey:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+    DeliverySummary:
+      type: object
+      required:
+        - pending
+        - received
+        - running
+        - succeeded
+        - failed
+        - expired
+        - superseded
+      properties:
+        pending:
+          type: integer
+          minimum: 0
+        received:
+          type: integer
+          minimum: 0
+        running:
+          type: integer
+          minimum: 0
+        succeeded:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        expired:
+          type: integer
+          minimum: 0
+        superseded:
+          type: integer
+          minimum: 0
+    AdminControlEvent:
+      allOf:
+        - $ref: '#/components/schemas/CreateControlEventRequest'
+        - type: object
+          required:
+            - eventId
+            - state
+            - createdAt
+            - createdBy
+            - deliverySummary
+          properties:
+            eventId:
+              type: string
+            state:
+              type: string
+              enum:
+                - active
+                - cancelled
+                - expired
+                - superseded
+            createdAt:
+              type: string
+              format: date-time
+            createdBy:
+              type: string
+            deliverySummary:
+              $ref: '#/components/schemas/DeliverySummary'
+    AdminControlEventPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminControlEvent'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    DeliveryState:
+      type: string
+      enum:
+        - pending
+        - received
+        - running
+        - succeeded
+        - failed
+        - expired
+        - superseded
+    AdminDelivery:
+      type: object
+      required:
+        - deliveryId
+        - eventId
+        - agentId
+        - state
+        - createdAt
+        - updatedAt
+      properties:
+        deliveryId:
+          type: string
+        eventId:
+          type: string
+        agentId:
+          type: string
+        state:
+          $ref: '#/components/schemas/DeliveryState'
+        attemptCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        receivedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        completedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        errorCode:
+          type:
+            - string
+            - 'null'
+        message:
+          type:
+            - string
+            - 'null'
+    DeliveryPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminDelivery'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    StoredEvent:
+      allOf:
+        - $ref: '#/components/schemas/AgentEvent'
+        - type: object
+          required:
+            - receivedAt
+            - userId
+            - agentId
+          properties:
+            receivedAt:
+              type: string
+              format: date-time
+            userId:
+              type: string
+            agentId:
+              type: string
+    EventSearchResult:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StoredEvent'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+  responses:
+    Problem:
+      description: AEP Problem Details
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TokenResponse:
+      description: AEP session tokens. The model token is issued at login or refresh and is validated locally by the Model Gateway without a per-request authorization call to the Control Service.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TokenResponse'
+    Problem-2:
+      description: AEP Problem Details
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem-2'
+    AdminSkill:
+      description: Skill resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AdminSkill'
+    AssignmentList:
+      description: Assignment list
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AssignmentList'
+    Assignment:
+      description: Assignment resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Assignment'
+  parameters:
+    AepAgentId:
+      name: X-AEP-Agent-ID
+      in: header
+      required: true
+      schema:
+        type: string
+    AepProtocolVersion:
+      name: X-AEP-Protocol-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        const: '1.0'
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    DeliveryId:
+      name: deliveryId
+      in: path
+      required: true
+      schema:
+        type: string
+    SkillId:
+      name: skillId
+      in: path
+      required: true
+      schema:
+        type: string
+    Version:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type:
+          - string
+          - 'null'
+    Limit-2:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema:
+        type: string
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string

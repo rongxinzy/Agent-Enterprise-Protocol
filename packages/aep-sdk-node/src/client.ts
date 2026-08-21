@@ -1,19 +1,28 @@
-import {AEP_PROTOCOL_VERSION, HttpMethod} from './constants.js';
+import {AEP_PROTOCOL_VERSION, AepCapability, HttpMethod} from './constants.js';
 import {AepProblem} from './problem.js';
 import {FetchTransport} from './transport.js';
 import type {
   AdminAgent,
+  AdminModel,
+  AdminModelList,
+  AdminModelPatch,
+  AdminModelWrite,
   AepClientOptions,
   AepRequest,
   AepResponse,
   AepTokens,
   AepTransport,
+  AgentModelList,
   AuthenticationMethods,
   ControlEventPage,
   CurrentIdentity,
   HeartbeatResponse,
   JsonObject,
   JsonValue,
+  ModelAssignment,
+  ModelAssignmentList,
+  ModelAssignmentWrite,
+  ModelConnection,
   Page,
   PlatformUser,
   Query,
@@ -134,6 +143,36 @@ export class AepClient {
 
   getCurrentIdentity(): Promise<CurrentIdentity> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/me'});
+  }
+
+  listAgentModels(): Promise<AgentModelList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/models'});
+  }
+
+  async getModelConnection(): Promise<ModelConnection> {
+    const [metadata, tokens] = await Promise.all([this.getMetadata(), this.#tokenStore.get()]);
+    if (!metadata.capabilities.includes(AepCapability.ModelGateway) || !metadata.modelGateway) {
+      throw new AepProblem({
+        type: 'https://aep.example/problems/capability-not-supported',
+        title: 'Model gateway is not supported',
+        status: 501,
+        code: 'CAPABILITY_NOT_SUPPORTED',
+      });
+    }
+    if (!tokens) {
+      throw new AepProblem({
+        type: 'https://aep.example/problems/no-session',
+        title: 'No active AEP session',
+        status: 401,
+        code: 'NO_SESSION',
+      });
+    }
+    return {
+      ...metadata.modelGateway,
+      baseUrl: new URL(metadata.modelGateway.baseUrl, this.#baseUrl).toString(),
+      apiKey: tokens.modelAccessToken,
+      expiresIn: tokens.modelAccessExpiresIn,
+    };
   }
 
   async getSkillManifest(etag?: string): Promise<SkillManifestResult> {
@@ -296,6 +335,54 @@ export class AepClient {
     return this.#send({
       method: HttpMethod.Delete,
       path: `/aep/v1/admin/skill-assignments/${segment(assignmentId)}`,
+      responseType: 'empty',
+    });
+  }
+
+  listAdminModels(): Promise<AdminModelList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/models'});
+  }
+
+  createModel(input: AdminModelWrite): Promise<AdminModel> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/models', body: asJson(input)});
+  }
+
+  getModel(modelId: string): Promise<AdminModel> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/models/${segment(modelId)}`});
+  }
+
+  updateModel(modelId: string, input: AdminModelPatch): Promise<AdminModel> {
+    return this.#send({
+      method: HttpMethod.Patch,
+      path: `/aep/v1/admin/models/${segment(modelId)}`,
+      body: asJson(input),
+    });
+  }
+
+  deleteModel(modelId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: `/aep/v1/admin/models/${segment(modelId)}`,
+      responseType: 'empty',
+    });
+  }
+
+  listModelAssignments(): Promise<ModelAssignmentList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-assignments'});
+  }
+
+  createModelAssignment(input: ModelAssignmentWrite): Promise<ModelAssignment> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/model-assignments',
+      body: asJson(input),
+    });
+  }
+
+  deleteModelAssignment(assignmentId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: `/aep/v1/admin/model-assignments/${segment(assignmentId)}`,
       responseType: 'empty',
     });
   }
