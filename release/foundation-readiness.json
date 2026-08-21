@@ -1,0 +1,116 @@
+{
+  "release": {
+    "name": "AEP v1 enterprise foundation",
+    "implementationProfile": "m2",
+    "protocolVersion": "1.0",
+    "packageVersion": "0.1.0",
+    "stage": "release-candidate",
+    "completionPercent": 85,
+    "asOf": "2026-08-21"
+  },
+  "completedGates": [
+    {
+      "id": "contract-and-sdk",
+      "weight": 15,
+      "evidence": [
+        "openapi/aep-v1-m2.openapi.yaml",
+        "packages/aep-sdk-node/test/client.test.ts"
+      ]
+    },
+    {
+      "id": "platform-identity-and-session",
+      "weight": 15,
+      "evidence": [
+        "services/control-service/internal/auth/auth_test.go",
+        "services/control-service/internal/config/config_test.go",
+        "tests/e2e/m0.mjs"
+      ]
+    },
+    {
+      "id": "skill-control-loop",
+      "weight": 10,
+      "evidence": [
+        "examples/node-agent/test/skills.test.ts",
+        "tests/e2e/m0.mjs"
+      ]
+    },
+    {
+      "id": "events-and-telemetry",
+      "weight": 10,
+      "evidence": [
+        "examples/node-agent/test/state.test.ts",
+        "tests/e2e/m0.mjs"
+      ]
+    },
+    {
+      "id": "model-control-and-data-plane",
+      "weight": 15,
+      "evidence": [
+        "tests/e2e/m1-control.mjs",
+        "tests/e2e/m1-gateway.mjs",
+        "tests/e2e/m1-client.mjs"
+      ]
+    },
+    {
+      "id": "credential-control-and-delivery",
+      "weight": 10,
+      "evidence": [
+        "tests/e2e/m2-control.mjs",
+        "tests/e2e/m2-agent.mjs"
+      ]
+    },
+    {
+      "id": "reference-agent",
+      "weight": 5,
+      "evidence": [
+        "examples/node-agent/src/agent.ts",
+        "examples/node-agent/test/credentials.test.ts"
+      ]
+    },
+    {
+      "id": "production-runtime-baseline",
+      "weight": 5,
+      "evidence": [
+        "tests/e2e/runtime.mjs",
+        "docs/production-runtime.md"
+      ]
+    }
+  ],
+  "remainingGates": [
+    {
+      "id": "customer-client-and-idp-integration",
+      "weight": 5,
+      "exitCriteria": [
+        "Integrate a real enterprise OIDC or customer identity adapter.",
+        "Complete a RongxinAI main-process pilot without exposing tokens or Credential values to the renderer."
+      ]
+    },
+    {
+      "id": "production-data-plane-automation",
+      "weight": 5,
+      "exitCriteria": [
+        "Continuously reconcile approved model routes and server-only provider Secrets into a production Higress deployment.",
+        "Deliver organization-specific Kubernetes availability and Secret-management manifests."
+      ]
+    },
+    {
+      "id": "ga-validation",
+      "weight": 5,
+      "exitCriteria": [
+        "Complete load and soak tests, an external security review, and a backup and disaster-recovery rehearsal.",
+        "Close the remaining draft-profile gaps and publish signed release artifacts with an SBOM."
+      ]
+    }
+  ],
+  "productionCapabilities": [
+    "password_auth",
+    "skills",
+    "telemetry",
+    "control_events",
+    "model_gateway",
+    "credentials"
+  ],
+  "developmentOnlyCapabilities": [
+    "federated_auth"
+  ]
+}

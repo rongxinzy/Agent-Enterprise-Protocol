@@ -6,6 +6,8 @@ This baseline makes the AEP control service and gateway authorizer operable unde
 
 Set `AEP_ENVIRONMENT=production`. The control service then refuses to start with an ephemeral JWT signing key, the development PostgreSQL URL, default MinIO credentials, or the default/short bootstrap administrator password. Invalid booleans, durations, URLs, log settings, request limits, and header limits always fail startup instead of silently reverting to defaults.
 
+Mock federated authentication is a development and test fixture. Production defaults it off and rejects AEP_ENABLE_MOCK_FEDERATED_AUTH=true. Do not advertise or expose federated_auth until a real enterprise identity adapter is configured.
+
 Use [control-service.env.example](../deploy/production/control-service.env.example) and [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example) as deployment inputs. Sensitive values support `VARIABLE_FILE` paths. A direct value and its `_FILE` form are mutually exclusive. The Credential keyring continues to use `AEP_CREDENTIAL_MASTER_KEY_FILE` so old decryption keys can remain available during controlled rotation.
 
 The signing seed, Credential keyring, database credentials, object-store credentials, and bootstrap password must come from the orchestrator's Secret provider. Do not place them in images, ConfigMaps, Git, Helm values, or shell history.

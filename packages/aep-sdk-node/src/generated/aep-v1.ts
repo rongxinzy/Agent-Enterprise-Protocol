@@ -775,6 +775,7 @@ export interface components {
         ServiceMetadata: {
             service: string;
             supportedProtocolVersions: string[];
+            /** @description Only capabilities enabled by the current deployment. */
             capabilities: ("password_auth" | "federated_auth" | "skills" | "telemetry" | "control_events" | "model_gateway" | "credentials" | "mcp" | "plugins")[];
             /** Format: uri-reference */
             jwksUri: string;

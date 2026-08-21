@@ -19,6 +19,7 @@ type Config struct {
 	Environment               string
 	LogFormat                 string
 	LogLevel                  string
+	EnableMockFederatedAuth   bool
 	Address                   string
 	HTTPReadHeaderTimeout     time.Duration
 	HTTPReadTimeout           time.Duration
@@ -98,6 +99,9 @@ func Load() (Config, error) {
 		BootstrapAdminPassword:    adminPassword,
 		BootstrapAdminDisplayName: value("AEP_BOOTSTRAP_ADMIN_DISPLAY_NAME", "AEP Administrator"),
 	}
+	if cfg.EnableMockFederatedAuth, err = boolean("AEP_ENABLE_MOCK_FEDERATED_AUTH", environment != "production"); err != nil {
+		return Config{}, err
+	}
 	if cfg.MinioSecure, err = boolean("AEP_MINIO_SECURE", false); err != nil {
 		return Config{}, err
 	}
@@ -156,6 +160,8 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Environment == "production" {
 		switch {
+		case cfg.EnableMockFederatedAuth:
+			return errors.New("AEP_ENABLE_MOCK_FEDERATED_AUTH must be false in production")
 		case cfg.SigningKeyBase64 == "":
 			return errors.New("AEP_SIGNING_KEY_BASE64 or AEP_SIGNING_KEY_BASE64_FILE is required in production")
 		case cfg.DatabaseURL == defaultDatabaseURL:

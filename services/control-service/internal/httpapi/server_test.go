@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 )
 
@@ -38,6 +39,107 @@ func TestMetadataAdvertisesCredentialsOnlyWhenConfigured(t *testing.T) {
 	}
 	if !contains(testMetadata(&app.App{Credentials: credential.NewSealer(provider)}), "credentials") {
 		t.Fatal("metadata omitted Credentials with a configured master key")
+	}
+}
+
+func TestMetadataAdvertisesMockFederatedAuthOnlyWhenEnabled(t *testing.T) {
+	requestCapabilities := func(enabled bool) []string {
+		t.Helper()
+		application := &app.App{Config: config.Config{EnableMockFederatedAuth: enabled}}
+		request := httptest.NewRequest(http.MethodGet, "/aep/v1/metadata", nil)
+		response := httptest.NewRecorder()
+		New(application).Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("metadata status = %d", response.Code)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		rawCapabilities, ok := document["capabilities"].([]any)
+		if !ok {
+			t.Fatalf("metadata capabilities = %#v", document["capabilities"])
+		}
+		capabilities := make([]string, 0, len(rawCapabilities))
+		for _, value := range rawCapabilities {
+			capability, ok := value.(string)
+			if !ok {
+				t.Fatalf("metadata capability = %#v", value)
+			}
+			capabilities = append(capabilities, capability)
+		}
+		return capabilities
+	}
+
+	if contains(requestCapabilities(false), "federated_auth") {
+		t.Fatal("metadata advertised disabled mock federated authentication")
+	}
+	if !contains(requestCapabilities(true), "federated_auth") {
+		t.Fatal("metadata omitted enabled mock federated authentication")
+	}
+}
+
+func TestDisabledMockFederatedAuthEndpointsReturnNotFound(t *testing.T) {
+	handler := New(&app.App{}).Handler()
+	for _, path := range []string{"/aep/v1/auth/federated/start", "/aep/v1/auth/federated/exchange"} {
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("disabled endpoint %s status = %d, body = %s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestProtocolVersionGate(t *testing.T) {
+	observedResponses := 0
+	observe := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			next.ServeHTTP(response, request)
+			observedResponses++
+		})
+	}
+	handler := New(&app.App{}, observe).Handler()
+	for _, version := range []string{"", "2.0"} {
+		request := httptest.NewRequest(http.MethodGet, "/aep/v1/agent/me", nil)
+		if version != "" {
+			request.Header.Set("X-AEP-Protocol-Version", version)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUpgradeRequired {
+			t.Fatalf("version %q status = %d, body = %s", version, response.Code, response.Body.String())
+		}
+		if response.Header().Get("X-AEP-Supported-Protocol-Versions") != supportedProtocolVersion {
+			t.Fatalf("version %q omitted supported protocol response header", version)
+		}
+		var problem map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
+			t.Fatal(err)
+		}
+		if problem["code"] != "PROTOCOL_VERSION_UNSUPPORTED" || problem["requestId"] == "" {
+			t.Fatalf("version %q problem = %#v", version, problem)
+		}
+	}
+
+	if observedResponses != 2 {
+		t.Fatalf("runtime middleware observed %d protocol rejections", observedResponses)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/aep/v1/agent/me", nil)
+	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("supported version did not reach authentication: %d", response.Code)
+	}
+
+	for _, path := range []string{"/aep/v1/metadata", "/livez"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("exempt path %s status = %d", path, response.Code)
+		}
 	}
 }
 

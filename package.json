@@ -34,6 +34,8 @@
     "compose:down": "docker compose -f deploy/compose/compose.yaml down",
     "compose:gateway:up": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build",
     "compose:gateway:down": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml down",
+    "release:audit": "node scripts/release-audit.mjs",
+    "release:check": "npm run check && npm run release:audit && go test ./... && go test -race ./... && go vet ./... && go build ./... && npm run test:e2e",
     "check": "npm run openapi:lint && npm run build && npm test"
   },
   "devDependencies": {

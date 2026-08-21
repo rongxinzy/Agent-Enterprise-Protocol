@@ -29,6 +29,7 @@ to use MCP.
 - [AEP M1 Node Agent model runbook](docs/m1-client-runbook.md)
 - [AEP M2 Credential runbook](docs/m2-credential-runbook.md)
 - [AEP production runtime baseline](docs/production-runtime.md)
+- [AEP v1 foundation release readiness](docs/release-readiness.md)
 - [OpenAPI 3.1 specification](openapi/aep-v1.openapi.yaml)
 - [M2 Credential OpenAPI profile](openapi/aep-v1-m2.openapi.yaml)
 - [Control Events OpenAPI 3.1 specification](openapi/aep-v1-control-events.openapi.yaml)
@@ -36,8 +37,9 @@ to use MCP.
 
 ## Status
 
-AEP v1 is an initial draft intended for implementation review. Breaking
-changes may occur until the specification is marked stable.
+The protocol specification remains an initial draft and may still receive breaking changes.
+The M2 enterprise-foundation implementation is an 85% release candidate for independent
+integration and controlled pilots; it is not a general-availability release.
 
 ## License
 

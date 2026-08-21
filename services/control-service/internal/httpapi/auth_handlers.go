@@ -31,13 +31,18 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	methods := []map[string]any{
+		{"id": "password", "type": "password", "displayName": "ZhiYuan password"},
+	}
+	if s.app.Config.EnableMockFederatedAuth {
+		methods = append(methods, map[string]any{
+			"id": "mock-oidc", "type": "federated", "protocol": "oidc", "displayName": "Mock OIDC",
+		})
+	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"enterprise":        map[string]string{"id": enterprise.ID, "name": enterprise.Name},
 		"preferredMethodId": "password",
-		"methods": []map[string]any{
-			{"id": "password", "type": "password", "displayName": "ZhiYuan password"},
-			{"id": "mock-oidc", "type": "federated", "protocol": "oidc", "displayName": "Mock OIDC"},
-		},
+		"methods":           methods,
 	})
 }
 
@@ -64,6 +69,10 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) federatedStart(response http.ResponseWriter, request *http.Request) {
+	if !s.app.Config.EnableMockFederatedAuth {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method is unavailable.")
+		return
+	}
 	var input struct {
 		EnterpriseID        string `json:"enterpriseId"`
 		MethodID            string `json:"methodId"`
@@ -97,6 +106,10 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) federatedExchange(response http.ResponseWriter, request *http.Request) {
+	if !s.app.Config.EnableMockFederatedAuth {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method is unavailable.")
+		return
+	}
 	var input struct {
 		app.AgentContext
 		TransactionID     string `json:"transactionId"`

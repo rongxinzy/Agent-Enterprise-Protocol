@@ -25,6 +25,8 @@ X-Request-ID: <request-id>
 JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 9457
 `application/problem+json`。AEP v1 使用 REST 轮询，不使用 SSE 或 WebSocket。
 
+为支持客户端发现兼容性，metadata 可以不带协议版本头访问。其他所有 /aep/v1 请求必须发送 X-AEP-Protocol-Version: 1.0；缺失或不支持的值会返回 RFC 9457 的 426 状态及 X-AEP-Supported-Protocol-Versions。
+
 ## 2. 端点总览
 
 ### 服务与认证

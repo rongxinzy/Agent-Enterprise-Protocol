@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Agent Enterprise Protocol M2
   version: 1.0.0-m2
-  description: M2 contract for Credential delivery plus the M0 and M1 capabilities.
+  description: M2 contract for Credential delivery plus the M0 and M1 capabilities. Except for metadata discovery, AEP v1 operations require X-AEP-Protocol-Version 1.0 and return RFC 9457 status 426 for missing or unsupported versions. federated_auth is advertised only when a federated adapter is enabled; mock OIDC is forbidden in production.
   license:
     name: Apache 2.0
     identifier: Apache-2.0
@@ -1136,6 +1136,7 @@ components:
           items:
             type: string
         capabilities:
+          description: Only capabilities enabled by the current deployment.
           type: array
           uniqueItems: true
           items:
