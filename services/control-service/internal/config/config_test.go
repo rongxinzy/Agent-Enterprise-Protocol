@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var environmentKeys = []string{
@@ -16,6 +17,7 @@ var environmentKeys = []string{
 	"AEP_BOOTSTRAP_ADMIN_PASSWORD", "AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE",
 	"AEP_DATA_PLANE_RECONCILER_TOKEN", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
+	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
 }
 
 func TestLoadDevelopmentDefaults(t *testing.T) {
@@ -24,7 +26,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginBackoffBase != 30*time.Second {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
 	}
 }
@@ -37,6 +39,8 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 		{key: "AEP_MINIO_SECURE", value: "sometimes"},
 		{key: "AEP_HTTP_READ_TIMEOUT", value: "forever"},
 		{key: "AEP_HTTP_MAX_HEADER_BYTES", value: "0"},
+		{key: "AEP_LOGIN_FAILURE_LIMIT", value: "0"},
+		{key: "AEP_LOGIN_FAILURE_WINDOW", value: "forever"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			clearEnvironment(t)
@@ -45,6 +49,15 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 				t.Fatalf("Load() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestLoadRejectsInvertedLoginBackoff(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_LOGIN_BACKOFF_BASE", "2m")
+	t.Setenv("AEP_LOGIN_BACKOFF_MAX", "1m")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_LOGIN_BACKOFF_MAX") {
+		t.Fatalf("Load() error = %v", err)
 	}
 }
 

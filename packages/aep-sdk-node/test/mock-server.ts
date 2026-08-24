@@ -80,7 +80,8 @@ export class MockAepServer {
     if (path === '/aep/v1/auth/methods') {
       return json(response, 200, {
         enterprise: {id: 'ent-1', name: 'Demo'},
-        methods: [{id: 'password', type: 'password', displayName: 'Password'}],
+        preferredMethodId: 'zhiyuan-password',
+        methods: [{id: 'zhiyuan-password', type: 'password', displayName: 'ZhiYuan account'}],
       });
     }
     if (path === '/aep/v1/auth/password/login') {
@@ -111,6 +112,8 @@ export class MockAepServer {
         user: {id: 'user-1', displayName: 'Demo User'},
         enterprise: {id: 'ent-1', name: 'Demo'},
         roles: ['user'],
+        sessionExpiresAt: '2026-08-20T01:00:00Z',
+        passwordChangeRequired: false,
       });
     }
     if (path === '/aep/v1/agent/credentials') {
@@ -202,7 +205,7 @@ export class MockAepServer {
 }
 
 function tokens(accessToken: string, refreshToken: string): object {
-  return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300};
+  return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300, passwordChangeRequired: false};
 }
 
 function credential(deliveryMode: 'agent' | 'server_only'): object {

@@ -570,7 +570,7 @@ components:
         refreshToken: {type: string, minLength: 1}
     TokenResponse:
       type: object
-      required: [accessToken, refreshToken, modelAccessToken, tokenType, expiresIn, modelAccessExpiresIn]
+      required: [accessToken, refreshToken, modelAccessToken, tokenType, expiresIn, modelAccessExpiresIn, passwordChangeRequired]
       properties:
         accessToken: {type: string}
         refreshToken: {type: string}
@@ -578,14 +578,16 @@ components:
         tokenType: {type: string, const: Bearer}
         expiresIn: {type: integer, minimum: 1}
         modelAccessExpiresIn: {type: integer, minimum: 1}
+        passwordChangeRequired: {type: boolean}
     CurrentIdentity:
       type: object
-      required: [user, enterprise, roles, sessionExpiresAt]
+      required: [user, enterprise, roles, sessionExpiresAt, passwordChangeRequired]
       properties:
         user: {$ref: '#/components/schemas/User'}
         enterprise: {$ref: '#/components/schemas/Enterprise'}
         roles: {type: array, items: {type: string}}
         sessionExpiresAt: {type: string, format: date-time}
+        passwordChangeRequired: {type: boolean}
     User:
       type: object
       required: [id, displayName]

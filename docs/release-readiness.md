@@ -37,7 +37,7 @@ Administrators can use aepctl to manage users, Skills, scoped assignments, contr
 
 The reference Agent persists event inbox and telemetry outbox state, safely reconciles Skill packages, converges after restart, consumes authorized models through the Higress path, and resolves short-lived Credential material without writing it to SQLite, telemetry, logs, or command output.
 
-The control service and gateway authorizer expose liveness, dependency-aware readiness, structured logs, bounded request handling, and Prometheus metrics. Production configuration fails closed on development database, object-store, signing, administrator-password, and mock-federated-auth settings.
+The control service and gateway authorizer expose liveness, dependency-aware readiness, structured logs, bounded request handling, and Prometheus metrics. Production configuration fails closed on development database, object-store, signing, administrator-password, and mock-federated-auth settings. Password login uses replica-shared progressive backoff, opaque security audit identifiers, timing-safe unknown-user verification, and server-enforced temporary-password sessions.
 
 ## Security And Compatibility Gates
 

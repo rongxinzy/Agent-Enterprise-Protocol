@@ -187,8 +187,19 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeProblem(response, request, http.StatusConflict, "AGENT_IDENTITY_CONFLICT", "The Agent header does not match the authenticated session.")
 			return
 		}
+		if claims.PasswordChangeRequired && !passwordChangeRouteAllowed(request) {
+			writeProblem(response, request, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "The temporary password must be changed before using this operation.")
+			return
+		}
 		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims)))
 	})
+}
+
+func passwordChangeRouteAllowed(request *http.Request) bool {
+	if request.Method == http.MethodPost && (request.URL.Path == "/aep/v1/auth/password/change" || request.URL.Path == "/aep/v1/auth/logout") {
+		return true
+	}
+	return request.Method == http.MethodGet && request.URL.Path == "/aep/v1/agent/me"
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {

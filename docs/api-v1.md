@@ -150,13 +150,20 @@ on callback. Customer credentials never pass through the Agent.
   "modelAccessToken": "eyJ-model...",
   "tokenType": "Bearer",
   "expiresIn": 7200,
-  "modelAccessExpiresIn": 7200
+  "modelAccessExpiresIn": 7200,
+  "passwordChangeRequired": false
 }
 ```
 
 Password login and federated exchange return this same session structure. The
 authorization code is single use. The model token is accepted directly by the
 Model Gateway during its validity period.
+
+When `passwordChangeRequired` is true, the session can only read current
+identity, change the password, or log out. Its model token has no model scopes.
+Other operations return `PASSWORD_CHANGE_REQUIRED`. Password login failures
+use a shared progressive backoff and return `429` with `Retry-After` while the
+backoff is active.
 
 ### `POST /auth/refresh`
 
@@ -182,7 +189,8 @@ Request: `{"refreshToken":"refresh-token"}`. Success returns `204 No Content`.
   "user": {"id": "user_123", "displayName": "Li Ming", "email": "liming@example.com"},
   "enterprise": {"id": "enterprise_001", "name": "Example Enterprise"},
   "roles": ["employee"],
-  "sessionExpiresAt": "2026-08-19T10:00:00Z"
+  "sessionExpiresAt": "2026-08-19T10:00:00Z",
+  "passwordChangeRequired": false
 }
 ```
 

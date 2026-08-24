@@ -328,6 +328,7 @@ components:
         - tokenType
         - expiresIn
         - modelAccessExpiresIn
+        - passwordChangeRequired
       properties:
         accessToken:
           type: string
@@ -341,6 +342,12 @@ components:
         tokenType: {type: string, const: Bearer}
         expiresIn: {type: integer, minimum: 1}
         modelAccessExpiresIn: {type: integer, minimum: 1}
+        passwordChangeRequired:
+          type: boolean
+          description: >-
+            When true, the access session is restricted to current identity,
+            password change, and logout operations. The model token has no
+            model scopes until the password is changed.
     CreatePlatformUserRequest:
       type: object
       required: [enterpriseId, username, displayName, temporaryPassword]
@@ -349,7 +356,7 @@ components:
         username: {type: string, minLength: 1, maxLength: 256}
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
-        temporaryPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+        temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
         organizationIds: {type: array, items: {type: string}, uniqueItems: true}
         roleIds: {type: array, items: {type: string}, uniqueItems: true}
         requirePasswordChange: {type: boolean, default: true}
@@ -371,7 +378,7 @@ components:
         username: {type: string, minLength: 1, maxLength: 256}
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
-        temporaryPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+        temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
         organizationIds: {type: array, items: {type: string}, uniqueItems: true}
         roleIds: {type: array, items: {type: string}, uniqueItems: true}
         requirePasswordChange: {type: boolean, default: true}
@@ -403,7 +410,7 @@ components:
       type: object
       required: [temporaryPassword]
       properties:
-        temporaryPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+        temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
         requirePasswordChange: {type: boolean, default: true}
     PlatformUser:
       type: object

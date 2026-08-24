@@ -12,6 +12,12 @@ Use [control-service.env.example](../deploy/production/control-service.env.examp
 
 The signing seed, Credential keyring, database credentials, object-store credentials, and bootstrap password must come from the orchestrator's Secret provider. Do not place them in images, ConfigMaps, Git, Helm values, or shell history.
 
+## Password Authentication
+
+Passwords must contain 12 to 1024 Unicode characters and are stored with Argon2id. Temporary-password sessions are server-restricted until the user changes the password; their model token carries no model scopes. Login failures are tracked in PostgreSQL by an opaque principal hash so the progressive backoff is shared across sources and control-service replicas; the source is retained only as a separate opaque audit hash. Configure `AEP_LOGIN_FAILURE_LIMIT`, `AEP_LOGIN_FAILURE_WINDOW`, `AEP_LOGIN_BACKOFF_BASE`, and `AEP_LOGIN_BACKOFF_MAX` for the deployment threat model.
+
+Authentication audit rows contain enterprise and Agent identifiers plus opaque principal/source hashes, but never usernames, passwords, tokens, or request bodies. Apply an organization-approved retention policy to `authentication_audit_events`. A password reset or account disable revokes all refresh sessions; already issued access and model JWTs expire at their configured short TTL.
+
 ## Runtime Endpoints
 
 | Endpoint | Meaning | Orchestrator use |

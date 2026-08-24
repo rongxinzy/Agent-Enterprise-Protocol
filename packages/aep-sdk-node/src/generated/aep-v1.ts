@@ -949,6 +949,8 @@ export interface components {
             tokenType: "Bearer";
             expiresIn: number;
             modelAccessExpiresIn: number;
+            /** @description When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed. */
+            passwordChangeRequired: boolean;
         };
         FederatedLoginStartRequest: {
             enterpriseId: string;
@@ -995,6 +997,7 @@ export interface components {
             roles: string[];
             /** Format: date-time */
             sessionExpiresAt: string;
+            passwordChangeRequired: boolean;
         };
         "Problem-2": {
             /** Format: uri */

@@ -104,6 +104,11 @@ assert(productClientGate?.weight === 5, "product-client integration must remain 
 assert(!JSON.stringify(productClientGate).includes("OIDC"), "the password-only product-client gate must not require customer OIDC");
 const authenticationHandlers = await readText("services/control-service/internal/httpapi/auth_handlers.go");
 assert(authenticationHandlers.includes('zhiYuanPasswordMethodID = "zhiyuan-password"'), "the stable ZhiYuan password method ID is missing");
+assert(authenticationHandlers.includes("VerifyPasswordOrDummy"), "password login does not use the timing-safe dummy verification path");
+const authenticationSecurity = await readText("services/control-service/internal/httpapi/auth_security.go");
+assert(authenticationSecurity.includes("login_rate_limits"), "shared password-login backoff is missing");
+assert(authenticationSecurity.includes("authentication_audit_events"), "password authentication audit is missing");
+assert(controlServer.includes("PASSWORD_CHANGE_REQUIRED"), "temporary-password sessions are not server-restricted");
 
 console.log("AEP release audit passed: " + completedWeight + "% complete, " + remainingWeight + "% explicitly gated.");
 

@@ -1580,6 +1580,7 @@ components:
         - tokenType
         - expiresIn
         - modelAccessExpiresIn
+        - passwordChangeRequired
       properties:
         accessToken:
           type: string
@@ -1599,6 +1600,9 @@ components:
         modelAccessExpiresIn:
           type: integer
           minimum: 1
+        passwordChangeRequired:
+          type: boolean
+          description: When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed.
     FederatedLoginStartRequest:
       type: object
       required:
@@ -1712,6 +1716,7 @@ components:
         - enterprise
         - roles
         - sessionExpiresAt
+        - passwordChangeRequired
       properties:
         user:
           $ref: '#/components/schemas/User'
@@ -1724,6 +1729,8 @@ components:
         sessionExpiresAt:
           type: string
           format: date-time
+        passwordChangeRequired:
+          type: boolean
     Problem-2:
       type: object
       required:
@@ -2396,7 +2403,7 @@ components:
           format: email
         temporaryPassword:
           type: string
-          minLength: 1
+          minLength: 12
           maxLength: 1024
           writeOnly: true
         organizationIds:
@@ -2437,7 +2444,7 @@ components:
           format: email
         temporaryPassword:
           type: string
-          minLength: 1
+          minLength: 12
           maxLength: 1024
           writeOnly: true
         organizationIds:
@@ -2529,7 +2536,7 @@ components:
       properties:
         temporaryPassword:
           type: string
-          minLength: 1
+          minLength: 12
           maxLength: 1024
           writeOnly: true
         requirePasswordChange:

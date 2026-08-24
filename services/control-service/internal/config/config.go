@@ -27,6 +27,10 @@ type Config struct {
 	HTTPIdleTimeout           time.Duration
 	HTTPShutdownTimeout       time.Duration
 	HTTPMaxHeaderBytes        int
+	LoginFailureLimit         int
+	LoginFailureWindow        time.Duration
+	LoginBackoffBase          time.Duration
+	LoginBackoffMax           time.Duration
 	DatabaseURL               string
 	MinioEndpoint             string
 	MinioAccessKey            string
@@ -125,6 +129,9 @@ func Load() (Config, error) {
 		{"AEP_HTTP_WRITE_TIMEOUT", 30 * time.Second, &cfg.HTTPWriteTimeout, true},
 		{"AEP_HTTP_IDLE_TIMEOUT", 60 * time.Second, &cfg.HTTPIdleTimeout, false},
 		{"AEP_HTTP_SHUTDOWN_TIMEOUT", 10 * time.Second, &cfg.HTTPShutdownTimeout, false},
+		{"AEP_LOGIN_FAILURE_WINDOW", 15 * time.Minute, &cfg.LoginFailureWindow, false},
+		{"AEP_LOGIN_BACKOFF_BASE", 30 * time.Second, &cfg.LoginBackoffBase, false},
+		{"AEP_LOGIN_BACKOFF_MAX", 15 * time.Minute, &cfg.LoginBackoffMax, false},
 	}
 	for _, item := range durations {
 		if *item.target, err = duration(item.key, item.fallback, item.zeroOK); err != nil {
@@ -132,6 +139,9 @@ func Load() (Config, error) {
 		}
 	}
 	if cfg.HTTPMaxHeaderBytes, err = integer("AEP_HTTP_MAX_HEADER_BYTES", 1<<20); err != nil {
+		return Config{}, err
+	}
+	if cfg.LoginFailureLimit, err = integer("AEP_LOGIN_FAILURE_LIMIT", 5); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -163,6 +173,9 @@ func (cfg Config) Validate() error {
 	}
 	if strings.TrimSpace(cfg.MinioEndpoint) == "" || strings.TrimSpace(cfg.MinioBucket) == "" {
 		return errors.New("AEP_MINIO_ENDPOINT and AEP_MINIO_BUCKET must not be empty")
+	}
+	if cfg.LoginBackoffMax < cfg.LoginBackoffBase {
+		return errors.New("AEP_LOGIN_BACKOFF_MAX must be greater than or equal to AEP_LOGIN_BACKOFF_BASE")
 	}
 	if cfg.Environment == "production" {
 		switch {

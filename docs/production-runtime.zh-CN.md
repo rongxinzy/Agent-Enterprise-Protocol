@@ -12,6 +12,12 @@ Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并
 
 签名 seed、Credential keyring、数据库凭据、对象存储凭据和初始管理员密码必须由编排平台的 Secret Provider 提供，不得写入镜像、ConfigMap、Git、Helm values 或 shell 历史。
 
+## 密码认证
+
+密码必须包含 12 至 1024 个 Unicode 字符，并使用 Argon2id 存储。临时密码会话在完成改密前由服务端限制，所签发的 model token 不包含任何模型作用域。登录失败按不透明的主体哈希记录到 PostgreSQL，因此不同来源和多个 control-service 副本共享渐进退避状态；来源只作为独立的不透明审计哈希保留。部署方可通过 `AEP_LOGIN_FAILURE_LIMIT`、`AEP_LOGIN_FAILURE_WINDOW`、`AEP_LOGIN_BACKOFF_BASE` 和 `AEP_LOGIN_BACKOFF_MAX` 按威胁模型调节参数。
+
+认证审计记录包含企业、Agent 标识及不透明的主体/来源哈希，但不会包含用户名、密码、Token 或请求体。部署方应为 `authentication_audit_events` 设置组织认可的保留策略。管理员重置密码或禁用账号会撤销全部 refresh session；已经签发的 access/model JWT 按配置的短 TTL 到期。
+
 ## 运行端点
 
 | 端点 | 语义 | 编排用途 |
