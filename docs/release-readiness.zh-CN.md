@@ -33,7 +33,7 @@
 
 ## 当前可发版能力
 
-管理员可以通过 aepctl 管理账号、Skill、作用域授权、管控事件、模型、Credential、Agent、投递和审计记录。Node SDK 已提供登录、refresh 轮换、RFC 9457 错误、安全重试、全部已实现的 Agent 与管理 API、模型连接发现及 Credential no-store 校验。
+管理员可以通过 aepctl 管理账号、Skill、作用域授权、管控事件、模型、Credential、Agent、投递和审计记录。Node SDK 已提供登录、refresh 轮换、RFC 9457 错误、安全重试、全部已实现的 Agent 与管理 API、模型连接发现、Credential no-store 校验，以及仅通过注入的操作系统保护存储持久化 refresh token 的桌面冷启动恢复。
 
 参考 Agent 可持久化事件 inbox 和遥测 outbox，安全收敛 Skill 包，在重启后继续执行，通过 Higress 链路消费授权模型，并在不把明文写入 SQLite、遥测、日志或命令输出的前提下短时解析 Credential。
 

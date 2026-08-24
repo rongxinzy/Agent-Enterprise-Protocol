@@ -43,6 +43,11 @@ for (const command of ["npm run check", "npm run release:audit", "go test ./..."
 const constants = await readText("packages/aep-sdk-node/src/constants.ts");
 const protocolMatch = constants.match(/AEP_PROTOCOL_VERSION\s*=\s*'([^']+)'/);
 assert(protocolMatch?.[1] === release.protocolVersion, "SDK protocol version does not match release manifest");
+const tokenStore = await readText("packages/aep-sdk-node/src/token-store.ts");
+assert(tokenStore.includes("ProtectedRefreshTokenStore"), "SDK protected refresh-token store is missing");
+assert(!tokenStore.includes("tokens.accessToken") && !tokenStore.includes("tokens.modelAccessToken"), "protected token store may not persist short-lived tokens");
+const sdkClient = await readText("packages/aep-sdk-node/src/client.ts");
+assert(sdkClient.includes("restoreSession()"), "SDK cold-start session restoration is missing");
 
 const goModule = await readText("go.mod");
 assert(/^go\s+1\.26(?:\.\d+)?$/m.test(goModule), "Go 1.26 baseline is not pinned");

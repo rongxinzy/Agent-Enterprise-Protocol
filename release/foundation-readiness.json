@@ -14,7 +14,9 @@
       "weight": 15,
       "evidence": [
         "openapi/aep-v1-m2.openapi.yaml",
-        "packages/aep-sdk-node/test/client.test.ts"
+        "packages/aep-sdk-node/test/client.test.ts",
+        "packages/aep-sdk-node/test/desktop-session.test.ts",
+        "docs/desktop-session.md"
       ]
     },
     {
