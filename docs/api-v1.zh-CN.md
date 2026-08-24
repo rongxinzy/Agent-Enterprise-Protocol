@@ -147,12 +147,17 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
   "modelAccessToken": "eyJ-model...",
   "tokenType": "Bearer",
   "expiresIn": 7200,
-  "modelAccessExpiresIn": 7200
+  "modelAccessExpiresIn": 7200,
+  "passwordChangeRequired": false
 }
 ```
 
 密码登录和联合登录交换返回相同的会话结构。授权码只能使用一次。model access token 在
 有效期内可直接用于模型网关。
+
+`passwordChangeRequired` 为 true 时，会话只能读取当前身份、修改密码或退出，model token
+不包含任何模型作用域；其他操作返回 `PASSWORD_CHANGE_REQUIRED`。密码登录失败使用共享的
+渐进退避，退避期间返回带 `Retry-After` 的 `429`。
 
 ### `POST /auth/refresh`
 
@@ -177,7 +182,8 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
   "user": {"id": "user_123", "displayName": "李明", "email": "liming@example.com"},
   "enterprise": {"id": "enterprise_001", "name": "示例企业"},
   "roles": ["employee"],
-  "sessionExpiresAt": "2026-08-19T10:00:00Z"
+  "sessionExpiresAt": "2026-08-19T10:00:00Z",
+  "passwordChangeRequired": false
 }
 ```
 

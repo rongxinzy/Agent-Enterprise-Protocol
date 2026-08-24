@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -53,8 +55,50 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	user, err := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{EnterpriseID: input.EnterpriseID, Username: input.Username})
-	if err != nil || user.Status != "active" || !auth.VerifyPassword(user.PasswordHash, input.Password) {
+	now := time.Now().UTC()
+	fingerprint := s.loginFingerprint(request, input.EnterpriseID, input.Username)
+	retryAfter, err := s.loginThrottle(request.Context(), fingerprint.KeyHash, now)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if retryAfter > 0 {
+		if err := s.recordLoginThrottled(request.Context(), fingerprint, input.EnterpriseID, input.AgentID, now); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		response.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds(retryAfter)))
+		slog.Warn("authentication event", "event", "login.throttled", "outcome", "denied", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
+		writeProblem(response, request, http.StatusTooManyRequests, "LOGIN_RATE_LIMITED", "Too many login attempts. Retry later.")
+		return
+	}
+
+	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{EnterpriseID: input.EnterpriseID, Username: input.Username})
+	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+		databaseFailure(response, request, lookupErr)
+		return
+	}
+	passwordHash := ""
+	if lookupErr == nil {
+		passwordHash = user.PasswordHash
+	}
+	passwordValid := auth.VerifyPasswordOrDummy(passwordHash, input.Password)
+	if lookupErr != nil || user.Status != "active" || !passwordValid {
+		userID := ""
+		if lookupErr == nil {
+			userID = user.ID
+		}
+		backoff, err := s.recordLoginFailure(request.Context(), fingerprint, input.EnterpriseID, userID, input.AgentID, now)
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		slog.Warn("authentication event", "event", "login.failed", "outcome", "failure", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
+		if backoff > 0 {
+			response.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds(backoff)))
+			writeProblem(response, request, http.StatusTooManyRequests, "LOGIN_RATE_LIMITED", "Too many login attempts. Retry later.")
+			return
+		}
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The username or password is invalid.")
 		return
 	}
@@ -67,6 +111,8 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		databaseFailure(response, request, err)
 		return
 	}
+	s.recordLoginSuccess(request.Context(), fingerprint, user.EnterpriseID, user.ID, input.AgentID, now)
+	slog.Info("authentication event", "event", "login.succeeded", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
 
@@ -186,8 +232,8 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if len(input.NewPassword) < 12 {
-		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_TOO_SHORT", "The new password must contain at least 12 characters.")
+	if err := auth.ValidatePassword(input.NewPassword); err != nil {
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "The new password must contain 12 to 1024 characters.")
 		return
 	}
 	claims := claimsFrom(request)
@@ -209,6 +255,7 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
+	user.RequirePasswordChange = false
 	agent, err := s.app.DB.GetAgent(request.Context(), input.AgentID)
 	if err != nil {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Agent was not found.")
@@ -219,6 +266,9 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
+	fingerprint := s.loginFingerprint(request, user.EnterpriseID, user.Username)
+	s.recordPasswordChanged(request.Context(), fingerprint, user.EnterpriseID, user.ID, input.AgentID, time.Now().UTC())
+	slog.Info("authentication event", "event", "password.changed", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
 
@@ -235,8 +285,10 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"user":       map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": nullablePGText(user.Email)},
-		"enterprise": map[string]string{"id": enterprise.ID, "name": enterprise.Name},
-		"roles":      user.RoleIds,
+		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": nullablePGText(user.Email)},
+		"enterprise":             map[string]string{"id": enterprise.ID, "name": enterprise.Name},
+		"roles":                  user.RoleIds,
+		"sessionExpiresAt":       claims.ExpiresAt.Time,
+		"passwordChangeRequired": claims.PasswordChangeRequired,
 	})
 }

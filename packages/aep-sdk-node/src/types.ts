@@ -12,6 +12,7 @@ export interface AepTokens {
   tokenType: 'Bearer';
   expiresIn: number;
   modelAccessExpiresIn: number;
+  passwordChangeRequired: boolean;
 }
 
 export interface AgentContext {
@@ -108,6 +109,8 @@ export interface CurrentIdentity {
   user: {id: string; displayName: string; email?: string | null};
   enterprise: {id: string; name: string};
   roles: string[];
+  sessionExpiresAt: string;
+  passwordChangeRequired: boolean;
 }
 
 export interface SkillManifestItem {

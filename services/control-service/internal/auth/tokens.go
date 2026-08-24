@@ -14,12 +14,13 @@ import (
 )
 
 type Claims struct {
-	Tenant      string   `json:"tenant"`
-	AgentID     string   `json:"agent_id"`
-	Admin       bool     `json:"admin,omitempty"`
-	Roles       []string `json:"roles,omitempty"`
-	ModelScopes []string `json:"model_scopes,omitempty"`
-	TokenUse    string   `json:"token_use"`
+	Tenant                 string   `json:"tenant"`
+	AgentID                string   `json:"agent_id"`
+	Admin                  bool     `json:"admin,omitempty"`
+	Roles                  []string `json:"roles,omitempty"`
+	ModelScopes            []string `json:"model_scopes,omitempty"`
+	PasswordChangeRequired bool     `json:"password_change_required,omitempty"`
+	TokenUse               string   `json:"token_use"`
 	jwt.RegisteredClaims
 }
 
@@ -52,12 +53,12 @@ func NewService(issuer, encodedSeed string, accessTTL, modelTTL time.Duration) (
 	return &Service{issuer: issuer, keyID: base64.RawURLEncoding.EncodeToString(digest[:8]), private: private, public: public, accessTTL: accessTTL, modelTTL: modelTTL}, nil
 }
 
-func (s *Service) Issue(userID, enterpriseID, agentID string, admin bool, roles []string, modelScopes []string) (string, string, error) {
-	access, err := s.sign(userID, enterpriseID, agentID, admin, roles, nil, "aep", "aep-control", s.accessTTL)
+func (s *Service) Issue(userID, enterpriseID, agentID string, admin, passwordChangeRequired bool, roles []string, modelScopes []string) (string, string, error) {
+	access, err := s.sign(userID, enterpriseID, agentID, admin, passwordChangeRequired, roles, nil, "aep", "aep-control", s.accessTTL)
 	if err != nil {
 		return "", "", err
 	}
-	model, err := s.sign(userID, enterpriseID, agentID, false, nil, modelScopes, "model", "model-gateway", s.modelTTL)
+	model, err := s.sign(userID, enterpriseID, agentID, false, passwordChangeRequired, nil, modelScopes, "model", "model-gateway", s.modelTTL)
 	return access, model, err
 }
 
@@ -90,10 +91,10 @@ func (s *Service) JWKS() map[string]any {
 	return map[string]any{"keys": []map[string]string{{"kty": "OKP", "kid": s.keyID, "use": "sig", "alg": "EdDSA", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(s.public)}}}
 }
 
-func (s *Service) sign(userID, enterpriseID, agentID string, admin bool, roles, modelScopes []string, tokenUse, audience string, ttl time.Duration) (string, error) {
+func (s *Service) sign(userID, enterpriseID, agentID string, admin, passwordChangeRequired bool, roles, modelScopes []string, tokenUse, audience string, ttl time.Duration) (string, error) {
 	now := time.Now().UTC()
 	claims := Claims{
-		Tenant: enterpriseID, AgentID: agentID, Admin: admin, Roles: roles, ModelScopes: modelScopes, TokenUse: tokenUse,
+		Tenant: enterpriseID, AgentID: agentID, Admin: admin, Roles: roles, ModelScopes: modelScopes, PasswordChangeRequired: passwordChangeRequired, TokenUse: tokenUse,
 		RegisteredClaims: jwt.RegisteredClaims{Issuer: s.issuer, Subject: userID, Audience: jwt.ClaimStrings{audience}, ExpiresAt: jwt.NewNumericDate(now.Add(ttl)), IssuedAt: jwt.NewNumericDate(now), ID: uuid.NewString()},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

@@ -40,12 +40,13 @@ type AgentContext struct {
 }
 
 type TokenResponse struct {
-	AccessToken          string `json:"accessToken"`
-	RefreshToken         string `json:"refreshToken"`
-	ModelAccessToken     string `json:"modelAccessToken"`
-	TokenType            string `json:"tokenType"`
-	ExpiresIn            int64  `json:"expiresIn"`
-	ModelAccessExpiresIn int64  `json:"modelAccessExpiresIn"`
+	AccessToken            string `json:"accessToken"`
+	RefreshToken           string `json:"refreshToken"`
+	ModelAccessToken       string `json:"modelAccessToken"`
+	TokenType              string `json:"tokenType"`
+	ExpiresIn              int64  `json:"expiresIn"`
+	ModelAccessExpiresIn   int64  `json:"modelAccessExpiresIn"`
+	PasswordChangeRequired bool   `json:"passwordChangeRequired"`
 }
 
 func Open(ctx context.Context, cfg config.Config) (*App, error) {
@@ -141,7 +142,10 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	access, model, err := a.Tokens.Issue(user.ID, user.EnterpriseID, agent.AgentID, user.IsAdmin, user.RoleIds, modelScopes)
+	if user.RequirePasswordChange {
+		modelScopes = nil
+	}
+	access, model, err := a.Tokens.Issue(user.ID, user.EnterpriseID, agent.AgentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -153,7 +157,7 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 	if err := a.DB.CreateRefreshSession(ctx, db.CreateRefreshSessionParams{TokenHash: refreshHash, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentID: agent.AgentID, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true}}); err != nil {
 		return TokenResponse{}, err
 	}
-	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds())}, nil
+	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), PasswordChangeRequired: user.RequirePasswordChange}, nil
 }
 
 func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (TokenResponse, error) {
@@ -183,7 +187,10 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	access, model, err := a.Tokens.Issue(user.ID, enterpriseID, agentID, user.IsAdmin, user.RoleIds, modelScopes)
+	if user.RequirePasswordChange {
+		modelScopes = nil
+	}
+	access, model, err := a.Tokens.Issue(user.ID, enterpriseID, agentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -197,7 +204,7 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	if err := tx.Commit(ctx); err != nil {
 		return TokenResponse{}, err
 	}
-	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds())}, nil
+	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), PasswordChangeRequired: user.RequirePasswordChange}, nil
 }
 
 func (a *App) bootstrap(ctx context.Context) error {

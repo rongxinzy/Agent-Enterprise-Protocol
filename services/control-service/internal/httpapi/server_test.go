@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 )
@@ -39,6 +41,30 @@ func TestMetadataAdvertisesCredentialsOnlyWhenConfigured(t *testing.T) {
 	}
 	if !contains(testMetadata(&app.App{Credentials: credential.NewSealer(provider)}), "credentials") {
 		t.Fatal("metadata omitted Credentials with a configured master key")
+	}
+}
+
+func TestPasswordChangeRequiredSessionIsRestricted(t *testing.T) {
+	tokens, err := auth.NewService("https://issuer.example", "", time.Minute, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, _, err := tokens.Issue("user-1", "tenant-1", "agent-1", false, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := New(&app.App{Tokens: tokens}).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/aep/v1/agent/models", nil)
+	request.Header.Set("Authorization", "Bearer "+access)
+	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("restricted session status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var problem map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil || problem["code"] != "PASSWORD_CHANGE_REQUIRED" {
+		t.Fatalf("restricted session problem = %#v, %v", problem, err)
 	}
 }
 

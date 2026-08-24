@@ -13,7 +13,13 @@ const composeFile = path.join(root, 'deploy', 'compose', 'compose.yaml');
 const project = 'aep-m0-e2e';
 const port = process.env.AEP_E2E_PORT ?? '18080';
 const baseUrl = `http://localhost:${port}`;
-const composeEnv = {AEP_PORT: port, AEP_MINIO_CONSOLE_PORT: process.env.AEP_E2E_MINIO_CONSOLE_PORT ?? '19001'};
+const composeEnv = {
+  AEP_PORT: port,
+  AEP_MINIO_CONSOLE_PORT: process.env.AEP_E2E_MINIO_CONSOLE_PORT ?? '19001',
+  AEP_LOGIN_FAILURE_LIMIT: '3',
+  AEP_LOGIN_BACKOFF_BASE: '1s',
+  AEP_LOGIN_BACKOFF_MAX: '2s',
+};
 const runId = Date.now().toString(36);
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'aep-m0-e2e-'));
 
@@ -30,6 +36,8 @@ try {
 async function runScenario() {
   const admin = new AepClient({baseUrl, agentId: `e2e-admin-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: new MemoryTokenStore()});
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+
+  await assertPasswordSecurity();
 
   const username = `user-${runId}`;
   const password = 'temporary-password-123';
@@ -104,6 +112,62 @@ async function runScenario() {
   assert(Array.isArray(audit.items) && audit.items.length >= 3, 'Expected Skill telemetry was not recorded');
   assert(audit.items.filter(item => item.eventId === duplicateEventId).length === 1, 'Telemetry eventId was not deduplicated');
   await runCli(['metadata']);
+}
+
+async function assertPasswordSecurity() {
+  const username = `forced-change-${runId}`;
+  const temporaryPassword = 'temporary-password-123';
+  const changedPassword = 'changed-password-456';
+  await runCli(['user', 'create', '--user', username, '--display-name', `Forced Change ${runId}`, '--temporary-password', temporaryPassword]);
+
+  const store = new MemoryTokenStore();
+  const client = new AepClient({baseUrl, agentId: `forced-agent-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: store});
+  const restricted = await client.loginWithPassword({enterpriseId: 'demo', username, password: temporaryPassword});
+  assert(restricted.passwordChangeRequired === true, 'Temporary-password login was not marked as restricted');
+  const identity = await client.getCurrentIdentity();
+  assert(identity.passwordChangeRequired === true && identity.sessionExpiresAt, 'Restricted identity state was incomplete');
+  await assertProblem(client.listAgentModels(), 'PASSWORD_CHANGE_REQUIRED');
+
+  const changed = await client.changePassword(temporaryPassword, changedPassword);
+  assert(changed.passwordChangeRequired === false, 'Password change did not rotate to an unrestricted session');
+  await client.listAgentModels();
+  await client.logout();
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await passwordLogin(username, 'incorrect-password-123');
+    assert(response.status === (attempt < 3 ? 401 : 429), `Login attempt ${attempt} returned ${response.status}`);
+    if (attempt === 3) assert(response.headers.get('retry-after') === '1', 'Rate-limited response omitted Retry-After');
+  }
+  const blocked = await passwordLogin(username, changedPassword);
+  assert(blocked.status === 429, 'Active login backoff accepted valid credentials');
+  await new Promise(resolve => setTimeout(resolve, 1_100));
+  const recovered = await passwordLogin(username, changedPassword);
+  assert(recovered.status === 200, `Login did not recover after backoff: ${recovered.status}`);
+
+  const auditCount = Number(await queryDatabase(`SELECT count(*) FROM authentication_audit_events WHERE enterprise_id='demo' AND agent_id LIKE 'forced-agent-%'`));
+  assert(auditCount >= 6, `Authentication audit recorded only ${auditCount} events`);
+}
+
+async function passwordLogin(username, password) {
+  return fetch(`${baseUrl}/aep/v1/auth/password/login`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-AEP-Protocol-Version': '1.0'},
+    body: JSON.stringify({enterpriseId: 'demo', username, password, agentId: `forced-agent-${runId}`, agentVersion: 'e2e', platform: platform()}),
+  });
+}
+
+async function queryDatabase(sql) {
+  return commandOutput('docker', ['compose', '-p', project, '-f', composeFile, 'exec', '-T', 'postgres', 'psql', '-U', 'aep', '-d', 'aep', '-Atc', sql], composeEnv);
+}
+
+async function assertProblem(promise, code) {
+  try {
+    await promise;
+  } catch (error) {
+    assert(error?.code === code, `Expected ${code}, got ${error?.code ?? error}`);
+    return;
+  }
+  throw new Error(`Expected ${code}`);
 }
 
 async function runCli(args) {

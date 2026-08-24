@@ -22,6 +22,8 @@
       "weight": 15,
       "evidence": [
         "services/control-service/internal/auth/auth_test.go",
+        "services/control-service/internal/httpapi/auth_security_test.go",
+        "services/control-service/internal/db/migrations/005_auth_security.sql",
         "services/control-service/internal/config/config_test.go",
         "tests/e2e/m0.mjs"
       ]

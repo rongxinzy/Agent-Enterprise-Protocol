@@ -54,6 +54,10 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	}
 	user, err := s.insertUser(request, input)
 	if err != nil {
+		if errors.Is(err, auth.ErrPasswordPolicy) {
+			writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 12 to 1024 characters.")
+			return
+		}
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "USER_ALREADY_EXISTS", "The username already exists.")
 			return
@@ -90,7 +94,13 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 	for _, item := range input.Users {
 		_, err := s.insertUser(request, createUserRequest{EnterpriseID: input.EnterpriseID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, OrganizationIDs: item.OrganizationIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
 		if err != nil {
-			errorsResult = append(errorsResult, map[string]string{"externalRowId": item.ExternalRowID, "code": "USER_IMPORT_FAILED", "detail": "The account could not be created."})
+			code := "USER_IMPORT_FAILED"
+			detail := "The account could not be created."
+			if errors.Is(err, auth.ErrPasswordPolicy) {
+				code = "PASSWORD_POLICY_VIOLATION"
+				detail = "Temporary passwords must contain 12 to 1024 characters."
+			}
+			errorsResult = append(errorsResult, map[string]string{"externalRowId": item.ExternalRowID, "code": code, "detail": detail})
 			continue
 		}
 		created++
@@ -156,7 +166,10 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	if user.Status == "disabled" {
-		_ = s.app.DB.RevokeUserSessions(request.Context(), user.ID)
+		if err := s.app.DB.RevokeUserSessions(request.Context(), user.ID); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
 	}
 	writeJSON(response, http.StatusOK, publicUser(user))
 }
@@ -167,6 +180,10 @@ func (s *Server) resetUserPassword(response http.ResponseWriter, request *http.R
 		RequirePasswordChange *bool  `json:"requirePasswordChange"`
 	}
 	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if err := auth.ValidatePassword(input.TemporaryPassword); err != nil {
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 12 to 1024 characters.")
 		return
 	}
 	hash, err := auth.HashPassword(input.TemporaryPassword)
@@ -183,7 +200,10 @@ func (s *Server) resetUserPassword(response http.ResponseWriter, request *http.R
 		databaseFailure(response, request, err)
 		return
 	}
-	_ = s.app.DB.RevokeUserSessions(request.Context(), userID)
+	if err := s.app.DB.RevokeUserSessions(request.Context(), userID); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	response.WriteHeader(http.StatusNoContent)
 }
 
