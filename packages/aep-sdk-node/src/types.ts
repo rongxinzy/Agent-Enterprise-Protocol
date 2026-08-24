@@ -80,6 +80,11 @@ export type AdminModelPatch = components['schemas']['AdminModelPatch'];
 export type ModelAssignment = components['schemas']['ModelAssignment'];
 export type ModelAssignmentList = components['schemas']['ModelAssignmentList'];
 export type ModelAssignmentWrite = components['schemas']['ModelAssignmentWrite'];
+export type DataPlaneSecretReference = components['schemas']['DataPlaneSecretReference'];
+export type DataPlaneRoute = components['schemas']['DataPlaneRoute'];
+export type DataPlaneDesiredStateWrite = components['schemas']['DataPlaneDesiredStateWrite'];
+export type DataPlaneDesiredState = components['schemas']['DataPlaneDesiredState'];
+export type DataPlaneStatus = components['schemas']['DataPlaneStatus'];
 
 export interface ModelConnection extends ModelGatewayMetadata {
   apiKey: string;

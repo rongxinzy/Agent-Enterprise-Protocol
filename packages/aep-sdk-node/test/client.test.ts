@@ -97,6 +97,19 @@ describe('AepClient SDK gate', () => {
     await client.deleteModelAssignment('assignment-1');
   });
 
+  test('publishes and observes data-plane desired state without secret values', async () => {
+    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    const desired = await client.getDataPlaneDesiredState();
+    expect(desired.revision).toBe('rev-1');
+    expect(desired.routes[0].credentialRef).toEqual({name: 'provider-secrets', key: 'model-1'});
+    expect(JSON.stringify(desired)).not.toContain('provider-secret-value');
+    await expect(client.putDataPlaneDesiredState({
+      revision: 'rev-next',
+      routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
+    })).resolves.toMatchObject({revision: 'rev-published'});
+    await expect(client.getDataPlaneStatus()).resolves.toMatchObject({state: 'ready', observedRevision: 'rev-published', resourceCount: 1});
+  });
+
   test('covers Credential delivery and administration without caching secrets', async () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
 

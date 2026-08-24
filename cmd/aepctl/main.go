@@ -48,7 +48,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.username, "username", env("AEPCTL_USERNAME", "admin"), "administrator username")
 	root.PersistentFlags().StringVar(&opts.password, "password", os.Getenv("AEPCTL_PASSWORD"), "administrator password (prefer AEPCTL_PASSWORD)")
 	root.PersistentFlags().StringVar(&opts.agentID, "agent-id", env("AEPCTL_AGENT_ID", "aepctl"), "stable CLI Agent identifier")
-	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
+	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), dataPlaneCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
 	return root
 }
 
@@ -198,6 +198,35 @@ func eventCommand(opts *options) *cobra.Command {
 	deliveries.Flags().StringVar(&eventID, "event-id", "", "control event identifier")
 	_ = deliveries.MarkFlagRequired("event-id")
 	command.AddCommand(publish, deliveries)
+	return command
+}
+
+func dataPlaneCommand(opts *options) *cobra.Command {
+	command := &cobra.Command{Use: "data-plane", Short: "Inspect and publish model gateway desired state"}
+	command.AddCommand(&cobra.Command{Use: "status", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
+		value, err := api.request(http.MethodGet, "/aep/v1/admin/data-plane/status", nil, true)
+		return output(value, err)
+	})})
+	command.AddCommand(&cobra.Command{Use: "desired-state", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
+		value, err := api.request(http.MethodGet, "/aep/v1/admin/data-plane/desired-state", nil, true)
+		return output(value, err)
+	})})
+	var file string
+	publish := &cobra.Command{Use: "publish", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		var body map[string]any
+		if err := json.Unmarshal(content, &body); err != nil {
+			return fmt.Errorf("parse desired state: %w", err)
+		}
+		value, err := api.request(http.MethodPut, "/aep/v1/admin/data-plane/desired-state", body, true)
+		return output(value, err)
+	})}
+	publish.Flags().StringVar(&file, "file", "", "desired state JSON path")
+	_ = publish.MarkFlagRequired("file")
+	command.AddCommand(publish)
 	return command
 }
 

@@ -768,6 +768,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/data-plane/desired-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the tenant-scoped model gateway state intended for reconciliation. Secret values are never returned. */
+        get: operations["getDataPlaneDesiredState"];
+        /** @description Publishes an idempotent desired state. Secret references identify external Secret material and never contain values. */
+        put: operations["putDataPlaneDesiredState"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/data-plane/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the latest observed gateway reconciliation state. */
+        get: operations["getDataPlaneStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -812,6 +847,42 @@ export interface components {
         AgentPage: {
             items: components["schemas"]["AdminAgent"][];
             nextCursor: string | null;
+        };
+        DataPlaneSecretReference: {
+            name: string;
+            key: string;
+            namespace?: string | null;
+        };
+        DataPlaneRoute: {
+            modelId: string;
+            enabled: boolean;
+            /** Format: uri-reference */
+            endpoint: string;
+            upstreamModel: string;
+            /** @constant */
+            protocol: "openai-compatible";
+            credentialRef?: components["schemas"]["DataPlaneSecretReference"];
+        };
+        DataPlaneDesiredStateWrite: {
+            revision: string;
+            routes: components["schemas"]["DataPlaneRoute"][];
+        };
+        DataPlaneDesiredState: components["schemas"]["DataPlaneDesiredStateWrite"] & {
+            enterpriseId: string;
+            /** Format: date-time */
+            publishedAt: string;
+            contentHash: string;
+        };
+        DataPlaneStatus: {
+            /** @enum {string} */
+            state: "pending" | "applying" | "ready" | "degraded" | "error";
+            observedRevision: string | null;
+            contentHash: string | null;
+            /** Format: date-time */
+            lastAppliedAt?: string | null;
+            errorCode?: string | null;
+            message?: string | null;
+            resourceCount?: number;
         };
         JsonWebKeySet: {
             keys: {
@@ -2904,6 +2975,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    getDataPlaneDesiredState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current desired state, or an empty state when none has been published. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlaneDesiredState"];
+                };
+            };
+        };
+    };
+    putDataPlaneDesiredState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataPlaneDesiredStateWrite"];
+            };
+        };
+        responses: {
+            /** @description Desired state accepted for reconciliation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlaneDesiredState"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
+        };
+    };
+    getDataPlaneStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Data plane observation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlaneStatus"];
+                };
             };
         };
     };

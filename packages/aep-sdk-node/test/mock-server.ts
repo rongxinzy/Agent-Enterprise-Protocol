@@ -11,6 +11,7 @@ export class MockAepServer {
   #unauthorizedResponseDelays: number[] = [];
   #modelGatewayEnabled = true;
   #credentialNoStore = true;
+  #dataPlaneRevision = 'rev-1';
   readonly requests: Array<{method: string; path: string; headers: IncomingMessage['headers']}> = [];
   refreshCount = 0;
   baseUrl = '';
@@ -180,6 +181,16 @@ export class MockAepServer {
       return json(response, 201, assignment);
     }
     if (path === '/aep/v1/admin/model-assignments/assignment-1') return empty(response, 204);
+    if (path === '/aep/v1/admin/data-plane/desired-state') {
+      if (request.method === 'PUT') {
+        this.#dataPlaneRevision = 'rev-published';
+        return json(response, 200, dataPlaneDesiredState(this.#dataPlaneRevision));
+      }
+      return json(response, 200, dataPlaneDesiredState(this.#dataPlaneRevision));
+    }
+    if (path === '/aep/v1/admin/data-plane/status') {
+      return json(response, 200, {state: 'ready', observedRevision: this.#dataPlaneRevision, contentHash: 'a'.repeat(64), lastAppliedAt: '2026-08-24T00:00:00Z', errorCode: null, message: null, resourceCount: 1});
+    }
     if (path.startsWith('/aep/v1/admin/')) return json(response, 200, {items: [], nextCursor: null});
 
     return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
@@ -240,6 +251,16 @@ function modelAssignment(): object {
     resourceId: 'model-1',
     subject: {type: 'user', id: 'user-1'},
     createdAt: '2026-08-21T00:00:00Z',
+  };
+}
+
+function dataPlaneDesiredState(revision: string): object {
+  return {
+    enterpriseId: 'ent-1',
+    revision,
+    publishedAt: '2026-08-24T00:00:00Z',
+    contentHash: 'a'.repeat(64),
+    routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
   };
 }
 
