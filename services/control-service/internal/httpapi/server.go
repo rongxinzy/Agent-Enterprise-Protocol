@@ -52,6 +52,8 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 	router.Get("/readyz", server.readiness)
 	router.Get("/healthz", server.readiness)
 	router.Get("/aep/v1/metadata", server.metadata)
+	router.Get("/internal/data-plane/desired-state", server.internalDataPlane(server.getDataPlaneDesiredState))
+	router.Put("/internal/data-plane/status", server.internalDataPlane(server.putInternalDataPlaneStatus))
 	router.Get("/aep/v1/auth/methods", server.authenticationMethods)
 	router.Post("/aep/v1/auth/password/login", server.passwordLogin)
 	router.Post("/aep/v1/auth/federated/start", server.federatedStart)
@@ -108,6 +110,9 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Get("/aep/v1/admin/model-assignments", server.listModelAssignments)
 			admin.Post("/aep/v1/admin/model-assignments", server.createModelAssignment)
 			admin.Delete("/aep/v1/admin/model-assignments/{assignmentId}", server.deleteModelAssignment)
+			admin.Get("/aep/v1/admin/data-plane/desired-state", server.getDataPlaneDesiredState)
+			admin.Put("/aep/v1/admin/data-plane/desired-state", server.putDataPlaneDesiredState)
+			admin.Get("/aep/v1/admin/data-plane/status", server.getDataPlaneStatus)
 			admin.Get("/aep/v1/admin/credentials", server.listCredentials)
 			admin.Post("/aep/v1/admin/credentials", server.createCredential)
 			admin.Get("/aep/v1/admin/credentials/{credentialId}", server.getCredential)
@@ -193,6 +198,22 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func (s *Server) internalDataPlane(next http.HandlerFunc) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		if s.app.Config.DataPlaneReconcilerToken == "" || request.Header.Get("X-AEP-Data-Plane-Token") != s.app.Config.DataPlaneReconcilerToken {
+			writeProblem(response, request, http.StatusUnauthorized, "INTERNAL_AUTH_REQUIRED", "A valid data-plane service token is required.")
+			return
+		}
+		tenant := strings.TrimSpace(request.Header.Get("X-AEP-Tenant-ID"))
+		if tenant == "" || len(tenant) > 200 {
+			writeProblem(response, request, http.StatusBadRequest, "TENANT_REQUIRED", "The tenant header is required.")
+			return
+		}
+		claims := &auth.Claims{Tenant: tenant}
+		next(response, request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims)))
+	}
 }
 
 func claimsFrom(request *http.Request) *auth.Claims {

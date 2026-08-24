@@ -92,6 +92,15 @@ func TestDisabledMockFederatedAuthEndpointsReturnNotFound(t *testing.T) {
 	}
 }
 
+func TestInternalDataPlaneEndpointRequiresServiceToken(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/internal/data-plane/desired-state", nil)
+	response := httptest.NewRecorder()
+	New(&app.App{}).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("internal data-plane endpoint status = %d", response.Code)
+	}
+}
+
 func TestProtocolVersionGate(t *testing.T) {
 	observedResponses := 0
 	observe := func(next http.Handler) http.Handler {

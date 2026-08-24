@@ -38,6 +38,7 @@ type Config struct {
 	AccessTTL                 time.Duration
 	ModelAccessTTL            time.Duration
 	ModelGatewayBaseURL       string
+	DataPlaneReconcilerToken  string
 	CredentialMasterKeyBase64 string
 	CredentialMasterKeyFile   string
 	RefreshTTL                time.Duration
@@ -91,6 +92,7 @@ func Load() (Config, error) {
 		Issuer:                    value("AEP_ISSUER", "http://localhost:8080"),
 		SigningKeyBase64:          signingKey,
 		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
+		DataPlaneReconcilerToken:  os.Getenv("AEP_DATA_PLANE_RECONCILER_TOKEN"),
 		CredentialMasterKeyBase64: credentialKey,
 		CredentialMasterKeyFile:   os.Getenv("AEP_CREDENTIAL_MASTER_KEY_FILE"),
 		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"),
