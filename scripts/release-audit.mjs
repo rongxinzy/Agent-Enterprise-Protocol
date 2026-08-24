@@ -51,7 +51,8 @@ const controlConfig = await readText("services/control-service/internal/config/c
 assert(controlConfig.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH must be false in production"), "production mock federated-auth guard is missing");
 const controlServer = await readText("services/control-service/internal/httpapi/server.go");
 assert(controlServer.includes("http.StatusUpgradeRequired"), "protocol-version 426 gate is missing");
-assert(controlServer.includes("s.app.Config.EnableMockFederatedAuth"), "metadata does not conditionally advertise mock federated auth");
+assert(controlServer.includes("mockFederatedAuthEnabled(s.app.Config)"), "metadata does not conditionally advertise mock federated auth");
+assert(controlServer.includes('cfg.Environment != "production"'), "production does not defensively disable mock federated auth");
 
 for (const sample of ["deploy/production/control-service.env.example", "deploy/production/gateway-authorizer.env.example"]) {
   const content = await readText(sample);
@@ -97,6 +98,12 @@ for (const readme of ["README.md", "README.zh-CN.md"]) {
 
 assert(!manifest.productionCapabilities.includes("federated_auth"), "mock federated auth cannot be a production capability");
 assert(manifest.developmentOnlyCapabilities.includes("federated_auth"), "mock federated auth must be marked development-only");
+assert(manifest.productionCapabilities.includes("password_auth"), "ZhiYuan password authentication must remain a production capability");
+const productClientGate = remaining.find(gate => gate.id === "product-client-integration");
+assert(productClientGate?.weight === 5, "product-client integration must remain an explicit 5% gate");
+assert(!JSON.stringify(productClientGate).includes("OIDC"), "the password-only product-client gate must not require customer OIDC");
+const authenticationHandlers = await readText("services/control-service/internal/httpapi/auth_handlers.go");
+assert(authenticationHandlers.includes('zhiYuanPasswordMethodID = "zhiyuan-password"'), "the stable ZhiYuan password method ID is missing");
 
 console.log("AEP release audit passed: " + completedWeight + "% complete, " + remainingWeight + "% explicitly gated.");
 

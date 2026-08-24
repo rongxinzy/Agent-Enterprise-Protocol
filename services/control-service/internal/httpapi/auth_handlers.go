@@ -20,6 +20,8 @@ type passwordLoginRequest struct {
 	Password     string `json:"password"`
 }
 
+const zhiYuanPasswordMethodID = "zhiyuan-password"
+
 func (s *Server) authenticationMethods(response http.ResponseWriter, request *http.Request) {
 	enterpriseID := request.URL.Query().Get("enterpriseHint")
 	enterprise, err := s.app.DB.GetEnterprise(request.Context(), enterpriseID)
@@ -32,16 +34,16 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 		return
 	}
 	methods := []map[string]any{
-		{"id": "password", "type": "password", "displayName": "ZhiYuan password"},
+		{"id": zhiYuanPasswordMethodID, "type": "password", "displayName": "ZhiYuan account"},
 	}
-	if s.app.Config.EnableMockFederatedAuth {
+	if mockFederatedAuthEnabled(s.app.Config) {
 		methods = append(methods, map[string]any{
 			"id": "mock-oidc", "type": "federated", "protocol": "oidc", "displayName": "Mock OIDC",
 		})
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"enterprise":        map[string]string{"id": enterprise.ID, "name": enterprise.Name},
-		"preferredMethodId": "password",
+		"preferredMethodId": zhiYuanPasswordMethodID,
 		"methods":           methods,
 	})
 }
@@ -69,7 +71,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) federatedStart(response http.ResponseWriter, request *http.Request) {
-	if !s.app.Config.EnableMockFederatedAuth {
+	if !mockFederatedAuthEnabled(s.app.Config) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method is unavailable.")
 		return
 	}
@@ -106,7 +108,7 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) federatedExchange(response http.ResponseWriter, request *http.Request) {
-	if !s.app.Config.EnableMockFederatedAuth {
+	if !mockFederatedAuthEnabled(s.app.Config) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method is unavailable.")
 		return
 	}

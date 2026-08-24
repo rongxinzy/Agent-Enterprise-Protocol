@@ -89,11 +89,11 @@
   ],
   "remainingGates": [
     {
-      "id": "customer-client-and-idp-integration",
+      "id": "product-client-integration",
       "weight": 5,
       "exitCriteria": [
-        "Integrate a real enterprise OIDC or customer identity adapter.",
-        "Complete a RongxinAI main-process pilot without exposing tokens or Credential values to the renderer."
+        "Complete a RongxinAI main-process pilot using the production ZhiYuan password authentication profile.",
+        "Keep passwords, tokens, and Credential values out of the renderer and persist refresh tokens only through operating-system protected storage."
       ]
     },
     {

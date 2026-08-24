@@ -9,7 +9,7 @@ Assessment date: 2026-08-24
 
 The enterprise foundation is ready for independent integration testing and a controlled enterprise pilot. It is not a general-availability release.
 
-A real product client is not required to validate this 90% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A RongxinAI main-process integration and a customer identity pilot remain part of the final 10%.
+A real product client is not required to validate this 90% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A RongxinAI main-process integration using the ZhiYuan password profile remains part of the final 10%.
 
 The authoritative machine-readable score is in release/foundation-readiness.json. The scripts/release-audit.mjs check rejects score drift, missing evidence, mismatched toolchain or protocol versions, unsafe production defaults, and removal of required CI gates.
 
@@ -25,7 +25,7 @@ The authoritative machine-readable score is in release/foundation-readiness.json
 | Credential control and Agent delivery | 10% | Complete |
 | Reference Agent | 5% | Complete |
 | Production runtime baseline | 5% | Complete |
-| Customer client and IdP integration | 5% | Pending |
+| Product client integration | 5% | Pending |
 | Production data-plane automation | 5% | Complete |
 | GA validation and release supply chain | 5% | Pending |
 
@@ -41,7 +41,7 @@ The control service and gateway authorizer expose liveness, dependency-aware rea
 
 ## Security And Compatibility Gates
 
-Mock OIDC is a development and test fixture. It defaults off in production, production configuration rejects attempts to enable it, authentication discovery omits it, and metadata does not advertise federated_auth. A real enterprise OIDC adapter must preserve Authorization Code with PKCE, one-time exchange, identity mapping, and the same AEP session contract.
+The supported production authentication profile for this release is administrator-provisioned ZhiYuan accounts and passwords. Mock OIDC is a development and test fixture. It defaults off in production, production configuration rejects attempts to enable it, authentication discovery omits it, and metadata does not advertise federated_auth. Customer identity integration is deferred and does not block the password-only GA profile. A future enterprise OIDC adapter must preserve Authorization Code with PKCE, one-time exchange, identity mapping, and the same AEP session contract.
 
 Metadata remains accessible without a protocol header for discovery. Every other /aep/v1 request requires X-AEP-Protocol-Version: 1.0. Missing or unsupported versions receive RFC 9457 status 426 and X-AEP-Supported-Protocol-Versions.
 
@@ -51,7 +51,7 @@ The gateway reconciler now applies tenant Ingress and Higress WasmPlugin resourc
 
 ## Remaining 10%
 
-Customer client and IdP integration, 5%: connect a real enterprise OIDC or customer adapter and complete a RongxinAI main-process pilot. Tokens and Credential values must remain outside the renderer.
+Product client integration, 5%: complete a RongxinAI main-process pilot using the ZhiYuan password profile. Passwords, tokens, and Credential values must remain outside the renderer, and refresh tokens must use operating-system protected storage.
 
 GA validation, 5%: complete load and soak testing, external security review, backup and disaster-recovery rehearsal, signed artifacts and SBOM publication, and remaining draft-profile cleanup. The M3 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
 

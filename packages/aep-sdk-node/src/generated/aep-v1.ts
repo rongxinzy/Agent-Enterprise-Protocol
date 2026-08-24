@@ -910,8 +910,10 @@ export interface components {
             protocol?: "oidc" | "saml" | "custom" | null;
             displayName: string;
         };
+        /** @description Authentication methods enabled for the enterprise. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured. */
         AuthenticationMethods: {
             enterprise: components["schemas"]["Enterprise"];
+            /** @description The ID of the preferred enabled method. Defaults to zhiyuan-password for the password-only production profile. */
             preferredMethodId?: string | null;
             methods: components["schemas"]["AuthenticationMethod"][];
         };

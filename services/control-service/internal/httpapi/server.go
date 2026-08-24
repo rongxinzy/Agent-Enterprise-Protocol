@@ -16,6 +16,7 @@ import (
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
 )
 
 type contextKey string
@@ -298,7 +299,7 @@ func (s *Server) getJWKS(response http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
 	capabilities := []string{"password_auth"}
-	if s.app.Config.EnableMockFederatedAuth {
+	if mockFederatedAuthEnabled(s.app.Config) {
 		capabilities = append(capabilities, "federated_auth")
 	}
 	capabilities = append(capabilities, "skills", "telemetry", "control_events")
@@ -318,4 +319,8 @@ func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
 		metadata["capabilities"] = capabilities
 	}
 	writeJSON(response, http.StatusOK, metadata)
+}
+
+func mockFederatedAuthEnabled(cfg config.Config) bool {
+	return cfg.EnableMockFederatedAuth && cfg.Environment != "production"
 }
