@@ -29,9 +29,11 @@ kubectl -n aep-system rollout status deployment/aep-gateway-authorizer
 kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 ```
 
-The two reconciler replicas have independent scratch volumes and a disruption budget. In this PR they still render deterministic Higress resources only; they do not apply Kubernetes resources. The next data-plane automation gate adds leader-safe live server-side apply and verifies it against Higress-compatible Kubernetes resources. Do not treat a `ready` status from this version as proof that a live Higress configuration changed.
+The two reconciler replicas have independent audit volumes and a disruption budget. Both use Kubernetes server-side apply with the `aep-gateway-reconciler` field manager. Because every object name and body is deterministic, concurrent replicas have safe write ownership without a leader lease. A `ready` status is written only after both live Kubernetes operations succeed. Any partial failure reports `KUBERNETES_APPLY_FAILED` and is retried with bounded exponential backoff.
 
-The reconciler Role and RoleBinding are deliberately scoped to `higress-system` and are included so the next gate can use server-side apply without broad cluster permissions. Validate that the installed Higress CRD group and resource names match `extensions.higress.io/wasmplugins` before enabling that mode.
+The reconciler Role and RoleBinding are deliberately scoped to Ingress and `extensions.higress.io/wasmplugins` in `higress-system`. The service-account token and cluster CA come from projected Kubernetes files. Validate the installed Higress CRD group and resource names before rollout.
+
+Run `npm run test:e2e:m3-data-plane` for control-plane and fault convergence, and `npm run test:e2e:m3-kubernetes` for the real Kubernetes API Server and Higress-compatible CRD gate.
 
 ## Rollback
 

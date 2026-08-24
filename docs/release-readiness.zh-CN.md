@@ -1,15 +1,15 @@
 # AEP v1 企业底座发布就绪度
 
 状态：发布候选
-实现档位：M2
-企业底座完成度：85%
-评估日期：2026-08-21
+实现档位：M3
+企业底座完成度：90%
+评估日期：2026-08-24
 
 ## 发布结论
 
 当前企业底座可以作为独立集成包发版，并进入受控企业试点，但还不是通用可用的 GA 版本。
 
-达到 85% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。RongxinAI 主进程接入及客户身份系统试点属于最后 15%。
+达到 90% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。RongxinAI 主进程接入及客户身份系统试点属于最后 10%。
 
 权威机器可读评分位于 release/foundation-readiness.json。scripts/release-audit.mjs 会阻止评分漂移、证据文件缺失、工具链或协议版本不一致、不安全生产默认值以及 CI 必需门禁被删除。
 
@@ -26,10 +26,10 @@
 | 参考 Agent | 5% | 完成 |
 | 生产运行基线 | 5% | 完成 |
 | 客户客户端与 IdP 集成 | 5% | 待完成 |
-| 生产数据面自动化 | 5% | 待完成 |
+| 生产数据面自动化 | 5% | 完成 |
 | GA 验证与发布供应链 | 5% | 待完成 |
 
-已完成权重严格为 85/100，待完成工作不按部分完成计分。
+已完成权重严格为 90/100，待完成工作不按部分完成计分。
 
 ## 当前可发版能力
 
@@ -47,13 +47,13 @@ metadata 为支持能力发现，可以不带协议版本头访问。其他所�
 
 higress-standalone 与静态 AI Proxy 映射只用于本地和 CI。生产 Higress 必须采用 Helm、受保护的供应商 Secret、TLS 入口和组织级高可用控制。
 
-## 剩余 15%
+gateway reconciler 现已通过 Kubernetes server-side apply 下发租户 Ingress 与 Higress WasmPlugin。确定性名称、统一 field manager、周期漂移修复、禁用删除、部分失败状态和双副本收敛均由故障测试及真实 kind API Server 门禁覆盖。
+
+## 剩余 10%
 
 客户客户端与 IdP 集成，5%：接入真实企业 OIDC 或客户身份适配器，并完成 RongxinAI 主进程试点；Token 和 Credential 明文不得进入 Renderer。
 
-生产数据面自动化，5%：把审批后的模型路由和 server-only 供应商 Secret 持续收敛到生产 Higress，并交付面向实际环境的 Kubernetes、Secret 管理和高可用清单。
-
-GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾备演练、签名制品与 SBOM 发布，以及草案档位的剩余清理。M2 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
+GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾备演练、签名制品与 SBOM 发布，以及草案档位的剩余清理。M3 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
 
 ## Go 或 No-Go
 
@@ -63,6 +63,6 @@ GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾
 npm run release:check
 ~~~
 
-该命令会校验 OpenAPI 与生成的 SDK 类型，构建并测试 Node workspace，校验 85% 评分，执行 Go test、race、vet 和 build，并运行全部 Compose E2E。CI 中 sdk-gate、control-service、example-agent、compose-e2e 和 release-gate 必须全部成功。
+该命令会校验 OpenAPI 与生成的 SDK 类型，构建并测试 Node workspace，校验 90% 评分，执行 Go test、race、vet 和 build，并运行全部 Compose E2E。CI 中 sdk-gate、control-service、example-agent、compose-e2e、data-plane-kubernetes 和 release-gate 必须全部成功。
 
 出现以下任一情况时不得进入生产试点：复用任何生产默认凭证、启用 mock 联合认证、在不可信网络上缺少 HTTPS 或等效可信传输、备份责任未定义，或目标 Higress 拓扑仍基于 higress-standalone。

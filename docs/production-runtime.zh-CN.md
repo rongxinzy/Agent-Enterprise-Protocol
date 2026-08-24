@@ -58,4 +58,4 @@ npm run test:e2e:runtime
 
 该场景验证首次并发启动、依赖感知 readiness、独立 liveness、Prometheus 指标、结构化日志、容器权限收敛和 SIGTERM 零退出。完整发布门仍为 `npm run test:e2e`。
 
-Kubernetes、Higress Helm、TLS、RBAC 和 External Secrets 的部署基线见 [production-data-plane.zh-CN.md](production-data-plane.zh-CN.md)。它只提供部署基线，不代表当前渲染器已经在线 apply Higress 对象。
+Kubernetes、Higress Helm、TLS、RBAC、External Secrets 与在线数据面收敛基线见 [production-data-plane.zh-CN.md](production-data-plane.zh-CN.md)。

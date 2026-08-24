@@ -1,15 +1,15 @@
 # AEP v1 Foundation Release Readiness
 
 Status: release candidate
-Implementation profile: M2
-Measured foundation completion: 85%
-Assessment date: 2026-08-21
+Implementation profile: M3
+Measured foundation completion: 90%
+Assessment date: 2026-08-24
 
 ## Release Decision
 
 The enterprise foundation is ready for independent integration testing and a controlled enterprise pilot. It is not a general-availability release.
 
-A real product client is not required to validate this 85% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A RongxinAI main-process integration and a customer identity pilot remain part of the final 15%.
+A real product client is not required to validate this 90% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A RongxinAI main-process integration and a customer identity pilot remain part of the final 10%.
 
 The authoritative machine-readable score is in release/foundation-readiness.json. The scripts/release-audit.mjs check rejects score drift, missing evidence, mismatched toolchain or protocol versions, unsafe production defaults, and removal of required CI gates.
 
@@ -26,10 +26,10 @@ The authoritative machine-readable score is in release/foundation-readiness.json
 | Reference Agent | 5% | Complete |
 | Production runtime baseline | 5% | Complete |
 | Customer client and IdP integration | 5% | Pending |
-| Production data-plane automation | 5% | Pending |
+| Production data-plane automation | 5% | Complete |
 | GA validation and release supply chain | 5% | Pending |
 
-Completed weight is 85 of 100. Pending work is not counted as partial completion.
+Completed weight is 90 of 100. Pending work is not counted as partial completion.
 
 ## Available Release Surface
 
@@ -47,13 +47,13 @@ Metadata remains accessible without a protocol header for discovery. Every other
 
 Higress standalone and the static AI Proxy mapping remain local and CI fixtures. Production Higress must use Helm, protected provider Secrets, TLS ingress, and organization-specific availability controls.
 
-## Remaining 15%
+The gateway reconciler now applies tenant Ingress and Higress WasmPlugin resources through Kubernetes server-side apply. Deterministic names, one field manager, periodic drift repair, delete-on-disable behavior, partial-failure status, and two-replica convergence are covered by fake-control-plane fault tests and a real kind API Server gate.
+
+## Remaining 10%
 
 Customer client and IdP integration, 5%: connect a real enterprise OIDC or customer adapter and complete a RongxinAI main-process pilot. Tokens and Credential values must remain outside the renderer.
 
-Production data-plane automation, 5%: continuously reconcile approved model routes and server-only provider Secrets into production Higress, and deliver deployment-specific Kubernetes, Secret-management, and availability manifests.
-
-GA validation, 5%: complete load and soak testing, external security review, backup and disaster-recovery rehearsal, signed artifacts and SBOM publication, and remaining draft-profile cleanup. The M2 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
+GA validation, 5%: complete load and soak testing, external security review, backup and disaster-recovery rehearsal, signed artifacts and SBOM publication, and remaining draft-profile cleanup. The M3 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
 
 ## Go Or No-Go
 
@@ -63,6 +63,6 @@ Run the complete local release gate:
 npm run release:check
 ~~~
 
-The command validates OpenAPI and generated SDK types, builds and tests Node workspaces, validates the readiness score, runs Go test, race, vet, and build gates, and executes every Compose E2E scenario. CI must finish with sdk-gate, control-service, example-agent, compose-e2e, and release-gate all successful.
+The command validates OpenAPI and generated SDK types, builds and tests Node workspaces, validates the readiness score, runs Go test, race, vet, and build gates, and executes every Compose E2E scenario. CI must finish with sdk-gate, control-service, example-agent, compose-e2e, data-plane-kubernetes, and release-gate all successful.
 
 A production pilot is no-go if any production default is reused, mock federated authentication is enabled, HTTPS or equivalent trusted transport is absent on an untrusted network, backup ownership is undefined, or the target Higress topology is based on higress-standalone.
