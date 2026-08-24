@@ -96,9 +96,11 @@ jobs:
           cache: true
       - name: Install kind
         run: |
-          curl --fail --location --silent --show-error https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64 -o /usr/local/bin/kind
-          echo "50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  /usr/local/bin/kind" | sha256sum --check
-          chmod +x /usr/local/bin/kind
+          mkdir -p "$RUNNER_TEMP/aep-bin"
+          curl --fail --location --silent --show-error https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64 -o "$RUNNER_TEMP/aep-bin/kind"
+          echo "50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  $RUNNER_TEMP/aep-bin/kind" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/aep-bin/kind"
+          echo "$RUNNER_TEMP/aep-bin" >> "$GITHUB_PATH"
       - run: npm ci
       - run: npm run test:e2e:m3-kubernetes
 
