@@ -30,6 +30,7 @@ jobs:
       - run: npm run release:audit
       - run: npm run build --workspace @aep/sdk-node
       - run: npm run test --workspace @aep/sdk-node
+      - run: npm run sdk:package:check
 
   control-service:
     needs: sdk-gate

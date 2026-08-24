@@ -4,6 +4,7 @@
     "implementationProfile": "m3",
     "protocolVersion": "1.0",
     "packageVersion": "0.1.0",
+    "sdkVersion": "0.2.0",
     "stage": "release-candidate",
     "completionPercent": 90,
     "asOf": "2026-08-24"
