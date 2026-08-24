@@ -36,11 +36,16 @@ for (const gate of remaining) {
 const packageDocument = await readJSON("package.json");
 assert(packageDocument.version === release.packageVersion, "package version does not match release manifest");
 assert(packageDocument.scripts?.["release:audit"] === "node scripts/release-audit.mjs", "release:audit script is not wired");
-for (const command of ["npm run check", "npm run release:audit", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e"]) {
+assert(packageDocument.scripts?.["sdk:package:check"]?.includes("scripts/sdk-package-check.mjs"), "SDK package check is not wired");
+for (const command of ["npm run check", "npm run release:audit", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e"]) {
   assert(packageDocument.scripts?.["release:check"]?.includes(command), "release:check omits " + command);
 }
 
 const constants = await readText("packages/aep-sdk-node/src/constants.ts");
+const sdkPackage = await readJSON("packages/aep-sdk-node/package.json");
+assert(sdkPackage.version === release.sdkVersion, "SDK package version does not match release manifest");
+assert(sdkPackage.publishConfig?.access === "public", "SDK package must remain publicly installable");
+assert(sdkPackage.publishConfig?.provenance === true, "SDK package publication must request provenance");
 const protocolMatch = constants.match(/AEP_PROTOCOL_VERSION\s*=\s*'([^']+)'/);
 assert(protocolMatch?.[1] === release.protocolVersion, "SDK protocol version does not match release manifest");
 const tokenStore = await readText("packages/aep-sdk-node/src/token-store.ts");
@@ -91,10 +96,15 @@ assert(packageDocument.scripts?.["test:e2e"]?.includes("test:e2e:m3-data-plane")
 assert(packageDocument.scripts?.["test:e2e:m3-kubernetes"] === "node tests/e2e/m3-kubernetes.mjs", "kind/Higress-compatible E2E gate is not wired");
 
 const workflow = await readText(".github/workflows/m0.yml");
+const sdkReleaseWorkflow = await readText(".github/workflows/sdk-release.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
+assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
 assert(workflow.includes("go test -race ./..."), "CI does not run the Go race detector");
 assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
 assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
+assert(sdkReleaseWorkflow.includes("sdk-node-v*"), "SDK release workflow does not use versioned tags");
+assert(sdkReleaseWorkflow.includes("git merge-base --is-ancestor"), "SDK release tags are not constrained to main history");
+assert(sdkReleaseWorkflow.includes("npm run sdk:package:check"), "SDK release workflow bypasses the package check");
 
 for (const readme of ["README.md", "README.zh-CN.md"]) {
   const content = await readText(readme);

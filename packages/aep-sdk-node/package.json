@@ -1,8 +1,19 @@
 {
   "name": "@aep/sdk-node",
-  "version": "0.1.0",
-  "description": "Node.js SDK for Agent Enterprise Protocol M0",
+  "version": "0.2.0",
+  "description": "Node.js SDK for Agent Enterprise Protocol",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rongxinzy/Agent-Enterprise-Protocol.git",
+    "directory": "packages/aep-sdk-node"
+  },
+  "homepage": "https://github.com/rongxinzy/Agent-Enterprise-Protocol/tree/main/packages/aep-sdk-node#readme",
+  "bugs": {
+    "url": "https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues"
+  },
+  "keywords": ["aep", "agent", "enterprise", "protocol"],
+  "sideEffects": false,
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -14,7 +25,11 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md", "README.zh-CN.md"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {"node": ">=24 <25"},
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --clean",
