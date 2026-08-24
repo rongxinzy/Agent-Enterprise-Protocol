@@ -1,0 +1,59 @@
+# cert-manager creates aep-public-tls from the production ClusterIssuer. The
+# certificate private key is managed by cert-manager, never stored in Git.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aep-public
+  namespace: aep-system
+spec:
+  secretName: aep-public-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: production-acme
+  dnsNames: [aep.example.com, models.aep.example.com]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aep-control-api
+  namespace: aep-system
+  annotations:
+    kubernetes.io/ingress.class: higress
+spec:
+  ingressClassName: higress
+  tls:
+    - hosts: [aep.example.com]
+      secretName: aep-public-tls
+  rules:
+    - host: aep.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aep-control-service
+                port: {name: http}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aep-model-api
+  namespace: aep-system
+  annotations:
+    kubernetes.io/ingress.class: higress
+spec:
+  ingressClassName: higress
+  tls:
+    - hosts: [models.aep.example.com]
+      secretName: aep-public-tls
+  rules:
+    - host: models.aep.example.com
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: aep-gateway-authorizer
+                port: {name: http}

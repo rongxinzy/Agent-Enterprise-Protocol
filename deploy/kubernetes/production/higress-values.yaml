@@ -1,0 +1,17 @@
+# Input for `helm upgrade --install higress higress.io/higress --namespace
+# higress-system --create-namespace --version <pinned-version> -f ...`.
+# Pin a tested Higress chart version and image digests in the deployment system.
+global:
+  enableIstioAPI: true
+higress-core:
+  controller:
+    replicaCount: 2
+    podAntiAffinity: preferred
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 2Gi}
+  gateway:
+    replicas: 2
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 2Gi}

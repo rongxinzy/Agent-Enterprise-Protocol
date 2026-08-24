@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - external-secrets.yaml
+  - control-service.yaml
+  - gateway-authorizer.yaml
+  - gateway-reconciler-rbac.yaml
+  - gateway-reconciler.yaml
+  - disruption-budgets.yaml
+  - network-policies.yaml
+  - ingress-tls.yaml
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/part-of: aep
+      app.kubernetes.io/managed-by: kustomize

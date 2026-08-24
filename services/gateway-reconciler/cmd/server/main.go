@@ -15,6 +15,20 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if len(os.Args) < 3 {
+			os.Exit(2)
+		}
+		response, err := (&http.Client{Timeout: 2 * time.Second}).Get(os.Args[2])
+		if err != nil || response.StatusCode != http.StatusOK {
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			os.Exit(1)
+		}
+		_ = response.Body.Close()
+		return
+	}
 	config, err := loadConfig()
 	if err != nil {
 		slog.Error("gateway reconciler configuration failed", "error", err)
@@ -46,7 +60,11 @@ func loadConfig() (serverConfig, error) {
 	if err != nil || interval <= 0 {
 		return serverConfig{}, errors.New("AEP_RECONCILER_INTERVAL must be positive")
 	}
-	return serverConfig{worker: reconciler.Config{ControlURL: os.Getenv("AEP_RECONCILER_CONTROL_URL"), Token: os.Getenv("AEP_DATA_PLANE_RECONCILER_TOKEN"), OutputDir: value("AEP_RECONCILER_OUTPUT_DIR", "/var/lib/aep-reconciler"), Tenants: tenants}, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
+	token, err := secret("AEP_DATA_PLANE_RECONCILER_TOKEN")
+	if err != nil {
+		return serverConfig{}, err
+	}
+	return serverConfig{worker: reconciler.Config{ControlURL: os.Getenv("AEP_RECONCILER_CONTROL_URL"), Token: token, OutputDir: value("AEP_RECONCILER_OUTPUT_DIR", "/var/lib/aep-reconciler"), Tenants: tenants}, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
 }
 
 func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration) {
@@ -111,4 +129,19 @@ func value(key, fallback string) string {
 		return current
 	}
 	return fallback
+}
+
+func secret(key string) (string, error) {
+	direct, file := os.Getenv(key), os.Getenv(key+"_FILE")
+	if direct != "" && file != "" {
+		return "", errors.New(key + " and " + key + "_FILE are mutually exclusive")
+	}
+	if file == "" {
+		return direct, nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(data), "\r\n"), nil
 }
