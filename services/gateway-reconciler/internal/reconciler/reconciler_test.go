@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,16 @@ import (
 	"strings"
 	"testing"
 )
+
+type recordingApplier struct {
+	calls int
+	err   error
+}
+
+func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ string) error {
+	a.calls++
+	return a.err
+}
 
 func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
 	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-1", ContentHash: "ignored", Routes: []Route{{ModelID: "model-b", Enabled: true, Endpoint: "/b", UpstreamModel: "up-b", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-b"}}, {ModelID: "model-a", Enabled: true, Endpoint: "/a", UpstreamModel: "up-a", Protocol: "openai-compatible"}}}
@@ -59,7 +70,8 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 	defer server.Close()
 
 	output := t.TempDir()
-	worker, err := New(Config{ControlURL: server.URL, Token: "token", OutputDir: output, Tenants: []string{"demo"}, HTTPClient: server.Client()})
+	applier := &recordingApplier{}
+	worker, err := New(Config{ControlURL: server.URL, Token: "token", OutputDir: output, Tenants: []string{"demo"}, HTTPClient: server.Client(), Applier: applier})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,5 +87,34 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 	}
 	if len(statuses) != 2 || statuses[0].State != "applying" || statuses[1].State != "ready" {
 		t.Fatalf("unexpected status transitions: %#v", statuses)
+	}
+	if applier.calls != 1 {
+		t.Fatalf("apply calls = %d", applier.calls)
+	}
+}
+
+func TestSyncReportsKubernetesApplyFailure(t *testing.T) {
+	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-1", Routes: []Route{}}
+	desired.ContentHash = canonicalHash(desired)
+	statuses := make([]Status, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			_ = json.NewEncoder(response).Encode(desired)
+			return
+		}
+		var status Status
+		_ = json.NewDecoder(request.Body).Decode(&status)
+		statuses = append(statuses, status)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	applier := &recordingApplier{err: errors.New("Kubernetes unavailable")}
+	worker, err := New(Config{ControlURL: server.URL, Token: "token", OutputDir: t.TempDir(), Tenants: []string{"demo"}, HTTPClient: server.Client(), Applier: applier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = worker.Sync(context.Background(), "demo")
+	if err == nil || len(statuses) != 2 || statuses[1].State != "error" || statuses[1].ErrorCode == nil || *statuses[1].ErrorCode != "KUBERNETES_APPLY_FAILED" {
+		t.Fatalf("Sync() error = %v, statuses = %#v", err, statuses)
 	}
 }

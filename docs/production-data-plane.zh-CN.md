@@ -29,9 +29,11 @@ kubectl -n aep-system rollout status deployment/aep-gateway-authorizer
 kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 ```
 
-两个 reconciler 副本各自拥有临时渲染目录，并配置了 PDB。本 PR 中它们仍只渲染确定性的 Higress 资源，尚未直接 apply Kubernetes 资源。下一项数据面自动化门禁会实现具备 leader 安全性的 server-side apply，并以 Higress 兼容 Kubernetes 资源验证。因此当前版本的 `ready` 状态不能视为线上 Higress 配置已修改的证据。
+两个 reconciler 副本各自拥有审计副本目录，并配置了 PDB。两者都使用 field manager `aep-gateway-reconciler` 执行 Kubernetes server-side apply。因为对象名称和内容完全确定，多个副本无需 leader lease 也能安全持有相同写入字段。只有两个线上 Kubernetes 操作均成功后才会上报 `ready`；部分失败会返回 `KUBERNETES_APPLY_FAILED`，并按有界指数退避重试。
 
-reconciler 的 Role 和 RoleBinding 明确限定在 `higress-system`，下一阶段可在不授予宽泛集群权限的前提下启用 server-side apply。启用前必须确认已安装 Higress CRD 的组和资源名为 `extensions.higress.io/wasmplugins`。
+reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingress 与 `extensions.higress.io/wasmplugins`。service-account token 与集群 CA 来自 Kubernetes 投射文件。上线前必须确认已安装 Higress CRD 的组和资源名。
+
+运行 `npm run test:e2e:m3-data-plane` 验证控制面与故障收敛，运行 `npm run test:e2e:m3-kubernetes` 验证真实 Kubernetes API Server 与 Higress 兼容 CRD 门禁。
 
 ## 回滚
 

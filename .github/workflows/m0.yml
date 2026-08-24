@@ -8,6 +8,7 @@ on:
       - codex/m0-*
       - codex/m1-*
       - codex/m2-*
+      - codex/m3-*
 
 permissions:
   contents: read
@@ -77,12 +78,37 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:e2e
+
+  data-plane-kubernetes:
+    needs:
+      - control-service
+      - example-agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.x
+          cache: true
+      - name: Install kind
+        run: |
+          curl --fail --location --silent --show-error https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64 -o /usr/local/bin/kind
+          echo "50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54  /usr/local/bin/kind" | sha256sum --check
+          chmod +x /usr/local/bin/kind
+      - run: npm ci
+      - run: npm run test:e2e:m3-kubernetes
+
   release-gate:
     needs:
       - sdk-gate
       - control-service
       - example-agent
       - compose-e2e
+      - data-plane-kubernetes
     runs-on: ubuntu-latest
     steps:
-      - run: echo "AEP 85% release gate passed."
+      - run: echo "AEP 90% release gate passed."

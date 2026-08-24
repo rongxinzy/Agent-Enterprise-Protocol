@@ -1,0 +1,4 @@
+services:
+  control-service:
+    environment:
+      AEP_DATA_PLANE_RECONCILER_TOKEN: m3-e2e-reconciler-token

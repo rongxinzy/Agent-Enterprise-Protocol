@@ -58,4 +58,4 @@ npm run test:e2e:runtime
 
 The scenario validates concurrent first startup, dependency-aware readiness, independent liveness, Prometheus metrics, structured logs, container hardening, and clean SIGTERM exit. The complete release gate remains `npm run test:e2e`.
 
-The Kubernetes, Higress Helm, TLS, RBAC, and External Secrets deployment baseline is documented in [production-data-plane.md](production-data-plane.md). It is a deployment baseline, not evidence that the current renderer already applies live Higress objects.
+The Kubernetes, Higress Helm, TLS, RBAC, External Secrets, and live data-plane reconciliation baseline is documented in [production-data-plane.md](production-data-plane.md).

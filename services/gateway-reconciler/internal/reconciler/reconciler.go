@@ -22,6 +22,7 @@ type Config struct {
 	OutputDir  string
 	Tenants    []string
 	HTTPClient *http.Client
+	Applier    Applier
 }
 
 type SecretReference struct {
@@ -94,6 +95,11 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 	if err := writeAtomic(filepath.Join(r.config.OutputDir, tenant+".yaml"), []byte(document)); err != nil {
 		return r.writeFailure(ctx, tenant, "OUTPUT_WRITE_FAILED", err)
 	}
+	if r.config.Applier != nil {
+		if err := r.config.Applier.Apply(ctx, desired, document); err != nil {
+			return r.writeFailure(ctx, tenant, "KUBERNETES_APPLY_FAILED", err)
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	return r.writeStatus(ctx, tenant, Status{State: "ready", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, LastAppliedAt: &now, ResourceCount: len(desired.Routes)})
 }
@@ -165,24 +171,39 @@ func Render(desired DesiredState) (string, string, error) {
 	if desired.Revision == "" {
 		return "", "", errors.New("desired revision is required")
 	}
-	var document strings.Builder
-	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: aep-model-gateway-" + yamlScalar(desired.EnterpriseID) + "\n  namespace: higress-system\nspec:\n  ingressClassName: higress\n  rules:\n    - http:\n        paths:\n")
-	for _, route := range routes {
-		if !route.Enabled {
-			continue
-		}
-		document.WriteString("          - path: " + yamlScalar(route.Endpoint) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
+	if strings.TrimSpace(desired.EnterpriseID) == "" {
+		return "", "", errors.New("enterprise ID is required")
 	}
-	document.WriteString("---\napiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: aep-ai-proxy-" + yamlScalar(desired.EnterpriseID) + "\n  namespace: higress-system\nspec:\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n  matchRules:\n")
+	suffix := resourceSuffix(desired.EnterpriseID)
+	enabled := make([]Route, 0, len(routes))
 	for _, route := range routes {
-		if !route.Enabled {
-			continue
+		if route.Enabled {
+			enabled = append(enabled, route)
 		}
+	}
+	var document strings.Builder
+	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: " + yamlScalar("aep-model-gateway-"+suffix) + "\n  namespace: higress-system\nspec:\n  ingressClassName: higress\n")
+	if len(enabled) > 0 {
+		document.WriteString("  rules:\n    - http:\n        paths:\n")
+		for _, route := range enabled {
+			document.WriteString("          - path: " + yamlScalar(route.Endpoint) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
+		}
+	}
+	document.WriteString("---\napiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
+	if len(enabled) == 0 {
+		document.WriteString("  matchRules: []\n")
+	} else {
+		document.WriteString("  matchRules:\n")
+	}
+	for _, route := range enabled {
 		document.WriteString("    - config:\n        provider:\n          type: openai\n          modelMapping:\n            " + yamlScalar(route.ModelID) + ": " + yamlScalar(route.UpstreamModel) + "\n")
 		if route.CredentialRef != nil {
 			document.WriteString("        credentialRef:\n          name: " + yamlScalar(route.CredentialRef.Name) + "\n          key: " + yamlScalar(route.CredentialRef.Key) + "\n")
+			if route.CredentialRef.Namespace != nil {
+				document.WriteString("          namespace: " + yamlScalar(*route.CredentialRef.Namespace) + "\n")
+			}
 		}
-		document.WriteString("      ingress:\n        - aep-model-gateway-" + yamlScalar(desired.EnterpriseID) + "\n")
+		document.WriteString("      ingress:\n        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
 	}
 	canonical := strings.TrimSpace(document.String()) + "\n"
 	digest := sha256.Sum256([]byte(canonical))
@@ -203,6 +224,26 @@ func canonicalHash(desired DesiredState) string {
 func yamlScalar(value string) string {
 	value = strings.ReplaceAll(value, "'", "''")
 	return "'" + value + "'"
+}
+
+func resourceSuffix(value string) string {
+	var result strings.Builder
+	for _, character := range strings.ToLower(value) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
+			result.WriteRune(character)
+		} else {
+			result.WriteByte('-')
+		}
+	}
+	clean := strings.Trim(result.String(), "-")
+	if clean == "" {
+		clean = "tenant"
+	}
+	digest := sha256.Sum256([]byte(value))
+	if len(clean) > 40 {
+		clean = strings.Trim(clean[:40], "-")
+	}
+	return clean + "-" + hex.EncodeToString(digest[:4])
 }
 
 func writeAtomic(path string, content []byte) error {

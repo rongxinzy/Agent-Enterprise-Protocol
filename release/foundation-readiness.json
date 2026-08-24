@@ -1,12 +1,12 @@
 {
   "release": {
     "name": "AEP v1 enterprise foundation",
-    "implementationProfile": "m2",
+    "implementationProfile": "m3",
     "protocolVersion": "1.0",
     "packageVersion": "0.1.0",
     "stage": "release-candidate",
-    "completionPercent": 85,
-    "asOf": "2026-08-21"
+    "completionPercent": 90,
+    "asOf": "2026-08-24"
   },
   "completedGates": [
     {
@@ -74,6 +74,17 @@
         "tests/e2e/runtime.mjs",
         "docs/production-runtime.md"
       ]
+    },
+    {
+      "id": "production-data-plane-automation",
+      "weight": 5,
+      "evidence": [
+        "services/gateway-reconciler/internal/reconciler/kubernetes_test.go",
+        "tests/e2e/m3-data-plane.mjs",
+        "tests/e2e/m3-kubernetes.mjs",
+        "deploy/kubernetes/production/gateway-reconciler.yaml",
+        "docs/production-data-plane.md"
+      ]
     }
   ],
   "remainingGates": [
@@ -83,14 +94,6 @@
       "exitCriteria": [
         "Integrate a real enterprise OIDC or customer identity adapter.",
         "Complete a RongxinAI main-process pilot without exposing tokens or Credential values to the renderer."
-      ]
-    },
-    {
-      "id": "production-data-plane-automation",
-      "weight": 5,
-      "exitCriteria": [
-        "Continuously reconcile approved model routes and server-only provider Secrets into a production Higress deployment.",
-        "Deliver organization-specific Kubernetes availability and Secret-management manifests."
       ]
     },
     {
@@ -108,7 +111,8 @@
     "telemetry",
     "control_events",
     "model_gateway",
-    "credentials"
+    "credentials",
+    "production_data_plane_automation"
   ],
   "developmentOnlyCapabilities": [
     "federated_auth"

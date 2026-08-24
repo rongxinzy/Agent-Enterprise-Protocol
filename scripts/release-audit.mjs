@@ -8,7 +8,7 @@ const release = manifest.release ?? {};
 const completed = manifest.completedGates ?? [];
 const remaining = manifest.remainingGates ?? [];
 
-assert(release.implementationProfile === "m2", "implementation profile must be m2");
+assert(release.implementationProfile === "m3", "implementation profile must be m3");
 assert(release.protocolVersion === "1.0", "protocol version must be 1.0");
 assert(release.stage === "release-candidate", "release stage must remain release-candidate");
 assert(Number.isInteger(release.completionPercent), "completion percent must be an integer");
@@ -76,11 +76,19 @@ assert(productionRBAC.includes("namespace: higress-system"), "reconciler RBAC mu
 assert(productionSecrets.includes("kind: ExternalSecret"), "production Secret manager integration is missing");
 assert(!/\nkind: Secret\n/.test(productionSecrets), "production manifests must not commit Kubernetes Secret values");
 assert(productionNetworkPolicy.includes("aep-default-deny"), "production default-deny NetworkPolicy is missing");
+assert(productionReconciler.includes("AEP_RECONCILER_KUBERNETES_TOKEN_FILE"), "production reconciler does not use its projected service-account token");
+
+const kubernetesApplier = await readText("services/gateway-reconciler/internal/reconciler/kubernetes.go");
+assert(kubernetesApplier.includes("application/apply-patch+yaml"), "Kubernetes server-side apply is missing");
+assert(kubernetesApplier.includes("fieldManager"), "Kubernetes apply field ownership is missing");
+assert(packageDocument.scripts?.["test:e2e"]?.includes("test:e2e:m3-data-plane"), "default E2E gate omits M3 data-plane automation");
+assert(packageDocument.scripts?.["test:e2e:m3-kubernetes"] === "node tests/e2e/m3-kubernetes.mjs", "kind/Higress-compatible E2E gate is not wired");
 
 const workflow = await readText(".github/workflows/m0.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
 assert(workflow.includes("go test -race ./..."), "CI does not run the Go race detector");
 assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
+assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
 
 for (const readme of ["README.md", "README.zh-CN.md"]) {
   const content = await readText(readme);

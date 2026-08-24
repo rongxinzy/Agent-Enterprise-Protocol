@@ -64,7 +64,18 @@ func loadConfig() (serverConfig, error) {
 	if err != nil {
 		return serverConfig{}, err
 	}
-	return serverConfig{worker: reconciler.Config{ControlURL: os.Getenv("AEP_RECONCILER_CONTROL_URL"), Token: token, OutputDir: value("AEP_RECONCILER_OUTPUT_DIR", "/var/lib/aep-reconciler"), Tenants: tenants}, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
+	workerConfig := reconciler.Config{ControlURL: os.Getenv("AEP_RECONCILER_CONTROL_URL"), Token: token, OutputDir: value("AEP_RECONCILER_OUTPUT_DIR", "/var/lib/aep-reconciler"), Tenants: tenants}
+	if kubernetesURL := os.Getenv("AEP_RECONCILER_KUBERNETES_URL"); kubernetesURL != "" {
+		kubernetesToken, err := secret("AEP_RECONCILER_KUBERNETES_TOKEN")
+		if err != nil {
+			return serverConfig{}, err
+		}
+		workerConfig.Applier, err = reconciler.NewKubernetesApplier(reconciler.KubernetesConfig{URL: kubernetesURL, Token: kubernetesToken, CAFile: os.Getenv("AEP_RECONCILER_KUBERNETES_CA_FILE")})
+		if err != nil {
+			return serverConfig{}, err
+		}
+	}
+	return serverConfig{worker: workerConfig, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
 }
 
 func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration) {

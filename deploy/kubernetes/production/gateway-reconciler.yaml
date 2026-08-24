@@ -10,6 +10,9 @@ data:
   AEP_RECONCILER_OUTPUT_DIR: /var/lib/aep-reconciler
   AEP_RECONCILER_INTERVAL: 15s
   AEP_DATA_PLANE_RECONCILER_TOKEN_FILE: /var/run/aep-secrets/reconciler-token
+  AEP_RECONCILER_KUBERNETES_URL: https://kubernetes.default.svc
+  AEP_RECONCILER_KUBERNETES_TOKEN_FILE: /var/run/secrets/kubernetes.io/serviceaccount/token
+  AEP_RECONCILER_KUBERNETES_CA_FILE: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
 ---
 apiVersion: v1
 kind: Service
@@ -94,7 +97,7 @@ spec:
             items:
               - key: reconciler-token
                 path: reconciler-token
-        # Each replica owns an independent scratch directory. This PR does not
-        # expose it as a live Higress configuration source.
+        # Each replica owns an independent audit copy. Both replicas use the
+        # same server-side apply field manager and deterministic resources.
         - name: render-output
           emptyDir: {}

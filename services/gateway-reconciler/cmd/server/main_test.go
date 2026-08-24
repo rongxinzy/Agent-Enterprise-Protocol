@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadConfigReadsMountedToken(t *testing.T) {
+	t.Setenv("AEP_RECONCILER_KUBERNETES_URL", "")
 	t.Setenv("AEP_RECONCILER_CONTROL_URL", "http://control-service:8080")
 	t.Setenv("AEP_RECONCILER_TENANTS", "enterprise")
 	t.Setenv("AEP_RECONCILER_INTERVAL", "15s")
@@ -25,6 +26,7 @@ func TestLoadConfigReadsMountedToken(t *testing.T) {
 }
 
 func TestLoadConfigRejectsAmbiguousToken(t *testing.T) {
+	t.Setenv("AEP_RECONCILER_KUBERNETES_URL", "")
 	t.Setenv("AEP_RECONCILER_CONTROL_URL", "http://control-service:8080")
 	t.Setenv("AEP_RECONCILER_TENANTS", "enterprise")
 	t.Setenv("AEP_RECONCILER_INTERVAL", "15s")
