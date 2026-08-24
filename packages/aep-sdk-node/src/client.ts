@@ -24,6 +24,9 @@ import type {
   CredentialPatch,
   CredentialRotate,
   CurrentIdentity,
+  DataPlaneDesiredState,
+  DataPlaneDesiredStateWrite,
+  DataPlaneStatus,
   HeartbeatResponse,
   JsonObject,
   JsonValue,
@@ -474,6 +477,22 @@ export class AepClient {
       path: `/aep/v1/admin/model-assignments/${segment(assignmentId)}`,
       responseType: 'empty',
     });
+  }
+
+  getDataPlaneDesiredState(): Promise<DataPlaneDesiredState> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/desired-state'});
+  }
+
+  putDataPlaneDesiredState(input: DataPlaneDesiredStateWrite): Promise<DataPlaneDesiredState> {
+    return this.#send({
+      method: HttpMethod.Put,
+      path: '/aep/v1/admin/data-plane/desired-state',
+      body: asJson(input),
+    });
+  }
+
+  getDataPlaneStatus(): Promise<DataPlaneStatus> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/status'});
   }
 
   createControlEvent(input: JsonObject): Promise<JsonObject> {

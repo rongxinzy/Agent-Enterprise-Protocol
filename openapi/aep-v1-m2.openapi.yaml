@@ -27,6 +27,7 @@ tags:
   - {name: Admin Agents}
   - {name: Admin Models}
   - {name: Admin Credentials}
+  - {name: Admin Data Plane}
 paths:
   /.well-known/jwks.json:
     get:
@@ -178,6 +179,45 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments'
   /aep/v1/admin/model-assignments/{assignmentId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments~1{assignmentId}'
+  /aep/v1/admin/data-plane/desired-state:
+    get:
+      tags: [Admin Data Plane]
+      operationId: getDataPlaneDesiredState
+      description: Returns the tenant-scoped model gateway state intended for reconciliation. Secret values are never returned.
+      responses:
+        '200':
+          description: Current desired state, or an empty state when none has been published.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
+    put:
+      tags: [Admin Data Plane]
+      operationId: putDataPlaneDesiredState
+      description: Publishes an idempotent desired state. Secret references identify external Secret material and never contain values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DataPlaneDesiredStateWrite'}
+      responses:
+        '200':
+          description: Desired state accepted for reconciliation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
+        '400': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+        '409': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/data-plane/status:
+    get:
+      tags: [Admin Data Plane]
+      operationId: getDataPlaneStatus
+      description: Returns the latest observed gateway reconciliation state.
+      responses:
+        '200':
+          description: Data plane observation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DataPlaneStatus'}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -232,6 +272,56 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/AdminAgent'}}
         nextCursor: {type: [string, 'null']}
+    DataPlaneSecretReference:
+      type: object
+      required: [name, key]
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 253}
+        key: {type: string, minLength: 1, maxLength: 253}
+        namespace: {type: [string, 'null'], maxLength: 253}
+    DataPlaneRoute:
+      type: object
+      required: [modelId, enabled, endpoint, upstreamModel, protocol]
+      additionalProperties: false
+      properties:
+        modelId: {type: string, minLength: 1, maxLength: 200}
+        enabled: {type: boolean}
+        endpoint: {type: string, format: uri-reference}
+        upstreamModel: {type: string, minLength: 1, maxLength: 200}
+        protocol: {type: string, const: openai-compatible}
+        credentialRef: {$ref: '#/components/schemas/DataPlaneSecretReference'}
+    DataPlaneDesiredStateWrite:
+      type: object
+      required: [revision, routes]
+      additionalProperties: false
+      properties:
+        revision: {type: string, minLength: 1, maxLength: 200}
+        routes:
+          type: array
+          maxItems: 500
+          items: {$ref: '#/components/schemas/DataPlaneRoute'}
+    DataPlaneDesiredState:
+      allOf:
+        - {$ref: '#/components/schemas/DataPlaneDesiredStateWrite'}
+        - type: object
+          required: [enterpriseId, publishedAt, contentHash]
+          properties:
+            enterpriseId: {type: string}
+            publishedAt: {type: string, format: date-time}
+            contentHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+    DataPlaneStatus:
+      type: object
+      required: [state, observedRevision, contentHash]
+      additionalProperties: false
+      properties:
+        state: {type: string, enum: [pending, applying, ready, degraded, error]}
+        observedRevision: {type: [string, 'null']}
+        contentHash: {type: [string, 'null'], pattern: '^[a-f0-9]{64}$'}
+        lastAppliedAt: {type: [string, 'null'], format: date-time}
+        errorCode: {type: [string, 'null']}
+        message: {type: [string, 'null'], maxLength: 2000}
+        resourceCount: {type: integer, minimum: 0}
     JsonWebKeySet:
       type: object
       required: [keys]
