@@ -43,9 +43,9 @@ func TestMetadataAdvertisesCredentialsOnlyWhenConfigured(t *testing.T) {
 }
 
 func TestMetadataAdvertisesMockFederatedAuthOnlyWhenEnabled(t *testing.T) {
-	requestCapabilities := func(enabled bool) []string {
+	requestCapabilities := func(environment string, enabled bool) []string {
 		t.Helper()
-		application := &app.App{Config: config.Config{EnableMockFederatedAuth: enabled}}
+		application := &app.App{Config: config.Config{Environment: environment, EnableMockFederatedAuth: enabled}}
 		request := httptest.NewRequest(http.MethodGet, "/aep/v1/metadata", nil)
 		response := httptest.NewRecorder()
 		New(application).Handler().ServeHTTP(response, request)
@@ -71,11 +71,23 @@ func TestMetadataAdvertisesMockFederatedAuthOnlyWhenEnabled(t *testing.T) {
 		return capabilities
 	}
 
-	if contains(requestCapabilities(false), "federated_auth") {
+	if contains(requestCapabilities("development", false), "federated_auth") {
 		t.Fatal("metadata advertised disabled mock federated authentication")
 	}
-	if !contains(requestCapabilities(true), "federated_auth") {
+	if !contains(requestCapabilities("development", true), "federated_auth") {
 		t.Fatal("metadata omitted enabled mock federated authentication")
+	}
+	if contains(requestCapabilities("production", true), "federated_auth") {
+		t.Fatal("metadata advertised mock federated authentication in production")
+	}
+}
+
+func TestProductionNeverEnablesMockFederatedAuth(t *testing.T) {
+	if mockFederatedAuthEnabled(config.Config{Environment: "production", EnableMockFederatedAuth: true}) {
+		t.Fatal("production enabled mock federated authentication")
+	}
+	if !mockFederatedAuthEnabled(config.Config{Environment: "test", EnableMockFederatedAuth: true}) {
+		t.Fatal("test environment omitted explicitly enabled mock federated authentication")
 	}
 }
 

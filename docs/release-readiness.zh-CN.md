@@ -9,7 +9,7 @@
 
 当前企业底座可以作为独立集成包发版，并进入受控企业试点，但还不是通用可用的 GA 版本。
 
-达到 90% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。RongxinAI 主进程接入及客户身份系统试点属于最后 10%。
+达到 90% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。使用知远账号密码档位完成 RongxinAI 主进程接入属于最后 10%。
 
 权威机器可读评分位于 release/foundation-readiness.json。scripts/release-audit.mjs 会阻止评分漂移、证据文件缺失、工具链或协议版本不一致、不安全生产默认值以及 CI 必需门禁被删除。
 
@@ -25,7 +25,7 @@
 | Credential 管控与 Agent 下发 | 10% | 完成 |
 | 参考 Agent | 5% | 完成 |
 | 生产运行基线 | 5% | 完成 |
-| 客户客户端与 IdP 集成 | 5% | 待完成 |
+| 产品客户端集成 | 5% | 待完成 |
 | 生产数据面自动化 | 5% | 完成 |
 | GA 验证与发布供应链 | 5% | 待完成 |
 
@@ -41,7 +41,7 @@
 
 ## 安全与兼容门
 
-Mock OIDC 只属于开发和测试夹具。生产环境默认关闭，配置层禁止强行开启，认证方法发现不会返回它，metadata 也不会公布 federated_auth。真实企业 OIDC 适配器仍须实现 Authorization Code + PKCE、一次性交换、身份映射，并保持相同 AEP 会话契约。
+本次发布支持的生产认证档位是管理员创建的知远账号密码。Mock OIDC 只属于开发和测试夹具。生产环境默认关闭，配置层禁止强行开启，认证方法发现不会返回它，metadata 也不会公布 federated_auth。客户身份系统接入延后，不阻塞 password-only GA 档位；未来的企业 OIDC 适配器仍须实现 Authorization Code + PKCE、一次性交换、身份映射，并保持相同 AEP 会话契约。
 
 metadata 为支持能力发现，可以不带协议版本头访问。其他所有 /aep/v1 请求必须携带 X-AEP-Protocol-Version: 1.0。缺失或不支持的版本会收到 RFC 9457 的 426 响应及 X-AEP-Supported-Protocol-Versions 响应头。
 
@@ -51,7 +51,7 @@ gateway reconciler 现已通过 Kubernetes server-side apply 下发租户 Ingres
 
 ## 剩余 10%
 
-客户客户端与 IdP 集成，5%：接入真实企业 OIDC 或客户身份适配器，并完成 RongxinAI 主进程试点；Token 和 Credential 明文不得进入 Renderer。
+产品客户端集成，5%：使用知远账号密码档位完成 RongxinAI 主进程试点；密码、Token 和 Credential 明文不得进入 Renderer，refresh token 只能通过操作系统保护的存储持久化。
 
 GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾备演练、签名制品与 SBOM 发布，以及草案档位的剩余清理。M3 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
 
