@@ -14,6 +14,7 @@ var environmentKeys = []string{
 	"AEP_SIGNING_KEY_BASE64", "AEP_SIGNING_KEY_BASE64_FILE",
 	"AEP_CREDENTIAL_MASTER_KEY_BASE64", "AEP_CREDENTIAL_MASTER_KEY_BASE64_FILE",
 	"AEP_BOOTSTRAP_ADMIN_PASSWORD", "AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE",
+	"AEP_DATA_PLANE_RECONCILER_TOKEN", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
 }
 
@@ -89,6 +90,26 @@ func TestLoadReadsFileSecretsAndRejectsAmbiguousSources(t *testing.T) {
 		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
 	}
 	t.Setenv("AEP_DATABASE_URL", "postgres://direct@db.internal/aep")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+func TestLoadReadsDataPlaneTokenFromSecretFile(t *testing.T) {
+	clearEnvironment(t)
+	path := filepath.Join(t.TempDir(), "data-plane-token")
+	if err := os.WriteFile(path, []byte("reconciler-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEP_DATA_PLANE_RECONCILER_TOKEN_FILE", path)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DataPlaneReconcilerToken != "reconciler-token" {
+		t.Fatalf("DataPlaneReconcilerToken = %q", cfg.DataPlaneReconcilerToken)
+	}
+	t.Setenv("AEP_DATA_PLANE_RECONCILER_TOKEN", "direct")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("Load() error = %v", err)
 	}

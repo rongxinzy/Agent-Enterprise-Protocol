@@ -79,6 +79,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	dataPlaneToken, err := secret("AEP_DATA_PLANE_RECONCILER_TOKEN", "")
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Environment:               environment,
 		LogFormat:                 value("AEP_LOG_FORMAT", defaultLogFormat),
@@ -92,7 +96,7 @@ func Load() (Config, error) {
 		Issuer:                    value("AEP_ISSUER", "http://localhost:8080"),
 		SigningKeyBase64:          signingKey,
 		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
-		DataPlaneReconcilerToken:  os.Getenv("AEP_DATA_PLANE_RECONCILER_TOKEN"),
+		DataPlaneReconcilerToken:  dataPlaneToken,
 		CredentialMasterKeyBase64: credentialKey,
 		CredentialMasterKeyFile:   os.Getenv("AEP_CREDENTIAL_MASTER_KEY_FILE"),
 		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"),

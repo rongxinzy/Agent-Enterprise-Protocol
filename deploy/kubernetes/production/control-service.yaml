@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aep-control-service-config
+  namespace: aep-system
+data:
+  AEP_ENVIRONMENT: production
+  AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"
+  AEP_LOG_FORMAT: json
+  AEP_LOG_LEVEL: info
+  AEP_ADDRESS: ":8080"
+  AEP_ISSUER: https://aep.example.com
+  AEP_MINIO_ENDPOINT: minio.example.internal:9000
+  AEP_MINIO_BUCKET: aep-skills
+  AEP_MINIO_SECURE: "true"
+  AEP_ACCESS_TTL: 15m
+  AEP_MODEL_ACCESS_TTL: 15m
+  AEP_REFRESH_TTL: 720h
+  AEP_HTTP_READ_HEADER_TIMEOUT: 5s
+  AEP_HTTP_READ_TIMEOUT: 15s
+  AEP_HTTP_WRITE_TIMEOUT: 30s
+  AEP_HTTP_IDLE_TIMEOUT: 60s
+  AEP_HTTP_SHUTDOWN_TIMEOUT: 10s
+  AEP_HTTP_MAX_HEADER_BYTES: "1048576"
+  AEP_DATABASE_URL_FILE: /var/run/aep-secrets/database-url
+  AEP_MINIO_ACCESS_KEY_FILE: /var/run/aep-secrets/minio-access-key
+  AEP_MINIO_SECRET_KEY_FILE: /var/run/aep-secrets/minio-secret-key
+  AEP_SIGNING_KEY_BASE64_FILE: /var/run/aep-secrets/ed25519-seed
+  AEP_CREDENTIAL_MASTER_KEY_FILE: /var/run/aep-secrets/credential-keyring
+  AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE: /var/run/aep-secrets/bootstrap-admin-password
+  AEP_DATA_PLANE_RECONCILER_TOKEN_FILE: /var/run/aep-secrets/reconciler-token
+  AEP_BOOTSTRAP_ENTERPRISE_ID: enterprise
+  AEP_BOOTSTRAP_ENTERPRISE_NAME: Enterprise
+  AEP_BOOTSTRAP_ADMIN_USERNAME: admin
+  AEP_BOOTSTRAP_ADMIN_DISPLAY_NAME: AEP Administrator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aep-control-service
+  namespace: aep-system
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aep-control-service
+  namespace: aep-system
+spec:
+  selector:
+    app.kubernetes.io/name: aep-control-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-control-service
+  namespace: aep-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aep-control-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aep-control-service
+    spec:
+      serviceAccountName: aep-control-service
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: aep-control-service}
+      containers:
+        - name: control-service
+          image: aep-control-service:0.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: aep-control-service-config}
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: secrets
+              mountPath: /var/run/aep-secrets
+              readOnly: true
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: secrets
+          secret:
+            secretName: aep-control-service-secrets

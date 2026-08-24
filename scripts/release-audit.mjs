@@ -62,6 +62,20 @@ for (const sample of ["deploy/production/control-service.env.example", "deploy/p
 }
 const productionControl = await readText("deploy/production/control-service.env.example");
 assert(productionControl.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH=false"), "production sample must explicitly disable mock federated auth");
+assert(productionControl.includes("AEP_DATA_PLANE_RECONCILER_TOKEN_FILE="), "production sample must mount the data-plane reconciler token");
+
+const productionKustomization = await readText("deploy/kubernetes/production/kustomization.yaml");
+const productionReconciler = await readText("deploy/kubernetes/production/gateway-reconciler.yaml");
+const productionRBAC = await readText("deploy/kubernetes/production/gateway-reconciler-rbac.yaml");
+const productionSecrets = await readText("deploy/kubernetes/production/external-secrets.yaml");
+const productionNetworkPolicy = await readText("deploy/kubernetes/production/network-policies.yaml");
+assert(productionKustomization.includes("gateway-reconciler.yaml"), "production Kustomize baseline omits the reconciler");
+assert(productionReconciler.includes("replicas: 2"), "production reconciler must have two replicas");
+assert(productionReconciler.includes("readOnlyRootFilesystem: true"), "production reconciler must use a read-only root filesystem");
+assert(productionRBAC.includes("namespace: higress-system"), "reconciler RBAC must be scoped to Higress");
+assert(productionSecrets.includes("kind: ExternalSecret"), "production Secret manager integration is missing");
+assert(!/\nkind: Secret\n/.test(productionSecrets), "production manifests must not commit Kubernetes Secret values");
+assert(productionNetworkPolicy.includes("aep-default-deny"), "production default-deny NetworkPolicy is missing");
 
 const workflow = await readText(".github/workflows/m0.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");

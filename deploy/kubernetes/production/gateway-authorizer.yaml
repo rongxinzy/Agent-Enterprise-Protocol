@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aep-gateway-authorizer-config
+  namespace: aep-system
+data:
+  AEP_ENVIRONMENT: production
+  AEP_LOG_FORMAT: json
+  AEP_LOG_LEVEL: info
+  AEP_GATEWAY_ADDRESS: ":8090"
+  AEP_GATEWAY_UPSTREAM_URL: http://higress-gateway.higress-system.svc.cluster.local:80
+  AEP_GATEWAY_JWKS_URL: http://aep-control-service.aep-system.svc.cluster.local:8080/.well-known/jwks.json
+  AEP_GATEWAY_ISSUER: https://aep.example.com
+  AEP_GATEWAY_JWKS_TTL: 5m
+  AEP_GATEWAY_JWKS_TIMEOUT: 2s
+  AEP_GATEWAY_REQUEST_LIMIT: "2097152"
+  AEP_GATEWAY_HTTP_READ_HEADER_TIMEOUT: 5s
+  AEP_GATEWAY_HTTP_READ_TIMEOUT: 15s
+  AEP_GATEWAY_HTTP_WRITE_TIMEOUT: "0s"
+  AEP_GATEWAY_HTTP_IDLE_TIMEOUT: 60s
+  AEP_GATEWAY_HTTP_SHUTDOWN_TIMEOUT: 10s
+  AEP_GATEWAY_HTTP_MAX_HEADER_BYTES: "1048576"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aep-gateway-authorizer
+  namespace: aep-system
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aep-gateway-authorizer
+  namespace: aep-system
+spec:
+  selector:
+    app.kubernetes.io/name: aep-gateway-authorizer
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-gateway-authorizer
+  namespace: aep-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aep-gateway-authorizer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aep-gateway-authorizer
+    spec:
+      serviceAccountName: aep-gateway-authorizer
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: aep-gateway-authorizer}
+      containers:
+        - name: gateway-authorizer
+          image: aep-gateway-authorizer:0.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: aep-gateway-authorizer-config}
+          ports:
+            - name: http
+              containerPort: 8090
+          resources:
+            requests: {cpu: 200m, memory: 192Mi}
+            limits: {cpu: "1", memory: 384Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10

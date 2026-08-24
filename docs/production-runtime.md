@@ -8,7 +8,7 @@ Set `AEP_ENVIRONMENT=production`. The control service then refuses to start with
 
 Mock federated authentication is a development and test fixture. Production defaults it off and rejects AEP_ENABLE_MOCK_FEDERATED_AUTH=true. Do not advertise or expose federated_auth until a real enterprise identity adapter is configured.
 
-Use [control-service.env.example](../deploy/production/control-service.env.example) and [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example) as deployment inputs. Sensitive values support `VARIABLE_FILE` paths. A direct value and its `_FILE` form are mutually exclusive. The Credential keyring continues to use `AEP_CREDENTIAL_MASTER_KEY_FILE` so old decryption keys can remain available during controlled rotation.
+Use [control-service.env.example](../deploy/production/control-service.env.example) and [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example) as deployment inputs. Sensitive values support `VARIABLE_FILE` paths. A direct value and its `_FILE` form are mutually exclusive. The Credential keyring continues to use `AEP_CREDENTIAL_MASTER_KEY_FILE` so old decryption keys can remain available during controlled rotation. The data-plane reconciler token also supports the file form.
 
 The signing seed, Credential keyring, database credentials, object-store credentials, and bootstrap password must come from the orchestrator's Secret provider. Do not place them in images, ConfigMaps, Git, Helm values, or shell history.
 
@@ -57,3 +57,5 @@ npm run test:e2e:runtime
 ```
 
 The scenario validates concurrent first startup, dependency-aware readiness, independent liveness, Prometheus metrics, structured logs, container hardening, and clean SIGTERM exit. The complete release gate remains `npm run test:e2e`.
+
+The Kubernetes, Higress Helm, TLS, RBAC, and External Secrets deployment baseline is documented in [production-data-plane.md](production-data-plane.md). It is a deployment baseline, not evidence that the current renderer already applies live Higress objects.

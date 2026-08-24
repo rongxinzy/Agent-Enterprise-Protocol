@@ -3,6 +3,39 @@ services:
     environment:
       AEP_MODEL_GATEWAY_BASE_URL: http://localhost:${AEP_GATEWAY_PORT:-8090}/v1
       AEP_MODEL_ACCESS_TTL: ${AEP_MODEL_ACCESS_TTL:-15m}
+      AEP_DATA_PLANE_RECONCILER_TOKEN: ${AEP_DATA_PLANE_RECONCILER_TOKEN:-m3-local-reconciler-token}
+
+  gateway-reconciler:
+    build:
+      context: ../..
+      dockerfile: services/gateway-reconciler/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    depends_on:
+      control-service:
+        condition: service_healthy
+    environment:
+      AEP_RECONCILER_CONTROL_URL: http://control-service:8080
+      AEP_DATA_PLANE_RECONCILER_TOKEN: ${AEP_DATA_PLANE_RECONCILER_TOKEN:-m3-local-reconciler-token}
+      AEP_RECONCILER_TENANTS: ${AEP_RECONCILER_TENANTS:-demo}
+      AEP_RECONCILER_ADDRESS: :8091
+      AEP_RECONCILER_OUTPUT_DIR: /var/lib/aep-reconciler
+      AEP_RECONCILER_INTERVAL: ${AEP_RECONCILER_INTERVAL:-15s}
+    volumes:
+      - reconciler-output:/var/lib/aep-reconciler
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    healthcheck:
+      test: [CMD, /aep-gateway-reconciler, healthcheck, http://127.0.0.1:8091/readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   mock-openai:
     image: node:24-alpine
@@ -79,3 +112,6 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
+
+volumes:
+  reconciler-output:
