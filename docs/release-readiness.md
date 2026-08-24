@@ -33,7 +33,7 @@ Completed weight is 90 of 100. Pending work is not counted as partial completion
 
 ## Available Release Surface
 
-Administrators can use aepctl to manage users, Skills, scoped assignments, control events, models, Credentials, Agents, deliveries, and audit records. The Node SDK provides authentication, refresh rotation, RFC 9457 errors, safe retry behavior, all implemented Agent and administration APIs, model connection discovery, and Credential no-store enforcement.
+Administrators can use aepctl to manage users, Skills, scoped assignments, control events, models, Credentials, Agents, deliveries, and audit records. The Node SDK provides authentication, refresh rotation, RFC 9457 errors, safe retry behavior, all implemented Agent and administration APIs, model connection discovery, Credential no-store enforcement, and desktop cold-start restoration that persists only a refresh token through injected operating-system protected storage.
 
 The reference Agent persists event inbox and telemetry outbox state, safely reconciles Skill packages, converges after restart, consumes authorized models through the Higress path, and resolves short-lived Credential material without writing it to SQLite, telemetry, logs, or command output.
 

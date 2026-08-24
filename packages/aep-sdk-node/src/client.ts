@@ -10,6 +10,7 @@ import type {
   AepClientOptions,
   AepRequest,
   AepResponse,
+  AepSessionState,
   AepTokens,
   AepTransport,
   AgentModelList,
@@ -138,10 +139,28 @@ export class AepClient {
     return this.#refresh();
   }
 
-  async logout(): Promise<void> {
+  async getSessionState(): Promise<AepSessionState> {
     const tokens = await this.#tokenStore.get();
-    if (!tokens) return;
+    if (tokens) {
+      return {status: 'authenticated', passwordChangeRequired: tokens.passwordChangeRequired};
+    }
+    const refreshToken = await this.#tokenStore.getRefreshToken?.();
+    return refreshToken ? {status: 'recoverable'} : {status: 'signed-out'};
+  }
+
+  async restoreSession(): Promise<AepTokens | null> {
+    const tokens = await this.#tokenStore.get();
+    if (tokens) return tokens;
+    const refreshToken = await this.#tokenStore.getRefreshToken?.();
+    if (!refreshToken) return null;
+    return this.#refresh(refreshToken);
+  }
+
+  async logout(): Promise<void> {
+    let tokens = await this.#tokenStore.get();
     try {
+      tokens ??= await this.restoreSession();
+      if (!tokens) return;
       await this.#send<void>({
         method: HttpMethod.Post,
         path: '/aep/v1/auth/logout',
@@ -185,7 +204,7 @@ export class AepClient {
   }
 
   async getModelConnection(): Promise<ModelConnection> {
-    const [metadata, tokens] = await Promise.all([this.getMetadata(), this.#tokenStore.get()]);
+    const [metadata, tokens] = await Promise.all([this.getMetadata(), this.#loadOrRestoreTokens()]);
     if (!metadata.capabilities.includes(AepCapability.ModelGateway) || !metadata.modelGateway) {
       throw new AepProblem({
         type: 'https://aep.example/problems/capability-not-supported',
@@ -528,7 +547,7 @@ export class AepClient {
     const headers = {...request.headers, ...this.#agentHeaders()};
     let usedAccessToken: string | null = null;
     if (authenticated) {
-      const tokens = await this.#tokenStore.get();
+      const tokens = await this.#loadOrRestoreTokens();
       if (tokens) {
         usedAccessToken = tokens.accessToken;
         headers.Authorization = `Bearer ${tokens.accessToken}`;
@@ -547,16 +566,24 @@ export class AepClient {
     return response;
   }
 
-  async #refresh(): Promise<AepTokens> {
+  async #loadOrRestoreTokens(): Promise<AepTokens | null> {
+    const tokens = await this.#tokenStore.get();
+    if (tokens) return tokens;
+    const refreshToken = await this.#tokenStore.getRefreshToken?.();
+    return refreshToken ? this.#refresh(refreshToken) : null;
+  }
+
+  async #refresh(storedRefreshToken?: string): Promise<AepTokens> {
     if (this.#refreshPromise) return this.#refreshPromise;
     this.#refreshPromise = (async () => {
       const current = await this.#tokenStore.get();
-      if (!current) throw new AepProblem({type: 'about:blank', title: 'No session', status: 401, code: 'NO_SESSION'});
+      const refreshToken = current?.refreshToken ?? storedRefreshToken ?? await this.#tokenStore.getRefreshToken?.();
+      if (!refreshToken) throw new AepProblem({type: 'about:blank', title: 'No session', status: 401, code: 'NO_SESSION'});
       const response = await this.#transport.request<AepTokens>(this.#baseUrl, {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/refresh',
         headers: this.#agentHeaders(),
-        body: {refreshToken: current.refreshToken, agentId: this.#agentId},
+        body: {refreshToken, agentId: this.#agentId},
       });
       if (response.status < 200 || response.status >= 300) {
         await this.#tokenStore.clear();

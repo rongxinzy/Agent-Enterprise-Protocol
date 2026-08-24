@@ -27,6 +27,7 @@ AEP 是管理协议，不重新定义模型推理、MCP 或 Agent-to-Agent 协�
 - [AEP M1 Node Agent 模型运行手册](docs/m1-client-runbook.zh-CN.md)
 - [AEP M2 Credential 运行手册](docs/m2-credential-runbook.zh-CN.md)
 - [AEP 生产运行基线](docs/production-runtime.zh-CN.md)
+- [桌面端主进程会话接入](docs/desktop-session.zh-CN.md)
 - [AEP v1 企业底座发布就绪度](docs/release-readiness.zh-CN.md)
 - [OpenAPI 3.1 规范](openapi/aep-v1.openapi.yaml)
 - [M2 Credential OpenAPI Profile](openapi/aep-v1-m2.openapi.yaml)
@@ -36,7 +37,7 @@ AEP 是管理协议，不重新定义模型推理、MCP 或 Agent-to-Agent 协�
 ## 状态
 
 AEP v1 协议规范仍是初始草案，在标记稳定前仍可能发生破坏性变更。
-M2 企业底座实现当前达到 85% 发布候选，可用于独立集成和受控试点，但还不是 GA 版本。
+M3 企业底座实现当前达到 90% 发布候选，可用于独立集成和受控试点，但还不是 GA 版本。
 
 ## 许可证
 

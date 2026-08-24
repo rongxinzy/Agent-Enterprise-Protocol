@@ -31,7 +31,21 @@ export interface AepTokenStore {
   get(): Promise<AepTokens | null>;
   set(tokens: AepTokens): Promise<void>;
   clear(): Promise<void>;
+  getRefreshToken?(): Promise<string | null>;
 }
+
+export interface AepProtectedStorage {
+  /** Returns a disposable plaintext copy. The caller zeroes it after use. */
+  read(key: string): Promise<Uint8Array | null>;
+  /** Must protect and copy the value before the returned promise resolves. */
+  write(key: string, value: Uint8Array): Promise<void>;
+  remove(key: string): Promise<void>;
+}
+
+export type AepSessionState =
+  | {status: 'signed-out'}
+  | {status: 'recoverable'}
+  | {status: 'authenticated'; passwordChangeRequired: boolean};
 
 export interface AepRequest {
   method: HttpMethod;
