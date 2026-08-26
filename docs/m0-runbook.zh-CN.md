@@ -70,8 +70,10 @@ go run ./cmd/aepctl --password change-this-admin-password skill create --skill-i
 go run ./cmd/aepctl --password change-this-admin-password skill upload --skill-id review --version 1.0.0 --file ./review.zip
 go run ./cmd/aepctl --password change-this-admin-password skill publish --skill-id review --version 1.0.0
 go run ./cmd/aepctl --password change-this-admin-password skill assign --skill-id review --subject-type user --subject-id USER_ID
-go run ./cmd/aepctl --password change-this-admin-password event publish --scope-type agent --scope-id AGENT_ID --skill-id review --revision 1
 ```
+
+创建或撤销 Skill 授权会自动发布对应作用域的 `skill.manifest.changed`
+事件，不再需要为了授权收敛单独执行 `event publish`。
 
 示例 Agent 读取 `AEP_BASE_URL`、`AEP_ENTERPRISE_ID`、`AEP_USERNAME`、
 `AEP_PASSWORD`、`AEP_AGENT_ID`，以及可选的 `AEP_AGENT_DATA_DIR`。执行

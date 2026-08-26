@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -201,7 +202,14 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	id := uuid.NewString()
-	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO skill_assignments (id,enterprise_id,skill_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5)`, id, claimsFrom(request).Tenant, input.SkillID, input.Subject.Type, input.Subject.ID)
+	claims := claimsFrom(request)
+	tx, err := s.app.Pool.Begin(request.Context())
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(request.Context()) }()
+	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,enterprise_id,skill_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5)`, id, claims.Tenant, input.SkillID, input.Subject.Type, input.Subject.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The assignment already exists.")
@@ -210,20 +218,71 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	if err := createSkillAssignmentEvent(request.Context(), tx, claims.Tenant, claims.Subject, input.SkillID, input.Subject.Type, input.Subject.ID, "assigned:"+id); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := tx.Commit(request.Context()); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	writeJSON(response, http.StatusCreated, map[string]any{"id": id, "skillId": input.SkillID, "subject": input.Subject})
 }
 
 func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), `DELETE FROM skill_assignments WHERE id=$1 AND enterprise_id=$2`, chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
+	claims := claimsFrom(request)
+	tx, err := s.app.Pool.Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	if result.RowsAffected() == 0 {
+	defer func() { _ = tx.Rollback(request.Context()) }()
+	assignmentID := chi.URLParam(request, "assignmentId")
+	var skillID, subjectType, subjectID string
+	err = tx.QueryRow(request.Context(), `DELETE FROM skill_assignments WHERE id=$1 AND enterprise_id=$2 RETURNING skill_id,subject_type,subject_id`, assignmentID, claims.Tenant).Scan(&skillID, &subjectType, &subjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The assignment was not found.")
 		return
 	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := createSkillAssignmentEvent(request.Context(), tx, claims.Tenant, claims.Subject, skillID, subjectType, subjectID, "revoked:"+assignmentID); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := tx.Commit(request.Context()); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, createdBy, skillID, subjectType, subjectID, revision string) error {
+	scopeType, scopeID := skillAssignmentEventScope(subjectType, subjectID)
+	eventID := uuid.NewString()
+	supersedesKey := strings.Join([]string{"skill-manifest", skillID, scopeType, subjectID}, ":")
+	_, err := tx.Exec(ctx, `INSERT INTO control_events (event_id,enterprise_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by) VALUES ($1,$2,'skill.manifest.changed',$3,$4,'skill',$5,$6,'skill.reconcile',$7,$8,$9)`, eventID, enterpriseID, scopeType, scopeID, skillID, revision, supersedesKey, time.Now().UTC().Add(24*time.Hour), createdBy)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `WITH old AS (UPDATE control_events SET state='superseded' WHERE enterprise_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id) UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'`, enterpriseID, supersedesKey, eventID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO control_deliveries (delivery_id,event_id,agent_id)
+SELECT gen_random_uuid()::text,$1,a.agent_id
+FROM agents a JOIN users u ON u.id=a.user_id
+WHERE a.enterprise_id=$2 AND ($3='global' OR ($3='agent' AND a.agent_id=$4) OR ($3='user' AND a.user_id=$4) OR ($3='organization' AND $4=ANY(u.organization_ids)))`, eventID, enterpriseID, scopeType, scopeID)
+	return err
+}
+
+func skillAssignmentEventScope(subjectType, subjectID string) (string, *string) {
+	if subjectType == "enterprise" {
+		return "global", nil
+	}
+	return subjectType, &subjectID
 }
 
 func (s *Server) skillManifest(response http.ResponseWriter, request *http.Request) {
