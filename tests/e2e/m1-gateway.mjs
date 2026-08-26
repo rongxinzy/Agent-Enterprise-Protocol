@@ -98,6 +98,7 @@ async function runScenario() {
   assert(streaming.response.status === 200, 'Streaming inference failed: ' + streaming.response.status + ' ' + streaming.text);
   assert(streaming.response.headers.get('content-type')?.startsWith('text/event-stream'), 'Streaming response was not SSE');
   assert(streaming.text.includes('Hello') && streaming.text.includes(' AEP') && streaming.text.includes('[DONE]'), 'Streaming chunks were incomplete');
+  assert(streaming.text.includes('"finish_reason":"stop"'), 'Streaming response did not include a terminal finish reason');
   assert(streaming.text.includes('reasoning_content') && streaming.text.includes('Think through the request.'), 'Streaming reasoning_content was lost');
   assert(!containsSecret(streaming), 'Provider credentials were exposed in the streaming response');
 

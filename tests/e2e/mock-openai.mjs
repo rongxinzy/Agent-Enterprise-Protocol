@@ -43,7 +43,7 @@ const server = http.createServer(async (request, response) => {
     response.write(`data: ${JSON.stringify(chunk('', 'Think through the request.'))}\n\n`);
     response.write(`data: ${JSON.stringify(chunk('Hello'))}\n\n`);
     setTimeout(() => {
-      response.write(`data: ${JSON.stringify(chunk(' AEP'))}\n\n`);
+      response.write(`data: ${JSON.stringify(chunk(' AEP', undefined, 'stop'))}\n\n`);
       response.end('data: [DONE]\n\n');
     }, 40);
     return;
@@ -57,8 +57,8 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(port, '0.0.0.0');
 
-function chunk(content, reasoningContent) {
-  return {id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel, choices: [{index: 0, delta: {...(content ? {content} : {}), ...(reasoningContent ? {reasoning_content: reasoningContent} : {})}, finish_reason: null}]};
+function chunk(content, reasoningContent, finishReason = null) {
+  return {id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel, choices: [{index: 0, delta: {...(content ? {content} : {}), ...(reasoningContent ? {reasoning_content: reasoningContent} : {})}, finish_reason: finishReason}]};
 }
 
 function sendJSON(response, status, value) {
