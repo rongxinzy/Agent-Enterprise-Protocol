@@ -63,13 +63,14 @@ try {
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
   startReconciler();
 
-  const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a')]});
+  const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
   await waitForReady(admin, 'rev-1');
   assert(resources.size === 2, 'Ingress and WasmPlugin were not both applied');
   const firstCount = applyCount;
   const firstResources = snapshot();
+  assert(firstResources.includes("type: 'deepseek'"), 'DeepSeek provider type was not rendered');
 
-  const repeated = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a')]});
+  const repeated = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
   assert(repeated.contentHash === first.contentHash, 'same revision was not idempotent');
   await waitFor(() => assert(applyCount >= firstCount + 2, 'periodic convergence did not reapply desired state'));
   assert(snapshot() === firstResources, 'idempotent reconciliation changed resources');
@@ -96,6 +97,7 @@ try {
   await waitForReady(admin, 'rev-4');
 
   await expectProblem(admin.putDataPlaneDesiredState({revision: 'malformed', routes: [{...route('bad', '', 'provider', 'key')}]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'unsupported-provider', routes: [{...route('bad-provider', '/v1/chat', 'provider', 'key'), providerType: 'unknown'}]}), 400, 'INVALID_DATA_PLANE_STATE');
 
   await compose('restart', 'control-service');
   await waitFor(async () => assert((await fetch(`${baseUrl}/readyz`)).ok, 'control service did not recover'));
@@ -121,8 +123,8 @@ try {
   await rm(outputDir, {recursive: true, force: true});
 }
 
-function route(modelId, endpoint, upstreamModel, key, name = 'provider-secrets') {
-  return {modelId, enabled: true, endpoint, upstreamModel, protocol: 'openai-compatible', credentialRef: {name, key, namespace: 'higress-system'}};
+function route(modelId, endpoint, upstreamModel, key, name = 'provider-secrets', providerType = 'openai') {
+  return {modelId, enabled: true, endpoint, upstreamModel, protocol: 'openai-compatible', providerType, credentialRef: {name, key, namespace: 'higress-system'}};
 }
 
 function snapshot() {

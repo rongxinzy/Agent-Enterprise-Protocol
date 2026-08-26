@@ -861,6 +861,11 @@ export interface components {
             upstreamModel: string;
             /** @constant */
             protocol: "openai-compatible";
+            /**
+             * @description Higress AI Proxy provider implementation. Omitted legacy routes use openai.
+             * @enum {string}
+             */
+            providerType?: "openai" | "deepseek";
             credentialRef?: components["schemas"]["DataPlaneSecretReference"];
         };
         DataPlaneDesiredStateWrite: {
@@ -1225,6 +1230,18 @@ export interface components {
         };
         /** @enum {string} */
         ModelSourceType: "gateway" | "enterprise_open_source" | "local";
+        /** @description Wire-level reasoning behavior a client must preserve through an OpenAI-compatible endpoint. */
+        ModelReasoningCompatibility: {
+            /** @enum {string} */
+            thinkingFormat: "deepseek";
+            /** @constant */
+            supportsReasoningEffort: true;
+            /**
+             * @description Prior assistant reasoning_content must be replayed when a tool-call conversation continues.
+             * @constant
+             */
+            requiresReasoningContentOnAssistantMessages: true;
+        };
         AgentModel: {
             id: string;
             displayName: string;
@@ -1236,6 +1253,7 @@ export interface components {
             upstreamModel?: string;
             localModelRef?: string;
             capabilities: string[];
+            reasoningCompatibility?: components["schemas"]["ModelReasoningCompatibility"];
             contextWindow?: number;
             isDefault: boolean;
             enabled: boolean;
@@ -1495,6 +1513,7 @@ export interface components {
             localModelRef?: string;
             credentialId?: string | null;
             capabilities?: string[];
+            reasoningCompatibility?: components["schemas"]["ModelReasoningCompatibility"] | null;
             contextWindow?: number;
             isDefault?: boolean;
             enabled?: boolean;

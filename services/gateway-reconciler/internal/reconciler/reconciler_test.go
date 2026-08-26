@@ -46,6 +46,23 @@ func TestRenderRejectsMissingRevision(t *testing.T) {
 	}
 }
 
+func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
+	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-deepseek", Routes: []Route{{
+		ModelID: "reasoner", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Protocol: "openai-compatible", ProviderType: "deepseek",
+	}}}
+	document, _, err := Render(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(document, "type: 'deepseek'") {
+		t.Fatalf("DeepSeek provider was not rendered: %s", document)
+	}
+	desired.Routes[0].ProviderType = "unknown"
+	if _, _, err := Render(desired); err == nil {
+		t.Fatal("unsupported provider type was accepted")
+	}
+}
+
 func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-1", Routes: []Route{{ModelID: "model-1", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-1"}}}}
 	desired.ContentHash = canonicalHash(desired)

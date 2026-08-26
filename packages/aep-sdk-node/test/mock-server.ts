@@ -239,7 +239,12 @@ function model(admin: boolean): object {
     protocol: 'openai-compatible',
     endpoint: '/openai/v1',
     upstreamModel: 'qwen3-32b',
-    capabilities: ['text', 'tools', 'streaming'],
+    capabilities: ['text', 'tools', 'streaming', 'reasoning'],
+    reasoningCompatibility: {
+      thinkingFormat: 'deepseek',
+      supportsReasoningEffort: true,
+      requiresReasoningContentOnAssistantMessages: true,
+    },
     contextWindow: 131072,
     isDefault: true,
     enabled: true,
@@ -263,7 +268,7 @@ function dataPlaneDesiredState(revision: string): object {
     revision,
     publishedAt: '2026-08-24T00:00:00Z',
     contentHash: 'a'.repeat(64),
-    routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
+    routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', providerType: 'deepseek', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
   };
 }
 

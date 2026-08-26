@@ -59,7 +59,12 @@ async function runScenario() {
   await admin.createModel({
     id: 'enterprise-chat', displayName: 'Enterprise Chat', sourceType: 'gateway',
     protocol: 'openai-compatible', endpoint: gatewayBaseUrl, upstreamModel: 'mock-upstream-chat',
-    credentialId: modelCredential.id, capabilities: ['text', 'streaming'], contextWindow: 32768,
+    credentialId: modelCredential.id, capabilities: ['text', 'streaming', 'reasoning'],
+    reasoningCompatibility: {
+      thinkingFormat: 'deepseek', supportsReasoningEffort: true,
+      requiresReasoningContentOnAssistantMessages: true,
+    },
+    contextWindow: 32768,
     isDefault: true, enabled: true,
   });
   await admin.createModel({
@@ -85,6 +90,7 @@ async function runScenario() {
   const completionBody = JSON.parse(completion.text);
   assert(completionBody.model === 'mock-upstream-chat', 'Higress did not rewrite the enterprise model ID');
   assert(completionBody.choices[0].message.content === 'Hello AEP', 'Unexpected mock completion content');
+  assert(completionBody.choices[0].message.reasoning_content === 'Think through the request.', 'Non-stream reasoning_content was lost');
   assert(completion.response.headers.get('x-mock-provider-auth') === 'accepted', 'Higress did not inject the provider credential');
   assert(!containsSecret(completion), 'Provider credentials were exposed in the client response');
 
@@ -92,7 +98,18 @@ async function runScenario() {
   assert(streaming.response.status === 200, 'Streaming inference failed: ' + streaming.response.status + ' ' + streaming.text);
   assert(streaming.response.headers.get('content-type')?.startsWith('text/event-stream'), 'Streaming response was not SSE');
   assert(streaming.text.includes('Hello') && streaming.text.includes(' AEP') && streaming.text.includes('[DONE]'), 'Streaming chunks were incomplete');
+  assert(streaming.text.includes('reasoning_content') && streaming.text.includes('Think through the request.'), 'Streaming reasoning_content was lost');
   assert(!containsSecret(streaming), 'Provider credentials were exposed in the streaming response');
+
+  const replay = await inference(modelToken, {
+    model: 'enterprise-chat', thinking: {type: 'enabled'}, reasoning_effort: 'high',
+    messages: [
+      {role: 'user', content: 'verify reasoning replay'},
+      {role: 'assistant', content: null, reasoning_content: 'Call the clock tool.', tool_calls: [{id: 'call-1', type: 'function', function: {name: 'clock', arguments: '{}'}}]},
+      {role: 'tool', tool_call_id: 'call-1', content: '12:00'},
+    ],
+  });
+  assert(replay.response.status === 200, 'Reasoning tool replay failed: ' + replay.response.status + ' ' + replay.text);
 
   await expectGatewayProblem(null, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken + 'invalid', {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');

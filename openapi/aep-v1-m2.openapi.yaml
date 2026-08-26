@@ -290,6 +290,10 @@ components:
         endpoint: {type: string, format: uri-reference}
         upstreamModel: {type: string, minLength: 1, maxLength: 200}
         protocol: {type: string, const: openai-compatible}
+        providerType:
+          description: Higress AI Proxy provider implementation. Omitted legacy routes use openai.
+          type: string
+          enum: [openai, deepseek]
         credentialRef: {$ref: '#/components/schemas/DataPlaneSecretReference'}
     DataPlaneDesiredStateWrite:
       type: object

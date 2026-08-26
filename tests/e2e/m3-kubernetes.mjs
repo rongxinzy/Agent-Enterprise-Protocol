@@ -16,7 +16,7 @@ const controlUrl = `http://127.0.0.1:${controlPort}`;
 const kubeUrl = `http://127.0.0.1:${proxyPort}`;
 const work = await mkdtemp(path.join(tmpdir(), 'aep-m3-kind-'));
 const binary = path.join(work, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
-let desired = state('rev-kind-1', [{modelId: 'chat', enabled: true, endpoint: '/v1/chat', upstreamModel: 'kind-upstream', protocol: 'openai-compatible', credentialRef: {name: 'provider-secrets', key: 'api-key', namespace: 'higress-system'}}]);
+let desired = state('rev-kind-1', [{modelId: 'chat', enabled: true, endpoint: '/v1/chat', upstreamModel: 'kind-upstream', protocol: 'openai-compatible', providerType: 'deepseek', credentialRef: {name: 'provider-secrets', key: 'api-key', namespace: 'higress-system'}}]);
 let observed = {};
 let proxy;
 const reconcilers = [];
@@ -55,6 +55,7 @@ try {
   assert(ingress.spec.rules[0].http.paths[0].path === '/v1/chat', 'real Kubernetes Ingress route was incorrect');
   const plugin = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', pluginName, '-o', 'json']));
   assert(plugin.spec.matchRules[0].config.credentialRef.name === 'provider-secrets', 'Higress resource omitted the Secret reference');
+  assert(plugin.spec.matchRules[0].config.provider.type === 'deepseek', 'Higress resource did not select the DeepSeek provider');
 
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'patch', 'ingress', ingressName, '--type=json', '-p', '[{"op":"replace","path":"/spec/rules/0/http/paths/0/path","value":"/drifted"}]']);
   await waitFor(async () => {

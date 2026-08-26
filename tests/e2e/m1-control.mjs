@@ -67,7 +67,11 @@ async function runScenario() {
       endpoint: 'https://models.example.test/v1',
       upstreamModel: `upstream-${descriptor.suffix}`,
       credentialId: index === 0 ? modelCredential.id : null,
-      capabilities: ['text', 'streaming', 'text'],
+      capabilities: index === 0 ? ['text', 'streaming', 'reasoning', 'text'] : ['text', 'streaming', 'text'],
+      ...(index === 0 ? {reasoningCompatibility: {
+        thinkingFormat: 'deepseek', supportsReasoningEffort: true,
+        requiresReasoningContentOnAssistantMessages: true,
+      }} : {}),
       contextWindow: 32768,
       isDefault: index === 0,
       enabled: true,
@@ -78,7 +82,9 @@ async function runScenario() {
   const models = (await admin.listAdminModels()).models;
   assert(models.length === 4, 'Administrator model catalog did not contain four models');
   assert(models.filter(model => model.isDefault).length === 1, 'Enterprise catalog did not enforce one default model');
-  assert(models.every(model => model.capabilities.join(',') === 'streaming,text'), 'Model capabilities were not normalized');
+  assert(models.find(model => model.id === descriptors[0].modelId)?.reasoningCompatibility?.thinkingFormat === 'deepseek', 'Reasoning compatibility was not persisted');
+  assert(models.filter(model => model.capabilities.includes('reasoning')).length === 1, 'Reasoning capability was not persisted');
+  assert(models.every(model => model.capabilities.join(',') === (model.id === descriptors[0].modelId ? 'reasoning,streaming,text' : 'streaming,text')), 'Model capabilities were not normalized');
   await admin.updateModel(descriptors[0].modelId, {credentialId: null});
   assert((await admin.getModel(descriptors[0].modelId)).credentialId === null, 'Credential reference was not cleared');
   await admin.updateModel(descriptors[1].modelId, {isDefault: true});
@@ -97,6 +103,9 @@ async function runScenario() {
   const visible = (await agent.listAgentModels()).models;
   assert(visible.length === 4, 'Four-scope authorization union did not expose all models');
   assert(visible.every(model => !Object.hasOwn(model, 'credentialId')), 'Agent model catalog leaked credential metadata');
+  assert(visible.some(model => model.reasoningCompatibility?.requiresReasoningContentOnAssistantMessages === true), 'Agent model catalog omitted reasoning replay compatibility');
+  await admin.updateModel(descriptors[0].modelId, {reasoningCompatibility: null});
+  assert(!Object.hasOwn(await admin.getModel(descriptors[0].modelId), 'reasoningCompatibility'), 'Reasoning compatibility was not cleared');
   await assertModelToken(agentStore, descriptors.map(item => item.modelId), agentId);
 
   await admin.deleteModelAssignment(assignments[3].id);

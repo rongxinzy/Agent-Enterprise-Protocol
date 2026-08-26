@@ -19,7 +19,7 @@ func modelCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})})
 
-	var modelID, displayName, sourceType, endpoint, upstreamModel, localModelRef, credentialID string
+	var modelID, displayName, sourceType, endpoint, upstreamModel, localModelRef, credentialID, reasoningFormat string
 	var capabilities []string
 	var contextWindow int32
 	var defaultModel, enabled bool
@@ -44,6 +44,9 @@ func modelCommand(opts *options) *cobra.Command {
 		if contextWindow > 0 {
 			body["contextWindow"] = contextWindow
 		}
+		if reasoningFormat != "" {
+			body["reasoningCompatibility"] = reasoningCompatibility(reasoningFormat)
+		}
 		value, err := api.request(http.MethodPost, "/aep/v1/admin/models", body, true)
 		return output(value, err)
 	})}
@@ -54,6 +57,7 @@ func modelCommand(opts *options) *cobra.Command {
 	create.Flags().StringVar(&upstreamModel, "upstream-model", "", "upstream model identifier")
 	create.Flags().StringVar(&localModelRef, "local-model-ref", "", "local client model reference")
 	create.Flags().StringVar(&credentialID, "credential-id", "", "optional credential identifier")
+	create.Flags().StringVar(&reasoningFormat, "reasoning-format", "", "reasoning wire format (deepseek)")
 	create.Flags().StringSliceVar(&capabilities, "capability", []string{"text"}, "model capability (repeatable)")
 	create.Flags().Int32Var(&contextWindow, "context-window", 0, "context window size")
 	create.Flags().BoolVar(&defaultModel, "default", false, "make this the enterprise default model")
@@ -69,7 +73,7 @@ func modelCommand(opts *options) *cobra.Command {
 	show.Flags().StringVar(&showID, "model-id", "", "model identifier")
 	_ = show.MarkFlagRequired("model-id")
 
-	var updateID, updateDisplayName, updateEndpoint, updateUpstreamModel, updateLocalModelRef, updateCredentialID string
+	var updateID, updateDisplayName, updateEndpoint, updateUpstreamModel, updateLocalModelRef, updateCredentialID, updateReasoningFormat string
 	var updateCapabilities []string
 	var updateContextWindow int32
 	var updateDefault, updateEnabled bool
@@ -100,6 +104,13 @@ func modelCommand(opts *options) *cobra.Command {
 				body["credentialId"] = updateCredentialID
 			}
 		}
+		if command.Flags().Changed("reasoning-format") {
+			if updateReasoningFormat == "" {
+				body["reasoningCompatibility"] = nil
+			} else {
+				body["reasoningCompatibility"] = reasoningCompatibility(updateReasoningFormat)
+			}
+		}
 		if len(body) == 0 {
 			return errors.New("at least one model field must be changed")
 		}
@@ -112,6 +123,7 @@ func modelCommand(opts *options) *cobra.Command {
 	update.Flags().StringVar(&updateUpstreamModel, "upstream-model", "", "upstream model identifier")
 	update.Flags().StringVar(&updateLocalModelRef, "local-model-ref", "", "local client model reference")
 	update.Flags().StringVar(&updateCredentialID, "credential-id", "", "credential identifier; empty clears it")
+	update.Flags().StringVar(&updateReasoningFormat, "reasoning-format", "", "reasoning wire format; empty clears it")
 	update.Flags().StringSliceVar(&updateCapabilities, "capability", nil, "replacement model capabilities")
 	update.Flags().Int32Var(&updateContextWindow, "context-window", 0, "context window size")
 	update.Flags().BoolVar(&updateDefault, "default", false, "set default model status")
@@ -155,4 +167,12 @@ func modelCommand(opts *options) *cobra.Command {
 
 	command.AddCommand(create, show, update, remove, assign, revoke)
 	return command
+}
+
+func reasoningCompatibility(format string) map[string]any {
+	return map[string]any{
+		"thinkingFormat":                              format,
+		"supportsReasoningEffort":                     true,
+		"requiresReasoningContentOnAssistantMessages": true,
+	}
 }

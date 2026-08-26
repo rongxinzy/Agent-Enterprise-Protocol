@@ -35,6 +35,27 @@ reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingr
 
 运行 `npm run test:e2e:m3-data-plane` 验证控制面与故障收敛，运行 `npm run test:e2e:m3-kubernetes` 验证真实 Kubernetes API Server 与 Higress 兼容 CRD 门禁。
 
+## DeepSeek 推理路由
+
+路由使用 Higress 原生 DeepSeek provider 时，必须在期望状态中显式设置 `providerType`。未携带该字段的历史路由仍按 `openai` 处理。
+
+~~~json
+{
+  "revision": "models-2026-08-26",
+  "routes": [{
+    "modelId": "enterprise-reasoner",
+    "enabled": true,
+    "endpoint": "/v1/chat",
+    "upstreamModel": "deepseek-reasoner",
+    "protocol": "openai-compatible",
+    "providerType": "deepseek",
+    "credentialRef": {"name": "provider-secrets", "key": "deepseek-api-key", "namespace": "higress-system"}
+  }]
+}
+~~~
+
+对应的模型描述应包含 `reasoning` 能力，并通过 `reasoningCompatibility` 声明 `thinkingFormat: deepseek`。客户端必须保留流式和非流式 `reasoning_content`；工具调用会话继续执行时，还必须回放上一条 assistant 消息的 `reasoning_content`。推理请求仍直接走模型网关数据链路，不通过 SDK 控制 API 转发。
+
 ## 回滚
 
 仅在旧镜像兼容当前只向前迁移的 schema 时，才使用之前的不可变镜像 digest。通过交付系统回滚 manifests 和 Helm Release；若 schema 兼容性不确定，则从同一协调恢复点恢复 PostgreSQL、对象存储、签名 seed 与 Credential keyring。详细流程见 [production-runtime.zh-CN.md](production-runtime.zh-CN.md)。

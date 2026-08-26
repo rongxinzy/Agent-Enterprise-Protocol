@@ -97,7 +97,7 @@
       "id": "product-client-integration",
       "weight": 5,
       "exitCriteria": [
-        "Complete a RongxinAI main-process pilot using the production ZhiYuan password authentication profile.",
+        "Complete a Zhiyuan main-process pilot using the production ZhiYuan password authentication profile.",
         "Keep passwords, tokens, and Credential values out of the renderer and persist refresh tokens only through operating-system protected storage."
       ]
     },
