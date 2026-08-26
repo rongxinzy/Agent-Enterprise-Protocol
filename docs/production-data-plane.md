@@ -35,6 +35,27 @@ The reconciler Role and RoleBinding are deliberately scoped to Ingress and `exte
 
 Run `npm run test:e2e:m3-data-plane` for control-plane and fault convergence, and `npm run test:e2e:m3-kubernetes` for the real Kubernetes API Server and Higress-compatible CRD gate.
 
+## DeepSeek Reasoning Routes
+
+Set `providerType` explicitly in desired state when a route uses Higress' native DeepSeek provider. Legacy routes that omit it continue to use `openai`.
+
+~~~json
+{
+  "revision": "models-2026-08-26",
+  "routes": [{
+    "modelId": "enterprise-reasoner",
+    "enabled": true,
+    "endpoint": "/v1/chat",
+    "upstreamModel": "deepseek-reasoner",
+    "protocol": "openai-compatible",
+    "providerType": "deepseek",
+    "credentialRef": {"name": "provider-secrets", "key": "deepseek-api-key", "namespace": "higress-system"}
+  }]
+}
+~~~
+
+The corresponding model descriptor should include the `reasoning` capability and `reasoningCompatibility` with `thinkingFormat: deepseek`. Clients must preserve streamed and non-streamed `reasoning_content`; when a tool-call conversation continues, they must replay the prior assistant `reasoning_content`. AEP still keeps inference on the direct gateway data path rather than tunneling it through SDK control APIs.
+
 ## Rollback
 
 Use the prior immutable image digest only if it supports the current forward-only schema. Roll back manifests and Helm releases through the deployment system, then restore PostgreSQL, object storage, signing seed, and Credential keyring from one coordinated recovery point if schema compatibility is uncertain. Follow the detailed runtime runbook in [production-runtime.md](production-runtime.md).

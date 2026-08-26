@@ -86,6 +86,7 @@ export type CredentialAssignment = components['schemas']['CredentialAssignment']
 export type CredentialAssignmentList = components['schemas']['CredentialAssignmentList'];
 export type CredentialAssignmentWrite = components['schemas']['CredentialAssignmentWrite'];
 export type ModelGatewayMetadata = components['schemas']['ModelGatewayMetadata'];
+export type ModelReasoningCompatibility = components['schemas']['ModelReasoningCompatibility'];
 export type AgentModel = components['schemas']['AgentModel'];
 export type AgentModelList = components['schemas']['AgentModelList'];
 export type AdminModel = components['schemas']['AdminModel'];

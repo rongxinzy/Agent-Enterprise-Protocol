@@ -76,7 +76,12 @@ describe('AepClient SDK gate', () => {
       protocol: 'openai-compatible' as const,
       endpoint: '/openai/v1',
       upstreamModel: 'qwen3-32b',
-      capabilities: ['text', 'tools', 'streaming'],
+      capabilities: ['text', 'tools', 'streaming', 'reasoning'],
+      reasoningCompatibility: {
+        thinkingFormat: 'deepseek' as const,
+        supportsReasoningEffort: true as const,
+        requiresReasoningContentOnAssistantMessages: true as const,
+      },
       contextWindow: 131072,
       isDefault: true,
       enabled: true,
@@ -84,6 +89,7 @@ describe('AepClient SDK gate', () => {
     };
 
     expect((await client.listAdminModels()).models).toHaveLength(1);
+    await expect(client.listAgentModels()).resolves.toMatchObject({models: [{reasoningCompatibility: {thinkingFormat: 'deepseek'}}]});
     await expect(client.createModel(write)).resolves.toMatchObject({id: 'model-1'});
     await expect(client.getModel('model-1')).resolves.toMatchObject({id: 'model-1'});
     await expect(client.updateModel('model-1', {enabled: false})).resolves.toMatchObject({id: 'model-1'});
@@ -101,11 +107,12 @@ describe('AepClient SDK gate', () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
     const desired = await client.getDataPlaneDesiredState();
     expect(desired.revision).toBe('rev-1');
+    expect(desired.routes[0].providerType).toBe('deepseek');
     expect(desired.routes[0].credentialRef).toEqual({name: 'provider-secrets', key: 'model-1'});
     expect(JSON.stringify(desired)).not.toContain('provider-secret-value');
     await expect(client.putDataPlaneDesiredState({
       revision: 'rev-next',
-      routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
+      routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', providerType: 'deepseek', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
     })).resolves.toMatchObject({revision: 'rev-published'});
     await expect(client.getDataPlaneStatus()).resolves.toMatchObject({state: 'ready', observedRevision: 'rev-published', resourceCount: 1});
   });

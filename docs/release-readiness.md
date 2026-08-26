@@ -9,7 +9,7 @@ Assessment date: 2026-08-24
 
 The enterprise foundation is ready for independent integration testing and a controlled enterprise pilot. It is not a general-availability release.
 
-A real product client is not required to validate this 90% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A RongxinAI main-process integration using the ZhiYuan password profile remains part of the final 10%.
+A real product client is not required to validate this 90% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A Zhiyuan main-process integration using the ZhiYuan password profile remains part of the final 10%.
 
 The authoritative machine-readable score is in release/foundation-readiness.json. The scripts/release-audit.mjs check rejects score drift, missing evidence, mismatched toolchain or protocol versions, unsafe production defaults, and removal of required CI gates.
 
@@ -51,7 +51,7 @@ The gateway reconciler now applies tenant Ingress and Higress WasmPlugin resourc
 
 ## Remaining 10%
 
-Product client integration, 5%: complete a RongxinAI main-process pilot using the ZhiYuan password profile. Passwords, tokens, and Credential values must remain outside the renderer, and refresh tokens must use operating-system protected storage.
+Product client integration, 5%: complete a Zhiyuan main-process pilot using the ZhiYuan password profile. Passwords, tokens, and Credential values must remain outside the renderer, and refresh tokens must use operating-system protected storage.
 
 GA validation, 5%: complete load and soak testing, external security review, backup and disaster-recovery rehearsal, signed artifacts and SBOM publication, and remaining draft-profile cleanup. The M3 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
 

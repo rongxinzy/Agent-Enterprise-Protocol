@@ -16,43 +16,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const modelColumns = `id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,context_window,is_default,enabled,created_at,updated_at`
+const modelColumns = `id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled,created_at,updated_at`
+
+type modelReasoningCompatibility struct {
+	ThinkingFormat                              string `json:"thinkingFormat"`
+	SupportsReasoningEffort                     bool   `json:"supportsReasoningEffort"`
+	RequiresReasoningContentOnAssistantMessages bool   `json:"requiresReasoningContentOnAssistantMessages"`
+}
 
 type modelRecord struct {
-	ID            string
-	DisplayName   string
-	SourceType    string
-	Protocol      string
-	Endpoint      pgtype.Text
-	UpstreamModel pgtype.Text
-	LocalModelRef pgtype.Text
-	CredentialID  pgtype.Text
-	Capabilities  []string
-	ContextWindow pgtype.Int4
-	IsDefault     bool
-	Enabled       bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                     string
+	DisplayName            string
+	SourceType             string
+	Protocol               string
+	Endpoint               pgtype.Text
+	UpstreamModel          pgtype.Text
+	LocalModelRef          pgtype.Text
+	CredentialID           pgtype.Text
+	Capabilities           []string
+	ReasoningCompatibility json.RawMessage
+	ContextWindow          pgtype.Int4
+	IsDefault              bool
+	Enabled                bool
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 type modelWrite struct {
-	ID            string    `json:"id"`
-	DisplayName   string    `json:"displayName"`
-	SourceType    string    `json:"sourceType"`
-	Protocol      string    `json:"protocol"`
-	Endpoint      *string   `json:"endpoint"`
-	UpstreamModel *string   `json:"upstreamModel"`
-	LocalModelRef *string   `json:"localModelRef"`
-	CredentialID  *string   `json:"credentialId"`
-	Capabilities  *[]string `json:"capabilities"`
-	ContextWindow *int32    `json:"contextWindow"`
-	IsDefault     *bool     `json:"isDefault"`
-	Enabled       *bool     `json:"enabled"`
+	ID                     string                       `json:"id"`
+	DisplayName            string                       `json:"displayName"`
+	SourceType             string                       `json:"sourceType"`
+	Protocol               string                       `json:"protocol"`
+	Endpoint               *string                      `json:"endpoint"`
+	UpstreamModel          *string                      `json:"upstreamModel"`
+	LocalModelRef          *string                      `json:"localModelRef"`
+	CredentialID           *string                      `json:"credentialId"`
+	Capabilities           *[]string                    `json:"capabilities"`
+	ReasoningCompatibility *modelReasoningCompatibility `json:"reasoningCompatibility"`
+	ContextWindow          *int32                       `json:"contextWindow"`
+	IsDefault              *bool                        `json:"isDefault"`
+	Enabled                *bool                        `json:"enabled"`
 }
 
 type nullableStringPatch struct {
 	Set   bool
 	Value *string
+}
+
+type nullableReasoningCompatibilityPatch struct {
+	Set   bool
+	Value *modelReasoningCompatibility
+}
+
+func (value *nullableReasoningCompatibilityPatch) UnmarshalJSON(data []byte) error {
+	value.Set = true
+	if bytes.Equal(data, []byte("null")) {
+		value.Value = nil
+		return nil
+	}
+	var decoded modelReasoningCompatibility
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	value.Value = &decoded
+	return nil
 }
 
 func (value *nullableStringPatch) UnmarshalJSON(data []byte) error {
@@ -70,15 +97,16 @@ func (value *nullableStringPatch) UnmarshalJSON(data []byte) error {
 }
 
 type modelPatch struct {
-	DisplayName   *string             `json:"displayName"`
-	Endpoint      *string             `json:"endpoint"`
-	UpstreamModel *string             `json:"upstreamModel"`
-	LocalModelRef *string             `json:"localModelRef"`
-	CredentialID  nullableStringPatch `json:"credentialId"`
-	Capabilities  *[]string           `json:"capabilities"`
-	ContextWindow *int32              `json:"contextWindow"`
-	IsDefault     *bool               `json:"isDefault"`
-	Enabled       *bool               `json:"enabled"`
+	DisplayName            *string                             `json:"displayName"`
+	Endpoint               *string                             `json:"endpoint"`
+	UpstreamModel          *string                             `json:"upstreamModel"`
+	LocalModelRef          *string                             `json:"localModelRef"`
+	CredentialID           nullableStringPatch                 `json:"credentialId"`
+	Capabilities           *[]string                           `json:"capabilities"`
+	ReasoningCompatibility nullableReasoningCompatibilityPatch `json:"reasoningCompatibility"`
+	ContextWindow          *int32                              `json:"contextWindow"`
+	IsDefault              *bool                               `json:"isDefault"`
+	Enabled                *bool                               `json:"enabled"`
 }
 
 type rowScanner interface {
@@ -90,7 +118,7 @@ func scanModel(row rowScanner) (modelRecord, error) {
 	err := row.Scan(
 		&model.ID, &model.DisplayName, &model.SourceType, &model.Protocol,
 		&model.Endpoint, &model.UpstreamModel, &model.LocalModelRef, &model.CredentialID,
-		&model.Capabilities, &model.ContextWindow, &model.IsDefault, &model.Enabled,
+		&model.Capabilities, &model.ReasoningCompatibility, &model.ContextWindow, &model.IsDefault, &model.Enabled,
 		&model.CreatedAt, &model.UpdatedAt,
 	)
 	return model, err
@@ -113,6 +141,12 @@ func modelJSON(model modelRecord, admin bool) map[string]any {
 	}
 	if model.ContextWindow.Valid {
 		value["contextWindow"] = model.ContextWindow.Int32
+	}
+	if len(model.ReasoningCompatibility) > 0 {
+		var compatibility modelReasoningCompatibility
+		if json.Unmarshal(model.ReasoningCompatibility, &compatibility) == nil {
+			value["reasoningCompatibility"] = compatibility
+		}
 	}
 	if admin {
 		value["credentialId"] = nil
@@ -160,7 +194,11 @@ func validModelWrite(input modelWrite) bool {
 	if input.SourceType != "gateway" && input.SourceType != "enterprise_open_source" && input.SourceType != "local" {
 		return false
 	}
-	return input.ContextWindow == nil || *input.ContextWindow > 0
+	return (input.ContextWindow == nil || *input.ContextWindow > 0) && validReasoningCompatibility(input.ReasoningCompatibility)
+}
+
+func validReasoningCompatibility(value *modelReasoningCompatibility) bool {
+	return value == nil || value.ThinkingFormat == "deepseek" && value.SupportsReasoningEffort && value.RequiresReasoningContentOnAssistantMessages
 }
 
 func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Request) {
@@ -245,9 +283,9 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 			return
 		}
 	}
-	model, err := scanModel(tx.QueryRow(request.Context(), `INSERT INTO models (enterprise_id,id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,context_window,is_default,enabled)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING `+modelColumns,
-		tenant, input.ID, input.DisplayName, input.SourceType, input.Protocol, optionalString(input.Endpoint), optionalString(input.UpstreamModel), optionalString(input.LocalModelRef), optionalString(input.CredentialID), capabilities, optionalInt32(input.ContextWindow), *input.IsDefault, *input.Enabled))
+	model, err := scanModel(tx.QueryRow(request.Context(), `INSERT INTO models (enterprise_id,id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+modelColumns,
+		tenant, input.ID, input.DisplayName, input.SourceType, input.Protocol, optionalString(input.Endpoint), optionalString(input.UpstreamModel), optionalString(input.LocalModelRef), optionalString(input.CredentialID), capabilities, input.ReasoningCompatibility, optionalInt32(input.ContextWindow), *input.IsDefault, *input.Enabled))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "MODEL_EXISTS", "A model with this identifier already exists.")
@@ -277,7 +315,7 @@ func (s *Server) getModel(response http.ResponseWriter, request *http.Request) {
 }
 
 func (input modelPatch) hasChanges() bool {
-	return input.DisplayName != nil || input.Endpoint != nil || input.UpstreamModel != nil || input.LocalModelRef != nil || input.CredentialID.Set || input.Capabilities != nil || input.ContextWindow != nil || input.IsDefault != nil || input.Enabled != nil
+	return input.DisplayName != nil || input.Endpoint != nil || input.UpstreamModel != nil || input.LocalModelRef != nil || input.CredentialID.Set || input.Capabilities != nil || input.ReasoningCompatibility.Set || input.ContextWindow != nil || input.IsDefault != nil || input.Enabled != nil
 }
 
 func appendModelUpdate(sets *[]string, arguments *[]any, column string, value any) {
@@ -290,7 +328,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if !input.hasChanges() || input.DisplayName != nil && strings.TrimSpace(*input.DisplayName) == "" || input.ContextWindow != nil && *input.ContextWindow <= 0 {
+	if !input.hasChanges() || input.DisplayName != nil && strings.TrimSpace(*input.DisplayName) == "" || input.ContextWindow != nil && *input.ContextWindow <= 0 || input.ReasoningCompatibility.Set && !validReasoningCompatibility(input.ReasoningCompatibility.Value) {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "At least one valid model field is required.")
 		return
 	}
@@ -335,6 +373,9 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 	}
 	if input.Capabilities != nil {
 		appendModelUpdate(&sets, &arguments, "capabilities", normalizeCapabilities(*input.Capabilities))
+	}
+	if input.ReasoningCompatibility.Set {
+		appendModelUpdate(&sets, &arguments, "reasoning_compatibility", input.ReasoningCompatibility.Value)
 	}
 	if input.ContextWindow != nil {
 		appendModelUpdate(&sets, &arguments, "context_window", *input.ContextWindow)

@@ -37,6 +37,7 @@ type Route struct {
 	Endpoint      string           `json:"endpoint"`
 	UpstreamModel string           `json:"upstreamModel"`
 	Protocol      string           `json:"protocol"`
+	ProviderType  string           `json:"providerType,omitempty"`
 	CredentialRef *SecretReference `json:"credentialRef,omitempty"`
 }
 
@@ -176,7 +177,14 @@ func Render(desired DesiredState) (string, string, error) {
 	}
 	suffix := resourceSuffix(desired.EnterpriseID)
 	enabled := make([]Route, 0, len(routes))
-	for _, route := range routes {
+	for index := range routes {
+		route := routes[index]
+		if route.ProviderType == "" {
+			route.ProviderType = "openai"
+		}
+		if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
+			return "", "", fmt.Errorf("unsupported provider type %q for model %q", route.ProviderType, route.ModelID)
+		}
 		if route.Enabled {
 			enabled = append(enabled, route)
 		}
@@ -196,7 +204,7 @@ func Render(desired DesiredState) (string, string, error) {
 		document.WriteString("  matchRules:\n")
 	}
 	for _, route := range enabled {
-		document.WriteString("    - config:\n        provider:\n          type: openai\n          modelMapping:\n            " + yamlScalar(route.ModelID) + ": " + yamlScalar(route.UpstreamModel) + "\n")
+		document.WriteString("    - config:\n        provider:\n          type: " + yamlScalar(route.ProviderType) + "\n          modelMapping:\n            " + yamlScalar(route.ModelID) + ": " + yamlScalar(route.UpstreamModel) + "\n")
 		if route.CredentialRef != nil {
 			document.WriteString("        credentialRef:\n          name: " + yamlScalar(route.CredentialRef.Name) + "\n          key: " + yamlScalar(route.CredentialRef.Key) + "\n")
 			if route.CredentialRef.Namespace != nil {

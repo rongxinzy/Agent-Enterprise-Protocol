@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS models (
   local_model_ref text,
   credential_id text,
   capabilities text[] NOT NULL DEFAULT '{}',
+  reasoning_compatibility jsonb CHECK (reasoning_compatibility IS NULL OR jsonb_typeof(reasoning_compatibility) = 'object'),
   context_window integer CHECK (context_window > 0),
   is_default boolean NOT NULL DEFAULT false,
   enabled boolean NOT NULL DEFAULT true,

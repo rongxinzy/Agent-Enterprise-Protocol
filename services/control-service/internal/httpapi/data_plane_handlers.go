@@ -25,6 +25,7 @@ type dataPlaneRoute struct {
 	Endpoint      string                    `json:"endpoint"`
 	UpstreamModel string                    `json:"upstreamModel"`
 	Protocol      string                    `json:"protocol"`
+	ProviderType  string                    `json:"providerType,omitempty"`
 	CredentialRef *dataPlaneSecretReference `json:"credentialRef,omitempty"`
 }
 
@@ -54,8 +55,15 @@ func normalizeDataPlaneState(input dataPlaneDesiredStateWrite) (dataPlaneDesired
 	if strings.TrimSpace(input.Revision) == "" || len(input.Revision) > 200 || len(input.Routes) > 500 {
 		return dataPlaneDesiredStateWrite{}, false
 	}
-	for _, route := range input.Routes {
+	for index := range input.Routes {
+		route := &input.Routes[index]
 		if strings.TrimSpace(route.ModelID) == "" || strings.TrimSpace(route.Endpoint) == "" || strings.TrimSpace(route.UpstreamModel) == "" || route.Protocol != "openai-compatible" {
+			return dataPlaneDesiredStateWrite{}, false
+		}
+		if route.ProviderType == "" {
+			route.ProviderType = "openai"
+		}
+		if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
 			return dataPlaneDesiredStateWrite{}, false
 		}
 		if route.CredentialRef != nil && (strings.TrimSpace(route.CredentialRef.Name) == "" || strings.TrimSpace(route.CredentialRef.Key) == "") {

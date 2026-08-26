@@ -9,7 +9,7 @@
 
 当前企业底座可以作为独立集成包发版，并进入受控企业试点，但还不是通用可用的 GA 版本。
 
-达到 90% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。使用知远账号密码档位完成 RongxinAI 主进程接入属于最后 10%。
+达到 90% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。使用知远账号密码档位完成 Zhiyuan 主进程接入属于最后 10%。
 
 权威机器可读评分位于 release/foundation-readiness.json。scripts/release-audit.mjs 会阻止评分漂移、证据文件缺失、工具链或协议版本不一致、不安全生产默认值以及 CI 必需门禁被删除。
 
@@ -51,7 +51,7 @@ gateway reconciler 现已通过 Kubernetes server-side apply 下发租户 Ingres
 
 ## 剩余 10%
 
-产品客户端集成，5%：使用知远账号密码档位完成 RongxinAI 主进程试点；密码、Token 和 Credential 明文不得进入 Renderer，refresh token 只能通过操作系统保护的存储持久化。
+产品客户端集成，5%：使用知远账号密码档位完成 Zhiyuan 主进程试点；密码、Token 和 Credential 明文不得进入 Renderer，refresh token 只能通过操作系统保护的存储持久化。
 
 GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾备演练、签名制品与 SBOM 发布，以及草案档位的剩余清理。M3 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
 

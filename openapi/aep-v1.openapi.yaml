@@ -721,6 +721,8 @@ components:
         upstreamModel: {type: string}
         localModelRef: {type: string}
         capabilities: {type: array, items: {type: string}}
+        reasoningCompatibility:
+          $ref: '#/components/schemas/ModelReasoningCompatibility'
         contextWindow: {type: integer, minimum: 1}
         isDefault: {type: boolean}
         enabled: {type: boolean}
@@ -730,6 +732,20 @@ components:
       properties:
         models: {type: array, items: {$ref: '#/components/schemas/AgentModel'}}
     ModelSourceType: {type: string, enum: [gateway, enterprise_open_source, local]}
+    ModelReasoningCompatibility:
+      description: Wire-level reasoning behavior a client must preserve through an OpenAI-compatible endpoint.
+      type: object
+      required: [thinkingFormat, supportsReasoningEffort, requiresReasoningContentOnAssistantMessages]
+      additionalProperties: false
+      properties:
+        thinkingFormat:
+          type: string
+          enum: [deepseek]
+        supportsReasoningEffort: {type: boolean, const: true}
+        requiresReasoningContentOnAssistantMessages:
+          description: Prior assistant reasoning_content must be replayed when a tool-call conversation continues.
+          type: boolean
+          const: true
     AdminSkill:
       type: object
       required: [id, name, description, state, versions, createdAt, updatedAt]
@@ -887,6 +903,10 @@ components:
         localModelRef: {type: string}
         credentialId: {type: [string, 'null']}
         capabilities: {type: array, items: {type: string}}
+        reasoningCompatibility:
+          oneOf:
+            - {$ref: '#/components/schemas/ModelReasoningCompatibility'}
+            - {type: 'null'}
         contextWindow: {type: integer, minimum: 1}
         isDefault: {type: boolean}
         enabled: {type: boolean}

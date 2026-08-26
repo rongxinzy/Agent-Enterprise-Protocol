@@ -1879,6 +1879,26 @@ components:
         - gateway
         - enterprise_open_source
         - local
+    ModelReasoningCompatibility:
+      description: Wire-level reasoning behavior a client must preserve through an OpenAI-compatible endpoint.
+      type: object
+      required:
+        - thinkingFormat
+        - supportsReasoningEffort
+        - requiresReasoningContentOnAssistantMessages
+      additionalProperties: false
+      properties:
+        thinkingFormat:
+          type: string
+          enum:
+            - deepseek
+        supportsReasoningEffort:
+          type: boolean
+          const: true
+        requiresReasoningContentOnAssistantMessages:
+          description: Prior assistant reasoning_content must be replayed when a tool-call conversation continues.
+          type: boolean
+          const: true
     AgentModel:
       type: object
       required:
@@ -1911,6 +1931,8 @@ components:
           type: array
           items:
             type: string
+        reasoningCompatibility:
+          $ref: '#/components/schemas/ModelReasoningCompatibility'
         contextWindow:
           type: integer
           minimum: 1
@@ -2549,6 +2571,10 @@ components:
           type: array
           items:
             type: string
+        reasoningCompatibility:
+          oneOf:
+            - $ref: '#/components/schemas/ModelReasoningCompatibility'
+            - type: 'null'
         contextWindow:
           type: integer
           minimum: 1

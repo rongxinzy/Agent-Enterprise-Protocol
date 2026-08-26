@@ -30,9 +30,17 @@ const server = http.createServer(async (request, response) => {
     sendJSON(response, 503, {error: {message: 'forced upstream failure', type: 'upstream_error'}});
     return;
   }
+  if (body.messages?.[0]?.content === 'verify reasoning replay') {
+    const assistant = body.messages?.find(message => message.role === 'assistant');
+    if (body.thinking?.type !== 'enabled' || body.reasoning_effort !== 'high' || assistant?.reasoning_content !== 'Call the clock tool.') {
+      sendJSON(response, 400, {error: {message: 'DeepSeek thinking parameters or assistant reasoning replay were lost'}});
+      return;
+    }
+  }
   response.setHeader('X-Mock-Provider-Auth', 'accepted');
   if (body.stream === true) {
     response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
+    response.write(`data: ${JSON.stringify(chunk('', 'Think through the request.'))}\n\n`);
     response.write(`data: ${JSON.stringify(chunk('Hello'))}\n\n`);
     setTimeout(() => {
       response.write(`data: ${JSON.stringify(chunk(' AEP'))}\n\n`);
@@ -42,15 +50,15 @@ const server = http.createServer(async (request, response) => {
   }
   sendJSON(response, 200, {
     id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
-    choices: [{index: 0, message: {role: 'assistant', content: 'Hello AEP'}, finish_reason: 'stop'}],
+    choices: [{index: 0, message: {role: 'assistant', content: 'Hello AEP', reasoning_content: 'Think through the request.'}, finish_reason: 'stop'}],
     usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
   });
 });
 
 server.listen(port, '0.0.0.0');
 
-function chunk(content) {
-  return {id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel, choices: [{index: 0, delta: {content}, finish_reason: null}]};
+function chunk(content, reasoningContent) {
+  return {id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel, choices: [{index: 0, delta: {...(content ? {content} : {}), ...(reasoningContent ? {reasoning_content: reasoningContent} : {})}, finish_reason: null}]};
 }
 
 function sendJSON(response, status, value) {
