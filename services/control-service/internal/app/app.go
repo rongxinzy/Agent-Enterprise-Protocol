@@ -104,7 +104,45 @@ func (a *App) BindAgent(ctx context.Context, user db.User, agent AgentContext) (
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return db.Agent{}, err
 	}
-	return a.DB.CreateAgent(ctx, db.CreateAgentParams{AgentID: agent.AgentID, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		return db.Agent{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	created, err := a.DB.WithTx(tx).CreateAgent(ctx, db.CreateAgentParams{AgentID: agent.AgentID, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
+	if err != nil {
+		return db.Agent{}, err
+	}
+	rows, err := tx.Query(ctx, `SELECT e.event_id
+FROM control_events e
+WHERE e.enterprise_id=$1 AND e.state='active' AND e.expires_at>now()
+AND (e.scope_type='global' OR (e.scope_type='agent' AND e.scope_id=$2) OR (e.scope_type='user' AND e.scope_id=$3) OR (e.scope_type='organization' AND e.scope_id=ANY($4::text[])))`, user.EnterpriseID, agent.AgentID, user.ID, user.OrganizationIds)
+	if err != nil {
+		return db.Agent{}, err
+	}
+	eventIDs := make([]string, 0)
+	for rows.Next() {
+		var eventID string
+		if err := rows.Scan(&eventID); err != nil {
+			rows.Close()
+			return db.Agent{}, err
+		}
+		eventIDs = append(eventIDs, eventID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return db.Agent{}, err
+	}
+	rows.Close()
+	for _, eventID := range eventIDs {
+		if _, err := tx.Exec(ctx, `INSERT INTO control_deliveries (delivery_id,event_id,agent_id) VALUES ($1,$2,$3) ON CONFLICT (event_id,agent_id) DO NOTHING`, uuid.NewString(), eventID, agent.AgentID); err != nil {
+			return db.Agent{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Agent{}, err
+	}
+	return created, nil
 }
 
 func (a *App) ModelScopes(ctx context.Context, enterpriseID, userID, agentID string) ([]string, error) {

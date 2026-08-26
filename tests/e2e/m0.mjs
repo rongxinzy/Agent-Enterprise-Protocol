@@ -52,21 +52,16 @@ async function runScenario() {
 
   const agentId = `e2e-agent-${runId}`;
   const agentData = path.join(tempDirectory, 'agent');
-  await runAgent(agentId, username, password, agentData);
-  const installEvent = await admin.createControlEvent({
-    type: 'skill.manifest.changed', scope: {type: 'agent', id: agentId},
-    resource: {type: 'skill', id: skillId, revision: '1'}, task: {type: 'skill.reconcile'},
-    expiresAt: new Date(Date.now() + 60_000).toISOString(), supersedesKey: `skill:${skillId}:${agentId}`,
-  });
+  const installEventId = await automaticSkillEventId(skillId, 'assigned:');
   const installedSkill = path.join(agentData, 'managed-skills', skillId, 'SKILL.md');
   await runCompose('stop', 'minio');
   await runAgent(agentId, username, password, agentData);
   assert(!fs.existsSync(installedSkill), 'Skill was installed while MinIO was unavailable');
-  await assertDelivery(admin, String(installEvent.eventId), 'failed');
+  await assertDelivery(admin, installEventId, 'failed');
 
   await runCompose('start', 'minio');
   await waitForSkillInstall(agentId, username, password, agentData, installedSkill);
-  const recoveredDelivery = await assertDelivery(admin, String(installEvent.eventId), 'succeeded');
+  const recoveredDelivery = await assertDelivery(admin, installEventId, 'succeeded');
   assert(recoveredDelivery.attemptCount >= 2, 'Recovered delivery did not record a retry');
   assert(!recoveredDelivery.errorCode && !recoveredDelivery.message, 'Recovered delivery retained stale error details');
 
@@ -81,14 +76,10 @@ async function runScenario() {
   await waitForHealth();
 
   await runCli(['skill', 'revoke', '--assignment-id', String(assignment.id)]);
-  const removeEvent = await admin.createControlEvent({
-    type: 'skill.manifest.changed', scope: {type: 'agent', id: agentId},
-    resource: {type: 'skill', id: skillId, revision: '2'}, task: {type: 'skill.reconcile'},
-    expiresAt: new Date(Date.now() + 60_000).toISOString(), supersedesKey: `skill:${skillId}:${agentId}`,
-  });
+  const removeEventId = await automaticSkillEventId(skillId, 'revoked:');
   await runAgent(agentId, username, password, agentData);
   assert(!fs.existsSync(path.join(agentData, 'managed-skills', skillId)), 'Revoked managed Skill still exists');
-  await assertDelivery(admin, String(removeEvent.eventId), 'succeeded');
+  await assertDelivery(admin, removeEventId, 'succeeded');
 
   const expiredEvent = await admin.createControlEvent({
     type: 'skill.manifest.changed', scope: {type: 'agent', id: agentId},
@@ -112,6 +103,12 @@ async function runScenario() {
   assert(Array.isArray(audit.items) && audit.items.length >= 3, 'Expected Skill telemetry was not recorded');
   assert(audit.items.filter(item => item.eventId === duplicateEventId).length === 1, 'Telemetry eventId was not deduplicated');
   await runCli(['metadata']);
+}
+
+async function automaticSkillEventId(skillId, revisionPrefix) {
+  const eventId = await queryDatabase(`SELECT event_id FROM control_events WHERE resource_id='${skillId}' AND resource_revision LIKE '${revisionPrefix}%' ORDER BY created_at DESC LIMIT 1`);
+  assert(eventId, `Automatic ${revisionPrefix} Skill event was not created`);
+  return eventId;
 }
 
 async function assertPasswordSecurity() {

@@ -74,8 +74,11 @@ go run ./cmd/aepctl --password change-this-admin-password skill create --skill-i
 go run ./cmd/aepctl --password change-this-admin-password skill upload --skill-id review --version 1.0.0 --file ./review.zip
 go run ./cmd/aepctl --password change-this-admin-password skill publish --skill-id review --version 1.0.0
 go run ./cmd/aepctl --password change-this-admin-password skill assign --skill-id review --subject-type user --subject-id USER_ID
-go run ./cmd/aepctl --password change-this-admin-password event publish --scope-type agent --scope-id AGENT_ID --skill-id review --revision 1
 ```
+
+Creating or revoking a Skill assignment automatically publishes a scoped
+`skill.manifest.changed` event. A separate `event publish` command is not
+required for assignment convergence.
 
 The example Agent reads these environment variables: `AEP_BASE_URL`,
 `AEP_ENTERPRISE_ID`, `AEP_USERNAME`, `AEP_PASSWORD`, `AEP_AGENT_ID`, and
