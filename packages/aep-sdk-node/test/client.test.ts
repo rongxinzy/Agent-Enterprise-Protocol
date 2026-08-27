@@ -37,6 +37,20 @@ describe('AepClient SDK gate', () => {
     expect(server.requests.filter(item => item.path === '/aep/v1/metadata')).toHaveLength(2);
   });
 
+  test('sends requests when Web Crypto is unavailable', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', {configurable: true, value: undefined});
+    try {
+      await client.getMetadata();
+      expect(server.requests.at(-1)?.headers['x-request-id']).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'crypto', descriptor);
+      else delete (globalThis as {crypto?: unknown}).crypto;
+    }
+  });
+
   test('stores login tokens and loads current identity', async () => {
     const tokens = await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
     expect((await store.get())?.accessToken).toBe(tokens.accessToken);
