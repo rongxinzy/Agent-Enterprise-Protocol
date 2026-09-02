@@ -7,10 +7,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -33,6 +35,16 @@ func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.FlushInterval = -1
+	proxy.Transport = &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: config.UpstreamHeaderTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	proxy.ErrorHandler = func(response http.ResponseWriter, request *http.Request, err error) {
 		slog.Error("model gateway upstream failed", "request_id", requestID(request), "error", err)
 		writeProblem(response, request, http.StatusBadGateway, "GATEWAY_UPSTREAM_UNAVAILABLE", "The model gateway upstream is unavailable.")
@@ -84,7 +96,8 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, status, code, detail)
 		return
 	}
-	if !contains(claims.ModelScopes, model) {
+	model = strings.TrimSpace(model)
+	if model == "" || len(model) > 256 || !contains(claims.ModelScopes, model) {
 		writeProblem(response, request, http.StatusForbidden, "MODEL_NOT_ALLOWED", "The model token does not grant access to the requested model.")
 		return
 	}
@@ -114,7 +127,11 @@ func readModelRequest(reader io.Reader, limit int64) ([]byte, string, error) {
 	if err := json.Unmarshal(body, &input); err != nil || strings.TrimSpace(input.Model) == "" {
 		return nil, "", errors.New("model is required")
 	}
-	return body, input.Model, nil
+	model := strings.TrimSpace(input.Model)
+	if model == "" || len(model) > 256 || model != input.Model {
+		return nil, "", errors.New("model is invalid")
+	}
+	return body, model, nil
 }
 
 func bearerToken(header string) (string, bool) {

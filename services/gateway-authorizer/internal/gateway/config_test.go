@@ -9,6 +9,7 @@ var gatewayEnvironmentKeys = []string{
 	"AEP_ENVIRONMENT", "AEP_LOG_FORMAT", "AEP_LOG_LEVEL",
 	"AEP_GATEWAY_UPSTREAM_URL", "AEP_GATEWAY_JWKS_URL", "AEP_GATEWAY_ISSUER",
 	"AEP_GATEWAY_JWKS_TTL", "AEP_GATEWAY_JWKS_TIMEOUT", "AEP_GATEWAY_REQUEST_LIMIT",
+	"AEP_GATEWAY_UPSTREAM_HEADER_TIMEOUT",
 	"AEP_GATEWAY_HTTP_READ_TIMEOUT", "AEP_GATEWAY_HTTP_WRITE_TIMEOUT",
 	"AEP_GATEWAY_HTTP_MAX_HEADER_BYTES",
 }
@@ -19,7 +20,7 @@ func TestLoadConfigDefaultsAndProductionLogging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LogFormat != "text" || cfg.RequestLimit <= 0 || cfg.HTTPWriteTimeout != 0 {
+	if cfg.LogFormat != "text" || cfg.RequestLimit <= 0 || cfg.HTTPWriteTimeout != 0 || cfg.UpstreamHeaderTimeout <= 0 {
 		t.Fatalf("unexpected gateway defaults: %#v", cfg)
 	}
 	t.Setenv("AEP_ENVIRONMENT", "production")

@@ -20,6 +20,7 @@ type Config struct {
 	JWKSTTL               time.Duration
 	RequestLimit          int64
 	RequestTimeout        time.Duration
+	UpstreamHeaderTimeout time.Duration
 	HTTPReadHeaderTimeout time.Duration
 	HTTPReadTimeout       time.Duration
 	HTTPWriteTimeout      time.Duration
@@ -52,6 +53,7 @@ func LoadConfig() (Config, error) {
 	}{
 		{"AEP_GATEWAY_JWKS_TTL", 5 * time.Minute, &cfg.JWKSTTL, false},
 		{"AEP_GATEWAY_JWKS_TIMEOUT", 2 * time.Second, &cfg.RequestTimeout, false},
+		{"AEP_GATEWAY_UPSTREAM_HEADER_TIMEOUT", 15 * time.Second, &cfg.UpstreamHeaderTimeout, false},
 		{"AEP_GATEWAY_HTTP_READ_HEADER_TIMEOUT", 5 * time.Second, &cfg.HTTPReadHeaderTimeout, false},
 		{"AEP_GATEWAY_HTTP_READ_TIMEOUT", 15 * time.Second, &cfg.HTTPReadTimeout, false},
 		{"AEP_GATEWAY_HTTP_WRITE_TIMEOUT", 0, &cfg.HTTPWriteTimeout, true},
