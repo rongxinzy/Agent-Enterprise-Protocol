@@ -31,6 +31,7 @@ to use MCP.
 - [AEP production runtime baseline](docs/production-runtime.md)
 - [Desktop main-process session integration](docs/desktop-session.md)
 - [AEP v1 foundation release readiness](docs/release-readiness.md)
+- [Local enterprise License signing boundary](docs/license-signing-local.md)
 - [OpenAPI 3.1 specification](openapi/aep-v1.openapi.yaml)
 - [M2 Credential OpenAPI profile](openapi/aep-v1-m2.openapi.yaml)
 - [Control Events OpenAPI 3.1 specification](openapi/aep-v1-control-events.openapi.yaml)

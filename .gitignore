@@ -7,3 +7,9 @@ coverage/
 .env
 .aepctl/
 .aep-agent/
+
+# Enterprise License signer material is managed outside this repository.
+license-signer-local/
+.license-signer/
+*.license.private.*
+*.license.signing.*
