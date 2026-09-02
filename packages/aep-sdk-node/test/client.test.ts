@@ -57,6 +57,18 @@ describe('AepClient SDK gate', () => {
     expect((await client.getCurrentIdentity()).user.id).toBe('user-1');
   });
 
+  test('activates a locally verified enterprise license', async () => {
+    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await expect(client.activateEnterpriseLicense({
+      licenseId: 'lic-1',
+      licenseDigest: 'sha256:' + 'a'.repeat(64),
+      deploymentId: 'deployment-1',
+      expiresAt: '2026-08-20T01:00:00Z',
+      features: ['enterprise.models'],
+    })).resolves.toMatchObject({entitlementToken: 'entitlement-1', tokenType: 'Bearer'});
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/agent/activation');
+  });
+
   test('discovers models and returns an OpenAI-compatible gateway connection', async () => {
     await expect(client.getModelConnection()).rejects.toMatchObject({code: 'NO_SESSION', status: 401});
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});

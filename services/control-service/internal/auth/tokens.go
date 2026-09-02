@@ -16,6 +16,10 @@ import (
 type Claims struct {
 	Tenant                 string   `json:"tenant"`
 	AgentID                string   `json:"agent_id"`
+	LicenseID              string   `json:"license_id,omitempty"`
+	LicenseDigest          string   `json:"license_digest,omitempty"`
+	DeploymentID           string   `json:"deployment_id,omitempty"`
+	Features               []string `json:"features,omitempty"`
 	Admin                  bool     `json:"admin,omitempty"`
 	Roles                  []string `json:"roles,omitempty"`
 	ModelScopes            []string `json:"model_scopes,omitempty"`
@@ -68,6 +72,35 @@ func (s *Service) ParseAccess(raw string) (*Claims, error) {
 
 func (s *Service) ParseModel(raw string) (*Claims, error) {
 	return s.parse(raw, "model-gateway", "model")
+}
+
+func (s *Service) IssueEntitlement(userID, enterpriseID, agentID, deploymentID, licenseID, licenseDigest string, features []string, licenseExpiresAt time.Time) (string, time.Time, error) {
+	now := time.Now().UTC()
+	if !licenseExpiresAt.After(now) || deploymentID == "" || licenseID == "" || licenseDigest == "" {
+		return "", time.Time{}, errors.New("invalid enterprise license activation")
+	}
+	// Entitlements are deliberately short-lived. The license expiry remains the
+	// upper bound, while refresh requires another locally verified activation.
+	expiresAt := licenseExpiresAt.UTC()
+	if maximum := now.Add(24 * time.Hour); expiresAt.After(maximum) {
+		expiresAt = maximum
+	}
+	claims := Claims{
+		Tenant: enterpriseID, AgentID: agentID, DeploymentID: deploymentID, LicenseID: licenseID, LicenseDigest: licenseDigest,
+		Features: append([]string(nil), features...), TokenUse: "entitlement",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: s.issuer, Subject: userID, Audience: jwt.ClaimStrings{"aep-entitlement"},
+			ExpiresAt: jwt.NewNumericDate(expiresAt), IssuedAt: jwt.NewNumericDate(now), ID: uuid.NewString(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	token.Header["kid"] = s.keyID
+	raw, err := token.SignedString(s.private)
+	return raw, expiresAt, err
+}
+
+func (s *Service) ParseEntitlement(raw string) (*Claims, error) {
+	return s.parse(raw, "aep-entitlement", "entitlement")
 }
 
 func (s *Service) parse(raw, audience, tokenUse string) (*Claims, error) {

@@ -28,9 +28,11 @@ import type {
   DataPlaneDesiredState,
   DataPlaneDesiredStateWrite,
   DataPlaneStatus,
+  EntitlementTokenResponse,
   HeartbeatResponse,
   JsonObject,
   JsonValue,
+  LicenseActivationRequest,
   ModelAssignment,
   ModelAssignmentList,
   ModelAssignmentWrite,
@@ -174,6 +176,14 @@ export class AepClient {
 
   getCurrentIdentity(): Promise<CurrentIdentity> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/me'});
+  }
+
+  activateEnterpriseLicense(input: LicenseActivationRequest): Promise<EntitlementTokenResponse> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/agent/activation',
+      body: asJson(input),
+    });
   }
 
   listAgentCredentials(): Promise<CredentialList> {

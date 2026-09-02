@@ -65,6 +65,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 		protected.Use(server.authenticate)
 		protected.Post("/aep/v1/auth/password/change", server.changePassword)
 		protected.Post("/aep/v1/auth/logout", server.logout)
+		protected.Post("/aep/v1/agent/activation", server.activateLicense)
 		protected.Get("/aep/v1/agent/me", server.currentIdentity)
 		protected.Get("/aep/v1/agent/models", server.listAgentModels)
 		protected.Get("/aep/v1/agent/credentials", server.listAgentCredentials)
