@@ -22,6 +22,8 @@ spec:
             matchLabels: {app.kubernetes.io/name: aep-gateway-authorizer}
         - podSelector:
             matchLabels: {app.kubernetes.io/name: aep-gateway-reconciler}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: higress-system}
       ports: [{protocol: TCP, port: 8080}]
   egress:
     - to:

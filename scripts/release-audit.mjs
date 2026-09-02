@@ -72,8 +72,10 @@ for (const sample of ["deploy/production/control-service.env.example", "deploy/p
   }
 }
 const productionControl = await readText("deploy/production/control-service.env.example");
+const productionGateway = await readText("deploy/production/gateway-authorizer.env.example");
 assert(productionControl.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH=false"), "production sample must explicitly disable mock federated auth");
 assert(productionControl.includes("AEP_DATA_PLANE_RECONCILER_TOKEN_FILE="), "production sample must mount the data-plane reconciler token");
+assert(productionGateway.includes("AEP_GATEWAY_UPSTREAM_HEADER_TIMEOUT="), "production gateway sample must configure upstream header timeout");
 
 const productionKustomization = await readText("deploy/kubernetes/production/kustomization.yaml");
 const productionReconciler = await readText("deploy/kubernetes/production/gateway-reconciler.yaml");
@@ -87,7 +89,14 @@ assert(productionRBAC.includes("namespace: higress-system"), "reconciler RBAC mu
 assert(productionSecrets.includes("kind: ExternalSecret"), "production Secret manager integration is missing");
 assert(!/\nkind: Secret\n/.test(productionSecrets), "production manifests must not commit Kubernetes Secret values");
 assert(productionNetworkPolicy.includes("aep-default-deny"), "production default-deny NetworkPolicy is missing");
+assert(productionNetworkPolicy.includes("kubernetes.io/metadata.name: higress-system"), "control-service ingress must allow the Higress namespace");
 assert(productionReconciler.includes("AEP_RECONCILER_KUBERNETES_TOKEN_FILE"), "production reconciler does not use its projected service-account token");
+const productionControlDeployment = await readText("deploy/kubernetes/production/control-service.yaml");
+const productionGatewayDeployment = await readText("deploy/kubernetes/production/gateway-authorizer.yaml");
+const productionReconcilerDeployment = await readText("deploy/kubernetes/production/gateway-reconciler.yaml");
+for (const [name, content] of [["control-service", productionControlDeployment], ["gateway-authorizer", productionGatewayDeployment], ["gateway-reconciler", productionReconcilerDeployment]]) {
+  assert(content.includes("startupProbe:"), name + " must define a startup probe");
+}
 
 const kubernetesApplier = await readText("services/gateway-reconciler/internal/reconciler/kubernetes.go");
 assert(kubernetesApplier.includes("application/apply-patch+yaml"), "Kubernetes server-side apply is missing");

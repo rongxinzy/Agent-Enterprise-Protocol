@@ -90,6 +90,10 @@ spec:
             httpGet: {path: /readyz, port: health}
             initialDelaySeconds: 5
             periodSeconds: 10
+          startupProbe:
+            httpGet: {path: /livez, port: health}
+            failureThreshold: 30
+            periodSeconds: 2
       volumes:
         - name: secrets
           secret:
