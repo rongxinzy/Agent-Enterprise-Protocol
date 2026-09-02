@@ -128,6 +128,25 @@ export interface CurrentIdentity {
   passwordChangeRequired: boolean;
 }
 
+export interface LicenseActivationRequest {
+  licenseId: string;
+  licenseDigest: string;
+  deploymentId: string;
+  expiresAt: string;
+  features: string[];
+}
+
+export interface EntitlementTokenResponse {
+  entitlementToken: string;
+  tokenType: 'Bearer';
+  expiresAt: string;
+  expiresIn: number;
+  licenseId: string;
+  licenseDigest: string;
+  deploymentId: string;
+  features: string[];
+}
+
 export interface SkillManifestItem {
   id: string;
   name: string;

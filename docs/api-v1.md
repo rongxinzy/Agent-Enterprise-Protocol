@@ -41,6 +41,7 @@ Service metadata may be queried without a protocol-version header so a client ca
 | POST | `/auth/exchange` | Exchange a federated one-time authorization code |
 | POST | `/auth/refresh` | Refresh a session |
 | POST | `/auth/logout` | Revoke the current refresh session |
+| POST | `/agent/activation` | Exchange locally verified License evidence for an entitlement token |
 
 ### Agent API
 
@@ -179,6 +180,26 @@ the previous token.
 ### `POST /auth/logout`
 
 Request: `{"refreshToken":"refresh-token"}`. Success returns `204 No Content`.
+
+### `POST /agent/activation`
+
+After locally verifying a signed enterprise license, the Agent exchanges its
+license evidence for a short-lived service-signed entitlement token:
+
+```json
+{
+  "licenseId": "lic_123",
+  "licenseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deploymentId": "deployment_001",
+  "expiresAt": "2027-01-01T00:00:00Z",
+  "features": ["enterprise.models", "enterprise.skills"]
+}
+```
+
+The response includes `entitlementToken`, `expiresAt`, and the normalized
+feature list. The token is bound to the authenticated enterprise, user, and
+Agent. The Control Service does not sign licenses and must never receive a
+license private key.
 
 ## 4. Current Identity
 

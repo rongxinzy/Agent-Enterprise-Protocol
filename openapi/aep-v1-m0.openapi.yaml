@@ -72,6 +72,8 @@ paths:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1refresh'
   /aep/v1/auth/logout:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1logout'
+  /aep/v1/agent/activation:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1agent~1activation'
   /aep/v1/agent/me:
     $ref: './aep-v1.openapi.yaml#/paths/~1agent~1me'
   /aep/v1/agent/heartbeat:

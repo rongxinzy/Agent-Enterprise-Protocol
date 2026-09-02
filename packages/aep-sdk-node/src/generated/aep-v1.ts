@@ -150,6 +150,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/agent/activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Exchanges evidence from a locally verified enterprise license for a short-lived Control Service entitlement token. The service never receives license signing private keys. Clients MUST verify the signed license envelope locally before calling this operation. */
+        post: operations["activateEnterpriseLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/agent/me": {
         parameters: {
             query?: never;
@@ -989,6 +1006,28 @@ export interface components {
         };
         LogoutRequest: {
             refreshToken: string;
+        };
+        LicenseActivationRequest: {
+            licenseId: string;
+            /** @description SHA-256 digest of the canonical signed license envelope. */
+            licenseDigest: string;
+            deploymentId: string;
+            /** Format: date-time */
+            expiresAt: string;
+            features: string[];
+        };
+        EntitlementTokenResponse: {
+            /** @description Short-lived service-signed token for enterprise runtime checks. */
+            entitlementToken: string;
+            /** @constant */
+            tokenType: "Bearer";
+            /** Format: date-time */
+            expiresAt: string;
+            expiresIn: number;
+            licenseId: string;
+            licenseDigest: string;
+            deploymentId: string;
+            features: string[];
         };
         User: {
             id: string;
@@ -1862,6 +1901,33 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Problem"];
+        };
+    };
+    activateEnterpriseLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LicenseActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description Enterprise entitlement token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntitlementTokenResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
         };
     };
     getCurrentIdentity: {

@@ -193,6 +193,33 @@ paths:
           description: Session revoked
         '401':
           $ref: '#/components/responses/Problem'
+  /aep/v1/agent/activation:
+    post:
+      tags:
+        - Authentication
+      operationId: activateEnterpriseLicense
+      description: Exchanges evidence from a locally verified enterprise license for a short-lived Control Service entitlement token. The service never receives license signing private keys. Clients MUST verify the signed license envelope locally before calling this operation.
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LicenseActivationRequest'
+      responses:
+        '200':
+          description: Enterprise entitlement token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementTokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
   /aep/v1/agent/me:
     get:
       tags:
@@ -1252,6 +1279,74 @@ components:
           type: string
           minLength: 1
           writeOnly: true
+    LicenseActivationRequest:
+      type: object
+      required:
+        - licenseId
+        - licenseDigest
+        - deploymentId
+        - expiresAt
+        - features
+      additionalProperties: false
+      properties:
+        licenseId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        licenseDigest:
+          type: string
+          pattern: ^sha256:[0-9a-f]{64}$
+          description: SHA-256 digest of the canonical signed license envelope.
+        deploymentId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        expiresAt:
+          type: string
+          format: date-time
+        features:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    EntitlementTokenResponse:
+      type: object
+      required:
+        - entitlementToken
+        - tokenType
+        - expiresAt
+        - expiresIn
+        - licenseId
+        - licenseDigest
+        - deploymentId
+        - features
+      properties:
+        entitlementToken:
+          type: string
+          description: Short-lived service-signed token for enterprise runtime checks.
+        tokenType:
+          type: string
+          const: Bearer
+        expiresAt:
+          type: string
+          format: date-time
+        expiresIn:
+          type: integer
+          minimum: 1
+        licenseId:
+          type: string
+        licenseDigest:
+          type: string
+          pattern: ^sha256:[0-9a-f]{64}$
+        deploymentId:
+          type: string
+        features:
+          type: array
+          items:
+            type: string
     User:
       type: object
       required:

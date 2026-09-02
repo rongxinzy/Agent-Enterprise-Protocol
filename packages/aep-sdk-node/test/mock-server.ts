@@ -116,6 +116,18 @@ export class MockAepServer {
         passwordChangeRequired: false,
       });
     }
+    if (path === '/aep/v1/agent/activation') {
+      return json(response, 200, {
+        entitlementToken: 'entitlement-1',
+        tokenType: 'Bearer',
+        expiresAt: '2026-08-20T01:00:00Z',
+        expiresIn: 3600,
+        licenseId: 'lic-1',
+        licenseDigest: 'sha256:' + 'a'.repeat(64),
+        deploymentId: 'deployment-1',
+        features: ['enterprise.models'],
+      });
+    }
     if (path === '/aep/v1/agent/credentials') {
       return json(response, 200, {credentials: [credential('agent')]});
     }

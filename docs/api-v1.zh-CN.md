@@ -40,6 +40,7 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 | POST | `/auth/exchange` | 交换联合登录一次性授权码 |
 | POST | `/auth/refresh` | 刷新会话 |
 | POST | `/auth/logout` | 撤销当前 refresh 会话 |
+| POST | `/agent/activation` | 将本地验签的 License 证据交换为 entitlement token |
 
 ### Agent API
 
@@ -172,6 +173,24 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 ### `POST /auth/logout`
 
 请求：`{"refreshToken":"refresh-token"}`。成功返回 `204 No Content`。
+
+### `POST /agent/activation`
+
+Agent 在本地验签企业 License 后，将 License 证据交换为短期服务端签发的
+entitlement token：
+
+```json
+{
+  "licenseId": "lic_123",
+  "licenseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deploymentId": "deployment_001",
+  "expiresAt": "2027-01-01T00:00:00Z",
+  "features": ["enterprise.models", "enterprise.skills"]
+}
+```
+
+响应包含 `entitlementToken`、`expiresAt` 和规范化后的功能列表。Token 绑定当前
+认证企业、用户和 Agent。Control Service 不签发 License，且绝不能接收 License 私钥。
 
 ## 4. 当前身份
 
