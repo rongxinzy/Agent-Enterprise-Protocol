@@ -120,6 +120,15 @@ for (const readme of ["README.md", "README.zh-CN.md"]) {
   assert(content.includes("release-readiness"), readme + " does not link the release-readiness report");
 }
 
+const gitignore = await readText(".gitignore");
+assert(gitignore.includes("license-signer-local/"), "local signer directory must be ignored");
+assert(gitignore.includes("*.license.private.*"), "private License artifacts must be ignored");
+const signerBoundary = await readText("docs/license-signing-local.md");
+const signerBoundaryZh = await readText("docs/license-signing-local.zh-CN.md");
+for (const content of [signerBoundary, signerBoundaryZh]) {
+  assert(content.includes("never receives a License private key") || (content.includes("绝不接收") && content.includes("License 私钥")), "signer boundary must keep private keys out of Control Service");
+}
+
 assert(!manifest.productionCapabilities.includes("federated_auth"), "mock federated auth cannot be a production capability");
 assert(manifest.developmentOnlyCapabilities.includes("federated_auth"), "mock federated auth must be marked development-only");
 assert(manifest.productionCapabilities.includes("password_auth"), "ZhiYuan password authentication must remain a production capability");

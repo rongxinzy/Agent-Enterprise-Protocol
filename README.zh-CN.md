@@ -29,6 +29,7 @@ AEP 是管理协议，不重新定义模型推理、MCP 或 Agent-to-Agent 协�
 - [AEP 生产运行基线](docs/production-runtime.zh-CN.md)
 - [桌面端主进程会话接入](docs/desktop-session.zh-CN.md)
 - [AEP v1 企业底座发布就绪度](docs/release-readiness.zh-CN.md)
+- [企业 License 本地签发边界](docs/license-signing-local.zh-CN.md)
 - [OpenAPI 3.1 规范](openapi/aep-v1.openapi.yaml)
 - [M2 Credential OpenAPI Profile](openapi/aep-v1-m2.openapi.yaml)
 - [管控事件 OpenAPI 3.1 规范](openapi/aep-v1-control-events.openapi.yaml)
