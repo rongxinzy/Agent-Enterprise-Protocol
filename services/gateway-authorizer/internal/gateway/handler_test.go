@@ -71,6 +71,7 @@ func TestHandlerRejectsMissingTokenAndUnauthorizedModel(t *testing.T) {
 	}{
 		{name: "missing token", model: "model-a", status: http.StatusUnauthorized, code: "TOKEN_INVALID"},
 		{name: "unauthorized model", token: "Bearer token", model: "model-b", status: http.StatusForbidden, code: "MODEL_NOT_ALLOWED"},
+		{name: "model with surrounding whitespace", token: "Bearer token", model: " model-a", status: http.StatusBadRequest, code: "INVALID_REQUEST"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{\"model\":\""+test.model+"\"}"))
