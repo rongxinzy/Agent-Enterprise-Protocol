@@ -2,14 +2,14 @@
 
 Status: release candidate
 Implementation profile: M3
-Measured foundation completion: 90%
-Assessment date: 2026-08-24
+Measured foundation completion: 95%
+Assessment date: 2026-09-03
 
 ## Release Decision
 
 The enterprise foundation is ready for independent integration testing and a controlled enterprise pilot. It is not a general-availability release.
 
-A real product client is not required to validate this 90% foundation gate. The Node reference Agent exercises the same SDK, session, Skill, event, Credential, and model paths expected from a real client. A Zhiyuan main-process integration using the ZhiYuan password profile remains part of the final 10%.
+This 95% foundation gate includes a Zhiyuan main-process password-login and enterprise-model integration pilot. The Node reference Agent continues to exercise the SDK, session, Skill, event, Credential, and model paths expected from a real client. The remaining 5% is GA validation and does not block a controlled enterprise pilot.
 
 The authoritative machine-readable score is in release/foundation-readiness.json. The scripts/release-audit.mjs check rejects score drift, missing evidence, mismatched toolchain or protocol versions, unsafe production defaults, and removal of required CI gates.
 
@@ -25,11 +25,11 @@ The authoritative machine-readable score is in release/foundation-readiness.json
 | Credential control and Agent delivery | 10% | Complete |
 | Reference Agent | 5% | Complete |
 | Production runtime baseline | 5% | Complete |
-| Product client integration | 5% | Pending |
+| Product client integration | 5% | Complete |
 | Production data-plane automation | 5% | Complete |
 | GA validation and release supply chain | 5% | Pending |
 
-Completed weight is 90 of 100. Pending work is not counted as partial completion.
+Completed weight is 95 of 100. Pending work is not counted as partial completion.
 
 ## Available Release Surface
 
@@ -49,9 +49,7 @@ Higress standalone and the static AI Proxy mapping remain local and CI fixtures.
 
 The gateway reconciler now applies tenant Ingress and Higress WasmPlugin resources through Kubernetes server-side apply. Deterministic names, one field manager, periodic drift repair, delete-on-disable behavior, partial-failure status, and two-replica convergence are covered by fake-control-plane fault tests and a real kind API Server gate.
 
-## Remaining 10%
-
-Product client integration, 5%: complete a Zhiyuan main-process pilot using the ZhiYuan password profile. Passwords, tokens, and Credential values must remain outside the renderer, and refresh tokens must use operating-system protected storage.
+## Remaining 5%
 
 GA validation, 5%: complete load and soak testing, external security review, backup and disaster-recovery rehearsal, signed artifacts and SBOM publication, and remaining draft-profile cleanup. The M3 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
 

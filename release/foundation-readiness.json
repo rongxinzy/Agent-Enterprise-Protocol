@@ -6,8 +6,8 @@
     "packageVersion": "0.1.0",
     "sdkVersion": "0.2.2",
     "stage": "release-candidate",
-    "completionPercent": 90,
-    "asOf": "2026-08-24"
+    "completionPercent": 95,
+    "asOf": "2026-09-03"
   },
   "completedGates": [
     {
@@ -73,6 +73,14 @@
       ]
     },
     {
+      "id": "product-client-integration",
+      "weight": 5,
+      "evidence": [
+        "release/evidence/zhiyuan-electron-rc.md",
+        "tests/e2e/m1-client.mjs"
+      ]
+    },
+    {
       "id": "production-runtime-baseline",
       "weight": 5,
       "evidence": [
@@ -93,14 +101,6 @@
     }
   ],
   "remainingGates": [
-    {
-      "id": "product-client-integration",
-      "weight": 5,
-      "exitCriteria": [
-        "Complete a Zhiyuan main-process pilot using the production ZhiYuan password authentication profile.",
-        "Keep passwords, tokens, and Credential values out of the renderer and persist refresh tokens only through operating-system protected storage."
-      ]
-    },
     {
       "id": "ga-validation",
       "weight": 5,

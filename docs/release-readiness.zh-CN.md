@@ -2,14 +2,14 @@
 
 状态：发布候选
 实现档位：M3
-企业底座完成度：90%
-评估日期：2026-08-24
+企业底座完成度：95%
+评估日期：2026-09-03
 
 ## 发布结论
 
 当前企业底座可以作为独立集成包发版，并进入受控企业试点，但还不是通用可用的 GA 版本。
 
-达到 90% 底座门禁不依赖真实产品客户端。Node 参考 Agent 已覆盖真实客户端需要使用的 SDK、会话、Skill、事件、Credential 和模型链路。使用知远账号密码档位完成 Zhiyuan 主进程接入属于最后 10%。
+达到 95% 底座门禁已包含 Zhiyuan 主进程的密码登录与企业模型集成验收。Node 参考 Agent 继续覆盖 SDK、会话、Skill、事件、Credential 和模型链路。剩余 5% 是 GA 发布验证，不影响受控企业试点。
 
 权威机器可读评分位于 release/foundation-readiness.json。scripts/release-audit.mjs 会阻止评分漂移、证据文件缺失、工具链或协议版本不一致、不安全生产默认值以及 CI 必需门禁被删除。
 
@@ -25,11 +25,11 @@
 | Credential 管控与 Agent 下发 | 10% | 完成 |
 | 参考 Agent | 5% | 完成 |
 | 生产运行基线 | 5% | 完成 |
-| 产品客户端集成 | 5% | 待完成 |
+| 产品客户端集成 | 5% | 完成 |
 | 生产数据面自动化 | 5% | 完成 |
 | GA 验证与发布供应链 | 5% | 待完成 |
 
-已完成权重严格为 90/100，待完成工作不按部分完成计分。
+已完成权重严格为 95/100，待完成工作不按部分完成计分。
 
 ## 当前可发版能力
 
@@ -49,9 +49,7 @@ higress-standalone 与静态 AI Proxy 映射只用于本地和 CI。生产 Higre
 
 gateway reconciler 现已通过 Kubernetes server-side apply 下发租户 Ingress 与 Higress WasmPlugin。确定性名称、统一 field manager、周期漂移修复、禁用删除、部分失败状态和双副本收敛均由故障测试及真实 kind API Server 门禁覆盖。
 
-## 剩余 10%
-
-产品客户端集成，5%：使用知远账号密码档位完成 Zhiyuan 主进程试点；密码、Token 和 Credential 明文不得进入 Renderer，refresh token 只能通过操作系统保护的存储持久化。
+## 剩余 5%
 
 GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾备演练、签名制品与 SBOM 发布，以及草案档位的剩余清理。M3 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
 
@@ -63,6 +61,6 @@ GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾
 npm run release:check
 ~~~
 
-该命令会校验 OpenAPI 与生成的 SDK 类型，构建并测试 Node workspace，校验 90% 评分，执行 Go test、race、vet 和 build，并运行全部 Compose E2E。CI 中 sdk-gate、control-service、example-agent、compose-e2e、data-plane-kubernetes 和 release-gate 必须全部成功。
+该命令会校验 OpenAPI 与生成的 SDK 类型，构建并测试 Node workspace，校验 95% 评分，执行 Go test、race、vet 和 build，并运行全部 Compose E2E。CI 中 sdk-gate、control-service、example-agent、compose-e2e、data-plane-kubernetes 和 release-gate 必须全部成功。
 
 出现以下任一情况时不得进入生产试点：复用任何生产默认凭证、启用 mock 联合认证、在不可信网络上缺少 HTTPS 或等效可信传输、备份责任未定义，或目标 Higress 拓扑仍基于 higress-standalone。
