@@ -63,4 +63,9 @@ npm run release:check
 
 该命令会校验 OpenAPI 与生成的 SDK 类型，构建并测试 Node workspace，校验 95% 评分，执行 Go test、race、vet 和 build，并运行全部 Compose E2E。CI 中 sdk-gate、control-service、example-agent、compose-e2e、data-plane-kubernetes 和 release-gate 必须全部成功。
 
+创建 `aep-v*` 标签时，`.github/workflows/aep-release.yml` 会重新运行发布门禁，
+生成 CycloneDX 源码 SBOM，并发布其 SHA-256 校验文件。该工作流不会接触离线
+License 签名器或任何私钥。发布人员应在批准的本地签名环境审阅校验值后，
+再对面向客户的 Electron 安装包和 License 执行签名。
+
 出现以下任一情况时不得进入生产试点：复用任何生产默认凭证、启用 mock 联合认证、在不可信网络上缺少 HTTPS 或等效可信传输、备份责任未定义，或目标 Higress 拓扑仍基于 higress-standalone。
