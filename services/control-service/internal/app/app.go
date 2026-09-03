@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ var (
 	ErrRefreshTokenInvalid  = errors.New("refresh token is invalid or expired")
 	ErrLicenseNotRegistered = errors.New("license is not registered for this enterprise")
 	ErrLicenseRevoked       = errors.New("license has been revoked")
+	ErrLicenseConflict      = errors.New("license ID is already registered with a different digest")
 	ErrLicenseAgentLimit    = errors.New("license agent limit exceeded")
 	ErrLicenseUserLimit     = errors.New("license user limit exceeded")
 )
@@ -39,6 +41,23 @@ type App struct {
 	Credentials     *credential.Sealer
 	LicenseVerifier *license.Verifier
 	License         *license.Verified
+	licenseMu       sync.RWMutex
+}
+
+func (a *App) CurrentLicense() *license.Verified {
+	a.licenseMu.RLock()
+	defer a.licenseMu.RUnlock()
+	if a.License == nil {
+		return nil
+	}
+	copy := *a.License
+	return &copy
+}
+
+func (a *App) SetLicense(value license.Verified) {
+	a.licenseMu.Lock()
+	defer a.licenseMu.Unlock()
+	a.License = &value
 }
 
 type AgentContext struct {
@@ -109,7 +128,7 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 			}
 			return nil, errors.New("AEP_LICENSE_FILE is expired or bound to another customer")
 		}
-		application.License = &verified
+		application.SetLicense(verified)
 	}
 	if err := application.bootstrap(ctx); err != nil {
 		pool.Close()
@@ -140,7 +159,7 @@ func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) er
 	err := a.Pool.QueryRow(ctx, `SELECT digest FROM licenses WHERE license_id=$1`, claims.LicenseID).Scan(&existingDigest)
 	if err == nil {
 		if existingDigest != verified.Digest {
-			return errors.New("license ID is already registered with a different digest")
+			return ErrLicenseConflict
 		}
 		return nil
 	}

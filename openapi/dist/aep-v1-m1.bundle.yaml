@@ -855,6 +855,59 @@ paths:
                 $ref: '#/components/schemas/AdminAgent'
         '404':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/licenses:
+    get:
+      tags:
+        - Admin Licenses
+      operationId: listLicenses
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          $ref: '#/components/responses/LicenseList'
+  /aep/v1/admin/licenses/{licenseId}:
+    parameters:
+      - $ref: '#/components/parameters/LicenseId'
+    get:
+      tags:
+        - Admin Licenses
+      operationId: getLicense
+      responses:
+        '200':
+          $ref: '#/components/responses/License'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/licenses/import:
+    post:
+      tags:
+        - Admin Licenses
+      operationId: importLicense
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LicenseImportRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/License'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+        '422':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/licenses/{licenseId}/revoke:
+    post:
+      tags:
+        - Admin Licenses
+      operationId: revokeLicense
+      parameters:
+        - $ref: '#/components/parameters/LicenseId'
+      responses:
+        '200':
+          $ref: '#/components/responses/LicenseRevocation'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/events:
     get:
       tags:
@@ -2585,6 +2638,139 @@ components:
           type:
             - string
             - 'null'
+    License:
+      type: object
+      required:
+        - licenseId
+        - enterpriseId
+        - customerId
+        - deploymentId
+        - digest
+        - keyId
+        - status
+        - issuedAt
+        - expiresAt
+        - graceEndsAt
+        - limits
+        - features
+        - activeAgents
+        - activeUsers
+        - createdAt
+        - updatedAt
+      properties:
+        licenseId:
+          type: string
+        enterpriseId:
+          type: string
+        customerId:
+          type: string
+        deploymentId:
+          type: string
+        digest:
+          type: string
+          pattern: ^sha256:[0-9a-f]{64}$
+        keyId:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - revoked
+        issuedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        graceEndsAt:
+          type: string
+          format: date-time
+        limits:
+          type: object
+          required:
+            - users
+            - agents
+          properties:
+            users:
+              type: integer
+              minimum: 1
+            agents:
+              type: integer
+              minimum: 1
+        features:
+          type: array
+          items:
+            type: string
+        activeAgents:
+          type: integer
+          minimum: 0
+        activeUsers:
+          type: integer
+          minimum: 0
+        revokedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          readOnly: true
+    LicensePage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/License'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    LicenseImportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - license
+      properties:
+        license:
+          description: Complete vendor-signed license envelope. Private keys are never accepted.
+          type: object
+          additionalProperties: false
+          required:
+            - format
+            - keyId
+            - payload
+            - signature
+          properties:
+            format:
+              type: string
+              const: zhiyuan-license-v1
+            keyId:
+              type: string
+            payload:
+              type: object
+            signature:
+              type: string
+    LicenseRevocation:
+      type: object
+      required:
+        - licenseId
+        - status
+      properties:
+        licenseId:
+          type: string
+        status:
+          type: string
+          const: revoked
     StoredEvent:
       allOf:
         - $ref: '#/components/schemas/AgentEvent'
@@ -2766,6 +2952,24 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Assignment'
+    LicenseList:
+      description: Registered enterprise licenses
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LicensePage'
+    License:
+      description: Registered enterprise license metadata
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/License'
+    LicenseRevocation:
+      description: License revocation result
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LicenseRevocation'
     AdminModel:
       description: Model descriptor
       content:
@@ -2859,6 +3063,12 @@ components:
         type: string
     EventId:
       name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+    LicenseId:
+      name: licenseId
       in: path
       required: true
       schema:
