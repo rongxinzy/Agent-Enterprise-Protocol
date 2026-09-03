@@ -96,7 +96,7 @@ func validDeliveryMode(value string) bool {
 }
 
 func validCredentialSubject(value string) bool {
-	return value == "enterprise" || value == "organization" || value == "user" || value == "agent"
+	return value == "enterprise" || value == "organization" || value == "user" || value == "agent" || value == "role" || value == "team"
 }
 
 func (s *Server) listAgentCredentials(response http.ResponseWriter, request *http.Request) {
@@ -115,6 +115,8 @@ AND EXISTS (
     OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.organization_ids))
     OR (ca.subject_type='user' AND ca.subject_id=$2)
     OR (ca.subject_type='agent' AND ca.subject_id=$3)
+    OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
+    OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
   )
 )
 ORDER BY c.id`, claims.Tenant, claims.Subject, claims.AgentID)
@@ -189,6 +191,8 @@ WHERE ca.enterprise_id=$1 AND ca.credential_id=$4 AND (
   OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.organization_ids))
   OR (ca.subject_type='user' AND ca.subject_id=$2)
   OR (ca.subject_type='agent' AND ca.subject_id=$3)
+  OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
+  OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
 ))`, claims.Tenant, claims.Subject, claims.AgentID, credentialID).Scan(&authorized)
 		if err != nil {
 			databaseFailure(response, request, err)

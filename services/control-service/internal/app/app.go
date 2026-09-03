@@ -292,6 +292,16 @@ WHERE m.enterprise_id=$1 AND m.enabled=true AND (
   OR (ma.subject_type='organization' AND ma.subject_id=ANY(u.organization_ids))
   OR (ma.subject_type='user' AND ma.subject_id=$2)
   OR (ma.subject_type='agent' AND ma.subject_id=$3)
+  OR (ma.subject_type='role' AND EXISTS (
+    SELECT 1 FROM user_role_bindings urb
+    JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
+    WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ma.subject_id
+  ))
+  OR (ma.subject_type='team' AND EXISTS (
+    SELECT 1 FROM user_team_bindings utb
+    JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true
+    WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ma.subject_id
+  ))
 )
 ORDER BY m.id`, enterpriseID, userID, agentID)
 	if err != nil {
