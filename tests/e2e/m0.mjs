@@ -38,6 +38,7 @@ async function runScenario() {
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
 
   await assertUserSessionLogin();
+  await assertMultiTerminalControlEvent();
 
   await assertPasswordSecurity();
 
@@ -122,6 +123,31 @@ async function assertUserSessionLogin() {
   assert(!Object.hasOwn(claims, 'agent_id'), 'User session token unexpectedly contains agent_id');
   const stored = Number(await queryDatabase(`SELECT count(*) FROM user_sessions WHERE session_id='${tokens.sessionId}' AND topic='user:demo:${claims.sub}'`));
   assert(stored === 1, 'User session was not persisted with its user topic');
+}
+
+async function assertMultiTerminalControlEvent() {
+  const first = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  const second = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  const firstTokens = await first.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  await second.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const userId = decodeJwtPayload(firstTokens.accessToken).sub;
+  const event = await first.createControlEvent({
+    type: 'model.catalog.changed',
+    scope: {type: 'user', id: userId},
+    task: {type: 'model.reconcile'},
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  const firstPage = await first.listControlEvents(undefined, 10);
+  const secondPage = await second.listControlEvents(undefined, 10);
+  assert(firstPage.items.length === 1 && secondPage.items.length === 1, 'User event was not delivered to both sessions');
+  assert(firstPage.items[0].deliveryId !== secondPage.items[0].deliveryId, 'Terminals shared a delivery ID');
+  await first.acknowledgeControlEvent(firstPage.items[0].deliveryId, new Date().toISOString());
+  await first.reportControlEventResult(firstPage.items[0].deliveryId, {status: 'succeeded', completedAt: new Date().toISOString()});
+  const secondAgain = await second.listControlEvents(undefined, 10);
+  assert(secondAgain.items.length === 1, 'Acknowledging one terminal consumed the other terminal delivery');
+  const deliveries = await first.listControlEventDeliveries(event.eventId);
+  const sessionDeliveries = deliveries.items.filter(item => item.sessionId);
+  assert(sessionDeliveries.length >= 2, 'Admin delivery query did not include both sessions');
 }
 
 function decodeJwtPayload(token) {

@@ -785,7 +785,7 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/DeliveryState'
-        - name: agentId
+        - name: sessionId
           in: query
           schema:
             type: string
@@ -1612,7 +1612,7 @@ components:
           type: string
           const: global
       additionalProperties: false
-    OrganizationScope:
+    TeamScope:
       type: object
       required:
         - type
@@ -1620,12 +1620,9 @@ components:
       properties:
         type:
           type: string
-          const: organization
+          const: team
         id:
           type: string
-        includeDescendants:
-          type: boolean
-          default: false
       additionalProperties: false
     UserScope:
       type: object
@@ -1639,24 +1636,11 @@ components:
         id:
           type: string
       additionalProperties: false
-    AgentScope:
-      type: object
-      required:
-        - type
-        - id
-      properties:
-        type:
-          type: string
-          const: agent
-        id:
-          type: string
-      additionalProperties: false
     ControlEventScope:
       oneOf:
         - $ref: '#/components/schemas/GlobalScope'
-        - $ref: '#/components/schemas/OrganizationScope'
+        - $ref: '#/components/schemas/TeamScope'
         - $ref: '#/components/schemas/UserScope'
-        - $ref: '#/components/schemas/AgentScope'
       discriminator:
         propertyName: type
     ControlEventResource:
@@ -2363,9 +2347,8 @@ components:
       type: string
       enum:
         - global
-        - organization
+        - team
         - user
-        - agent
     CreateControlEventRequest:
       type: object
       required:
@@ -2478,9 +2461,7 @@ components:
       required:
         - deliveryId
         - eventId
-        - agentId
         - state
-        - createdAt
         - updatedAt
       properties:
         deliveryId:
@@ -2488,7 +2469,13 @@ components:
         eventId:
           type: string
         agentId:
-          type: string
+          type:
+            - string
+            - 'null'
+        sessionId:
+          type:
+            - string
+            - 'null'
         state:
           $ref: '#/components/schemas/DeliveryState'
         attemptCount:
@@ -2754,7 +2741,7 @@ components:
     AepAgentId:
       name: X-AEP-Agent-ID
       in: header
-      required: true
+      required: false
       schema:
         type: string
     AepProtocolVersion:
