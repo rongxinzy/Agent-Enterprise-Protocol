@@ -82,6 +82,12 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 
 		protected.Group(func(admin chi.Router) {
 			admin.Use(server.requireAdmin)
+			admin.Get("/aep/v1/admin/permissions", server.listPermissions)
+			admin.Get("/aep/v1/admin/roles", server.listRoles)
+			admin.Post("/aep/v1/admin/roles", server.createRole)
+			admin.Get("/aep/v1/admin/teams", server.listTeams)
+			admin.Post("/aep/v1/admin/teams", server.createTeam)
+			admin.Put("/aep/v1/admin/users/{userId}/rbac", server.replaceUserRBAC)
 			admin.Get("/aep/v1/admin/users", server.listUsers)
 			admin.Post("/aep/v1/admin/users", server.createUser)
 			admin.Post("/aep/v1/admin/users/import", server.importUsers)
