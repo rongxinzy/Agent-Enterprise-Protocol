@@ -72,23 +72,35 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: '/.well-known/jwks.json'}, false);
   }
 
-  getAuthenticationMethods(enterpriseHint: string): Promise<AuthenticationMethods> {
+  getAuthenticationMethods(deploymentHint: string): Promise<AuthenticationMethods> {
     return this.#send(
-      {method: HttpMethod.Get, path: `/aep/v1/auth/methods?${query({enterpriseHint})}`},
+      {method: HttpMethod.Get, path: `/aep/v1/auth/methods?${query({deploymentHint})}`},
       false,
     );
   }
 
   async loginWithPassword(input: {
-    enterpriseId: string;
+    /** New single-deployment identity. */
+    deploymentId?: string;
+    /** @deprecated Use deploymentId. Kept for protocol v1 transitional clients. */
+    enterpriseId?: string;
     username: string;
     password: string;
   }): Promise<AepTokens> {
+    const deploymentId = input.deploymentId ?? input.enterpriseId;
+    if (!deploymentId) {
+      throw new AepProblem({
+        type: 'https://aep.example/problems/invalid-request',
+        title: 'Deployment identity is required',
+        status: 400,
+        code: 'DEPLOYMENT_ID_REQUIRED',
+      });
+    }
     const tokens = await this.#send<AepTokens>(
       {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/password/login',
-        body: asJson({...this.#agentContext(), ...input}),
+        body: asJson({...this.#agentContext(), ...input, deploymentId}),
       },
       false,
     );
@@ -97,14 +109,24 @@ export class AepClient {
   }
 
   startFederatedLogin(input: {
-    enterpriseId: string;
+    deploymentId?: string;
+    enterpriseId?: string;
     methodId: string;
     redirectUri: string;
     codeChallenge: string;
     codeChallengeMethod?: 'S256';
   }): Promise<JsonObject> {
+    const deploymentId = input.deploymentId ?? input.enterpriseId;
+    if (!deploymentId) {
+      throw new AepProblem({
+        type: 'https://aep.example/problems/invalid-request',
+        title: 'Deployment identity is required',
+        status: 400,
+        code: 'DEPLOYMENT_ID_REQUIRED',
+      });
+    }
     return this.#send(
-      {method: HttpMethod.Post, path: '/aep/v1/auth/federated/start', body: asJson(input)},
+      {method: HttpMethod.Post, path: '/aep/v1/auth/federated/start', body: asJson({...input, deploymentId})},
       false,
     );
   }

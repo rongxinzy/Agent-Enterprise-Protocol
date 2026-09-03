@@ -596,12 +596,19 @@ components:
   schemas:
     ServiceMetadata:
       type: object
-      required: [service, protocol, minimumVersion, maximumVersion, features]
+      required: [service, protocol, minimumVersion, maximumVersion, features, deploymentId, deployment]
       properties:
         service: {type: string}
         protocol: {type: string, const: aep}
         minimumVersion: {type: string}
         maximumVersion: {type: string}
+        deploymentId: {type: string, minLength: 1}
+        deployment:
+          type: object
+          required: [id, name]
+          properties:
+            id: {type: string}
+            name: {type: string}
         features: {type: array, items: {type: string}}
     AuthExchangeRequest:
       type: object
@@ -635,13 +642,16 @@ components:
         tokenType: {type: string, const: Bearer}
         expiresIn: {type: integer, minimum: 1}
         modelAccessExpiresIn: {type: integer, minimum: 1}
+        deploymentId: {type: string, minLength: 1}
         passwordChangeRequired: {type: boolean}
     CurrentIdentity:
       type: object
-      required: [user, enterprise, roles, sessionExpiresAt, passwordChangeRequired]
+      required: [user, enterprise, deployment, deploymentId, roles, sessionExpiresAt, passwordChangeRequired]
       properties:
         user: {$ref: '#/components/schemas/User'}
         enterprise: {$ref: '#/components/schemas/Enterprise'}
+        deployment: {$ref: '#/components/schemas/Deployment'}
+        deploymentId: {type: string, minLength: 1}
         roles: {type: array, items: {type: string}}
         sessionExpiresAt: {type: string, format: date-time}
         passwordChangeRequired: {type: boolean}
@@ -653,6 +663,12 @@ components:
         displayName: {type: string}
         email: {type: [string, 'null'], format: email}
     Enterprise:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+    Deployment:
       type: object
       required: [id, name]
       properties:

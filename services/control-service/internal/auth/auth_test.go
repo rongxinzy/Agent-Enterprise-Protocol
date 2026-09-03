@@ -66,6 +66,31 @@ func TestAccessAndModelClaims(t *testing.T) {
 	}
 }
 
+func TestIssueWithDeploymentCarriesExplicitDeploymentClaim(t *testing.T) {
+	service, err := NewService("https://issuer.example", "", time.Minute, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, model, err := service.IssueWithDeployment("user-1", "legacy-tenant", "deployment-1", "agent-1", false, false, []string{"admin"}, []string{"model-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessClaims, err := service.ParseAccess(access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accessClaims.Tenant != "legacy-tenant" || accessClaims.DeploymentID != "deployment-1" {
+		t.Fatalf("access claims = %#v", accessClaims)
+	}
+	modelClaims, err := service.ParseModel(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelClaims.Tenant != "legacy-tenant" || modelClaims.DeploymentID != "deployment-1" {
+		t.Fatalf("model claims = %#v", modelClaims)
+	}
+}
+
 func TestPasswordChangeRequiredClaim(t *testing.T) {
 	service, err := NewService("https://issuer.example", "", time.Minute, time.Minute)
 	if err != nil {

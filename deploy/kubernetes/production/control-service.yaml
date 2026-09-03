@@ -22,6 +22,8 @@ data:
   AEP_HTTP_IDLE_TIMEOUT: 60s
   AEP_HTTP_SHUTDOWN_TIMEOUT: 10s
   AEP_HTTP_MAX_HEADER_BYTES: "1048576"
+  AEP_DEPLOYMENT_ID: deployment-enterprise-001
+  AEP_DEPLOYMENT_NAME: Enterprise deployment
   AEP_DATABASE_URL_FILE: /var/run/aep-secrets/database-url
   AEP_MINIO_ACCESS_KEY_FILE: /var/run/aep-secrets/minio-access-key
   AEP_MINIO_SECRET_KEY_FILE: /var/run/aep-secrets/minio-secret-key

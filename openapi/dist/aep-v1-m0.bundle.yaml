@@ -58,7 +58,13 @@ paths:
       parameters:
         - name: enterpriseHint
           in: query
-          required: true
+          required: false
+          schema:
+            type: string
+            minLength: 1
+        - name: deploymentHint
+          in: query
+          required: false
           schema:
             type: string
             minLength: 1
@@ -965,6 +971,19 @@ components:
           type: array
           items:
             type: string
+        deploymentId:
+          type: string
+          minLength: 1
+        deployment:
+          type: object
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+            name:
+              type: string
         capabilities:
           type: array
           uniqueItems: true
@@ -1099,6 +1118,16 @@ components:
           type: string
         name:
           type: string
+    Deployment:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
     AuthenticationMethod:
       type: object
       required:
@@ -1129,10 +1158,16 @@ components:
       description: Authentication methods enabled for the enterprise. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured.
       required:
         - enterprise
+        - deployment
         - methods
       properties:
         enterprise:
           $ref: '#/components/schemas/Enterprise'
+        deployment:
+          $ref: '#/components/schemas/Deployment'
+        deploymentId:
+          type: string
+          minLength: 1
         preferredMethodId:
           type:
             - string
@@ -1193,10 +1228,17 @@ components:
         - $ref: '#/components/schemas/AgentContext'
         - type: object
           required:
-            - enterpriseId
             - username
             - password
+          anyOf:
+            - required:
+                - deploymentId
+            - required:
+                - enterpriseId
           properties:
+            deploymentId:
+              type: string
+              minLength: 1
             enterpriseId:
               type: string
               minLength: 1
@@ -1238,17 +1280,27 @@ components:
         modelAccessExpiresIn:
           type: integer
           minimum: 1
+        deploymentId:
+          type: string
+          minLength: 1
         passwordChangeRequired:
           type: boolean
           description: When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed.
     FederatedLoginStartRequest:
       type: object
       required:
-        - enterpriseId
         - methodId
         - redirectUri
         - codeChallenge
+      anyOf:
+        - required:
+            - deploymentId
+        - required:
+            - enterpriseId
       properties:
+        deploymentId:
+          type: string
+          minLength: 1
         enterpriseId:
           type: string
           minLength: 1
@@ -1423,6 +1475,8 @@ components:
       required:
         - user
         - enterprise
+        - deployment
+        - deploymentId
         - roles
         - sessionExpiresAt
         - passwordChangeRequired
@@ -1431,6 +1485,11 @@ components:
           $ref: '#/components/schemas/User'
         enterprise:
           $ref: '#/components/schemas/Enterprise'
+        deployment:
+          $ref: '#/components/schemas/Deployment'
+        deploymentId:
+          type: string
+          minLength: 1
         roles:
           type: array
           items:

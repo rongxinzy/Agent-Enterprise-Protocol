@@ -44,6 +44,23 @@ type App struct {
 	licenseMu       sync.RWMutex
 }
 
+// DeploymentID is the stable identity of this single-deployment installation.
+// During the schema migration the legacy enterprise ID remains the storage
+// tenant, but all newly issued protocol metadata and tokens carry this value.
+func (a *App) DeploymentID() string {
+	if value := a.Config.DeploymentID; value != "" {
+		return value
+	}
+	return a.Config.BootstrapEnterpriseID
+}
+
+func (a *App) DeploymentName() string {
+	if value := a.Config.DeploymentName; value != "" {
+		return value
+	}
+	return a.Config.BootstrapEnterpriseName
+}
+
 func (a *App) CurrentLicense() *license.Verified {
 	a.licenseMu.RLock()
 	defer a.licenseMu.RUnlock()
@@ -73,6 +90,7 @@ type TokenResponse struct {
 	TokenType              string `json:"tokenType"`
 	ExpiresIn              int64  `json:"expiresIn"`
 	ModelAccessExpiresIn   int64  `json:"modelAccessExpiresIn"`
+	DeploymentID           string `json:"deploymentId"`
 	PasswordChangeRequired bool   `json:"passwordChangeRequired"`
 }
 
@@ -330,7 +348,7 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 	if user.RequirePasswordChange {
 		modelScopes = nil
 	}
-	access, model, err := a.Tokens.Issue(user.ID, user.EnterpriseID, agent.AgentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
+	access, model, err := a.Tokens.IssueWithDeployment(user.ID, user.EnterpriseID, a.DeploymentID(), agent.AgentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -342,7 +360,7 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 	if err := a.DB.CreateRefreshSession(ctx, db.CreateRefreshSessionParams{TokenHash: refreshHash, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentID: agent.AgentID, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true}}); err != nil {
 		return TokenResponse{}, err
 	}
-	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), PasswordChangeRequired: user.RequirePasswordChange}, nil
+	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), DeploymentID: a.DeploymentID(), PasswordChangeRequired: user.RequirePasswordChange}, nil
 }
 
 func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (TokenResponse, error) {
@@ -375,7 +393,7 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	if user.RequirePasswordChange {
 		modelScopes = nil
 	}
-	access, model, err := a.Tokens.Issue(user.ID, enterpriseID, agentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
+	access, model, err := a.Tokens.IssueWithDeployment(user.ID, enterpriseID, a.DeploymentID(), agentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -389,7 +407,7 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	if err := tx.Commit(ctx); err != nil {
 		return TokenResponse{}, err
 	}
-	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), PasswordChangeRequired: user.RequirePasswordChange}, nil
+	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), DeploymentID: a.DeploymentID(), PasswordChangeRequired: user.RequirePasswordChange}, nil
 }
 
 func (a *App) bootstrap(ctx context.Context) error {
@@ -410,6 +428,9 @@ func (a *App) bootstrap(ctx context.Context) error {
 		}
 	}()
 	queries := db.New(connection)
+	if _, err := connection.Exec(ctx, `INSERT INTO deployments (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`, a.DeploymentID(), a.DeploymentName()); err != nil {
+		return fmt.Errorf("bootstrap deployment: %w", err)
+	}
 	if _, err := queries.CreateEnterprise(ctx, db.CreateEnterpriseParams{ID: a.Config.BootstrapEnterpriseID, Name: a.Config.BootstrapEnterpriseName}); err != nil {
 		return err
 	}
