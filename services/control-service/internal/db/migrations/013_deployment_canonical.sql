@@ -55,3 +55,15 @@ WHERE (deployment_id IS NULL OR deployment_id = '')
 INSERT INTO deployments (id, name)
 SELECT id, name FROM enterprises
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
+
+-- Keep legacy assignment subjects valid during the API compatibility window.
+-- PR #53 will migrate remaining grants and restore the RBAC-only checks.
+ALTER TABLE skill_assignments DROP CONSTRAINT IF EXISTS skill_assignments_subject_type_check;
+ALTER TABLE skill_assignments ADD CONSTRAINT skill_assignments_subject_type_check
+  CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent', 'role', 'team'));
+ALTER TABLE model_assignments DROP CONSTRAINT IF EXISTS model_assignments_subject_type_check;
+ALTER TABLE model_assignments ADD CONSTRAINT model_assignments_subject_type_check
+  CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent', 'role', 'team'));
+ALTER TABLE credential_assignments DROP CONSTRAINT IF EXISTS credential_assignments_subject_type_check;
+ALTER TABLE credential_assignments ADD CONSTRAINT credential_assignments_subject_type_check
+  CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent', 'role', 'team'));
