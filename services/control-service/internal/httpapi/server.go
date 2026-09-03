@@ -216,12 +216,119 @@ func passwordChangeRouteAllowed(request *http.Request) bool {
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if !claimsFrom(request).Admin {
-			writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "Administrator access is required.")
+		claims := claimsFrom(request)
+		if claims.Admin {
+			next.ServeHTTP(response, request)
+			return
+		}
+		permission := requiredAdminPermission(request.Method, request.URL.Path)
+		if permission == "" {
+			writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "The authenticated user lacks the required management permission.")
+			return
+		}
+		allowed, err := s.userHasPermission(request, permission)
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		if !allowed {
+			writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "The authenticated user lacks the required management permission.")
 			return
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+func (s *Server) userHasPermission(request *http.Request, permission string) (bool, error) {
+	var allowed bool
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT EXISTS (
+  SELECT 1 FROM user_role_bindings urb
+  JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
+  JOIN role_permissions rp ON rp.deployment_id=urb.deployment_id AND rp.role_id=urb.role_id AND rp.permission_id=$3
+  WHERE urb.deployment_id=$1 AND urb.user_id=$2
+)`, claimsFrom(request).Tenant, claimsFrom(request).Subject, permission).Scan(&allowed)
+	return allowed, err
+}
+
+func requiredAdminPermission(method, path string) string {
+	switch {
+	case strings.HasPrefix(path, "/aep/v1/admin/permissions") || strings.HasPrefix(path, "/aep/v1/admin/roles"):
+		if method == http.MethodGet {
+			return "roles.read"
+		}
+		return "roles.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/teams"):
+		if method == http.MethodGet {
+			return "teams.read"
+		}
+		return "teams.write"
+	case strings.HasSuffix(path, "/rbac"):
+		return "users.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/users"):
+		if method == http.MethodGet {
+			return "users.read"
+		}
+		return "users.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/models"):
+		if strings.Contains(path, "assignment") {
+			return "models.assign"
+		}
+		if method == http.MethodGet {
+			return "models.read"
+		}
+		return "models.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/skills"):
+		if strings.Contains(path, "assignment") {
+			return "skills.assign"
+		}
+		if method == http.MethodGet {
+			return "skills.read"
+		}
+		return "skills.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/credentials"):
+		if strings.Contains(path, "assignment") {
+			return "credentials.assign"
+		}
+		if method == http.MethodGet {
+			return "credentials.read"
+		}
+		return "credentials.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/licenses"):
+		if strings.HasSuffix(path, "/revoke") {
+			return "licenses.revoke"
+		}
+		return "licenses.read"
+	case strings.HasPrefix(path, "/aep/v1/admin/events") || strings.HasPrefix(path, "/aep/v1/admin/control-events"):
+		if method == http.MethodGet {
+			return "events.read"
+		}
+		return "events.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/data-plane"):
+		return "data_plane.write"
+	}
+	return ""
+}
+
+func (s *Server) requirePermission(permission string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			claims := claimsFrom(request)
+			if claims.Admin {
+				next.ServeHTTP(response, request)
+				return
+			}
+			allowed, err := s.userHasPermission(request, permission)
+			if err != nil {
+				databaseFailure(response, request, err)
+				return
+			}
+			if !allowed {
+				writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "The authenticated user lacks the required permission.")
+				return
+			}
+			next.ServeHTTP(response, request)
+		})
+	}
 }
 
 func (s *Server) internalDataPlane(next http.HandlerFunc) http.HandlerFunc {
