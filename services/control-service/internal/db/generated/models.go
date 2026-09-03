@@ -10,7 +10,7 @@ import (
 
 type Agent struct {
 	AgentID              string             `json:"agent_id"`
-	EnterpriseID         string             `json:"enterprise_id"`
+	DeploymentID         string             `json:"deployment_id"`
 	UserID               string             `json:"user_id"`
 	AgentVersion         string             `json:"agent_version"`
 	Platform             string             `json:"platform"`
@@ -38,7 +38,7 @@ type ControlDelivery struct {
 
 type ControlEvent struct {
 	EventID          string             `json:"event_id"`
-	EnterpriseID     string             `json:"enterprise_id"`
+	DeploymentID     string             `json:"deployment_id"`
 	Type             string             `json:"type"`
 	ScopeType        string             `json:"scope_type"`
 	ScopeID          pgtype.Text        `json:"scope_id"`
@@ -53,14 +53,14 @@ type ControlEvent struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
-type Enterprise struct {
+type Deployment struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Model struct {
-	EnterpriseID  string             `json:"enterprise_id"`
+	DeploymentID  string             `json:"deployment_id"`
 	ID            string             `json:"id"`
 	DisplayName   string             `json:"display_name"`
 	SourceType    string             `json:"source_type"`
@@ -79,16 +79,16 @@ type Model struct {
 
 type ModelAssignment struct {
 	ID           string             `json:"id"`
-	EnterpriseID string             `json:"enterprise_id"`
+	DeploymentID string             `json:"deployment_id"`
 	ModelID      string             `json:"model_id"`
 	SubjectType  string             `json:"subject_type"`
 	SubjectID    string             `json:"subject_id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
-type Organization struct {
+type Team struct {
 	ID           string             `json:"id"`
-	EnterpriseID string             `json:"enterprise_id"`
+	DeploymentID string             `json:"deployment_id"`
 	Name         string             `json:"name"`
 	ParentID     pgtype.Text        `json:"parent_id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
@@ -96,7 +96,7 @@ type Organization struct {
 
 type RefreshSession struct {
 	TokenHash    string             `json:"token_hash"`
-	EnterpriseID string             `json:"enterprise_id"`
+	DeploymentID string             `json:"deployment_id"`
 	UserID       string             `json:"user_id"`
 	AgentID      string             `json:"agent_id"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
@@ -115,7 +115,7 @@ type Skill struct {
 
 type SkillAssignment struct {
 	ID           string             `json:"id"`
-	EnterpriseID string             `json:"enterprise_id"`
+	DeploymentID string             `json:"deployment_id"`
 	SkillID      string             `json:"skill_id"`
 	SubjectType  string             `json:"subject_type"`
 	SubjectID    string             `json:"subject_id"`
@@ -124,7 +124,7 @@ type SkillAssignment struct {
 
 type SkillSyncResult struct {
 	ID                string             `json:"id"`
-	EnterpriseID      string             `json:"enterprise_id"`
+	DeploymentID      string             `json:"deployment_id"`
 	UserID            string             `json:"user_id"`
 	AgentID           string             `json:"agent_id"`
 	Revision          string             `json:"revision"`
@@ -147,7 +147,7 @@ type SkillVersion struct {
 
 type TelemetryEvent struct {
 	EventID      string             `json:"event_id"`
-	EnterpriseID string             `json:"enterprise_id"`
+	DeploymentID string             `json:"deployment_id"`
 	UserID       string             `json:"user_id"`
 	AgentID      string             `json:"agent_id"`
 	Type         string             `json:"type"`
@@ -161,7 +161,7 @@ type TelemetryEvent struct {
 
 type User struct {
 	ID                    string             `json:"id"`
-	EnterpriseID          string             `json:"enterprise_id"`
+	DeploymentID          string             `json:"deployment_id"`
 	Username              string             `json:"username"`
 	DisplayName           string             `json:"display_name"`
 	Email                 pgtype.Text        `json:"email"`
@@ -169,7 +169,7 @@ type User struct {
 	Status                string             `json:"status"`
 	RequirePasswordChange bool               `json:"require_password_change"`
 	IsAdmin               bool               `json:"is_admin"`
-	OrganizationIds       []string           `json:"organization_ids"`
+	TeamIds       []string           `json:"team_ids"`
 	RoleIds               []string           `json:"role_ids"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`

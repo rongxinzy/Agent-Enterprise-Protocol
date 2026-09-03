@@ -42,7 +42,7 @@ type Route struct {
 }
 
 type DesiredState struct {
-	EnterpriseID string  `json:"enterpriseId"`
+	DeploymentID string  `json:"deploymentId"`
 	Revision     string  `json:"revision"`
 	PublishedAt  string  `json:"publishedAt"`
 	ContentHash  string  `json:"contentHash"`
@@ -172,10 +172,10 @@ func Render(desired DesiredState) (string, string, error) {
 	if desired.Revision == "" {
 		return "", "", errors.New("desired revision is required")
 	}
-	if strings.TrimSpace(desired.EnterpriseID) == "" {
+	if strings.TrimSpace(desired.DeploymentID) == "" {
 		return "", "", errors.New("enterprise ID is required")
 	}
-	suffix := resourceSuffix(desired.EnterpriseID)
+	suffix := resourceSuffix(desired.DeploymentID)
 	enabled := make([]Route, 0, len(routes))
 	for index := range routes {
 		route := routes[index]

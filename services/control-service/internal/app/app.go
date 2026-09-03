@@ -51,14 +51,14 @@ func (a *App) DeploymentID() string {
 	if value := a.Config.DeploymentID; value != "" {
 		return value
 	}
-	return a.Config.BootstrapEnterpriseID
+	return a.Config.BootstrapDeploymentID
 }
 
 func (a *App) DeploymentName() string {
 	if value := a.Config.DeploymentName; value != "" {
 		return value
 	}
-	return a.Config.BootstrapEnterpriseName
+	return a.Config.BootstrapDeploymentName
 }
 
 func (a *App) CurrentLicense() *license.Verified {
@@ -171,8 +171,8 @@ func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) er
 		return nil
 	}
 	claims := verified.Claims
-	if a.Config.LicenseEnterpriseID == "" {
-		return errors.New("AEP_LICENSE_ENTERPRISE_ID is required to register a license")
+	if a.Config.LicenseDeploymentID == "" {
+		return errors.New("AEP_LICENSE_DEPLOYMENT_ID is required to register a license")
 	}
 	var existingDigest string
 	err := a.Pool.QueryRow(ctx, `SELECT digest FROM licenses WHERE license_id=$1`, claims.LicenseID).Scan(&existingDigest)
@@ -188,7 +188,7 @@ func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) er
 	issuedAt, _ := time.Parse(time.RFC3339Nano, claims.IssuedAt)
 	expiresAt, _ := time.Parse(time.RFC3339Nano, claims.ExpiresAt)
 	graceEndsAt := expiresAt.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
-	_, err = a.Pool.Exec(ctx, `INSERT INTO licenses (license_id,enterprise_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,user_limit,agent_limit,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, claims.LicenseID, a.Config.LicenseEnterpriseID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Limits.Users, claims.Limits.Agents, claims.Features, verified.Envelope.Payload)
+	_, err = a.Pool.Exec(ctx, `INSERT INTO licenses (license_id,enterprise_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,user_limit,agent_limit,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, claims.LicenseID, a.Config.LicenseDeploymentID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Limits.Users, claims.Limits.Agents, claims.Features, verified.Envelope.Payload)
 	return err
 }
 
@@ -204,7 +204,7 @@ func (a *App) ActivateLicense(ctx context.Context, licenseID, enterpriseID, user
 	var status string
 	var revokedAt *time.Time
 	var agentLimit, userLimit int
-	err = tx.QueryRow(ctx, `SELECT status, revoked_at, agent_limit, user_limit FROM licenses WHERE license_id=$1 AND enterprise_id=$2 FOR UPDATE`, licenseID, enterpriseID).Scan(&status, &revokedAt, &agentLimit, &userLimit)
+	err = tx.QueryRow(ctx, `SELECT status, revoked_at, agent_limit, user_limit FROM licenses WHERE license_id=$1 AND deployment_id=$2 FOR UPDATE`, licenseID, enterpriseID).Scan(&status, &revokedAt, &agentLimit, &userLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrLicenseNotRegistered
 	}
@@ -242,7 +242,7 @@ func (a *App) ActivateLicense(ctx context.Context, licenseID, enterpriseID, user
 	if !userAlreadyActive && userCount >= userLimit {
 		return ErrLicenseUserLimit
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO license_activations (id,license_id,enterprise_id,user_id,agent_id) VALUES ($1,$2,$3,$4,$5)`, uuid.NewString(), licenseID, enterpriseID, userID, agentID)
+	_, err = tx.Exec(ctx, `INSERT INTO license_activations (id,license_id,deployment_id,user_id,agent_id) VALUES ($1,$2,$3,$4,$5)`, uuid.NewString(), licenseID, enterpriseID, userID, agentID)
 	if err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func (a *App) ActivateLicense(ctx context.Context, licenseID, enterpriseID, user
 func (a *App) BindAgent(ctx context.Context, user db.User, agent AgentContext) (db.Agent, error) {
 	existing, err := a.DB.GetAgent(ctx, agent.AgentID)
 	if err == nil {
-		if existing.UserID != user.ID || existing.EnterpriseID != user.EnterpriseID {
+		if existing.UserID != user.ID || existing.DeploymentID != user.DeploymentID {
 			return db.Agent{}, ErrAgentConflict
 		}
 		return a.DB.TouchAgent(ctx, db.TouchAgentParams{AgentID: agent.AgentID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
@@ -265,14 +265,14 @@ func (a *App) BindAgent(ctx context.Context, user db.User, agent AgentContext) (
 		return db.Agent{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	created, err := a.DB.WithTx(tx).CreateAgent(ctx, db.CreateAgentParams{AgentID: agent.AgentID, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
+	created, err := a.DB.WithTx(tx).CreateAgent(ctx, db.CreateAgentParams{AgentID: agent.AgentID, DeploymentID: user.DeploymentID, UserID: user.ID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
 	if err != nil {
 		return db.Agent{}, err
 	}
 	rows, err := tx.Query(ctx, `SELECT e.event_id
 FROM control_events e
-WHERE e.enterprise_id=$1 AND e.state='active' AND e.expires_at>now()
-AND (e.scope_type='global' OR (e.scope_type='agent' AND e.scope_id=$2) OR (e.scope_type='user' AND e.scope_id=$3) OR (e.scope_type='organization' AND e.scope_id=ANY($4::text[])))`, user.EnterpriseID, agent.AgentID, user.ID, user.OrganizationIds)
+WHERE e.deployment_id=$1 AND e.state='active' AND e.expires_at>now()
+AND (e.scope_type='global' OR (e.scope_type='agent' AND e.scope_id=$2) OR (e.scope_type='user' AND e.scope_id=$3) OR (e.scope_type='organization' AND e.scope_id=ANY($4::text[])))`, user.DeploymentID, agent.AgentID, user.ID, user.TeamIds)
 	if err != nil {
 		return db.Agent{}, err
 	}
@@ -304,11 +304,11 @@ AND (e.scope_type='global' OR (e.scope_type='agent' AND e.scope_id=$2) OR (e.sco
 func (a *App) ModelScopes(ctx context.Context, enterpriseID, userID, agentID string) ([]string, error) {
 	rows, err := a.Pool.Query(ctx, `SELECT DISTINCT m.id
 FROM models m
-JOIN model_assignments ma ON ma.enterprise_id=m.enterprise_id AND ma.model_id=m.id
-JOIN users u ON u.id=$2 AND u.enterprise_id=$1
-WHERE m.enterprise_id=$1 AND m.enabled=true AND (
+JOIN model_assignments ma ON ma.deployment_id=m.deployment_id AND ma.model_id=m.id
+JOIN users u ON u.id=$2 AND u.deployment_id=$1
+WHERE m.deployment_id=$1 AND m.enabled=true AND (
   (ma.subject_type='enterprise' AND ma.subject_id=$1)
-  OR (ma.subject_type='organization' AND ma.subject_id=ANY(u.organization_ids))
+  OR (ma.subject_type='organization' AND ma.subject_id=ANY(u.team_ids))
   OR (ma.subject_type='user' AND ma.subject_id=$2)
   OR (ma.subject_type='agent' AND ma.subject_id=$3)
   OR (ma.subject_type='role' AND EXISTS (
@@ -342,14 +342,14 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 	if _, err := a.BindAgent(ctx, user, agent); err != nil {
 		return TokenResponse{}, err
 	}
-	modelScopes, err := a.ModelScopes(ctx, user.EnterpriseID, user.ID, agent.AgentID)
+	modelScopes, err := a.ModelScopes(ctx, user.DeploymentID, user.ID, agent.AgentID)
 	if err != nil {
 		return TokenResponse{}, err
 	}
 	if user.RequirePasswordChange {
 		modelScopes = nil
 	}
-	access, model, err := a.Tokens.IssueWithDeployment(user.ID, user.EnterpriseID, a.DeploymentID(), agent.AgentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
+	access, model, err := a.Tokens.IssueWithDeployment(user.ID, user.DeploymentID, a.DeploymentID(), agent.AgentID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -358,7 +358,7 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 		return TokenResponse{}, err
 	}
 	expires := time.Now().UTC().Add(a.Config.RefreshTTL)
-	if err := a.DB.CreateRefreshSession(ctx, db.CreateRefreshSessionParams{TokenHash: refreshHash, EnterpriseID: user.EnterpriseID, UserID: user.ID, AgentID: agent.AgentID, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true}}); err != nil {
+	if err := a.DB.CreateRefreshSession(ctx, db.CreateRefreshSessionParams{TokenHash: refreshHash, DeploymentID: user.DeploymentID, UserID: user.ID, AgentID: agent.AgentID, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true}}); err != nil {
 		return TokenResponse{}, err
 	}
 	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), DeploymentID: a.DeploymentID(), PasswordChangeRequired: user.RequirePasswordChange}, nil
@@ -372,14 +372,14 @@ func (a *App) IssueUserSession(ctx context.Context, user db.User) (TokenResponse
 	}
 	sessionID := uuid.NewString()
 	topic := fmt.Sprintf("user:%s:%s", a.DeploymentID(), user.ID)
-	modelScopes, err := a.ModelScopes(ctx, user.EnterpriseID, user.ID, "")
+	modelScopes, err := a.ModelScopes(ctx, user.DeploymentID, user.ID, "")
 	if err != nil {
 		return TokenResponse{}, err
 	}
 	if user.RequirePasswordChange {
 		modelScopes = nil
 	}
-	access, model, err := a.Tokens.IssueWithDeploymentSession(user.ID, user.EnterpriseID, a.DeploymentID(), sessionID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
+	access, model, err := a.Tokens.IssueWithDeploymentSession(user.ID, user.DeploymentID, a.DeploymentID(), sessionID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -418,7 +418,7 @@ func (a *App) RefreshUserSession(ctx context.Context, rawToken, requestedSession
 	var sessionID, userID, enterpriseID, deploymentID string
 	var expires time.Time
 	var revokedAt, sessionRevokedAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.enterprise_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at
+	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.deployment_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at
 FROM user_session_tokens t
 JOIN user_sessions s ON s.session_id=t.session_id
 JOIN users u ON u.id=s.user_id
@@ -499,7 +499,7 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	var userID, enterpriseID, storedAgentID string
 	var expires time.Time
 	var revoked *time.Time
-	err = tx.QueryRow(ctx, `SELECT user_id, enterprise_id, agent_id, expires_at, revoked_at FROM refresh_sessions WHERE token_hash=$1 FOR UPDATE`, hash).Scan(&userID, &enterpriseID, &storedAgentID, &expires, &revoked)
+	err = tx.QueryRow(ctx, `SELECT user_id, deployment_id, agent_id, expires_at, revoked_at FROM refresh_sessions WHERE token_hash=$1 FOR UPDATE`, hash).Scan(&userID, &enterpriseID, &storedAgentID, &expires, &revoked)
 	if err != nil || revoked != nil || time.Now().After(expires) || storedAgentID != agentID {
 		return TokenResponse{}, ErrRefreshTokenInvalid
 	}
@@ -527,7 +527,7 @@ func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (Tok
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO refresh_sessions (token_hash, enterprise_id, user_id, agent_id, expires_at) VALUES ($1,$2,$3,$4,$5)`, newHash, enterpriseID, userID, agentID, time.Now().UTC().Add(a.Config.RefreshTTL)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO refresh_sessions (token_hash, deployment_id, user_id, agent_id, expires_at) VALUES ($1,$2,$3,$4,$5)`, newHash, enterpriseID, userID, agentID, time.Now().UTC().Add(a.Config.RefreshTTL)); err != nil {
 		return TokenResponse{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -557,10 +557,10 @@ func (a *App) bootstrap(ctx context.Context) error {
 	if _, err := connection.Exec(ctx, `INSERT INTO deployments (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`, a.DeploymentID(), a.DeploymentName()); err != nil {
 		return fmt.Errorf("bootstrap deployment: %w", err)
 	}
-	if _, err := queries.CreateEnterprise(ctx, db.CreateEnterpriseParams{ID: a.Config.BootstrapEnterpriseID, Name: a.Config.BootstrapEnterpriseName}); err != nil {
+	if _, err := queries.CreateDeployment(ctx, db.CreateDeploymentParams{ID: a.Config.BootstrapDeploymentID, Name: a.Config.BootstrapDeploymentName}); err != nil {
 		return err
 	}
-	_, err = queries.GetUserByUsername(ctx, db.GetUserByUsernameParams{EnterpriseID: a.Config.BootstrapEnterpriseID, Username: a.Config.BootstrapAdminUsername})
+	_, err = queries.GetUserByUsername(ctx, db.GetUserByUsernameParams{DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername})
 	if err == nil {
 		return nil
 	}
@@ -571,7 +571,7 @@ func (a *App) bootstrap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = queries.CreateUser(ctx, db.CreateUserParams{ID: uuid.NewString(), EnterpriseID: a.Config.BootstrapEnterpriseID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true, OrganizationIds: []string{}, RoleIds: []string{"admin"}})
+	_, err = queries.CreateUser(ctx, db.CreateUserParams{ID: uuid.NewString(), DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true, TeamIds: []string{}, RoleIds: []string{"admin"}})
 	if err != nil {
 		return fmt.Errorf("bootstrap administrator: %w", err)
 	}

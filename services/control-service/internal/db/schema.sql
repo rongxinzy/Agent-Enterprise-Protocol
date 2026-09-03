@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS enterprises (
 
 CREATE TABLE IF NOT EXISTS organizations (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   name text NOT NULL,
   parent_id text REFERENCES organizations(id),
   created_at timestamptz NOT NULL DEFAULT now()
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS organizations (
 
 CREATE TABLE IF NOT EXISTS users (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   username text NOT NULL,
   display_name text NOT NULL,
   email text,
@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS users (
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   require_password_change boolean NOT NULL DEFAULT true,
   is_admin boolean NOT NULL DEFAULT false,
-  organization_ids text[] NOT NULL DEFAULT '{}',
+  team_ids text[] NOT NULL DEFAULT '{}',
   role_ids text[] NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (enterprise_id, username)
+  UNIQUE (deployment_id, username)
 );
 
 CREATE TABLE IF NOT EXISTS deployments (
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS user_team_bindings (
 
 CREATE TABLE IF NOT EXISTS agents (
   agent_id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   user_id text NOT NULL REFERENCES users(id),
   agent_version text NOT NULL,
   platform text NOT NULL CHECK (platform IN ('windows', 'macos', 'linux')),
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE TABLE IF NOT EXISTS refresh_sessions (
   token_hash text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   user_id text NOT NULL REFERENCES users(id),
   agent_id text NOT NULL REFERENCES agents(agent_id),
   expires_at timestamptz NOT NULL,
@@ -162,16 +162,16 @@ CREATE TABLE IF NOT EXISTS skill_versions (
 
 CREATE TABLE IF NOT EXISTS skill_assignments (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
   subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
   subject_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (enterprise_id, skill_id, subject_type, subject_id)
+  UNIQUE (deployment_id, skill_id, subject_type, subject_id)
 );
 
 CREATE TABLE IF NOT EXISTS credentials (
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   id text NOT NULL,
   name text NOT NULL,
   service text NOT NULL,
@@ -185,23 +185,23 @@ CREATE TABLE IF NOT EXISTS credentials (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   rotated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (enterprise_id, id)
+  PRIMARY KEY (deployment_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS credential_assignments (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL,
+  deployment_id text NOT NULL,
   credential_id text NOT NULL,
   subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
   subject_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  FOREIGN KEY (enterprise_id, credential_id) REFERENCES credentials(enterprise_id, id) ON DELETE CASCADE,
-  UNIQUE (enterprise_id, credential_id, subject_type, subject_id)
+  FOREIGN KEY (deployment_id, credential_id) REFERENCES credentials(deployment_id, id) ON DELETE CASCADE,
+  UNIQUE (deployment_id, credential_id, subject_type, subject_id)
 );
 
 CREATE TABLE IF NOT EXISTS credential_resolution_audit (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   credential_id text NOT NULL,
   user_id text NOT NULL REFERENCES users(id),
   agent_id text NOT NULL REFERENCES agents(agent_id),
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS credential_resolution_audit (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS models (
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   id text NOT NULL,
   display_name text NOT NULL,
   source_type text NOT NULL CHECK (source_type IN ('gateway', 'enterprise_open_source', 'local')),
@@ -227,24 +227,24 @@ CREATE TABLE IF NOT EXISTS models (
   enabled boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (enterprise_id, id),
-  FOREIGN KEY (enterprise_id, credential_id) REFERENCES credentials(enterprise_id, id) ON DELETE RESTRICT
+  PRIMARY KEY (deployment_id, id),
+  FOREIGN KEY (deployment_id, credential_id) REFERENCES credentials(deployment_id, id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS model_assignments (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL,
+  deployment_id text NOT NULL,
   model_id text NOT NULL,
   subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
   subject_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  FOREIGN KEY (enterprise_id, model_id) REFERENCES models(enterprise_id, id) ON DELETE CASCADE,
-  UNIQUE (enterprise_id, model_id, subject_type, subject_id)
+  FOREIGN KEY (deployment_id, model_id) REFERENCES models(deployment_id, id) ON DELETE CASCADE,
+  UNIQUE (deployment_id, model_id, subject_type, subject_id)
 );
 
 CREATE TABLE IF NOT EXISTS control_events (
   event_id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   type text NOT NULL,
   scope_type text NOT NULL CHECK (scope_type IN ('global', 'organization', 'user', 'agent')),
   scope_id text,
@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS session_control_deliveries (
 
 CREATE TABLE IF NOT EXISTS telemetry_events (
   event_id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   user_id text NOT NULL REFERENCES users(id),
   agent_id text REFERENCES agents(agent_id),
   session_id text REFERENCES user_sessions(session_id) ON DELETE SET NULL,
@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
 
 CREATE TABLE IF NOT EXISTS skill_sync_results (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id),
+  deployment_id text NOT NULL REFERENCES enterprises(id),
   user_id text NOT NULL REFERENCES users(id),
   agent_id text NOT NULL REFERENCES agents(agent_id),
   revision text NOT NULL,
@@ -321,7 +321,7 @@ CREATE TABLE IF NOT EXISTS skill_sync_results (
 );
 
 CREATE TABLE IF NOT EXISTS data_plane_desired_states (
-  enterprise_id text PRIMARY KEY REFERENCES enterprises(id) ON DELETE CASCADE,
+  deployment_id text PRIMARY KEY REFERENCES enterprises(id) ON DELETE CASCADE,
   revision text NOT NULL,
   routes jsonb NOT NULL,
   content_hash text NOT NULL CHECK (content_hash ~ '^[a-f0-9]{64}$'),
@@ -330,7 +330,7 @@ CREATE TABLE IF NOT EXISTS data_plane_desired_states (
 );
 
 CREATE TABLE IF NOT EXISTS data_plane_statuses (
-  enterprise_id text PRIMARY KEY REFERENCES enterprises(id) ON DELETE CASCADE,
+  deployment_id text PRIMARY KEY REFERENCES enterprises(id) ON DELETE CASCADE,
   state text NOT NULL CHECK (state IN ('pending', 'applying', 'ready', 'degraded', 'error')),
   observed_revision text,
   content_hash text CHECK (content_hash IS NULL OR content_hash ~ '^[a-f0-9]{64}$'),
@@ -341,16 +341,16 @@ CREATE TABLE IF NOT EXISTS data_plane_statuses (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_agents_user ON agents (enterprise_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_agents_user ON agents (deployment_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_deliveries_agent_state ON control_deliveries (agent_id, state, cursor);
 CREATE INDEX IF NOT EXISTS idx_session_deliveries_session_state ON session_control_deliveries (session_id, state, cursor);
 CREATE INDEX IF NOT EXISTS idx_session_deliveries_event ON session_control_deliveries (event_id, cursor);
-CREATE INDEX IF NOT EXISTS idx_telemetry_search ON telemetry_events (enterprise_id, agent_id, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_telemetry_session_search ON telemetry_events (enterprise_id, session_id, occurred_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_models_default ON models (enterprise_id) WHERE is_default;
-CREATE INDEX IF NOT EXISTS idx_model_assignments_subject ON model_assignments (enterprise_id, subject_type, subject_id, model_id);
-CREATE INDEX IF NOT EXISTS idx_credential_assignments_subject ON credential_assignments (enterprise_id, subject_type, subject_id, credential_id);
-CREATE INDEX IF NOT EXISTS idx_credential_resolution_audit ON credential_resolution_audit (enterprise_id, credential_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_search ON telemetry_events (deployment_id, agent_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_session_search ON telemetry_events (deployment_id, session_id, occurred_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_models_default ON models (deployment_id) WHERE is_default;
+CREATE INDEX IF NOT EXISTS idx_model_assignments_subject ON model_assignments (deployment_id, subject_type, subject_id, model_id);
+CREATE INDEX IF NOT EXISTS idx_credential_assignments_subject ON credential_assignments (deployment_id, subject_type, subject_id, credential_id);
+CREATE INDEX IF NOT EXISTS idx_credential_resolution_audit ON credential_resolution_audit (deployment_id, credential_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS login_rate_limits (
   key_hash text PRIMARY KEY,
@@ -361,7 +361,7 @@ CREATE TABLE IF NOT EXISTS login_rate_limits (
 
 CREATE TABLE IF NOT EXISTS authentication_audit_events (
   cursor bigserial PRIMARY KEY,
-  enterprise_id text NOT NULL,
+  deployment_id text NOT NULL,
   user_id text,
   agent_id text NOT NULL,
   event_type text NOT NULL CHECK (event_type IN ('login.succeeded', 'login.failed', 'login.throttled', 'password.changed')),
@@ -373,13 +373,13 @@ CREATE TABLE IF NOT EXISTS authentication_audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_login_rate_limits_updated ON login_rate_limits (updated_at);
-CREATE INDEX IF NOT EXISTS idx_authentication_audit_enterprise_time ON authentication_audit_events (enterprise_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_authentication_audit_enterprise_time ON authentication_audit_events (deployment_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS licenses (
   license_id text PRIMARY KEY,
   enterprise_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+  deployment_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
   customer_id text NOT NULL,
-  deployment_id text NOT NULL,
   digest text NOT NULL CHECK (digest ~ '^sha256:[0-9a-f]{64}$'),
   key_id text NOT NULL,
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
@@ -398,7 +398,7 @@ CREATE TABLE IF NOT EXISTS licenses (
 CREATE TABLE IF NOT EXISTS license_activations (
   id text PRIMARY KEY,
   license_id text NOT NULL REFERENCES licenses(license_id) ON DELETE CASCADE,
-  enterprise_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+  deployment_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   agent_id text NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
   activated_at timestamptz NOT NULL DEFAULT now(),
@@ -407,12 +407,12 @@ CREATE TABLE IF NOT EXISTS license_activations (
   UNIQUE (license_id, agent_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_licenses_enterprise_status ON licenses (enterprise_id, status, expires_at);
-CREATE INDEX IF NOT EXISTS idx_license_activations_enterprise ON license_activations (enterprise_id, license_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_licenses_enterprise_status ON licenses (deployment_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_license_activations_enterprise ON license_activations (deployment_id, license_id, revoked_at);
 
 CREATE TABLE IF NOT EXISTS license_audit_events (
   id text PRIMARY KEY,
-  enterprise_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+  deployment_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
   license_id text NOT NULL,
   actor_user_id text NOT NULL,
   action text NOT NULL CHECK (action IN ('import', 'revoke')),
@@ -421,5 +421,5 @@ CREATE TABLE IF NOT EXISTS license_audit_events (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_license_audit_enterprise_time ON license_audit_events (enterprise_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_license_audit_enterprise_time ON license_audit_events (deployment_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_license_audit_license_time ON license_audit_events (license_id, created_at DESC);

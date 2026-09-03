@@ -69,7 +69,7 @@ func userCommand(opts *options) *cobra.Command {
 	var username, displayName, password, email string
 	var requirePasswordChange bool
 	create := &cobra.Command{Use: "create", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		body := map[string]any{"enterpriseId": opts.enterpriseID, "username": username, "displayName": displayName, "temporaryPassword": password, "requirePasswordChange": requirePasswordChange, "organizationIds": []string{}, "roleIds": []string{}}
+		body := map[string]any{"deploymentId": opts.enterpriseID, "username": username, "displayName": displayName, "temporaryPassword": password, "requirePasswordChange": requirePasswordChange, "teamIds": []string{}, "roleIds": []string{}}
 		if email != "" {
 			body["email"] = email
 		}
@@ -273,7 +273,7 @@ func authenticated(opts *options, run func(*client, *cobra.Command, []string) er
 	}
 }
 func (c *client) login(opts *options) error {
-	value, err := c.request(http.MethodPost, "/aep/v1/auth/password/login", map[string]any{"enterpriseId": opts.enterpriseID, "username": opts.username, "password": opts.password, "agentId": opts.agentID, "agentVersion": "aepctl-0.1.0", "platform": platform()}, false)
+	value, err := c.request(http.MethodPost, "/aep/v1/auth/password/login", map[string]any{"deploymentId": opts.enterpriseID, "username": opts.username, "password": opts.password, "agentId": opts.agentID, "agentVersion": "aepctl-0.1.0", "platform": platform()}, false)
 	if err != nil {
 		return err
 	}

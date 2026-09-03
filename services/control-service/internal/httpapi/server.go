@@ -27,7 +27,7 @@ const (
 )
 
 type federatedTransaction struct {
-	EnterpriseID string
+	DeploymentID string
 	State        string
 	ExpiresAt    time.Time
 }
@@ -437,7 +437,7 @@ func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
 		"service": "aep-control-service", "supportedProtocolVersions": []string{"1.0"},
 		"capabilities": capabilities, "jwksUri": "/.well-known/jwks.json",
 		"deploymentId": s.app.DeploymentID(),
-		"deployment": map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
+		"deployment":   map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 	}
 	if s.app.Config.ModelGatewayBaseURL != "" {
 		capabilities = append(capabilities, "model_gateway")

@@ -19,7 +19,7 @@ func (s *Server) internalLicenseStatus(response http.ResponseWriter, request *ht
 	}
 	var status string
 	var digest, deploymentID string
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT status,digest,deployment_id FROM licenses WHERE enterprise_id=$1 AND license_id=$2 AND now() <= grace_ends_at`, enterpriseID, chi.URLParam(request, "licenseId")).Scan(&status, &digest, &deploymentID)
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT status,digest,deployment_id FROM licenses WHERE deployment_id=$1 AND license_id=$2 AND now() <= grace_ends_at`, enterpriseID, chi.URLParam(request, "licenseId")).Scan(&status, &digest, &deploymentID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeJSON(response, http.StatusOK, map[string]any{"active": false})

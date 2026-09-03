@@ -23,12 +23,12 @@ func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ string) er
 }
 
 func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
-	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-1", ContentHash: "ignored", Routes: []Route{{ModelID: "model-b", Enabled: true, Endpoint: "/b", UpstreamModel: "up-b", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-b"}}, {ModelID: "model-a", Enabled: true, Endpoint: "/a", UpstreamModel: "up-a", Protocol: "openai-compatible"}}}
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", ContentHash: "ignored", Routes: []Route{{ModelID: "model-b", Enabled: true, Endpoint: "/b", UpstreamModel: "up-b", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-b"}}, {ModelID: "model-a", Enabled: true, Endpoint: "/a", UpstreamModel: "up-a", Protocol: "openai-compatible"}}}
 	first, firstHash, err := Render(desired)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, secondHash, err := Render(DesiredState{EnterpriseID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}})
+	second, secondHash, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,13 +41,13 @@ func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
 }
 
 func TestRenderRejectsMissingRevision(t *testing.T) {
-	if _, _, err := Render(DesiredState{EnterpriseID: "demo"}); err == nil {
+	if _, _, err := Render(DesiredState{DeploymentID: "demo"}); err == nil {
 		t.Fatal("missing revision was accepted")
 	}
 }
 
 func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
-	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-deepseek", Routes: []Route{{
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-deepseek", Routes: []Route{{
 		ModelID: "reasoner", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Protocol: "openai-compatible", ProviderType: "deepseek",
 	}}}
 	document, _, err := Render(desired)
@@ -64,7 +64,7 @@ func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
 }
 
 func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
-	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-1", Routes: []Route{{ModelID: "model-1", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-1"}}}}
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{{ModelID: "model-1", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-1"}}}}
 	desired.ContentHash = canonicalHash(desired)
 	statuses := make([]Status, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -111,7 +111,7 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 }
 
 func TestSyncReportsKubernetesApplyFailure(t *testing.T) {
-	desired := DesiredState{EnterpriseID: "demo", Revision: "rev-1", Routes: []Route{}}
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{}}
 	desired.ContentHash = canonicalHash(desired)
 	statuses := make([]Status, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

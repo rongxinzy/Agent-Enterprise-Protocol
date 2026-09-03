@@ -69,7 +69,7 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, doc
 	if len(documents) != 2 {
 		return errors.New("rendered data plane must contain exactly two resources")
 	}
-	suffix := resourceSuffix(desired.EnterpriseID)
+	suffix := resourceSuffix(desired.DeploymentID)
 	resources := []struct {
 		path string
 		body string

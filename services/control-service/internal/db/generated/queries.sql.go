@@ -12,14 +12,14 @@ import (
 )
 
 const createAgent = `-- name: CreateAgent :one
-INSERT INTO agents (agent_id, enterprise_id, user_id, agent_version, platform)
+INSERT INTO agents (agent_id, deployment_id, user_id, agent_version, platform)
 VALUES ($1,$2,$3,$4,$5)
-RETURNING agent_id, enterprise_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids
+RETURNING agent_id, deployment_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids
 `
 
 type CreateAgentParams struct {
 	AgentID      string `json:"agent_id"`
-	EnterpriseID string `json:"enterprise_id"`
+	DeploymentID string `json:"deployment_id"`
 	UserID       string `json:"user_id"`
 	AgentVersion string `json:"agent_version"`
 	Platform     string `json:"platform"`
@@ -28,7 +28,7 @@ type CreateAgentParams struct {
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, createAgent,
 		arg.AgentID,
-		arg.EnterpriseID,
+		arg.DeploymentID,
 		arg.UserID,
 		arg.AgentVersion,
 		arg.Platform,
@@ -36,7 +36,7 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 	var i Agent
 	err := row.Scan(
 		&i.AgentID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.UserID,
 		&i.AgentVersion,
 		&i.Platform,
@@ -48,32 +48,32 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 	return i, err
 }
 
-const createEnterprise = `-- name: CreateEnterprise :one
+const createDeployment = `-- name: CreateDeployment :one
 INSERT INTO enterprises (id, name) VALUES ($1, $2)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
 RETURNING id, name, created_at
 `
 
-type CreateEnterpriseParams struct {
+type CreateDeploymentParams struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-func (q *Queries) CreateEnterprise(ctx context.Context, arg CreateEnterpriseParams) (Enterprise, error) {
-	row := q.db.QueryRow(ctx, createEnterprise, arg.ID, arg.Name)
-	var i Enterprise
+func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentParams) (Deployment, error) {
+	row := q.db.QueryRow(ctx, createDeployment, arg.ID, arg.Name)
+	var i Deployment
 	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
 	return i, err
 }
 
 const createRefreshSession = `-- name: CreateRefreshSession :exec
-INSERT INTO refresh_sessions (token_hash, enterprise_id, user_id, agent_id, expires_at)
+INSERT INTO refresh_sessions (token_hash, deployment_id, user_id, agent_id, expires_at)
 VALUES ($1,$2,$3,$4,$5)
 `
 
 type CreateRefreshSessionParams struct {
 	TokenHash    string             `json:"token_hash"`
-	EnterpriseID string             `json:"enterprise_id"`
+	DeploymentID string             `json:"deployment_id"`
 	UserID       string             `json:"user_id"`
 	AgentID      string             `json:"agent_id"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
@@ -82,7 +82,7 @@ type CreateRefreshSessionParams struct {
 func (q *Queries) CreateRefreshSession(ctx context.Context, arg CreateRefreshSessionParams) error {
 	_, err := q.db.Exec(ctx, createRefreshSession,
 		arg.TokenHash,
-		arg.EnterpriseID,
+		arg.DeploymentID,
 		arg.UserID,
 		arg.AgentID,
 		arg.ExpiresAt,
@@ -92,42 +92,42 @@ func (q *Queries) CreateRefreshSession(ctx context.Context, arg CreateRefreshSes
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-  id, enterprise_id, username, display_name, email, password_hash,
-  require_password_change, is_admin, organization_ids, role_ids
+  id, deployment_id, username, display_name, email, password_hash,
+  require_password_change, is_admin, team_ids, role_ids
 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-RETURNING id, enterprise_id, username, display_name, email, password_hash, status, require_password_change, is_admin, organization_ids, role_ids, created_at, updated_at
+RETURNING id, deployment_id, username, display_name, email, password_hash, status, require_password_change, is_admin, team_ids, role_ids, created_at, updated_at
 `
 
 type CreateUserParams struct {
 	ID                    string      `json:"id"`
-	EnterpriseID          string      `json:"enterprise_id"`
+	DeploymentID          string      `json:"deployment_id"`
 	Username              string      `json:"username"`
 	DisplayName           string      `json:"display_name"`
 	Email                 pgtype.Text `json:"email"`
 	PasswordHash          string      `json:"password_hash"`
 	RequirePasswordChange bool        `json:"require_password_change"`
 	IsAdmin               bool        `json:"is_admin"`
-	OrganizationIds       []string    `json:"organization_ids"`
+	TeamIds       []string    `json:"team_ids"`
 	RoleIds               []string    `json:"role_ids"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.ID,
-		arg.EnterpriseID,
+		arg.DeploymentID,
 		arg.Username,
 		arg.DisplayName,
 		arg.Email,
 		arg.PasswordHash,
 		arg.RequirePasswordChange,
 		arg.IsAdmin,
-		arg.OrganizationIds,
+		arg.TeamIds,
 		arg.RoleIds,
 	)
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.Username,
 		&i.DisplayName,
 		&i.Email,
@@ -135,7 +135,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Status,
 		&i.RequirePasswordChange,
 		&i.IsAdmin,
-		&i.OrganizationIds,
+		&i.TeamIds,
 		&i.RoleIds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -144,7 +144,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT agent_id, enterprise_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids FROM agents WHERE agent_id = $1
+SELECT agent_id, deployment_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids FROM agents WHERE agent_id = $1
 `
 
 func (q *Queries) GetAgent(ctx context.Context, agentID string) (Agent, error) {
@@ -152,7 +152,7 @@ func (q *Queries) GetAgent(ctx context.Context, agentID string) (Agent, error) {
 	var i Agent
 	err := row.Scan(
 		&i.AgentID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.UserID,
 		&i.AgentVersion,
 		&i.Platform,
@@ -164,19 +164,19 @@ func (q *Queries) GetAgent(ctx context.Context, agentID string) (Agent, error) {
 	return i, err
 }
 
-const getEnterprise = `-- name: GetEnterprise :one
+const getDeployment = `-- name: GetDeployment :one
 SELECT id, name, created_at FROM enterprises WHERE id = $1
 `
 
-func (q *Queries) GetEnterprise(ctx context.Context, id string) (Enterprise, error) {
-	row := q.db.QueryRow(ctx, getEnterprise, id)
-	var i Enterprise
+func (q *Queries) GetDeployment(ctx context.Context, id string) (Deployment, error) {
+	row := q.db.QueryRow(ctx, getDeployment, id)
+	var i Deployment
 	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
 	return i, err
 }
 
 const getRefreshSession = `-- name: GetRefreshSession :one
-SELECT token_hash, enterprise_id, user_id, agent_id, expires_at, revoked_at, created_at FROM refresh_sessions WHERE token_hash = $1
+SELECT token_hash, deployment_id, user_id, agent_id, expires_at, revoked_at, created_at FROM refresh_sessions WHERE token_hash = $1
 `
 
 func (q *Queries) GetRefreshSession(ctx context.Context, tokenHash string) (RefreshSession, error) {
@@ -184,7 +184,7 @@ func (q *Queries) GetRefreshSession(ctx context.Context, tokenHash string) (Refr
 	var i RefreshSession
 	err := row.Scan(
 		&i.TokenHash,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.UserID,
 		&i.AgentID,
 		&i.ExpiresAt,
@@ -195,7 +195,7 @@ func (q *Queries) GetRefreshSession(ctx context.Context, tokenHash string) (Refr
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, enterprise_id, username, display_name, email, password_hash, status, require_password_change, is_admin, organization_ids, role_ids, created_at, updated_at FROM users WHERE id = $1
+SELECT id, deployment_id, username, display_name, email, password_hash, status, require_password_change, is_admin, team_ids, role_ids, created_at, updated_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
@@ -203,7 +203,7 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.Username,
 		&i.DisplayName,
 		&i.Email,
@@ -211,7 +211,7 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 		&i.Status,
 		&i.RequirePasswordChange,
 		&i.IsAdmin,
-		&i.OrganizationIds,
+		&i.TeamIds,
 		&i.RoleIds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -220,20 +220,20 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, enterprise_id, username, display_name, email, password_hash, status, require_password_change, is_admin, organization_ids, role_ids, created_at, updated_at FROM users WHERE enterprise_id = $1 AND username = $2
+SELECT id, deployment_id, username, display_name, email, password_hash, status, require_password_change, is_admin, team_ids, role_ids, created_at, updated_at FROM users WHERE deployment_id = $1 AND username = $2
 `
 
 type GetUserByUsernameParams struct {
-	EnterpriseID string `json:"enterprise_id"`
+	DeploymentID string `json:"deployment_id"`
 	Username     string `json:"username"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, arg GetUserByUsernameParams) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByUsername, arg.EnterpriseID, arg.Username)
+	row := q.db.QueryRow(ctx, getUserByUsername, arg.DeploymentID, arg.Username)
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.Username,
 		&i.DisplayName,
 		&i.Email,
@@ -241,7 +241,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, arg GetUserByUsernamePa
 		&i.Status,
 		&i.RequirePasswordChange,
 		&i.IsAdmin,
-		&i.OrganizationIds,
+		&i.TeamIds,
 		&i.RoleIds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -250,13 +250,13 @@ func (q *Queries) GetUserByUsername(ctx context.Context, arg GetUserByUsernamePa
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT agent_id, enterprise_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids FROM agents
-WHERE enterprise_id = $1 AND ($2::text = '' OR agent_id > $2) AND ($3::text = '' OR user_id = $3)
+SELECT agent_id, deployment_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids FROM agents
+WHERE deployment_id = $1 AND ($2::text = '' OR agent_id > $2) AND ($3::text = '' OR user_id = $3)
 ORDER BY agent_id LIMIT $4
 `
 
 type ListAgentsParams struct {
-	EnterpriseID string `json:"enterprise_id"`
+	DeploymentID string `json:"deployment_id"`
 	Column2      string `json:"column_2"`
 	Column3      string `json:"column_3"`
 	Limit        int32  `json:"limit"`
@@ -264,7 +264,7 @@ type ListAgentsParams struct {
 
 func (q *Queries) ListAgents(ctx context.Context, arg ListAgentsParams) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listAgents,
-		arg.EnterpriseID,
+		arg.DeploymentID,
 		arg.Column2,
 		arg.Column3,
 		arg.Limit,
@@ -278,7 +278,7 @@ func (q *Queries) ListAgents(ctx context.Context, arg ListAgentsParams) ([]Agent
 		var i Agent
 		if err := rows.Scan(
 			&i.AgentID,
-			&i.EnterpriseID,
+			&i.DeploymentID,
 			&i.UserID,
 			&i.AgentVersion,
 			&i.Platform,
@@ -298,18 +298,18 @@ func (q *Queries) ListAgents(ctx context.Context, arg ListAgentsParams) ([]Agent
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, enterprise_id, username, display_name, email, password_hash, status, require_password_change, is_admin, organization_ids, role_ids, created_at, updated_at FROM users WHERE enterprise_id = $1 AND ($2::text = '' OR id > $2)
+SELECT id, deployment_id, username, display_name, email, password_hash, status, require_password_change, is_admin, team_ids, role_ids, created_at, updated_at FROM users WHERE deployment_id = $1 AND ($2::text = '' OR id > $2)
 ORDER BY id LIMIT $3
 `
 
 type ListUsersParams struct {
-	EnterpriseID string `json:"enterprise_id"`
+	DeploymentID string `json:"deployment_id"`
 	Column2      string `json:"column_2"`
 	Limit        int32  `json:"limit"`
 }
 
 func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
-	rows, err := q.db.Query(ctx, listUsers, arg.EnterpriseID, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listUsers, arg.DeploymentID, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +319,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 		var i User
 		if err := rows.Scan(
 			&i.ID,
-			&i.EnterpriseID,
+			&i.DeploymentID,
 			&i.Username,
 			&i.DisplayName,
 			&i.Email,
@@ -327,7 +327,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.Status,
 			&i.RequirePasswordChange,
 			&i.IsAdmin,
-			&i.OrganizationIds,
+			&i.TeamIds,
 			&i.RoleIds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -362,7 +362,7 @@ func (q *Queries) RevokeUserSessions(ctx context.Context, userID string) error {
 
 const touchAgent = `-- name: TouchAgent :one
 UPDATE agents SET agent_version = $2, platform = $3, last_seen_at = now()
-WHERE agent_id = $1 RETURNING agent_id, enterprise_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids
+WHERE agent_id = $1 RETURNING agent_id, deployment_id, user_id, agent_version, platform, first_seen_at, last_seen_at, applied_skill_revision, installed_skill_ids
 `
 
 type TouchAgentParams struct {
@@ -376,7 +376,7 @@ func (q *Queries) TouchAgent(ctx context.Context, arg TouchAgentParams) (Agent, 
 	var i Agent
 	err := row.Scan(
 		&i.AgentID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.UserID,
 		&i.AgentVersion,
 		&i.Platform,
@@ -408,18 +408,18 @@ UPDATE users SET
   display_name = COALESCE($1, display_name),
   email = COALESCE($2, email),
   status = COALESCE($3, status),
-  organization_ids = COALESCE($4, organization_ids),
+  team_ids = COALESCE($4, team_ids),
   role_ids = COALESCE($5, role_ids),
   updated_at = now()
 WHERE id = $6
-RETURNING id, enterprise_id, username, display_name, email, password_hash, status, require_password_change, is_admin, organization_ids, role_ids, created_at, updated_at
+RETURNING id, deployment_id, username, display_name, email, password_hash, status, require_password_change, is_admin, team_ids, role_ids, created_at, updated_at
 `
 
 type UpdateUserParams struct {
 	DisplayName     pgtype.Text `json:"display_name"`
 	Email           pgtype.Text `json:"email"`
 	Status          pgtype.Text `json:"status"`
-	OrganizationIds []string    `json:"organization_ids"`
+	TeamIds []string    `json:"team_ids"`
 	RoleIds         []string    `json:"role_ids"`
 	ID              string      `json:"id"`
 }
@@ -429,14 +429,14 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		arg.DisplayName,
 		arg.Email,
 		arg.Status,
-		arg.OrganizationIds,
+		arg.TeamIds,
 		arg.RoleIds,
 		arg.ID,
 	)
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.EnterpriseID,
+		&i.DeploymentID,
 		&i.Username,
 		&i.DisplayName,
 		&i.Email,
@@ -444,7 +444,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Status,
 		&i.RequirePasswordChange,
 		&i.IsAdmin,
-		&i.OrganizationIds,
+		&i.TeamIds,
 		&i.RoleIds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
