@@ -10,8 +10,11 @@ Control Service 镜像、Admin Console 或任何云端构建任务。
   License 结果和公钥验签材料。
 - Zhiyuan 企业客户端先在本地验签，再调用
   `POST /aep/v1/agent/activation` 交换 License 证据。
-- Control Service 校验激活请求并签发短期 entitlement JWT，绝不接收
-  License 私钥，也不执行 License 签名。
+- Control Service 使用部署配置中的厂商公钥重新验证完整 License envelope，
+  校验部署和授权状态后签发短期 entitlement JWT，绝不接收 License 私钥，
+  也不执行 License 签名。
+- 内网部署时，License 文件和公钥分别挂载到 Control Service，并复制到企业版
+  客户端资源目录；激活请求只在企业内网完成，不依赖厂商在线服务。
 
 ## 仓库边界
 

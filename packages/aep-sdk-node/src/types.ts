@@ -129,11 +129,14 @@ export interface CurrentIdentity {
 }
 
 export interface LicenseActivationRequest {
-  licenseId: string;
-  licenseDigest: string;
-  deploymentId: string;
-  expiresAt: string;
-  features: string[];
+  license: LicenseEnvelope;
+}
+
+export interface LicenseEnvelope {
+  format: 'zhiyuan-license-v1';
+  keyId: string;
+  payload: Record<string, unknown>;
+  signature: string;
 }
 
 export interface EntitlementTokenResponse {

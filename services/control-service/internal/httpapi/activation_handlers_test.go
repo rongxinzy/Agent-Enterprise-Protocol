@@ -2,15 +2,17 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/license"
 )
 
 func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
@@ -23,16 +25,21 @@ func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	expiresAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	body, _ := json.Marshal(map[string]any{
-		"licenseId": "lic-1", "licenseDigest": "sha256:" + strings.Repeat("a", 64),
-		"deploymentId": "deployment-1", "expiresAt": expiresAt.Format(time.RFC3339),
-		"features": []string{"enterprise.models", "enterprise.models"},
-	})
+	envelope, publicKey := signedLicense(t, expiresAt)
+	verifier, err := license.NewVerifier(map[string]string{"license-prod-1": publicKey}, "deployment-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := verifier.Verify(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"license": json.RawMessage(envelope)})
 	request := httptest.NewRequest(http.MethodPost, "/aep/v1/agent/activation", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
-	New(&app.App{Tokens: tokens}).Handler().ServeHTTP(response, request)
+	New(&app.App{Tokens: tokens, LicenseVerifier: verifier, License: &verified}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("activation status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -64,13 +71,39 @@ func TestActivateLicenseRejectsExpiredEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := []byte(`{"licenseId":"lic-1","licenseDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","deploymentId":"deployment-1","expiresAt":"2020-01-01T00:00:00Z","features":[]}`)
+	envelope, publicKey := signedLicense(t, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+	verifier, err := license.NewVerifier(map[string]string{"license-prod-1": publicKey}, "deployment-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := verifier.Verify(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"license": json.RawMessage(envelope)})
 	request := httptest.NewRequest(http.MethodPost, "/aep/v1/agent/activation", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
-	New(&app.App{Tokens: tokens}).Handler().ServeHTTP(response, request)
+	New(&app.App{Tokens: tokens, LicenseVerifier: verifier, License: &verified}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expired activation status = %d, body = %s", response.Code, response.Body.String())
 	}
+}
+
+func signedLicense(t *testing.T, expiresAt time.Time) ([]byte, string) {
+	t.Helper()
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued := "2026-01-01T00:00:00.000Z"
+	if expiresAt.Before(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		issued = "2019-01-01T00:00:00.000Z"
+	}
+	expires := expiresAt.UTC().Format("2006-01-02T15:04:05.000Z")
+	payload := []byte(`{"customerId":"customer-1","deploymentId":"deployment-1","edition":"enterprise","expiresAt":"` + expires + `","features":["enterprise.models"],"graceDays":0,"issuedAt":"` + issued + `","licenseId":"lic-1","limits":{"agents":10,"users":10}}`)
+	signature := ed25519.Sign(private, payload)
+	envelope := []byte(`{"format":"zhiyuan-license-v1","keyId":"license-prod-1","payload":` + string(payload) + `,"signature":"` + base64.RawURLEncoding.EncodeToString(signature) + `"}`)
+	return envelope, base64.RawURLEncoding.EncodeToString(public)
 }

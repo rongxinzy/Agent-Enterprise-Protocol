@@ -1,10 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +47,12 @@ type Config struct {
 	DataPlaneReconcilerToken  string
 	CredentialMasterKeyBase64 string
 	CredentialMasterKeyFile   string
+	LicenseTrustedKeys        map[string]string
+	LicenseTrustedKeysFile    string
+	LicenseFile               string
+	LicenseDeploymentID       string
+	LicenseCustomerID         string
+	LicenseEnterpriseID       string
 	RefreshTTL                time.Duration
 	BootstrapEnterpriseID     string
 	BootstrapEnterpriseName   string
@@ -103,11 +111,19 @@ func Load() (Config, error) {
 		DataPlaneReconcilerToken:  dataPlaneToken,
 		CredentialMasterKeyBase64: credentialKey,
 		CredentialMasterKeyFile:   os.Getenv("AEP_CREDENTIAL_MASTER_KEY_FILE"),
+		LicenseTrustedKeysFile:    os.Getenv("AEP_LICENSE_TRUSTED_KEYS_FILE"),
+		LicenseFile:               os.Getenv("AEP_LICENSE_FILE"),
+		LicenseDeploymentID:       os.Getenv("AEP_LICENSE_DEPLOYMENT_ID"),
+		LicenseCustomerID:         os.Getenv("AEP_LICENSE_CUSTOMER_ID"),
+		LicenseEnterpriseID:       os.Getenv("AEP_LICENSE_ENTERPRISE_ID"),
 		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"),
 		BootstrapEnterpriseName:   value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Enterprise"),
 		BootstrapAdminUsername:    value("AEP_BOOTSTRAP_ADMIN_USERNAME", "admin"),
 		BootstrapAdminPassword:    adminPassword,
 		BootstrapAdminDisplayName: value("AEP_BOOTSTRAP_ADMIN_DISPLAY_NAME", "AEP Administrator"),
+	}
+	if cfg.LicenseTrustedKeys, err = loadTrustedKeys(cfg.LicenseTrustedKeysFile); err != nil {
+		return Config{}, err
 	}
 	if cfg.EnableMockFederatedAuth, err = boolean("AEP_ENABLE_MOCK_FEDERATED_AUTH", environment != "production"); err != nil {
 		return Config{}, err
@@ -189,9 +205,44 @@ func (cfg Config) Validate() error {
 			return errors.New("the development MinIO credentials are forbidden in production")
 		case cfg.BootstrapAdminPassword == defaultAdminPassword || len(cfg.BootstrapAdminPassword) < 12:
 			return errors.New("a non-default bootstrap administrator password of at least 12 characters is required in production")
+		case len(cfg.LicenseTrustedKeys) == 0:
+			return errors.New("AEP_LICENSE_TRUSTED_KEYS_FILE with at least one key is required in production")
+		case strings.TrimSpace(cfg.LicenseDeploymentID) == "":
+			return errors.New("AEP_LICENSE_DEPLOYMENT_ID is required in production")
+		case strings.TrimSpace(cfg.LicenseCustomerID) == "":
+			return errors.New("AEP_LICENSE_CUSTOMER_ID is required in production")
+		case strings.TrimSpace(cfg.LicenseEnterpriseID) == "":
+			return errors.New("AEP_LICENSE_ENTERPRISE_ID is required in production")
+		case strings.TrimSpace(cfg.LicenseFile) == "":
+			return errors.New("AEP_LICENSE_FILE is required in production")
 		}
 	}
 	return nil
+}
+
+func loadTrustedKeys(file string) (map[string]string, error) {
+	if strings.TrimSpace(file) == "" {
+		return map[string]string{}, nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("read AEP_LICENSE_TRUSTED_KEYS_FILE: %w", err)
+	}
+	var keys map[string]string
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return nil, fmt.Errorf("parse AEP_LICENSE_TRUSTED_KEYS_FILE: %w", err)
+	}
+	keyIDPattern := regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	keyPattern := regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	if len(keys) == 0 {
+		return nil, errors.New("AEP_LICENSE_TRUSTED_KEYS_FILE must contain at least one key")
+	}
+	for keyID, key := range keys {
+		if !keyIDPattern.MatchString(keyID) || !keyPattern.MatchString(key) {
+			return nil, errors.New("AEP_LICENSE_TRUSTED_KEYS_FILE contains an invalid key")
+		}
+	}
+	return keys, nil
 }
 
 func value(key, fallback string) string {

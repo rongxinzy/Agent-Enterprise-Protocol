@@ -4,7 +4,7 @@
 
 ## 配置门禁
 
-设置 `AEP_ENVIRONMENT=production` 后，control-service 会拒绝临时 JWT 签名密钥、开发 PostgreSQL URL、默认 MinIO 凭据、默认或过短的初始管理员密码。非法布尔值、时长、URL、日志参数、请求限制和 Header 限制都会导致启动失败，不再静默回退。
+设置 `AEP_ENVIRONMENT=production` 后，control-service 会拒绝临时 JWT 签名密钥、开发 PostgreSQL URL、默认 MinIO 凭据、默认或过短的初始管理员密码，并要求配置 License 公钥文件、License 文件、客户 ID 和部署 ID。服务启动时会验证挂载的 License；无效或过期 License 不会启动。非法布尔值、时长、URL、日志参数、请求限制和 Header 限制都会导致启动失败，不再静默回退。
 
 Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并拒绝 AEP_ENABLE_MOCK_FEDERATED_AUTH=true。在真实企业身份适配器接入前，不得公布或暴露 federated_auth。
 

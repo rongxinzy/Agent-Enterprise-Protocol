@@ -13,9 +13,13 @@ Admin Console, or any cloud build job.
   organization's approved distribution channel.
 - The Zhiyuan enterprise client verifies the License locally, then exchanges
   License evidence with `POST /aep/v1/agent/activation`.
-- Control Service verifies the activation request and issues a short-lived
-  entitlement JWT. It never receives a License private key and never performs
-  License signing.
+- Control Service re-verifies the complete License envelope with its configured
+  vendor public keys, checks deployment and entitlement state, and issues a
+  short-lived entitlement JWT. It never receives a License private key and
+  never performs License signing.
+- In an air-gapped deployment, mount the License and trusted public-key file into
+  Control Service and place the same License in the enterprise client resources.
+  Activation then completes entirely inside the customer network.
 
 ## Repository boundary
 

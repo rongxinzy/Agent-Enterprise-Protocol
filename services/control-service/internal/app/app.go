@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 	database "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db"
 	db "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db/generated"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/license"
 )
 
 var (
@@ -25,12 +27,14 @@ var (
 )
 
 type App struct {
-	Config      config.Config
-	Pool        *pgxpool.Pool
-	DB          *db.Queries
-	Blobs       blob.Store
-	Tokens      *auth.Service
-	Credentials *credential.Sealer
+	Config          config.Config
+	Pool            *pgxpool.Pool
+	DB              *db.Queries
+	Blobs           blob.Store
+	Tokens          *auth.Service
+	Credentials     *credential.Sealer
+	LicenseVerifier *license.Verifier
+	License         *license.Verified
 }
 
 type AgentContext struct {
@@ -81,7 +85,28 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 	if credentialsEnabled {
 		credentials = credential.NewSealer(provider)
 	}
-	application := &App{Config: cfg, Pool: pool, DB: db.New(pool), Blobs: blobs, Tokens: tokens, Credentials: credentials}
+	licenseVerifier, err := license.NewVerifier(cfg.LicenseTrustedKeys, cfg.LicenseDeploymentID)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("license verifier: %w", err)
+	}
+	application := &App{Config: cfg, Pool: pool, DB: db.New(pool), Blobs: blobs, Tokens: tokens, Credentials: credentials, LicenseVerifier: licenseVerifier}
+	if cfg.LicenseFile != "" {
+		licenseBytes, readErr := os.ReadFile(cfg.LicenseFile)
+		if readErr != nil {
+			pool.Close()
+			return nil, fmt.Errorf("read AEP_LICENSE_FILE: %w", readErr)
+		}
+		verified, verifyErr := licenseVerifier.Verify(licenseBytes)
+		if verifyErr != nil || verified.Status == "enterprise-expired" || (cfg.LicenseCustomerID != "" && verified.Claims.CustomerID != cfg.LicenseCustomerID) {
+			pool.Close()
+			if verifyErr != nil {
+				return nil, fmt.Errorf("verify AEP_LICENSE_FILE: %w", verifyErr)
+			}
+			return nil, errors.New("AEP_LICENSE_FILE is expired or bound to another customer")
+		}
+		application.License = &verified
+	}
 	if err := application.bootstrap(ctx); err != nil {
 		pool.Close()
 		return nil, err
