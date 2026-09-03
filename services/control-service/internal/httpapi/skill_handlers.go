@@ -271,16 +271,34 @@ func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, cr
 	if err != nil {
 		return err
 	}
+	_, err = tx.Exec(ctx, `INSERT INTO session_control_deliveries (delivery_id,event_id,session_id)
+SELECT gen_random_uuid()::text,$1,s.session_id
+FROM user_sessions s JOIN users u ON u.id=s.user_id
+WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
+  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND $4=ANY(u.team_ids)))
+ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
+	if err != nil {
+		return err
+	}
+	// Transitional delivery for pre-session clients. It is removed with the
+	// legacy Agent tables in the final identity cleanup migration.
 	_, err = tx.Exec(ctx, `INSERT INTO control_deliveries (delivery_id,event_id,agent_id)
 SELECT gen_random_uuid()::text,$1,a.agent_id
 FROM agents a JOIN users u ON u.id=a.user_id
-WHERE a.deployment_id=$2 AND ($3='global' OR ($3='agent' AND a.agent_id=$4) OR ($3='user' AND a.user_id=$4) OR ($3='organization' AND $4=ANY(u.team_ids)))`, eventID, enterpriseID, scopeType, scopeID)
+WHERE a.deployment_id=$2 AND ($3='global' OR ($3='agent' AND a.agent_id=$4) OR ($3='user' AND a.user_id=$4) OR ($3='organization' AND $4=ANY(u.team_ids)))
+ON CONFLICT (event_id,agent_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
 	return err
 }
 
 func skillAssignmentEventScope(subjectType, subjectID string) (string, *string) {
 	if subjectType == "enterprise" {
 		return "global", nil
+	}
+	if subjectType == "organization" {
+		return "team", &subjectID
+	}
+	if subjectType == "agent" {
+		return "agent", &subjectID
 	}
 	return subjectType, &subjectID
 }
@@ -373,9 +391,13 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	_, err = tx.Exec(request.Context(), "INSERT INTO skill_sync_results (id,deployment_id,user_id,agent_id,revision,status,installed_skill_ids,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), claims.Tenant, claims.Subject, claims.AgentID, input.Revision, input.Status, installed, payload)
-	if err == nil {
-		_, err = tx.Exec(request.Context(), "UPDATE agents SET applied_skill_revision=$2,installed_skill_ids=$3,last_seen_at=now() WHERE agent_id=$1", claims.AgentID, input.Revision, installed)
+	if claims.SessionID != "" {
+		_, err = tx.Exec(request.Context(), "INSERT INTO skill_sync_results (id,deployment_id,user_id,session_id,revision,status,installed_skill_ids,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), claims.Tenant, claims.Subject, claims.SessionID, input.Revision, input.Status, installed, payload)
+	} else {
+		_, err = tx.Exec(request.Context(), "INSERT INTO skill_sync_results (id,deployment_id,user_id,agent_id,revision,status,installed_skill_ids,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), claims.Tenant, claims.Subject, claims.AgentID, input.Revision, input.Status, installed, payload)
+		if err == nil {
+			_, err = tx.Exec(request.Context(), "UPDATE agents SET applied_skill_revision=$2,installed_skill_ids=$3,last_seen_at=now() WHERE agent_id=$1", claims.AgentID, input.Revision, installed)
+		}
 	}
 	if err == nil {
 		err = tx.Commit(request.Context())

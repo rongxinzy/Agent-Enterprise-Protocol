@@ -79,6 +79,20 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 		protected.Get("/aep/v1/agent/skills/{skillId}/versions/{version}/package", server.downloadSkillPackage)
 		protected.Post("/aep/v1/agent/skills/sync-results", server.reportSkillSyncResult)
 		protected.Post("/aep/v1/agent/events/batch", server.uploadTelemetryBatch)
+		// Canonical user-session surface. Legacy /agent paths remain aliases for
+		// one release so existing clients can rotate without a flag day.
+		protected.Get("/aep/v1/user/me", server.currentIdentity)
+		protected.Get("/aep/v1/user/models", server.listAgentModels)
+		protected.Get("/aep/v1/user/credentials", server.listAgentCredentials)
+		protected.Post("/aep/v1/user/credentials/{credentialId}/resolve", server.resolveAgentCredential)
+		protected.Post("/aep/v1/user/heartbeat", server.heartbeat)
+		protected.Get("/aep/v1/user/control-events", server.listAgentControlEvents)
+		protected.Post("/aep/v1/user/control-events/{deliveryId}/acknowledge", server.acknowledgeControlEvent)
+		protected.Post("/aep/v1/user/control-events/{deliveryId}/result", server.reportControlEventResult)
+		protected.Get("/aep/v1/user/skills/manifest", server.skillManifest)
+		protected.Get("/aep/v1/user/skills/{skillId}/versions/{version}/package", server.downloadSkillPackage)
+		protected.Post("/aep/v1/user/skills/sync-results", server.reportSkillSyncResult)
+		protected.Post("/aep/v1/user/events/batch", server.uploadTelemetryBatch)
 
 		protected.Group(func(admin chi.Router) {
 			admin.Use(server.requireAdmin)
@@ -110,6 +124,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Get("/aep/v1/admin/control-events/{eventId}/deliveries", server.listControlEventDeliveries)
 			admin.Get("/aep/v1/admin/agents", server.listAgents)
 			admin.Get("/aep/v1/admin/agents/{agentId}", server.getAgent)
+			admin.Get("/aep/v1/admin/sessions", server.listUserSessions)
 			admin.Get("/aep/v1/admin/licenses", server.listLicenses)
 			admin.Get("/aep/v1/admin/licenses/{licenseId}", server.getLicense)
 			admin.Post("/aep/v1/admin/licenses/import", server.importLicense)
@@ -195,7 +210,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "The access token is invalid or expired.")
 			return
 		}
-		if agentID := request.Header.Get("X-AEP-Agent-ID"); agentID != "" && agentID != claims.AgentID {
+		if agentID := request.Header.Get("X-AEP-Agent-ID"); agentID != "" && claims.AgentID != "" && agentID != claims.AgentID {
 			writeProblem(response, request, http.StatusConflict, "AGENT_IDENTITY_CONFLICT", "The Agent header does not match the authenticated session.")
 			return
 		}
@@ -269,6 +284,8 @@ func requiredAdminPermission(method, path string) string {
 			return "users.read"
 		}
 		return "users.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/sessions"):
+		return "users.read"
 	case strings.HasPrefix(path, "/aep/v1/admin/models"):
 		if strings.Contains(path, "assignment") {
 			return "models.assign"

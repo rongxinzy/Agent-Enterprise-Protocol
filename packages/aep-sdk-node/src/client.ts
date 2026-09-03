@@ -103,7 +103,13 @@ export class AepClient {
       {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/password/login',
-        body: asJson({...this.#agentContext(), ...input, deploymentId, sessionId: input.sessionId ?? this.#sessionId}),
+        body: asJson({
+          deploymentId,
+          username: input.username,
+          password: input.password,
+          sessionId: input.sessionId ?? this.#sessionId,
+          ...this.#agentContext(),
+        }),
       },
       false,
     );
@@ -206,6 +212,11 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/me'});
   }
 
+  /** Canonical user-session identity method. */
+  getCurrentUser(): Promise<CurrentIdentity> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/me'});
+  }
+
   activateEnterpriseLicense(input: LicenseActivationRequest): Promise<EntitlementTokenResponse> {
     return this.#send({
       method: HttpMethod.Post,
@@ -216,6 +227,11 @@ export class AepClient {
 
   listAgentCredentials(): Promise<CredentialList> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/credentials'});
+  }
+
+  /** Canonical user-session credential discovery method. */
+  listCredentialsForUser(): Promise<CredentialList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/credentials'});
   }
 
   async resolveAgentCredential(credentialId: string, purpose: string): Promise<ResolvedCredential> {
@@ -237,8 +253,36 @@ export class AepClient {
     return response.data;
   }
 
+  async resolveCredentialForUser(credentialId: string, purpose: string): Promise<ResolvedCredential> {
+    const response = await this.#request<ResolvedCredential>({
+      method: HttpMethod.Post,
+      path: '/aep/v1/user/credentials/' + segment(credentialId) + '/resolve',
+      body: {purpose},
+      retry: false,
+    });
+    this.#assertSuccess(response);
+    if (!hasNoStore(response.headers)) {
+      throw new AepProblem({
+        type: 'https://aep.example/problems/credential-response-cacheable',
+        title: 'Credential response is missing Cache-Control: no-store',
+        status: 502,
+        code: 'CREDENTIAL_RESPONSE_CACHEABLE',
+      });
+    }
+    return response.data;
+  }
+
   listAgentModels(): Promise<AgentModelList> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/models'});
+  }
+
+  /** Canonical user-session model discovery method. */
+  listModels(): Promise<AgentModelList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/models'});
+  }
+
+  listUserSessions(filters: Query = {}): Promise<JsonObject> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/sessions?${query(filters)}`});
   }
 
   async getModelConnection(): Promise<ModelConnection> {
@@ -279,10 +323,22 @@ export class AepClient {
     return {notModified: false, etag: responseEtag, manifest: response.data};
   }
 
+  getUserSkillManifest(etag?: string): Promise<SkillManifestResult> {
+    return this.#getSkillManifestAt('/aep/v1/user/skills/manifest', etag);
+  }
+
   downloadSkillPackage(skillId: string, version: string): Promise<Uint8Array> {
     return this.#send({
       method: HttpMethod.Get,
       path: `/aep/v1/agent/skills/${segment(skillId)}/versions/${segment(version)}/package`,
+      responseType: 'bytes',
+    });
+  }
+
+  downloadUserSkillPackage(skillId: string, version: string): Promise<Uint8Array> {
+    return this.#send({
+      method: HttpMethod.Get,
+      path: `/aep/v1/user/skills/${segment(skillId)}/versions/${segment(version)}/package`,
       responseType: 'bytes',
     });
   }
@@ -304,8 +360,16 @@ export class AepClient {
     });
   }
 
+  uploadUserEventBatch(events: JsonObject[]): Promise<JsonObject> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/user/events/batch', body: {events}});
+  }
+
   heartbeat(input: JsonObject): Promise<HeartbeatResponse> {
     return this.#send({method: HttpMethod.Post, path: '/aep/v1/agent/heartbeat', body: input});
+  }
+
+  heartbeatUser(input: JsonObject): Promise<HeartbeatResponse> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/user/heartbeat', body: input});
   }
 
   listControlEvents(afterCursor?: string, limit = 50): Promise<ControlEventPage> {
@@ -313,6 +377,10 @@ export class AepClient {
       method: HttpMethod.Get,
       path: `/aep/v1/agent/control-events?${query({afterCursor, limit})}`,
     });
+  }
+
+  listUserControlEvents(afterCursor?: string, limit = 50): Promise<ControlEventPage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/user/control-events?${query({afterCursor, limit})}`});
   }
 
   acknowledgeControlEvent(deliveryId: string, receivedAt: string): Promise<void> {
@@ -324,12 +392,28 @@ export class AepClient {
     });
   }
 
+  acknowledgeUserControlEvent(deliveryId: string, receivedAt: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: `/aep/v1/user/control-events/${segment(deliveryId)}/acknowledge`,
+      body: {status: 'received', receivedAt}, responseType: 'empty',
+    });
+  }
+
   reportControlEventResult(deliveryId: string, result: JsonObject): Promise<void> {
     return this.#send({
       method: HttpMethod.Post,
       path: `/aep/v1/agent/control-events/${segment(deliveryId)}/result`,
       body: result,
       responseType: 'empty',
+    });
+  }
+
+  reportUserControlEventResult(deliveryId: string, result: JsonObject): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: `/aep/v1/user/control-events/${segment(deliveryId)}/result`,
+      body: result, responseType: 'empty',
     });
   }
 
@@ -579,6 +663,18 @@ export class AepClient {
     const response = await this.#request<T>(request, authenticated);
     this.#assertSuccess(response);
     return response.data;
+  }
+
+  async #getSkillManifestAt(path: string, etag?: string): Promise<SkillManifestResult> {
+    const response = await this.#request<SkillManifest>({
+      method: HttpMethod.Get,
+      path,
+      headers: etag ? {'If-None-Match': etag} : undefined,
+    });
+    const responseEtag = response.headers.get('ETag');
+    if (response.status === 304) return {notModified: true, etag: responseEtag ?? etag ?? null};
+    this.#assertSuccess(response);
+    return {notModified: false, etag: responseEtag, manifest: response.data};
   }
 
   async #request<T>(request: AepRequest, authenticated = true): Promise<AepResponse<T>> {

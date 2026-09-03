@@ -426,6 +426,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listUserSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skills": {
         parameters: {
             query?: never;
@@ -911,7 +927,8 @@ export interface components {
         PasswordChangeRequest: {
             currentPassword: string;
             newPassword: string;
-            agentId: string;
+            agentId?: string;
+            sessionId?: string;
         };
         AdminAgent: {
             agentId: string;
@@ -1083,9 +1100,11 @@ export interface components {
         };
         RefreshRequest: {
             refreshToken: string;
-            agentId?: string;
+            /** @description User session identifier. */
             sessionId?: string;
-        } | unknown | unknown;
+            /** @deprecated */
+            agentId?: string;
+        };
         LogoutRequest: {
             refreshToken: string;
         };
@@ -2532,6 +2551,44 @@ export interface operations {
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+        };
+    };
+    listUserSessions: {
+        parameters: {
+            query?: {
+                userId?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description User session page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            sessionId: string;
+                            userId: string;
+                            topic: string;
+                            /** Format: date-time */
+                            createdAt: string;
+                            /** Format: date-time */
+                            lastSeenAt: string;
+                            /** Format: date-time */
+                            revokedAt?: string | null;
+                        }[];
+                        nextCursor?: string | null;
+                    };
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
         };
     };
     listSkills: {

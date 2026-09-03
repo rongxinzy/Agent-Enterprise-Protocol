@@ -44,10 +44,10 @@ test('does not share an in-flight resolution across metadata revisions', async (
   let resolveOld: ((value: ResolvedCredential) => void) | undefined;
   let resolveCalls = 0;
   const client = {
-    async listAgentCredentials() {
+    async listCredentialsForUser() {
       return {credentials};
     },
-    resolveAgentCredential() {
+    resolveCredentialForUser() {
       resolveCalls += 1;
       if (resolveCalls === 1) {
         return new Promise<ResolvedCredential>(resolve => {
@@ -122,10 +122,10 @@ function fakeClient(initial: CredentialMetadata[], materials: ResolvedCredential
   return {
     credentials: initial,
     resolveCalls: 0,
-    async listAgentCredentials() {
+    async listCredentialsForUser() {
       return {credentials: this.credentials};
     },
-    async resolveAgentCredential() {
+    async resolveCredentialForUser() {
       const value = materials[this.resolveCalls++];
       if (!value) throw new Error('No fake Credential material remains.');
       await Promise.resolve();

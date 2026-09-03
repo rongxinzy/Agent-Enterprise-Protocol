@@ -9,7 +9,7 @@ export interface ExampleAgentOptions {
   client: AepClient;
   state: AgentState;
   reconciler: SkillReconciler;
-  credentials: {enterpriseId: string; username: string; password: string};
+  credentials: {deploymentId: string; username: string; password: string};
   agentVersion: string;
   platform: 'windows' | 'macos' | 'linux';
 }
@@ -18,11 +18,14 @@ export class ExampleAgent {
   constructor(private readonly options: ExampleAgentOptions) {}
 
   async runOnce(): Promise<void> {
-    await this.options.client.loginWithPassword(this.options.credentials);
+    // Keep the same user session across process restarts so its delivery
+    // cursor and acknowledgement state remain addressable.
+    const restored = await this.options.client.restoreSession();
+    if (!restored) await this.options.client.loginWithPassword(this.options.credentials);
     await this.flushTelemetry();
     await this.resumeInbox();
     const skills = this.options.state.managedSkills();
-    const heartbeat = await this.options.client.heartbeat({
+    const heartbeat = await this.options.client.heartbeatUser({
       agentVersion: this.options.agentVersion,
       platform: this.options.platform,
       appliedSkillRevision: this.options.state.getValue('skill_revision'),
@@ -41,10 +44,10 @@ export class ExampleAgent {
   private async receiveControlEvents(): Promise<void> {
     let cursor: string | undefined;
     do {
-      const page = await this.options.client.listControlEvents(cursor);
+      const page = await this.options.client.listUserControlEvents(cursor);
       for (const event of page.items) {
         this.options.state.persistInbox(event);
-        await this.options.client.acknowledgeControlEvent(event.deliveryId, new Date().toISOString());
+        await this.options.client.acknowledgeUserControlEvent(event.deliveryId, new Date().toISOString());
       }
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
@@ -52,14 +55,14 @@ export class ExampleAgent {
 
   private async resumeInbox(): Promise<void> {
     for (const item of this.options.state.listPendingInbox()) {
-      await this.options.client.acknowledgeControlEvent(item.deliveryId, new Date().toISOString());
+      await this.options.client.acknowledgeUserControlEvent(item.deliveryId, new Date().toISOString());
       await this.execute(item.event);
     }
   }
 
   private async execute(event: ControlEvent): Promise<void> {
     this.options.state.setInboxState(event.deliveryId, 'running');
-    await this.options.client.reportControlEventResult(event.deliveryId, {status: 'running', startedAt: new Date().toISOString()});
+    await this.options.client.reportUserControlEventResult(event.deliveryId, {status: 'running', startedAt: new Date().toISOString()});
     try {
       let appliedRevision: string | undefined;
       if (event.task.type === 'skill.reconcile') {
@@ -69,12 +72,12 @@ export class ExampleAgent {
       } else {
         throw new Error(`Unsupported M0 task: ${event.task.type}`);
       }
-      await this.options.client.reportControlEventResult(event.deliveryId, {status: 'succeeded', completedAt: new Date().toISOString(), appliedRevision: appliedRevision ?? ''});
+      await this.options.client.reportUserControlEventResult(event.deliveryId, {status: 'succeeded', completedAt: new Date().toISOString(), appliedRevision: appliedRevision ?? ''});
       this.options.state.setInboxState(event.deliveryId, 'succeeded');
       this.queueTelemetry(event, 'succeeded');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.options.client.reportControlEventResult(event.deliveryId, {status: 'failed', completedAt: new Date().toISOString(), errorCode: 'TASK_FAILED', message, retryable: true});
+      await this.options.client.reportUserControlEventResult(event.deliveryId, {status: 'failed', completedAt: new Date().toISOString(), errorCode: 'TASK_FAILED', message, retryable: true});
       this.options.state.setInboxState(event.deliveryId, 'failed');
       this.queueTelemetry(event, 'failed', message);
     }
@@ -94,7 +97,7 @@ export class ExampleAgent {
   async flushTelemetry(): Promise<void> {
     const events = this.options.state.listTelemetry();
     if (events.length === 0) return;
-    const result = (await this.options.client.uploadEventBatch(events)) as {accepted?: unknown};
+    const result = (await this.options.client.uploadUserEventBatch(events)) as {accepted?: unknown};
     const accepted = Array.isArray(result.accepted) ? result.accepted.map(String) : [];
     this.options.state.removeTelemetry(accepted);
   }

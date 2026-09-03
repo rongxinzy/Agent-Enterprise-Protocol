@@ -155,7 +155,7 @@ function connection(baseUrl: string, apiKey: string): ModelConnection {
 
 function controlClient(models: AgentModel[], modelConnection: ModelConnection) {
   return {
-    async listAgentModels() {
+    async listModels() {
       return {models};
     },
     async getModelConnection() {

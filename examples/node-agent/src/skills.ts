@@ -16,7 +16,7 @@ export class SkillReconciler {
 
   async reconcile(): Promise<{revision: string; items: Array<{skillId: string; status: string}>}> {
     const etag = this.state.getValue('skill_etag') ?? undefined;
-    const result = await this.client.getSkillManifest(etag);
+    const result = await this.client.getUserSkillManifest(etag);
     if (result.notModified) {
       return {revision: this.state.getValue('skill_revision') ?? '', items: this.state.managedSkills().map(skill => ({skillId: skill.skillId, status: 'unchanged'}))};
     }
@@ -45,7 +45,7 @@ export class SkillReconciler {
   }
 
   private async install(skill: SkillManifestItem): Promise<void> {
-    const archive = await this.client.downloadSkillPackage(skill.id, skill.version);
+    const archive = await this.client.downloadUserSkillPackage(skill.id, skill.version);
     const actualHash = createHash('sha256').update(archive).digest('hex');
     if (actualHash !== skill.package.sha256) {
       throw new Error(`Skill ${skill.id} checksum mismatch`);

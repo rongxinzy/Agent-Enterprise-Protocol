@@ -121,11 +121,13 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The username or password is invalid.")
 		return
 	}
+	// All new logins are user sessions. A non-empty AgentID selects the
+	// transitional legacy path so existing M1/M2 clients can upgrade safely.
 	var tokens app.TokenResponse
-	if input.SessionID != "" || input.AgentID == "" {
-		tokens, err = s.app.IssueUserSession(request.Context(), user)
-	} else {
+	if input.AgentID != "" && input.SessionID == "" {
 		tokens, err = s.app.IssueSession(request.Context(), user, input.AgentContext)
+	} else {
+		tokens, err = s.app.IssueUserSession(request.Context(), user)
 	}
 	if errors.Is(err, app.ErrAgentConflict) {
 		writeProblem(response, request, http.StatusConflict, "AGENT_IDENTITY_CONFLICT", err.Error())
@@ -236,10 +238,10 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		return
 	}
 	var tokens app.TokenResponse
-	if input.SessionID != "" || input.AgentID == "" {
-		tokens, err = s.app.IssueUserSession(request.Context(), user)
-	} else {
+	if input.AgentID != "" && input.SessionID == "" {
 		tokens, err = s.app.IssueSession(request.Context(), user, input.AgentContext)
+	} else {
+		tokens, err = s.app.IssueUserSession(request.Context(), user)
 	}
 	if err != nil {
 		databaseFailure(response, request, err)
@@ -259,10 +261,10 @@ func (s *Server) refreshSession(response http.ResponseWriter, request *http.Requ
 	}
 	var tokens app.TokenResponse
 	var err error
-	if input.SessionID != "" || input.AgentID == "" {
-		tokens, err = s.app.RefreshUserSession(request.Context(), input.RefreshToken, input.SessionID)
-	} else {
+	if input.AgentID != "" && input.SessionID == "" {
 		tokens, err = s.app.RefreshSession(request.Context(), input.RefreshToken, input.AgentID)
+	} else {
+		tokens, err = s.app.RefreshUserSession(request.Context(), input.RefreshToken, input.SessionID)
 	}
 	if errors.Is(err, app.ErrRefreshTokenInvalid) {
 		writeProblem(response, request, http.StatusUnauthorized, "REFRESH_TOKEN_INVALID", err.Error())
@@ -332,29 +334,13 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	user.RequirePasswordChange = false
-	if claims.SessionID != "" {
-		tokens, err := s.app.IssueUserSession(request.Context(), user)
-		if err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-		fingerprint := s.loginFingerprint(request, user.DeploymentID, user.Username)
-		s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, "", time.Now().UTC())
-		writeJSON(response, http.StatusOK, tokens)
-		return
-	}
-	agent, err := s.app.DB.GetAgent(request.Context(), input.AgentID)
-	if err != nil {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Agent was not found.")
-		return
-	}
-	tokens, err := s.app.IssueSession(request.Context(), user, app.AgentContext{AgentID: agent.AgentID, AgentVersion: agent.AgentVersion, Platform: agent.Platform})
+	tokens, err := s.app.IssueUserSession(request.Context(), user)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	fingerprint := s.loginFingerprint(request, user.DeploymentID, user.Username)
-	s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, input.AgentID, time.Now().UTC())
+	s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, "", time.Now().UTC())
 	slog.Info("authentication event", "event", "password.changed", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
