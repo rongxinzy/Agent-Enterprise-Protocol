@@ -96,7 +96,7 @@ func validDeliveryMode(value string) bool {
 }
 
 func validCredentialSubject(value string) bool {
-	return value == "user" || value == "role" || value == "team"
+	return value == "enterprise" || value == "organization" || value == "user" || value == "agent" || value == "role" || value == "team"
 }
 
 func (s *Server) listAgentCredentials(response http.ResponseWriter, request *http.Request) {

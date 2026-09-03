@@ -16,11 +16,13 @@ import (
 
 type createUserRequest struct {
 	DeploymentID          string   `json:"deploymentId"`
+	EnterpriseID          string   `json:"enterpriseId"` // Deprecated v1 alias.
 	Username              string   `json:"username"`
 	DisplayName           string   `json:"displayName"`
 	Email                 *string  `json:"email"`
 	TemporaryPassword     string   `json:"temporaryPassword"`
 	TeamIDs               []string `json:"teamIds"`
+	OrganizationIDs       []string `json:"organizationIds"` // Deprecated v1 alias.
 	RoleIDs               []string `json:"roleIds"`
 	RequirePasswordChange *bool    `json:"requirePasswordChange"`
 }
@@ -48,6 +50,12 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	if input.DeploymentID == "" {
+		input.DeploymentID = input.EnterpriseID
+	}
+	if input.TeamIDs == nil {
+		input.TeamIDs = input.OrganizationIDs
+	}
 	if input.DeploymentID != claimsFrom(request).Tenant {
 		writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "Administrators can only create users in their enterprise.")
 		return
@@ -71,6 +79,7 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 func (s *Server) importUsers(response http.ResponseWriter, request *http.Request) {
 	var input struct {
 		DeploymentID string `json:"deploymentId"`
+		EnterpriseID string `json:"enterpriseId"` // Deprecated v1 alias.
 		Users        []struct {
 			ExternalRowID         string   `json:"externalRowId"`
 			Username              string   `json:"username"`
@@ -78,12 +87,16 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 			Email                 *string  `json:"email"`
 			TemporaryPassword     string   `json:"temporaryPassword"`
 			TeamIDs               []string `json:"teamIds"`
+			OrganizationIDs       []string `json:"organizationIds"` // Deprecated v1 alias.
 			RoleIDs               []string `json:"roleIds"`
 			RequirePasswordChange *bool    `json:"requirePasswordChange"`
 		} `json:"users"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
+	}
+	if input.DeploymentID == "" {
+		input.DeploymentID = input.EnterpriseID
 	}
 	if input.DeploymentID != claimsFrom(request).Tenant || len(input.Users) == 0 || len(input.Users) > 1000 {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The import must contain 1 to 1000 users for the current enterprise.")
@@ -92,7 +105,11 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 	created := 0
 	errorsResult := make([]map[string]string, 0)
 	for _, item := range input.Users {
-		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: item.TeamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
+		teamIDs := item.TeamIDs
+		if teamIDs == nil {
+			teamIDs = item.OrganizationIDs
+		}
+		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: teamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
 		if err != nil {
 			code := "USER_IMPORT_FAILED"
 			detail := "The account could not be created."
@@ -131,14 +148,18 @@ func (s *Server) insertUser(request *http.Request, input createUserRequest) (db.
 
 func (s *Server) updateUser(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		DisplayName *string   `json:"displayName"`
-		Email       *string   `json:"email"`
-		Status      *string   `json:"status"`
-		TeamIDs     *[]string `json:"teamIds"`
-		RoleIDs     *[]string `json:"roleIds"`
+		DisplayName     *string   `json:"displayName"`
+		Email           *string   `json:"email"`
+		Status          *string   `json:"status"`
+		TeamIDs         *[]string `json:"teamIds"`
+		OrganizationIDs *[]string `json:"organizationIds"` // Deprecated v1 alias.
+		RoleIDs         *[]string `json:"roleIds"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
+	}
+	if input.TeamIDs == nil {
+		input.TeamIDs = input.OrganizationIDs
 	}
 	params := db.UpdateUserParams{ID: chi.URLParam(request, "userId")}
 	if input.DisplayName != nil {

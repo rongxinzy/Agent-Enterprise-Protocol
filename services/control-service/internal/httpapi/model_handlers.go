@@ -417,7 +417,7 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 }
 
 func validModelSubject(subjectType string) bool {
-	return subjectType == "user" || subjectType == "role" || subjectType == "team"
+	return subjectType == "enterprise" || subjectType == "organization" || subjectType == "user" || subjectType == "agent" || subjectType == "role" || subjectType == "team"
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {

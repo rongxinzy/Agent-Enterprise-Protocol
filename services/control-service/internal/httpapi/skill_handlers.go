@@ -197,7 +197,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.Subject.Type != "user" && input.Subject.Type != "role" && input.Subject.Type != "team" {
+	if input.Subject.Type != "enterprise" && input.Subject.Type != "organization" && input.Subject.Type != "user" && input.Subject.Type != "agent" && input.Subject.Type != "role" && input.Subject.Type != "team" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
 		return
 	}
