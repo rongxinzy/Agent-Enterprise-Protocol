@@ -217,7 +217,7 @@ export class MockAepServer {
 }
 
 function tokens(accessToken: string, refreshToken: string): object {
-  return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300, passwordChangeRequired: false};
+  return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300, deploymentId: 'ent-1', sessionId: 'session-1', passwordChangeRequired: false};
 }
 
 function credential(deliveryMode: 'agent' | 'server_only'): object {

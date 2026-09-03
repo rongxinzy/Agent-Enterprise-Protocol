@@ -1639,13 +1639,26 @@ components:
           type: string
         requestId:
           type: string
-    AgentContext:
+    PasswordLoginRequest:
       type: object
       required:
-        - agentId
-        - agentVersion
-        - platform
+        - username
+        - password
+      anyOf:
+        - required:
+            - deploymentId
+        - required:
+            - enterpriseId
       properties:
+        deploymentId:
+          type: string
+          minLength: 1
+        enterpriseId:
+          type: string
+          minLength: 1
+        sessionId:
+          type: string
+          minLength: 1
         agentId:
           type: string
           minLength: 1
@@ -1658,34 +1671,15 @@ components:
             - windows
             - macos
             - linux
-    PasswordLoginRequest:
-      allOf:
-        - $ref: '#/components/schemas/AgentContext'
-        - type: object
-          required:
-            - username
-            - password
-          anyOf:
-            - required:
-                - deploymentId
-            - required:
-                - enterpriseId
-          properties:
-            deploymentId:
-              type: string
-              minLength: 1
-            enterpriseId:
-              type: string
-              minLength: 1
-            username:
-              type: string
-              minLength: 1
-              maxLength: 256
-            password:
-              type: string
-              minLength: 1
-              maxLength: 1024
-              writeOnly: true
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
     TokenResponse:
       type: object
       required:
@@ -1718,6 +1712,9 @@ components:
         deploymentId:
           type: string
           minLength: 1
+        sessionId:
+          type: string
+          minLength: 1
         passwordChangeRequired:
           type: boolean
           description: When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed.
@@ -1737,6 +1734,9 @@ components:
           type: string
           minLength: 1
         enterpriseId:
+          type: string
+          minLength: 1
+        sessionId:
           type: string
           minLength: 1
         methodId:
@@ -1774,40 +1774,60 @@ components:
           minimum: 1
           maximum: 600
     FederatedExchangeRequest:
-      allOf:
-        - $ref: '#/components/schemas/AgentContext'
-        - type: object
-          required:
-            - transactionId
-            - authorizationCode
-            - redirectUri
-            - codeVerifier
-          properties:
-            transactionId:
-              type: string
-              minLength: 1
-            authorizationCode:
-              type: string
-              minLength: 1
-            redirectUri:
-              type: string
-              format: uri
-            codeVerifier:
-              type: string
-              minLength: 43
-              maxLength: 128
-              writeOnly: true
+      type: object
+      required:
+        - transactionId
+        - authorizationCode
+        - redirectUri
+        - codeVerifier
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+        authorizationCode:
+          type: string
+          minLength: 1
+        redirectUri:
+          type: string
+          format: uri
+        codeVerifier:
+          type: string
+          minLength: 43
+          maxLength: 128
+          writeOnly: true
+        sessionId:
+          type: string
+          minLength: 1
+        agentId:
+          type: string
+          minLength: 1
+        agentVersion:
+          type: string
+          minLength: 1
+        platform:
+          type: string
+          enum:
+            - windows
+            - macos
+            - linux
     RefreshRequest:
       type: object
       required:
         - refreshToken
-        - agentId
+      anyOf:
+        - required:
+            - agentId
+        - required:
+            - sessionId
       properties:
         refreshToken:
           type: string
           minLength: 1
           writeOnly: true
         agentId:
+          type: string
+          minLength: 1
+        sessionId:
           type: string
           minLength: 1
     LogoutRequest:
@@ -1912,6 +1932,7 @@ components:
         - enterprise
         - deployment
         - deploymentId
+        - sessionId
         - roles
         - sessionExpiresAt
         - passwordChangeRequired
@@ -1925,6 +1946,8 @@ components:
         deploymentId:
           type: string
           minLength: 1
+        sessionId:
+          type: string
         roles:
           type: array
           items:

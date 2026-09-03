@@ -15,7 +15,8 @@ import (
 
 type Claims struct {
 	Tenant                 string   `json:"tenant"`
-	AgentID                string   `json:"agent_id"`
+	AgentID                string   `json:"agent_id,omitempty"`
+	SessionID              string   `json:"session_id,omitempty"`
 	LicenseID              string   `json:"license_id,omitempty"`
 	LicenseDigest          string   `json:"license_digest,omitempty"`
 	DeploymentID           string   `json:"deployment_id,omitempty"`
@@ -66,11 +67,21 @@ func (s *Service) Issue(userID, enterpriseID, agentID string, admin, passwordCha
 // intentionally separate during the migration window; PR #52 removes the
 // legacy tenant/enterprise storage and claim.
 func (s *Service) IssueWithDeployment(userID, enterpriseID, deploymentID, agentID string, admin, passwordChangeRequired bool, roles []string, modelScopes []string) (string, string, error) {
-	access, err := s.sign(userID, enterpriseID, deploymentID, agentID, admin, passwordChangeRequired, roles, nil, "aep", "aep-control", s.accessTTL)
+	return s.issue(userID, enterpriseID, deploymentID, agentID, "", admin, passwordChangeRequired, roles, modelScopes)
+}
+
+// IssueWithDeploymentSession issues tokens for a user session. Session tokens
+// deliberately omit agent_id; the session ID identifies one terminal cursor.
+func (s *Service) IssueWithDeploymentSession(userID, enterpriseID, deploymentID, sessionID string, admin, passwordChangeRequired bool, roles []string, modelScopes []string) (string, string, error) {
+	return s.issue(userID, enterpriseID, deploymentID, "", sessionID, admin, passwordChangeRequired, roles, modelScopes)
+}
+
+func (s *Service) issue(userID, enterpriseID, deploymentID, agentID, sessionID string, admin, passwordChangeRequired bool, roles, modelScopes []string) (string, string, error) {
+	access, err := s.sign(userID, enterpriseID, deploymentID, agentID, sessionID, admin, passwordChangeRequired, roles, nil, "aep", "aep-control", s.accessTTL)
 	if err != nil {
 		return "", "", err
 	}
-	model, err := s.sign(userID, enterpriseID, deploymentID, agentID, false, passwordChangeRequired, nil, modelScopes, "model", "model-gateway", s.modelTTL)
+	model, err := s.sign(userID, enterpriseID, deploymentID, agentID, sessionID, false, passwordChangeRequired, nil, modelScopes, "model", "model-gateway", s.modelTTL)
 	return access, model, err
 }
 
@@ -132,10 +143,10 @@ func (s *Service) JWKS() map[string]any {
 	return map[string]any{"keys": []map[string]string{{"kty": "OKP", "kid": s.keyID, "use": "sig", "alg": "EdDSA", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(s.public)}}}
 }
 
-func (s *Service) sign(userID, enterpriseID, deploymentID, agentID string, admin, passwordChangeRequired bool, roles, modelScopes []string, tokenUse, audience string, ttl time.Duration) (string, error) {
+func (s *Service) sign(userID, enterpriseID, deploymentID, agentID, sessionID string, admin, passwordChangeRequired bool, roles, modelScopes []string, tokenUse, audience string, ttl time.Duration) (string, error) {
 	now := time.Now().UTC()
 	claims := Claims{
-		Tenant: enterpriseID, DeploymentID: deploymentID, AgentID: agentID, Admin: admin, Roles: roles, ModelScopes: modelScopes, PasswordChangeRequired: passwordChangeRequired, TokenUse: tokenUse,
+		Tenant: enterpriseID, DeploymentID: deploymentID, AgentID: agentID, SessionID: sessionID, Admin: admin, Roles: roles, ModelScopes: modelScopes, PasswordChangeRequired: passwordChangeRequired, TokenUse: tokenUse,
 		RegisteredClaims: jwt.RegisteredClaims{Issuer: s.issuer, Subject: userID, Audience: jwt.ClaimStrings{audience}, ExpiresAt: jwt.NewNumericDate(now.Add(ttl)), IssuedAt: jwt.NewNumericDate(now), ID: uuid.NewString()},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

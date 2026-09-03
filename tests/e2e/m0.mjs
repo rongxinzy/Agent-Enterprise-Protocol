@@ -37,6 +37,8 @@ async function runScenario() {
   const admin = new AepClient({baseUrl, agentId: `e2e-admin-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: new MemoryTokenStore()});
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
 
+  await assertUserSessionLogin();
+
   await assertPasswordSecurity();
 
   const username = `user-${runId}`;
@@ -103,6 +105,29 @@ async function runScenario() {
   assert(Array.isArray(audit.items) && audit.items.length >= 3, 'Expected Skill telemetry was not recorded');
   assert(audit.items.filter(item => item.eventId === duplicateEventId).length === 1, 'Telemetry eventId was not deduplicated');
   await runCli(['metadata']);
+}
+
+async function assertUserSessionLogin() {
+  const response = await fetch(`${baseUrl}/aep/v1/auth/password/login`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-AEP-Protocol-Version': '1.0'},
+    body: JSON.stringify({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'}),
+  });
+  assert(response.status === 200, `Deployment-only login returned ${response.status}`);
+  const tokens = await response.json();
+  assert(tokens.sessionId, 'Deployment-only login did not issue a session ID');
+  const claims = decodeJwtPayload(tokens.accessToken);
+  assert(claims.deployment_id === 'demo', 'Session access token omitted deployment_id');
+  assert(claims.session_id === tokens.sessionId, 'Session access token omitted the issued session ID');
+  assert(!Object.hasOwn(claims, 'agent_id'), 'User session token unexpectedly contains agent_id');
+  const stored = Number(await queryDatabase(`SELECT count(*) FROM user_sessions WHERE session_id='${tokens.sessionId}' AND topic='user:demo:${claims.sub}'`));
+  assert(stored === 1, 'User session was not persisted with its user topic');
+}
+
+function decodeJwtPayload(token) {
+  const encoded = token.split('.')[1];
+  assert(encoded, 'Access token payload is missing');
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
 }
 
 async function automaticSkillEventId(skillId, revisionPrefix) {

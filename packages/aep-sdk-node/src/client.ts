@@ -48,9 +48,10 @@ import type {
 
 export class AepClient {
   readonly #baseUrl: string;
-  readonly #agentId: string;
-  readonly #agentVersion: string;
+  readonly #agentId?: string;
+  readonly #agentVersion?: string;
   readonly #platform: AepClientOptions['platform'];
+  #sessionId?: string;
   readonly #tokenStore: AepClientOptions['tokenStore'];
   readonly #transport: AepTransport;
   #refreshPromise: Promise<AepTokens> | null = null;
@@ -60,6 +61,7 @@ export class AepClient {
     this.#agentId = options.agentId;
     this.#agentVersion = options.agentVersion;
     this.#platform = options.platform;
+    this.#sessionId = options.sessionId;
     this.#tokenStore = options.tokenStore;
     this.#transport = options.transport ?? new FetchTransport();
   }
@@ -84,6 +86,7 @@ export class AepClient {
     deploymentId?: string;
     /** @deprecated Use deploymentId. Kept for protocol v1 transitional clients. */
     enterpriseId?: string;
+    sessionId?: string;
     username: string;
     password: string;
   }): Promise<AepTokens> {
@@ -100,11 +103,12 @@ export class AepClient {
       {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/password/login',
-        body: asJson({...this.#agentContext(), ...input, deploymentId}),
+        body: asJson({...this.#agentContext(), ...input, deploymentId, sessionId: input.sessionId ?? this.#sessionId}),
       },
       false,
     );
     await this.#tokenStore.set(tokens);
+    this.#sessionId = tokens.sessionId ?? this.#sessionId;
     return tokens;
   }
 
@@ -141,11 +145,12 @@ export class AepClient {
       {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/exchange',
-        body: asJson({...this.#agentContext(), ...input}),
+        body: asJson({...this.#agentContext(), ...input, sessionId: this.#sessionId}),
       },
       false,
     );
     await this.#tokenStore.set(tokens);
+    this.#sessionId = tokens.sessionId ?? this.#sessionId;
     return tokens;
   }
 
@@ -153,9 +158,10 @@ export class AepClient {
     const tokens = await this.#send<AepTokens>({
       method: HttpMethod.Post,
       path: '/aep/v1/auth/password/change',
-      body: {currentPassword, newPassword, agentId: this.#agentId},
+      body: this.#sessionBody({currentPassword, newPassword}),
     });
     await this.#tokenStore.set(tokens);
+    this.#sessionId = tokens.sessionId ?? this.#sessionId;
     return tokens;
   }
 
@@ -615,13 +621,14 @@ export class AepClient {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/refresh',
         headers: this.#agentHeaders(),
-        body: {refreshToken, agentId: this.#agentId},
+        body: this.#sessionBody({refreshToken}),
       });
       if (response.status < 200 || response.status >= 300) {
         await this.#tokenStore.clear();
         throw AepProblem.from(response.status, response.data, response.headers.get('X-Request-ID'));
       }
       await this.#tokenStore.set(response.data);
+      this.#sessionId = response.data.sessionId ?? this.#sessionId;
       return response.data;
     })();
     try {
@@ -638,14 +645,22 @@ export class AepClient {
 
   #agentHeaders(): Record<string, string> {
     return {
-      'X-AEP-Agent-ID': this.#agentId,
+      ...(this.#agentId ? {'X-AEP-Agent-ID': this.#agentId} : {}),
       'X-AEP-Protocol-Version': AEP_PROTOCOL_VERSION,
       'X-Request-ID': requestId(),
     };
   }
 
   #agentContext(): object {
-    return {agentId: this.#agentId, agentVersion: this.#agentVersion, platform: this.#platform};
+    return {
+      ...(this.#agentId ? {agentId: this.#agentId} : {}),
+      ...(this.#agentVersion ? {agentVersion: this.#agentVersion} : {}),
+      ...(this.#platform ? {platform: this.#platform} : {}),
+    };
+  }
+
+  #sessionBody(body: Record<string, string>): Record<string, string> {
+    return this.#sessionId ? {...body, sessionId: this.#sessionId} : {...body, agentId: this.#agentId ?? ''};
   }
 }
 

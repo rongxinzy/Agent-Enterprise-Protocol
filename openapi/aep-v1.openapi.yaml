@@ -623,10 +623,14 @@ components:
         platform: {type: string, enum: [windows, macos, linux]}
     RefreshRequest:
       type: object
-      required: [refreshToken, agentId]
+      required: [refreshToken]
+      anyOf:
+        - required: [agentId]
+        - required: [sessionId]
       properties:
         refreshToken: {type: string, minLength: 1}
         agentId: {type: string}
+        sessionId: {type: string, minLength: 1}
     LogoutRequest:
       type: object
       required: [refreshToken]
@@ -643,15 +647,17 @@ components:
         expiresIn: {type: integer, minimum: 1}
         modelAccessExpiresIn: {type: integer, minimum: 1}
         deploymentId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
         passwordChangeRequired: {type: boolean}
     CurrentIdentity:
       type: object
-      required: [user, enterprise, deployment, deploymentId, roles, sessionExpiresAt, passwordChangeRequired]
+      required: [user, enterprise, deployment, deploymentId, sessionId, roles, sessionExpiresAt, passwordChangeRequired]
       properties:
         user: {$ref: '#/components/schemas/User'}
         enterprise: {$ref: '#/components/schemas/Enterprise'}
         deployment: {$ref: '#/components/schemas/Deployment'}
         deploymentId: {type: string, minLength: 1}
+        sessionId: {type: string}
         roles: {type: array, items: {type: string}}
         sessionExpiresAt: {type: string, format: date-time}
         passwordChangeRequired: {type: boolean}
