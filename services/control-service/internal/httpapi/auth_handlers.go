@@ -19,6 +19,7 @@ type passwordLoginRequest struct {
 	app.AgentContext
 	DeploymentID string `json:"deploymentId"`
 	EnterpriseID string `json:"enterpriseId"`
+	SessionID    string `json:"sessionId"`
 	Username     string `json:"username"`
 	Password     string `json:"password"`
 }
@@ -120,7 +121,12 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The username or password is invalid.")
 		return
 	}
-	tokens, err := s.app.IssueSession(request.Context(), user, input.AgentContext)
+	var tokens app.TokenResponse
+	if input.SessionID != "" || input.AgentID == "" {
+		tokens, err = s.app.IssueUserSession(request.Context(), user)
+	} else {
+		tokens, err = s.app.IssueSession(request.Context(), user, input.AgentContext)
+	}
 	if errors.Is(err, app.ErrAgentConflict) {
 		writeProblem(response, request, http.StatusConflict, "AGENT_IDENTITY_CONFLICT", err.Error())
 		return
@@ -208,6 +214,7 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 	}
 	var input struct {
 		app.AgentContext
+		SessionID         string `json:"sessionId"`
 		TransactionID     string `json:"transactionId"`
 		AuthorizationCode string `json:"authorizationCode"`
 		RedirectURI       string `json:"redirectUri"`
@@ -229,7 +236,12 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		databaseFailure(response, request, err)
 		return
 	}
-	tokens, err := s.app.IssueSession(request.Context(), user, input.AgentContext)
+	var tokens app.TokenResponse
+	if input.SessionID != "" || input.AgentID == "" {
+		tokens, err = s.app.IssueUserSession(request.Context(), user)
+	} else {
+		tokens, err = s.app.IssueSession(request.Context(), user, input.AgentContext)
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -241,11 +253,18 @@ func (s *Server) refreshSession(response http.ResponseWriter, request *http.Requ
 	var input struct {
 		RefreshToken string `json:"refreshToken"`
 		AgentID      string `json:"agentId"`
+		SessionID    string `json:"sessionId"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	tokens, err := s.app.RefreshSession(request.Context(), input.RefreshToken, input.AgentID)
+	var tokens app.TokenResponse
+	var err error
+	if input.SessionID != "" || input.AgentID == "" {
+		tokens, err = s.app.RefreshUserSession(request.Context(), input.RefreshToken, input.SessionID)
+	} else {
+		tokens, err = s.app.RefreshSession(request.Context(), input.RefreshToken, input.AgentID)
+	}
 	if errors.Is(err, app.ErrRefreshTokenInvalid) {
 		writeProblem(response, request, http.StatusUnauthorized, "REFRESH_TOKEN_INVALID", err.Error())
 		return
@@ -264,7 +283,13 @@ func (s *Server) logout(response http.ResponseWriter, request *http.Request) {
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if err := s.app.DB.RevokeRefreshSession(request.Context(), auth.HashRefreshToken(input.RefreshToken)); err != nil {
+	claims := claimsFrom(request)
+	if claims.SessionID != "" {
+		if err := s.app.RevokeUserSession(request.Context(), input.RefreshToken, claims.SessionID); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	} else if err := s.app.DB.RevokeRefreshSession(request.Context(), auth.HashRefreshToken(input.RefreshToken)); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -303,7 +328,22 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
+	if err := s.app.RevokeUserSessionSet(request.Context(), user.ID); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	user.RequirePasswordChange = false
+	if claims.SessionID != "" {
+		tokens, err := s.app.IssueUserSession(request.Context(), user)
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		fingerprint := s.loginFingerprint(request, user.EnterpriseID, user.Username)
+		s.recordPasswordChanged(request.Context(), fingerprint, user.EnterpriseID, user.ID, "", time.Now().UTC())
+		writeJSON(response, http.StatusOK, tokens)
+		return
+	}
 	agent, err := s.app.DB.GetAgent(request.Context(), input.AgentID)
 	if err != nil {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Agent was not found.")
@@ -337,6 +377,7 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		"enterprise":             map[string]string{"id": enterprise.ID, "name": enterprise.Name},
 		"deployment":             map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 		"deploymentId":           s.app.DeploymentID(),
+		"sessionId":              claims.SessionID,
 		"roles":                  user.RoleIds,
 		"sessionExpiresAt":       claims.ExpiresAt.Time,
 		"passwordChangeRequired": claims.PasswordChangeRequired,

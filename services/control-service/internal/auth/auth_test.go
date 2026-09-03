@@ -91,6 +91,31 @@ func TestIssueWithDeploymentCarriesExplicitDeploymentClaim(t *testing.T) {
 	}
 }
 
+func TestIssueWithDeploymentSessionOmitsAgentAndCarriesSession(t *testing.T) {
+	service, err := NewService("https://issuer.example", "", time.Minute, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, model, err := service.IssueWithDeploymentSession("user-1", "tenant-1", "deployment-1", "session-1", false, false, nil, []string{"model-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessClaims, err := service.ParseAccess(access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accessClaims.AgentID != "" || accessClaims.SessionID != "session-1" {
+		t.Fatalf("access session claims = %#v", accessClaims)
+	}
+	modelClaims, err := service.ParseModel(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelClaims.AgentID != "" || modelClaims.SessionID != "session-1" {
+		t.Fatalf("model session claims = %#v", modelClaims)
+	}
+}
+
 func TestPasswordChangeRequiredClaim(t *testing.T) {
 	service, err := NewService("https://issuer.example", "", time.Minute, time.Minute)
 	if err != nil {

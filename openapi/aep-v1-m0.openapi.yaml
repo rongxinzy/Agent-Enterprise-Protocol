@@ -183,11 +183,12 @@ components:
         jwksUri: {type: string, format: uri-reference}
     PasswordChangeRequest:
       type: object
-      required: [currentPassword, newPassword, agentId]
+      required: [currentPassword, newPassword]
       properties:
         currentPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
         newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
         agentId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
     AdminAgent:
       type: object
       required: [agentId, enterpriseId, userId, agentVersion, platform, firstSeenAt, lastSeenAt]

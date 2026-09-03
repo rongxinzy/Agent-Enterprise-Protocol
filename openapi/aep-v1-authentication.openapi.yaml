@@ -408,18 +408,20 @@ components:
         agentVersion: {type: string, minLength: 1}
         platform: {type: string, enum: [windows, macos, linux]}
     PasswordLoginRequest:
-      allOf:
-        - $ref: '#/components/schemas/AgentContext'
-        - type: object
-          required: [username, password]
-          anyOf:
-            - required: [deploymentId]
-            - required: [enterpriseId]
-          properties:
-            deploymentId: {type: string, minLength: 1}
-            enterpriseId: {type: string, minLength: 1}
-            username: {type: string, minLength: 1, maxLength: 256}
-            password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+      type: object
+      required: [username, password]
+      anyOf:
+        - required: [deploymentId]
+        - required: [enterpriseId]
+      properties:
+        deploymentId: {type: string, minLength: 1}
+        enterpriseId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
+        agentId: {type: string, minLength: 1}
+        agentVersion: {type: string, minLength: 1}
+        platform: {type: string, enum: [windows, macos, linux]}
+        username: {type: string, minLength: 1, maxLength: 256}
+        password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
     FederatedLoginStartRequest:
       type: object
       required: [methodId, redirectUri, codeChallenge]
@@ -429,6 +431,7 @@ components:
       properties:
         deploymentId: {type: string, minLength: 1}
         enterpriseId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
         methodId: {type: string, minLength: 1}
         redirectUri: {type: string, format: uri}
         codeChallenge: {type: string, minLength: 43, maxLength: 128}
@@ -442,21 +445,27 @@ components:
         state: {type: string, minLength: 16}
         expiresIn: {type: integer, minimum: 1, maximum: 600}
     FederatedExchangeRequest:
-      allOf:
-        - $ref: '#/components/schemas/AgentContext'
-        - type: object
-          required: [transactionId, authorizationCode, redirectUri, codeVerifier]
-          properties:
-            transactionId: {type: string, minLength: 1}
-            authorizationCode: {type: string, minLength: 1}
-            redirectUri: {type: string, format: uri}
-            codeVerifier: {type: string, minLength: 43, maxLength: 128, writeOnly: true}
+      type: object
+      required: [transactionId, authorizationCode, redirectUri, codeVerifier]
+      properties:
+        transactionId: {type: string, minLength: 1}
+        authorizationCode: {type: string, minLength: 1}
+        redirectUri: {type: string, format: uri}
+        codeVerifier: {type: string, minLength: 43, maxLength: 128, writeOnly: true}
+        sessionId: {type: string, minLength: 1}
+        agentId: {type: string, minLength: 1}
+        agentVersion: {type: string, minLength: 1}
+        platform: {type: string, enum: [windows, macos, linux]}
     RefreshRequest:
       type: object
-      required: [refreshToken, agentId]
+      required: [refreshToken]
+      anyOf:
+        - required: [agentId]
+        - required: [sessionId]
       properties:
         refreshToken: {type: string, minLength: 1, writeOnly: true}
         agentId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
     LogoutRequest:
       type: object
       required: [refreshToken]
@@ -486,6 +495,7 @@ components:
         expiresIn: {type: integer, minimum: 1}
         modelAccessExpiresIn: {type: integer, minimum: 1}
         deploymentId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
         passwordChangeRequired:
           type: boolean
           description: >-

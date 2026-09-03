@@ -13,6 +13,7 @@ export interface AepTokens {
   expiresIn: number;
   modelAccessExpiresIn: number;
   deploymentId?: string;
+  sessionId?: string;
   passwordChangeRequired: boolean;
 }
 
@@ -22,9 +23,10 @@ export interface AgentContext {
   platform: 'windows' | 'macos' | 'linux';
 }
 
-export interface AepClientOptions extends AgentContext {
+export interface AepClientOptions extends Partial<AgentContext> {
   baseUrl: string;
   tokenStore: AepTokenStore;
+  sessionId?: string;
   transport?: AepTransport;
 }
 

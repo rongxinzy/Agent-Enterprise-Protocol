@@ -1022,18 +1022,17 @@ export interface components {
             code: string;
             requestId?: string;
         };
-        AgentContext: {
-            agentId: string;
-            agentVersion: string;
-            /** @enum {string} */
-            platform: "windows" | "macos" | "linux";
-        };
-        PasswordLoginRequest: components["schemas"]["AgentContext"] & ({
+        PasswordLoginRequest: {
             deploymentId?: string;
             enterpriseId?: string;
+            sessionId?: string;
+            agentId?: string;
+            agentVersion?: string;
+            /** @enum {string} */
+            platform?: "windows" | "macos" | "linux";
             username: string;
             password: string;
-        } | unknown | unknown);
+        } | unknown | unknown;
         TokenResponse: {
             /** @description Bearer token for AEP management APIs. */
             accessToken: string;
@@ -1045,12 +1044,14 @@ export interface components {
             expiresIn: number;
             modelAccessExpiresIn: number;
             deploymentId?: string;
+            sessionId?: string;
             /** @description When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed. */
             passwordChangeRequired: boolean;
         };
         FederatedLoginStartRequest: {
             deploymentId?: string;
             enterpriseId?: string;
+            sessionId?: string;
             methodId: string;
             /** Format: uri */
             redirectUri: string;
@@ -1068,17 +1069,23 @@ export interface components {
             state: string;
             expiresIn: number;
         };
-        FederatedExchangeRequest: components["schemas"]["AgentContext"] & {
+        FederatedExchangeRequest: {
             transactionId: string;
             authorizationCode: string;
             /** Format: uri */
             redirectUri: string;
             codeVerifier: string;
+            sessionId?: string;
+            agentId?: string;
+            agentVersion?: string;
+            /** @enum {string} */
+            platform?: "windows" | "macos" | "linux";
         };
         RefreshRequest: {
             refreshToken: string;
-            agentId: string;
-        };
+            agentId?: string;
+            sessionId?: string;
+        } | unknown | unknown;
         LogoutRequest: {
             refreshToken: string;
         };
@@ -1118,6 +1125,7 @@ export interface components {
             enterprise: components["schemas"]["Enterprise"];
             deployment: components["schemas"]["Deployment"];
             deploymentId: string;
+            sessionId: string;
             roles: string[];
             /** Format: date-time */
             sessionExpiresAt: string;
@@ -1910,8 +1918,9 @@ export interface operations {
     };
     getAuthenticationMethods: {
         parameters: {
-            query: {
-                enterpriseHint: string;
+            query?: {
+                enterpriseHint?: string;
+                deploymentHint?: string;
             };
             header?: never;
             path?: never;

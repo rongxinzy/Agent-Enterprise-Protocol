@@ -91,6 +91,7 @@ type TokenResponse struct {
 	ExpiresIn              int64  `json:"expiresIn"`
 	ModelAccessExpiresIn   int64  `json:"modelAccessExpiresIn"`
 	DeploymentID           string `json:"deploymentId"`
+	SessionID              string `json:"sessionId,omitempty"`
 	PasswordChangeRequired bool   `json:"passwordChangeRequired"`
 }
 
@@ -361,6 +362,131 @@ func (a *App) IssueSession(ctx context.Context, user db.User, agent AgentContext
 		return TokenResponse{}, err
 	}
 	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), DeploymentID: a.DeploymentID(), PasswordChangeRequired: user.RequirePasswordChange}, nil
+}
+
+// IssueUserSession creates a refreshable terminal session that is scoped to a
+// user topic. It does not create or touch a legacy Agent record.
+func (a *App) IssueUserSession(ctx context.Context, user db.User) (TokenResponse, error) {
+	if a.Pool == nil {
+		return TokenResponse{}, errors.New("database is unavailable")
+	}
+	sessionID := uuid.NewString()
+	topic := fmt.Sprintf("user:%s:%s", a.DeploymentID(), user.ID)
+	modelScopes, err := a.ModelScopes(ctx, user.EnterpriseID, user.ID, "")
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	if user.RequirePasswordChange {
+		modelScopes = nil
+	}
+	access, model, err := a.Tokens.IssueWithDeploymentSession(user.ID, user.EnterpriseID, a.DeploymentID(), sessionID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	refresh, refreshHash, err := auth.NewRefreshToken()
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	expires := time.Now().UTC().Add(a.Config.RefreshTTL)
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `INSERT INTO user_sessions (session_id,deployment_id,user_id,topic) VALUES ($1,$2,$3,$4)`, sessionID, a.DeploymentID(), user.ID, topic); err != nil {
+		return TokenResponse{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO user_session_tokens (token_hash,session_id,expires_at) VALUES ($1,$2,$3)`, refreshHash, sessionID, expires); err != nil {
+		return TokenResponse{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return TokenResponse{}, err
+	}
+	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), DeploymentID: a.DeploymentID(), SessionID: sessionID, PasswordChangeRequired: user.RequirePasswordChange}, nil
+}
+
+// RefreshUserSession rotates a user-session refresh token and keeps its topic
+// and session ID stable, allowing each terminal to maintain an independent
+// event cursor.
+func (a *App) RefreshUserSession(ctx context.Context, rawToken, requestedSessionID string) (TokenResponse, error) {
+	hash := auth.HashRefreshToken(rawToken)
+	tx, err := a.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var sessionID, userID, enterpriseID, deploymentID string
+	var expires time.Time
+	var revokedAt, sessionRevokedAt *time.Time
+	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.enterprise_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at
+FROM user_session_tokens t
+JOIN user_sessions s ON s.session_id=t.session_id
+JOIN users u ON u.id=s.user_id
+WHERE t.token_hash=$1 FOR UPDATE`, hash).Scan(&sessionID, &userID, &enterpriseID, &deploymentID, &expires, &revokedAt, &sessionRevokedAt)
+	if err != nil || revokedAt != nil || sessionRevokedAt != nil || time.Now().After(expires) || (requestedSessionID != "" && requestedSessionID != sessionID) {
+		return TokenResponse{}, ErrRefreshTokenInvalid
+	}
+	queries := db.New(tx)
+	user, err := queries.GetUser(ctx, userID)
+	if err != nil || user.Status != "active" {
+		return TokenResponse{}, ErrRefreshTokenInvalid
+	}
+	modelScopes, err := a.ModelScopes(ctx, enterpriseID, user.ID, "")
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	if user.RequirePasswordChange {
+		modelScopes = nil
+	}
+	access, model, err := a.Tokens.IssueWithDeploymentSession(user.ID, enterpriseID, deploymentID, sessionID, user.IsAdmin, user.RequirePasswordChange, user.RoleIds, modelScopes)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	refresh, newHash, err := auth.NewRefreshToken()
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE token_hash=$1`, hash); err != nil {
+		return TokenResponse{}, err
+	}
+	newExpires := time.Now().UTC().Add(a.Config.RefreshTTL)
+	if _, err := tx.Exec(ctx, `INSERT INTO user_session_tokens (token_hash,session_id,expires_at) VALUES ($1,$2,$3)`, newHash, sessionID, newExpires); err != nil {
+		return TokenResponse{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE user_sessions SET last_seen_at=now() WHERE session_id=$1`, sessionID); err != nil {
+		return TokenResponse{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return TokenResponse{}, err
+	}
+	return TokenResponse{AccessToken: access, RefreshToken: refresh, ModelAccessToken: model, TokenType: "Bearer", ExpiresIn: int64(a.Config.AccessTTL.Seconds()), ModelAccessExpiresIn: int64(a.Config.ModelAccessTTL.Seconds()), DeploymentID: deploymentID, SessionID: sessionID, PasswordChangeRequired: user.RequirePasswordChange}, nil
+}
+
+func (a *App) RevokeUserSession(ctx context.Context, rawToken, sessionID string) error {
+	if a.Pool == nil {
+		return nil
+	}
+	hash := auth.HashRefreshToken(rawToken)
+	if sessionID == "" {
+		return nil
+	}
+	_, err := a.Pool.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE token_hash=$1 AND session_id=$2`, hash, sessionID)
+	if err != nil {
+		return err
+	}
+	_, err = a.Pool.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE session_id=$1`, sessionID)
+	return err
+}
+
+func (a *App) RevokeUserSessionSet(ctx context.Context, userID string) error {
+	if a.Pool == nil {
+		return nil
+	}
+	if _, err := a.Pool.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE session_id IN (SELECT session_id FROM user_sessions WHERE user_id=$1) AND revoked_at IS NULL`, userID); err != nil {
+		return err
+	}
+	_, err := a.Pool.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, userID)
+	return err
 }
 
 func (a *App) RefreshSession(ctx context.Context, rawToken, agentID string) (TokenResponse, error) {
