@@ -13,6 +13,10 @@ Control Service 镜像、Admin Console 或任何云端构建任务。
 - Control Service 使用部署配置中的厂商公钥重新验证完整 License envelope，
   校验部署和授权状态后签发短期 entitlement JWT，绝不接收 License 私钥，
   也不执行 License 签名。
+- License 在 `expiresAt` 前为 active，之后进入 `graceDays` 定义的宽限期；
+  宽限期结束或被管理员撤销后，Control Service 和网关均拒绝新的 entitlement。
+- `deploymentId`、License digest 和客户企业 ID 必须同时匹配；复制到另一部署的
+  License 会在客户端或服务端验签阶段失败。
 - 内网部署时，License 文件和公钥分别挂载到 Control Service，并复制到企业版
   客户端资源目录；激活请求只在企业内网完成，不依赖厂商在线服务。
 
