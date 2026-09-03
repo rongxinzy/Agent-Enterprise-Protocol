@@ -98,6 +98,7 @@ services:
       AEP_GATEWAY_UPSTREAM_URL: http://higress:8080
       AEP_GATEWAY_JWKS_URL: http://control-service:8080/.well-known/jwks.json
       AEP_GATEWAY_ISSUER: http://localhost:${AEP_PORT:-8080}
+      AEP_GATEWAY_REQUIRE_ENTITLEMENT: ${AEP_GATEWAY_REQUIRE_ENTITLEMENT:-false}
     ports:
       - ${AEP_GATEWAY_PORT:-8090}:8090
     restart: unless-stopped

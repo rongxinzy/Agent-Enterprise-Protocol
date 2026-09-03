@@ -27,6 +27,7 @@ type Config struct {
 	HTTPIdleTimeout       time.Duration
 	HTTPShutdownTimeout   time.Duration
 	HTTPMaxHeaderBytes    int
+	RequireEntitlement    bool
 }
 
 func LoadConfig() (Config, error) {
@@ -69,6 +70,9 @@ func LoadConfig() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.HTTPMaxHeaderBytes, err = integer("AEP_GATEWAY_HTTP_MAX_HEADER_BYTES", 1<<20); err != nil {
+		return Config{}, err
+	}
+	if cfg.RequireEntitlement, err = boolean("AEP_GATEWAY_REQUIRE_ENTITLEMENT", false); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -137,4 +141,16 @@ func integer64(key string, fallback int64) (int64, error) {
 func integer(key string, fallback int) (int, error) {
 	parsed, err := integer64(key, int64(fallback))
 	return int(parsed), err
+}
+
+func boolean(key string, fallback bool) (bool, error) {
+	current := os.Getenv(key)
+	if current == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(current)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", key)
+	}
+	return parsed, nil
 }

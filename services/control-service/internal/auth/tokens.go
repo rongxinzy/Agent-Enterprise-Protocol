@@ -74,7 +74,7 @@ func (s *Service) ParseModel(raw string) (*Claims, error) {
 	return s.parse(raw, "model-gateway", "model")
 }
 
-func (s *Service) IssueEntitlement(userID, enterpriseID, agentID, deploymentID, licenseID, licenseDigest string, features []string, licenseExpiresAt time.Time) (string, time.Time, error) {
+func (s *Service) IssueEntitlement(userID, enterpriseID, agentID, deploymentID, licenseID, licenseDigest string, features, modelScopes []string, licenseExpiresAt time.Time) (string, time.Time, error) {
 	now := time.Now().UTC()
 	if !licenseExpiresAt.After(now) || deploymentID == "" || licenseID == "" || licenseDigest == "" {
 		return "", time.Time{}, errors.New("invalid enterprise license activation")
@@ -87,7 +87,7 @@ func (s *Service) IssueEntitlement(userID, enterpriseID, agentID, deploymentID, 
 	}
 	claims := Claims{
 		Tenant: enterpriseID, AgentID: agentID, DeploymentID: deploymentID, LicenseID: licenseID, LicenseDigest: licenseDigest,
-		Features: append([]string(nil), features...), TokenUse: "entitlement",
+		Features: append([]string(nil), features...), ModelScopes: append([]string(nil), modelScopes...), TokenUse: "entitlement",
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: s.issuer, Subject: userID, Audience: jwt.ClaimStrings{"aep-entitlement"},
 			ExpiresAt: jwt.NewNumericDate(expiresAt), IssuedAt: jwt.NewNumericDate(now), ID: uuid.NewString(),

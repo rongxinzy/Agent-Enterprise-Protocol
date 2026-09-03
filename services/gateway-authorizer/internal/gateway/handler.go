@@ -23,9 +23,10 @@ type TokenVerifier interface {
 }
 
 type Handler struct {
-	verifier TokenVerifier
-	proxy    *httputil.ReverseProxy
-	limit    int64
+	verifier           TokenVerifier
+	proxy              *httputil.ReverseProxy
+	limit              int64
+	requireEntitlement bool
 }
 
 func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
@@ -49,7 +50,7 @@ func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
 		slog.Error("model gateway upstream failed", "request_id", requestID(request), "error", err)
 		writeProblem(response, request, http.StatusBadGateway, "GATEWAY_UPSTREAM_UNAVAILABLE", "The model gateway upstream is unavailable.")
 	}
-	return &Handler{verifier: verifier, proxy: proxy, limit: config.RequestLimit}, nil
+	return &Handler{verifier: verifier, proxy: proxy, limit: config.RequestLimit, requireEntitlement: config.RequireEntitlement}, nil
 }
 
 func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -81,6 +82,10 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	if err != nil {
 		response.Header().Set("WWW-Authenticate", "Bearer")
 		writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "The model token is invalid or expired.")
+		return
+	}
+	if h.requireEntitlement && claims.TokenUse != "entitlement" {
+		writeProblem(response, request, http.StatusForbidden, "ENTITLEMENT_REQUIRED", "An active enterprise entitlement token is required.")
 		return
 	}
 	body, model, err := readModelRequest(request.Body, h.limit)

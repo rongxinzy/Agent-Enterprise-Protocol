@@ -12,6 +12,7 @@ var gatewayEnvironmentKeys = []string{
 	"AEP_GATEWAY_UPSTREAM_HEADER_TIMEOUT",
 	"AEP_GATEWAY_HTTP_READ_TIMEOUT", "AEP_GATEWAY_HTTP_WRITE_TIMEOUT",
 	"AEP_GATEWAY_HTTP_MAX_HEADER_BYTES",
+	"AEP_GATEWAY_REQUIRE_ENTITLEMENT",
 }
 
 func TestLoadConfigDefaultsAndProductionLogging(t *testing.T) {
@@ -42,6 +43,7 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 		{key: "AEP_GATEWAY_JWKS_TTL", value: "0s"},
 		{key: "AEP_GATEWAY_REQUEST_LIMIT", value: "-1"},
 		{key: "AEP_GATEWAY_HTTP_MAX_HEADER_BYTES", value: "many"},
+		{key: "AEP_GATEWAY_REQUIRE_ENTITLEMENT", value: "sometimes"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			clearGatewayEnvironment(t)

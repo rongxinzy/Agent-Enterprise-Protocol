@@ -148,6 +148,7 @@ export interface EntitlementTokenResponse {
   licenseDigest: string;
   deploymentId: string;
   features: string[];
+  modelScopes: string[];
 }
 
 export interface SkillManifestItem {

@@ -26,6 +26,12 @@ and membership of the requested model in `model_scopes`. JWKS refresh is not a
 per-request authorization decision and the signing private key is never shared
 with the data plane.
 
+Enterprise deployments can set `AEP_GATEWAY_REQUIRE_ENTITLEMENT=true`. In that
+mode the authorizer accepts the short-lived `token_use=entitlement` JWT returned
+by `/aep/v1/agent/activation`; it requires License ID, digest, deployment ID,
+and model scopes in the signed claims. Development mode remains compatible with
+the login-issued model JWT by default.
+
 Higress native JWT plugins do not, in v2.2.4, enforce all of the AEP-specific
 claims or compare an array claim with the model in an OpenAI request body. That
 is why this narrowly scoped authorizer is required in addition to AI Proxy.
@@ -79,6 +85,7 @@ Relevant authorizer environment variables are:
 | `AEP_GATEWAY_ISSUER` | `http://localhost:8080` | Required token issuer |
 | `AEP_GATEWAY_JWKS_TTL` | `5m` | Public-key cache TTL |
 | `AEP_GATEWAY_REQUEST_LIMIT` | `2097152` | Maximum inference body bytes |
+| `AEP_GATEWAY_REQUIRE_ENTITLEMENT` | `false` | Require an activated enterprise entitlement JWT |
 
 ## Production Deployment
 

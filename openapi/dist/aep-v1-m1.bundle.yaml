@@ -1493,6 +1493,7 @@ components:
         - licenseDigest
         - deploymentId
         - features
+        - modelScopes
       properties:
         entitlementToken:
           type: string
@@ -1514,6 +1515,11 @@ components:
         deploymentId:
           type: string
         features:
+          type: array
+          items:
+            type: string
+        modelScopes:
+          description: Model identifiers authorized for this enterprise entitlement.
           type: array
           items:
             type: string

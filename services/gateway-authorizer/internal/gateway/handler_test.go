@@ -85,6 +85,26 @@ func TestHandlerRejectsMissingTokenAndUnauthorizedModel(t *testing.T) {
 	}
 }
 
+func TestHandlerRequiresEntitlementWhenConfigured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	handler, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 1024, RequireEntitlement: true}, verifierStub{claims: &ModelClaims{
+		Tenant: "enterprise-a", AgentID: "agent-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a"}`))
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"ENTITLEMENT_REQUIRED"`) {
+		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestHandlerRejectsOversizedAndInvalidRequests(t *testing.T) {
 	handler, err := NewHandler(Config{UpstreamURL: "http://example.test", RequestLimit: 16}, verifierStub{claims: &ModelClaims{ModelScopes: []string{"model-a"}}})
 	if err != nil {
