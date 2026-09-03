@@ -17,6 +17,12 @@ Admin Console, or any cloud build job.
   vendor public keys, checks deployment and entitlement state, and issues a
   short-lived entitlement JWT. It never receives a License private key and
   never performs License signing.
+- A License is active through `expiresAt`, remains usable during the configured
+  `graceDays` window, and is rejected after grace or immediately after admin
+  revocation by both Control Service and the gateway.
+- `deploymentId`, the License digest, and the customer enterprise ID must all
+  match. Copying a License to another deployment fails client or server
+  verification.
 - In an air-gapped deployment, mount the License and trusted public-key file into
   Control Service and place the same License in the enterprise client resources.
   Activation then completes entirely inside the customer network.
