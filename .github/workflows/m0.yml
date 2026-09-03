@@ -114,4 +114,4 @@ jobs:
       - data-plane-kubernetes
     runs-on: ubuntu-latest
     steps:
-      - run: echo "AEP 90% release gate passed."
+      - run: echo "AEP 95% release gate passed."

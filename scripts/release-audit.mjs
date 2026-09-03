@@ -132,9 +132,10 @@ for (const content of [signerBoundary, signerBoundaryZh]) {
 assert(!manifest.productionCapabilities.includes("federated_auth"), "mock federated auth cannot be a production capability");
 assert(manifest.developmentOnlyCapabilities.includes("federated_auth"), "mock federated auth must be marked development-only");
 assert(manifest.productionCapabilities.includes("password_auth"), "ZhiYuan password authentication must remain a production capability");
-const productClientGate = remaining.find(gate => gate.id === "product-client-integration");
+const productClientGate = completed.find(gate => gate.id === "product-client-integration");
 assert(productClientGate?.weight === 5, "product-client integration must remain an explicit 5% gate");
 assert(!JSON.stringify(productClientGate).includes("OIDC"), "the password-only product-client gate must not require customer OIDC");
+assert(!remaining.some(gate => gate.id === "product-client-integration"), "product-client integration must not remain pending after the pilot");
 const authenticationHandlers = await readText("services/control-service/internal/httpapi/auth_handlers.go");
 assert(authenticationHandlers.includes('zhiYuanPasswordMethodID = "zhiyuan-password"'), "the stable ZhiYuan password method ID is missing");
 assert(authenticationHandlers.includes("VerifyPasswordOrDummy"), "password login does not use the timing-safe dummy verification path");
