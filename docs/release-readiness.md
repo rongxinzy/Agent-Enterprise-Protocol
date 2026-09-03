@@ -63,4 +63,10 @@ npm run release:check
 
 The command validates OpenAPI and generated SDK types, builds and tests Node workspaces, validates the readiness score, runs Go test, race, vet, and build gates, and executes every Compose E2E scenario. CI must finish with sdk-gate, control-service, example-agent, compose-e2e, data-plane-kubernetes, and release-gate all successful.
 
+For a tagged foundation release, `.github/workflows/aep-release.yml` reruns the
+release gate, generates a CycloneDX source SBOM, and publishes its SHA-256
+checksum. The workflow never has access to the offline License signer or any
+private key. Sign the customer-specific Electron package and License only in
+the approved local signing environment after reviewing the published checksum.
+
 A production pilot is no-go if any production default is reused, mock federated authentication is enabled, HTTPS or equivalent trusted transport is absent on an untrusted network, backup ownership is undefined, or the target Higress topology is based on higress-standalone.

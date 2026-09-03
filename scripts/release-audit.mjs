@@ -106,6 +106,7 @@ assert(packageDocument.scripts?.["test:e2e:m3-kubernetes"] === "node tests/e2e/m
 
 const workflow = await readText(".github/workflows/m0.yml");
 const sdkReleaseWorkflow = await readText(".github/workflows/sdk-release.yml");
+const foundationReleaseWorkflow = await readText(".github/workflows/aep-release.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
 assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
 assert(workflow.includes("go test -race ./..."), "CI does not run the Go race detector");
@@ -114,6 +115,9 @@ assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Ku
 assert(sdkReleaseWorkflow.includes("sdk-node-v*"), "SDK release workflow does not use versioned tags");
 assert(sdkReleaseWorkflow.includes("git merge-base --is-ancestor"), "SDK release tags are not constrained to main history");
 assert(sdkReleaseWorkflow.includes("npm run sdk:package:check"), "SDK release workflow bypasses the package check");
+assert(foundationReleaseWorkflow.includes("anchore/sbom-action@v0"), "foundation release workflow does not generate an SBOM");
+assert(foundationReleaseWorkflow.includes("sha256sum release/aep-foundation.sbom.cdx.json"), "foundation release workflow does not publish an SBOM checksum");
+assert(!foundationReleaseWorkflow.toLowerCase().includes("private.key"), "foundation release workflow must not reference a private signing key");
 
 for (const readme of ["README.md", "README.zh-CN.md"]) {
   const content = await readText(readme);

@@ -1,0 +1,51 @@
+name: AEP foundation release artifacts
+
+on:
+  push:
+    tags:
+      - aep-v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.x
+          cache: true
+      - run: npm ci
+      - name: Verify tag is a release-ready main commit
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          version="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "aep-v$version"
+      - run: npm run release:check
+      - name: Generate source SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: release/aep-foundation.sbom.cdx.json
+      - name: Generate artifact checksums
+        run: sha256sum release/aep-foundation.sbom.cdx.json > release/aep-foundation.sbom.cdx.json.sha256
+      - name: Publish release evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/aep-foundation.sbom.cdx.json \
+            release/aep-foundation.sbom.cdx.json.sha256 \
+            --verify-tag \
+            --title "AEP foundation ${GITHUB_REF_NAME#aep-v}" \
+            --generate-notes
