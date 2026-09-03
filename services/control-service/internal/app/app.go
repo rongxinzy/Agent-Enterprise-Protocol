@@ -22,8 +22,12 @@ import (
 )
 
 var (
-	ErrAgentConflict       = errors.New("agent identifier is already bound to another identity")
-	ErrRefreshTokenInvalid = errors.New("refresh token is invalid or expired")
+	ErrAgentConflict        = errors.New("agent identifier is already bound to another identity")
+	ErrRefreshTokenInvalid  = errors.New("refresh token is invalid or expired")
+	ErrLicenseNotRegistered = errors.New("license is not registered for this enterprise")
+	ErrLicenseRevoked       = errors.New("license has been revoked")
+	ErrLicenseAgentLimit    = errors.New("license agent limit exceeded")
+	ErrLicenseUserLimit     = errors.New("license user limit exceeded")
 )
 
 type App struct {
@@ -111,11 +115,100 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 		pool.Close()
 		return nil, err
 	}
+	if application.License != nil {
+		if err := application.RegisterLicense(ctx, *application.License); err != nil {
+			pool.Close()
+			return nil, err
+		}
+	}
 	return application, nil
 }
 
 func (a *App) Close() {
 	a.Pool.Close()
+}
+
+func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) error {
+	if a.Pool == nil {
+		return nil
+	}
+	claims := verified.Claims
+	if a.Config.LicenseEnterpriseID == "" {
+		return errors.New("AEP_LICENSE_ENTERPRISE_ID is required to register a license")
+	}
+	var existingDigest string
+	err := a.Pool.QueryRow(ctx, `SELECT digest FROM licenses WHERE license_id=$1`, claims.LicenseID).Scan(&existingDigest)
+	if err == nil {
+		if existingDigest != verified.Digest {
+			return errors.New("license ID is already registered with a different digest")
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	issuedAt, _ := time.Parse(time.RFC3339Nano, claims.IssuedAt)
+	expiresAt, _ := time.Parse(time.RFC3339Nano, claims.ExpiresAt)
+	graceEndsAt := expiresAt.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
+	_, err = a.Pool.Exec(ctx, `INSERT INTO licenses (license_id,enterprise_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,user_limit,agent_limit,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, claims.LicenseID, a.Config.LicenseEnterpriseID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Limits.Users, claims.Limits.Agents, claims.Features, verified.Envelope.Payload)
+	return err
+}
+
+func (a *App) ActivateLicense(ctx context.Context, licenseID, enterpriseID, userID, agentID string) error {
+	if a.Pool == nil {
+		return nil
+	}
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var status string
+	var revokedAt *time.Time
+	var agentLimit, userLimit int
+	err = tx.QueryRow(ctx, `SELECT status, revoked_at, agent_limit, user_limit FROM licenses WHERE license_id=$1 AND enterprise_id=$2 FOR UPDATE`, licenseID, enterpriseID).Scan(&status, &revokedAt, &agentLimit, &userLimit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrLicenseNotRegistered
+	}
+	if err != nil {
+		return err
+	}
+	if status != "active" || revokedAt != nil {
+		return ErrLicenseRevoked
+	}
+	var alreadyActive bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM license_activations WHERE license_id=$1 AND agent_id=$2 AND revoked_at IS NULL)`, licenseID, agentID).Scan(&alreadyActive); err != nil {
+		return err
+	}
+	if alreadyActive {
+		_, err = tx.Exec(ctx, `UPDATE license_activations SET last_seen_at=now() WHERE license_id=$1 AND agent_id=$2 AND revoked_at IS NULL`, licenseID, agentID)
+		if err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	var agentCount, userCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM license_activations WHERE license_id=$1 AND revoked_at IS NULL`, licenseID).Scan(&agentCount); err != nil {
+		return err
+	}
+	if agentCount >= agentLimit {
+		return ErrLicenseAgentLimit
+	}
+	if err := tx.QueryRow(ctx, `SELECT COUNT(DISTINCT user_id) FROM license_activations WHERE license_id=$1 AND revoked_at IS NULL`, licenseID).Scan(&userCount); err != nil {
+		return err
+	}
+	var userAlreadyActive bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM license_activations WHERE license_id=$1 AND user_id=$2 AND revoked_at IS NULL)`, licenseID, userID).Scan(&userAlreadyActive); err != nil {
+		return err
+	}
+	if !userAlreadyActive && userCount >= userLimit {
+		return ErrLicenseUserLimit
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO license_activations (id,license_id,enterprise_id,user_id,agent_id) VALUES ($1,$2,$3,$4,$5)`, uuid.NewString(), licenseID, enterpriseID, userID, agentID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (a *App) BindAgent(ctx context.Context, user db.User, agent AgentContext) (db.Agent, error) {

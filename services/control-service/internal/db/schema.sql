@@ -214,6 +214,27 @@ CREATE TABLE IF NOT EXISTS skill_sync_results (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS data_plane_desired_states (
+  enterprise_id text PRIMARY KEY REFERENCES enterprises(id) ON DELETE CASCADE,
+  revision text NOT NULL,
+  routes jsonb NOT NULL,
+  content_hash text NOT NULL CHECK (content_hash ~ '^[a-f0-9]{64}$'),
+  published_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS data_plane_statuses (
+  enterprise_id text PRIMARY KEY REFERENCES enterprises(id) ON DELETE CASCADE,
+  state text NOT NULL CHECK (state IN ('pending', 'applying', 'ready', 'degraded', 'error')),
+  observed_revision text,
+  content_hash text CHECK (content_hash IS NULL OR content_hash ~ '^[a-f0-9]{64}$'),
+  last_applied_at timestamptz,
+  error_code text,
+  message text,
+  resource_count integer NOT NULL DEFAULT 0 CHECK (resource_count >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_agents_user ON agents (enterprise_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_deliveries_agent_state ON control_deliveries (agent_id, state, cursor);
 CREATE INDEX IF NOT EXISTS idx_telemetry_search ON telemetry_events (enterprise_id, agent_id, occurred_at DESC);
@@ -244,3 +265,38 @@ CREATE TABLE IF NOT EXISTS authentication_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_login_rate_limits_updated ON login_rate_limits (updated_at);
 CREATE INDEX IF NOT EXISTS idx_authentication_audit_enterprise_time ON authentication_audit_events (enterprise_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS licenses (
+  license_id text PRIMARY KEY,
+  enterprise_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+  customer_id text NOT NULL,
+  deployment_id text NOT NULL,
+  digest text NOT NULL CHECK (digest ~ '^sha256:[0-9a-f]{64}$'),
+  key_id text NOT NULL,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+  issued_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL,
+  grace_ends_at timestamptz NOT NULL,
+  user_limit integer NOT NULL CHECK (user_limit > 0),
+  agent_limit integer NOT NULL CHECK (agent_limit > 0),
+  features text[] NOT NULL DEFAULT '{}',
+  payload jsonb NOT NULL,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS license_activations (
+  id text PRIMARY KEY,
+  license_id text NOT NULL REFERENCES licenses(license_id) ON DELETE CASCADE,
+  enterprise_id text NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  agent_id text NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+  activated_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  revoked_at timestamptz,
+  UNIQUE (license_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_licenses_enterprise_status ON licenses (enterprise_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_license_activations_enterprise ON license_activations (enterprise_id, license_id, revoked_at);

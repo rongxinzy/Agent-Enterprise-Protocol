@@ -2,9 +2,12 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 )
 
 type licenseActivationRequest struct {
@@ -49,6 +52,24 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		expiresAt = verified.GraceEndsAt
 	}
 	claims := claimsFrom(request)
+	if err := s.app.ActivateLicense(request.Context(), verified.Claims.LicenseID, claims.Tenant, claims.Subject, claims.AgentID); err != nil {
+		code := "LICENSE_ACTIVATION_FAILED"
+		status := http.StatusForbidden
+		switch {
+		case errors.Is(err, app.ErrLicenseAgentLimit):
+			code = "LICENSE_AGENT_LIMIT"
+		case errors.Is(err, app.ErrLicenseUserLimit):
+			code = "LICENSE_USER_LIMIT"
+		case errors.Is(err, app.ErrLicenseRevoked):
+			code = "LICENSE_REVOKED"
+		case errors.Is(err, app.ErrLicenseNotRegistered):
+			code = "LICENSE_NOT_REGISTERED"
+		default:
+			status = http.StatusInternalServerError
+		}
+		writeProblem(response, request, status, code, "The enterprise License activation was rejected.")
+		return
+	}
 	features := normalizeActivationFeatures(verified.Claims.Features)
 	token, tokenExpiresAt, err := s.app.Tokens.IssueEntitlement(
 		claims.Subject,
