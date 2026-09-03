@@ -76,6 +76,30 @@ func TestVerifierAcceptsEnterpriseEntitlementToken(t *testing.T) {
 	}
 }
 
+func TestVerifierChecksAndCachesEnterpriseLicenseStatus(t *testing.T) {
+	var calls atomic.Int32
+	status := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		if request.Header.Get("X-AEP-Gateway-Token") != "gateway-secret" || request.Header.Get("X-AEP-Tenant-ID") != "enterprise-a" {
+			t.Fatalf("missing internal status headers: %v", request.Header)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{"active": true, "digest": "sha256:digest", "deploymentId": "deployment-a"})
+	}))
+	defer status.Close()
+	verifier := NewVerifier("http://unused.example/jwks", "issuer", time.Hour, time.Second)
+	verifier.ConfigureLicenseStatus(status.URL, "gateway-secret", time.Minute)
+	claims := &ModelClaims{Tenant: "enterprise-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", DeploymentID: "deployment-a"}
+	if err := verifier.CheckEntitlement(context.Background(), claims); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifier.CheckEntitlement(context.Background(), claims); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("license status endpoint called %d times, want cached once", calls.Load())
+	}
+}
+
 func TestVerifierRefreshesFreshJWKSForUnknownKID(t *testing.T) {
 	firstPublic, firstPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

@@ -13,6 +13,7 @@ var gatewayEnvironmentKeys = []string{
 	"AEP_GATEWAY_HTTP_READ_TIMEOUT", "AEP_GATEWAY_HTTP_WRITE_TIMEOUT",
 	"AEP_GATEWAY_HTTP_MAX_HEADER_BYTES",
 	"AEP_GATEWAY_REQUIRE_ENTITLEMENT",
+	"AEP_GATEWAY_LICENSE_STATUS_URL", "AEP_GATEWAY_LICENSE_STATUS_TOKEN", "AEP_GATEWAY_LICENSE_STATUS_TTL",
 }
 
 func TestLoadConfigDefaultsAndProductionLogging(t *testing.T) {
@@ -44,6 +45,7 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 		{key: "AEP_GATEWAY_REQUEST_LIMIT", value: "-1"},
 		{key: "AEP_GATEWAY_HTTP_MAX_HEADER_BYTES", value: "many"},
 		{key: "AEP_GATEWAY_REQUIRE_ENTITLEMENT", value: "sometimes"},
+		{key: "AEP_GATEWAY_LICENSE_STATUS_TTL", value: "0s"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			clearGatewayEnvironment(t)

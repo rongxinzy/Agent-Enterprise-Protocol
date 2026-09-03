@@ -28,6 +28,9 @@ type Config struct {
 	HTTPShutdownTimeout   time.Duration
 	HTTPMaxHeaderBytes    int
 	RequireEntitlement    bool
+	LicenseStatusURL      string
+	LicenseStatusToken    string
+	LicenseStatusTTL      time.Duration
 }
 
 func LoadConfig() (Config, error) {
@@ -37,13 +40,15 @@ func LoadConfig() (Config, error) {
 		defaultLogFormat = "json"
 	}
 	cfg := Config{
-		Environment: environment,
-		LogFormat:   value("AEP_LOG_FORMAT", defaultLogFormat),
-		LogLevel:    value("AEP_LOG_LEVEL", "info"),
-		Address:     value("AEP_GATEWAY_ADDRESS", ":8090"),
-		UpstreamURL: value("AEP_GATEWAY_UPSTREAM_URL", "http://localhost:8080"),
-		JWKSURL:     value("AEP_GATEWAY_JWKS_URL", "http://localhost:8080/.well-known/jwks.json"),
-		Issuer:      value("AEP_GATEWAY_ISSUER", "http://localhost:8080"),
+		Environment:        environment,
+		LogFormat:          value("AEP_LOG_FORMAT", defaultLogFormat),
+		LogLevel:           value("AEP_LOG_LEVEL", "info"),
+		Address:            value("AEP_GATEWAY_ADDRESS", ":8090"),
+		UpstreamURL:        value("AEP_GATEWAY_UPSTREAM_URL", "http://localhost:8080"),
+		JWKSURL:            value("AEP_GATEWAY_JWKS_URL", "http://localhost:8080/.well-known/jwks.json"),
+		Issuer:             value("AEP_GATEWAY_ISSUER", "http://localhost:8080"),
+		LicenseStatusURL:   value("AEP_GATEWAY_LICENSE_STATUS_URL", ""),
+		LicenseStatusToken: os.Getenv("AEP_GATEWAY_LICENSE_STATUS_TOKEN"),
 	}
 	var err error
 	durations := []struct {
@@ -75,6 +80,9 @@ func LoadConfig() (Config, error) {
 	if cfg.RequireEntitlement, err = boolean("AEP_GATEWAY_REQUIRE_ENTITLEMENT", false); err != nil {
 		return Config{}, err
 	}
+	if cfg.LicenseStatusTTL, err = duration("AEP_GATEWAY_LICENSE_STATUS_TTL", 15*time.Second, false); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -103,6 +111,15 @@ func (cfg Config) Validate() error {
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("%s must be an absolute HTTP URL", endpoint.key)
 		}
+	}
+	if cfg.LicenseStatusURL != "" {
+		parsed, err := url.Parse(cfg.LicenseStatusURL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("AEP_GATEWAY_LICENSE_STATUS_URL must be an absolute HTTP URL")
+		}
+	}
+	if cfg.RequireEntitlement && (cfg.LicenseStatusURL == "" || cfg.LicenseStatusToken == "") {
+		return errors.New("AEP_GATEWAY_LICENSE_STATUS_URL and AEP_GATEWAY_LICENSE_STATUS_TOKEN are required when entitlement enforcement is enabled")
 	}
 	return nil
 }

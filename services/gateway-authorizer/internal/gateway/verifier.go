@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 )
 
 const maxJWKSBytes = 1 << 20
+
+var ErrEntitlementInactive = errors.New("enterprise entitlement is inactive")
 
 type ModelClaims struct {
 	Tenant        string   `json:"tenant"`
@@ -35,18 +39,87 @@ type Verifier struct {
 	ttl    time.Duration
 	client *http.Client
 
-	refreshMu sync.Mutex
-	mu        sync.RWMutex
-	keys      map[string]ed25519.PublicKey
-	fetchedAt time.Time
+	refreshMu          sync.Mutex
+	mu                 sync.RWMutex
+	keys               map[string]ed25519.PublicKey
+	fetchedAt          time.Time
+	licenseStatusURL   string
+	licenseStatusToken string
+	licenseStatusTTL   time.Duration
+	statusMu           sync.Mutex
+	statusCache        map[string]statusCacheEntry
+}
+
+type statusCacheEntry struct {
+	active    bool
+	expiresAt time.Time
 }
 
 func NewVerifier(url, issuer string, ttl, timeout time.Duration) *Verifier {
 	return &Verifier{
 		url: url, issuer: issuer, ttl: ttl,
-		client: &http.Client{Timeout: timeout},
-		keys:   make(map[string]ed25519.PublicKey),
+		client:      &http.Client{Timeout: timeout},
+		keys:        make(map[string]ed25519.PublicKey),
+		statusCache: make(map[string]statusCacheEntry),
 	}
+}
+
+func (v *Verifier) ConfigureLicenseStatus(endpoint, token string, ttl time.Duration) {
+	v.statusMu.Lock()
+	defer v.statusMu.Unlock()
+	v.licenseStatusURL, v.licenseStatusToken, v.licenseStatusTTL = strings.TrimRight(endpoint, "/"), token, ttl
+	v.statusCache = make(map[string]statusCacheEntry)
+}
+
+func (v *Verifier) CheckEntitlement(ctx context.Context, claims *ModelClaims) error {
+	if v.licenseStatusURL == "" || v.licenseStatusToken == "" {
+		return errors.New("license status endpoint is not configured")
+	}
+	key := claims.LicenseID + "\x00" + claims.LicenseDigest + "\x00" + claims.DeploymentID
+	now := time.Now()
+	v.statusMu.Lock()
+	if cached, ok := v.statusCache[key]; ok && now.Before(cached.expiresAt) {
+		v.statusMu.Unlock()
+		if !cached.active {
+			return ErrEntitlementInactive
+		}
+		return nil
+	}
+	v.statusMu.Unlock()
+	endpoint, err := url.JoinPath(v.licenseStatusURL, claims.LicenseID)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("X-AEP-Gateway-Token", v.licenseStatusToken)
+	request.Header.Set("X-AEP-Tenant-ID", claims.Tenant)
+	response, err := v.client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("license status endpoint returned %d", response.StatusCode)
+	}
+	var document struct {
+		Active       bool   `json:"active"`
+		Digest       string `json:"digest"`
+		DeploymentID string `json:"deploymentId"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<10)).Decode(&document); err != nil {
+		return err
+	}
+	active := document.Active && document.Digest == claims.LicenseDigest && document.DeploymentID == claims.DeploymentID
+	v.statusMu.Lock()
+	v.statusCache[key] = statusCacheEntry{active: active, expiresAt: now.Add(v.licenseStatusTTL)}
+	v.statusMu.Unlock()
+	if !active {
+		return ErrEntitlementInactive
+	}
+	return nil
 }
 
 func (v *Verifier) Verify(ctx context.Context, raw string) (*ModelClaims, error) {
