@@ -399,6 +399,19 @@ func (a *App) IssueUserSession(ctx context.Context, user db.User) (TokenResponse
 	if _, err := tx.Exec(ctx, `INSERT INTO user_session_tokens (token_hash,session_id,expires_at) VALUES ($1,$2,$3)`, refreshHash, sessionID, expires); err != nil {
 		return TokenResponse{}, err
 	}
+	// Every active event addressed to this user (or one of their Teams) gets a
+	// private delivery cursor. Acknowledging one terminal must never consume a
+	// sibling terminal's copy.
+	if _, err := tx.Exec(ctx, `
+INSERT INTO session_control_deliveries (delivery_id,event_id,session_id)
+SELECT gen_random_uuid()::text,e.event_id,$1
+FROM control_events e
+WHERE e.deployment_id=$2 AND e.state='active' AND e.expires_at>now()
+  AND (e.scope_type='global' OR (e.scope_type='user' AND e.scope_id=$3)
+    OR (e.scope_type='team' AND e.scope_id=ANY($4::text[])))
+ON CONFLICT (event_id,session_id) DO NOTHING`, sessionID, a.DeploymentID(), user.ID, user.TeamIds); err != nil {
+		return TokenResponse{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return TokenResponse{}, err
 	}

@@ -37,8 +37,8 @@ test('does not install a Skill when its checksum mismatches', async () => {
   const archive = await zip([['SKILL.md', '# Demo']]);
   const state = new AgentState(path.join(directory, 'state.sqlite'));
   const client = {
-    getSkillManifest: async () => ({notModified: false, etag: '"revision-1"', manifest: {revision: '1', generatedAt: new Date().toISOString(), skills: [{id: 'demo', name: 'Demo', version: '1.0.0', enabled: true, package: {url: '/demo.zip', sha256: '0'.repeat(64), size: archive.byteLength}}]}}),
-    downloadSkillPackage: async () => archive,
+    getUserSkillManifest: async () => ({notModified: false, etag: '"revision-1"', manifest: {revision: '1', generatedAt: new Date().toISOString(), skills: [{id: 'demo', name: 'Demo', version: '1.0.0', enabled: true, package: {url: '/demo.zip', sha256: '0'.repeat(64), size: archive.byteLength}}]}}),
+    downloadUserSkillPackage: async () => archive,
   } as unknown as AepClient;
   try {
     const managedRoot = path.join(directory, 'managed-skills');

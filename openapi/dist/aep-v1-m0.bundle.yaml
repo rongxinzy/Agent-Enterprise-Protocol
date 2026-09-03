@@ -1381,22 +1381,19 @@ components:
       type: object
       required:
         - refreshToken
-      anyOf:
-        - required:
-            - agentId
-        - required:
-            - sessionId
       properties:
         refreshToken:
           type: string
           minLength: 1
           writeOnly: true
-        agentId:
-          type: string
-          minLength: 1
         sessionId:
           type: string
           minLength: 1
+          description: User session identifier.
+        agentId:
+          type: string
+          minLength: 1
+          deprecated: true
     LogoutRequest:
       type: object
       required:

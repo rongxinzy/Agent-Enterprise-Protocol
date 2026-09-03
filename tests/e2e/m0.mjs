@@ -38,6 +38,8 @@ async function runScenario() {
   await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
 
   await assertUserSessionLogin();
+  const sessions = await admin.listUserSessions();
+  assert(Array.isArray(sessions.items) && sessions.items.length >= 1, 'Admin session inventory was empty');
   await assertMultiTerminalControlEvent();
 
   await assertPasswordSecurity();

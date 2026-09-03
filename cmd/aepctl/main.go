@@ -20,10 +20,12 @@ import (
 
 type options struct {
 	baseURL      string
-	enterpriseID string
+	deploymentID string
 	username     string
 	password     string
-	agentID      string
+	// agentID is retained only so older scripts continue to parse. New CLI
+	// sessions never send an Agent identity to the control service.
+	agentID string
 }
 
 type client struct {
@@ -44,11 +46,12 @@ func newRootCommand() *cobra.Command {
 	opts := &options{}
 	root := &cobra.Command{Use: "aepctl", Short: "Manage an AEP deployment", SilenceUsage: true}
 	root.PersistentFlags().StringVar(&opts.baseURL, "base-url", env("AEPCTL_BASE_URL", "http://localhost:8080"), "AEP service origin")
-	root.PersistentFlags().StringVar(&opts.enterpriseID, "enterprise", env("AEPCTL_ENTERPRISE", "demo"), "enterprise identifier")
+	root.PersistentFlags().StringVar(&opts.deploymentID, "deployment", env("AEPCTL_DEPLOYMENT", env("AEPCTL_ENTERPRISE", "demo")), "deployment identifier")
+	root.PersistentFlags().StringVar(&opts.deploymentID, "enterprise", env("AEPCTL_DEPLOYMENT", env("AEPCTL_ENTERPRISE", "demo")), "deprecated deployment alias")
 	root.PersistentFlags().StringVar(&opts.username, "username", env("AEPCTL_USERNAME", "admin"), "administrator username")
 	root.PersistentFlags().StringVar(&opts.password, "password", os.Getenv("AEPCTL_PASSWORD"), "administrator password (prefer AEPCTL_PASSWORD)")
-	root.PersistentFlags().StringVar(&opts.agentID, "agent-id", env("AEPCTL_AGENT_ID", "aepctl"), "stable CLI Agent identifier")
-	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), licenseCommand(opts), dataPlaneCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
+	root.PersistentFlags().StringVar(&opts.agentID, "agent-id", env("AEPCTL_AGENT_ID", ""), "deprecated Agent identifier (ignored by new sessions)")
+	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), licenseCommand(opts), dataPlaneCommand(opts), eventCommand(opts), sessionCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
 	return root
 }
 
@@ -69,7 +72,7 @@ func userCommand(opts *options) *cobra.Command {
 	var username, displayName, password, email string
 	var requirePasswordChange bool
 	create := &cobra.Command{Use: "create", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		body := map[string]any{"deploymentId": opts.enterpriseID, "username": username, "displayName": displayName, "temporaryPassword": password, "requirePasswordChange": requirePasswordChange, "teamIds": []string{}, "roleIds": []string{}}
+		body := map[string]any{"deploymentId": opts.deploymentID, "username": username, "displayName": displayName, "temporaryPassword": password, "requirePasswordChange": requirePasswordChange, "teamIds": []string{}, "roleIds": []string{}}
 		if email != "" {
 			body["email"] = email
 		}
@@ -149,7 +152,7 @@ func skillCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})}
 	assign.Flags().StringVar(&assignID, "skill-id", "", "Skill identifier")
-	assign.Flags().StringVar(&subjectType, "subject-type", "user", "enterprise, organization, user, or agent")
+	assign.Flags().StringVar(&subjectType, "subject-type", "user", "user, role, or team")
 	assign.Flags().StringVar(&subjectID, "subject-id", "", "subject identifier")
 	_ = assign.MarkFlagRequired("skill-id")
 	_ = assign.MarkFlagRequired("subject-id")
@@ -185,7 +188,7 @@ func eventCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})}
 	publish.Flags().StringVar(&eventType, "type", "skill.manifest.changed", "event type")
-	publish.Flags().StringVar(&scopeType, "scope-type", "global", "global, organization, user, or agent")
+	publish.Flags().StringVar(&scopeType, "scope-type", "global", "global, team, or user")
 	publish.Flags().StringVar(&scopeID, "scope-id", "", "scope identifier")
 	publish.Flags().StringVar(&skillID, "skill-id", "", "optional Skill identifier")
 	publish.Flags().StringVar(&revision, "revision", "1", "resource revision")
@@ -246,6 +249,16 @@ func agentCommand(opts *options) *cobra.Command {
 	command.AddCommand(show)
 	return command
 }
+
+func sessionCommand(opts *options) *cobra.Command {
+	command := &cobra.Command{Use: "session", Short: "Inspect user terminal sessions"}
+	command.AddCommand(&cobra.Command{Use: "list", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
+		value, err := api.request(http.MethodGet, "/aep/v1/admin/sessions", nil, true)
+		return output(value, err)
+	})})
+	return command
+}
+
 func auditCommand(opts *options) *cobra.Command {
 	var agentID string
 	command := &cobra.Command{Use: "audit", Short: "Query telemetry", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
@@ -273,7 +286,7 @@ func authenticated(opts *options, run func(*client, *cobra.Command, []string) er
 	}
 }
 func (c *client) login(opts *options) error {
-	value, err := c.request(http.MethodPost, "/aep/v1/auth/password/login", map[string]any{"deploymentId": opts.enterpriseID, "username": opts.username, "password": opts.password, "agentId": opts.agentID, "agentVersion": "aepctl-0.1.0", "platform": platform()}, false)
+	value, err := c.request(http.MethodPost, "/aep/v1/auth/password/login", map[string]any{"deploymentId": opts.deploymentID, "username": opts.username, "password": opts.password}, false)
 	if err != nil {
 		return err
 	}
@@ -301,7 +314,6 @@ func (c *client) request(method, path string, body any, authenticated bool) (any
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("X-AEP-Agent-ID", c.agentID)
 	request.Header.Set("X-AEP-Protocol-Version", "1.0")
 	request.Header.Set("X-Request-ID", uuid.NewString())
 	if body != nil {
@@ -355,7 +367,6 @@ func (c *client) uploadSkill(skillID, version, path string) (any, error) {
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	request.Header.Set("Authorization", "Bearer "+c.token)
-	request.Header.Set("X-AEP-Agent-ID", c.agentID)
 	request.Header.Set("X-AEP-Protocol-Version", "1.0")
 	response, err := c.http.Do(request)
 	if err != nil {

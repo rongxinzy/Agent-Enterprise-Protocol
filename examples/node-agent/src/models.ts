@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 
 import {AgentState} from './state.js';
 
-type ModelControlClient = Pick<AepClient, 'getModelConnection' | 'listAgentModels'>;
+type ModelControlClient = Pick<AepClient, 'getModelConnection' | 'listModels'>;
 type ModelState = Pick<AgentState, 'enqueueTelemetry'>;
 
 export interface ModelChatOptions {
@@ -63,7 +63,7 @@ export class OpenAIModelClient {
   }
 
   async #selectModel(requestedId?: string): Promise<AgentModel> {
-    const {models} = await this.client.listAgentModels();
+    const {models} = await this.client.listModels();
     const model = requestedId ? models.find(item => item.id === requestedId) : models.find(item => item.isDefault);
     if (!model) {
       const code = requestedId ? 'MODEL_NOT_AVAILABLE' : 'DEFAULT_MODEL_NOT_AVAILABLE';

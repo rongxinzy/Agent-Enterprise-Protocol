@@ -23,11 +23,17 @@ export interface AgentContext {
   platform: 'windows' | 'macos' | 'linux';
 }
 
-export interface AepClientOptions extends Partial<AgentContext> {
+export interface AepClientOptions {
   baseUrl: string;
   tokenStore: AepTokenStore;
   sessionId?: string;
   transport?: AepTransport;
+  /** @deprecated Agent identity is no longer used; sessions are user-scoped. */
+  agentId?: string;
+  /** @deprecated Retained for transitional clients. */
+  agentVersion?: string;
+  /** @deprecated Retained for transitional clients. */
+  platform?: AgentContext['platform'];
 }
 
 export interface AepTokenStore {
@@ -209,12 +215,16 @@ export interface Page<T> {
 
 export interface PlatformUser {
   id: string;
-  enterpriseId: string;
+  deploymentId: string;
+  /** @deprecated Use deploymentId. */
+  enterpriseId?: string;
   username: string;
   displayName: string;
   status: 'active' | 'disabled';
+  teamIds?: string[];
+  roleIds: string[];
+  /** @deprecated Use teamIds. */
   organizationIds?: string[];
-  roleIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

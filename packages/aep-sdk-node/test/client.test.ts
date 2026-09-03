@@ -73,6 +73,19 @@ describe('AepClient SDK gate', () => {
     expect(server.requests.at(-1)?.headers['x-aep-agent-id']).toBeUndefined();
   });
 
+  test('exposes canonical user-session discovery methods', async () => {
+    const sessionClient = new AepClient({
+      baseUrl: server.baseUrl,
+      tokenStore: store,
+      transport: new FetchTransport({defaultTimeoutMs: 2_000, maxRetries: 2}),
+    });
+    await sessionClient.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await sessionClient.getCurrentUser();
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/me');
+    await sessionClient.listModels();
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/models');
+  });
+
   test('activates a locally verified enterprise license', async () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
     await expect(client.activateEnterpriseLicense({

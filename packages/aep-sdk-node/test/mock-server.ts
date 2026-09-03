@@ -107,7 +107,7 @@ export class MockAepServer {
       return json(response, 401, problem(401, 'TOKEN_INVALID'));
     }
 
-    if (path === '/aep/v1/agent/me') {
+    if (path === '/aep/v1/agent/me' || path === '/aep/v1/user/me') {
       return json(response, 200, {
         user: {id: 'user-1', displayName: 'Demo User'},
         enterprise: {id: 'ent-1', name: 'Demo'},
@@ -138,7 +138,7 @@ export class MockAepServer {
     if (path === '/aep/v1/agent/credentials/server-only/resolve') {
       return json(response, 403, problem(403, 'CREDENTIAL_NOT_DELIVERABLE'));
     }
-    if (path === '/aep/v1/agent/models') {
+    if (path === '/aep/v1/agent/models' || path === '/aep/v1/user/models') {
       return json(response, 200, {models: [model(false)]});
     }
     if (path === '/aep/v1/agent/skills/manifest') {

@@ -114,6 +114,42 @@ paths:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users~1{userId}'
   /aep/v1/admin/users/{userId}/reset-password:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users~1{userId}~1reset-password'
+  /aep/v1/admin/sessions:
+    get:
+      tags: [Admin Users]
+      operationId: listUserSessions
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: userId
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        '200':
+          description: User session page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [sessionId, userId, topic, createdAt, lastSeenAt]
+                      properties:
+                        sessionId: {type: string}
+                        userId: {type: string}
+                        topic: {type: string}
+                        createdAt: {type: string, format: date-time}
+                        lastSeenAt: {type: string, format: date-time}
+                        revokedAt: {type: [string, 'null'], format: date-time}
+                  nextCursor: {type: [string, 'null']}
+        '401': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+        '403': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/skills:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills'
   /aep/v1/admin/skills/{skillId}:
@@ -258,11 +294,12 @@ components:
         apiVersion: {type: string, const: v1}
     PasswordChangeRequest:
       type: object
-      required: [currentPassword, newPassword, agentId]
+      required: [currentPassword, newPassword]
       properties:
         currentPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
         newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
         agentId: {type: string, minLength: 1}
+        sessionId: {type: string, minLength: 1}
     AdminAgent:
       type: object
       required: [agentId, enterpriseId, userId, agentVersion, platform, firstSeenAt, lastSeenAt]

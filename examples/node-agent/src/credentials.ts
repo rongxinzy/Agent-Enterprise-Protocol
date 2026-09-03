@@ -4,7 +4,7 @@ import type {AepClient, CredentialMetadata, ResolvedCredential} from '@aep/sdk-n
 
 import type {AgentState} from './state.js';
 
-type CredentialControlClient = Pick<AepClient, 'listAgentCredentials' | 'resolveAgentCredential'>;
+type CredentialControlClient = Pick<AepClient, 'listCredentialsForUser' | 'resolveCredentialForUser'>;
 type CredentialTelemetryState = Pick<AgentState, 'enqueueTelemetry'>;
 
 interface CachedCredential {
@@ -82,7 +82,7 @@ export class CredentialManager {
   }
 
   async #synchronize(): Promise<CredentialMetadata[]> {
-    const {credentials} = await this.client.listAgentCredentials();
+    const {credentials} = await this.client.listCredentialsForUser();
     const current = new Map(credentials.map(item => [item.id, item]));
     for (const [credentialId, cached] of this.#cache) {
       const metadata = current.get(credentialId);
@@ -103,7 +103,7 @@ export class CredentialManager {
 
     const pending = this.#resolutions.get(metadata.id);
     if (pending?.metadataRevision === metadata.updatedAt) return pending.promise;
-    const resolution = this.client.resolveAgentCredential(metadata.id, purpose);
+    const resolution = this.client.resolveCredentialForUser(metadata.id, purpose);
     this.#resolutions.set(metadata.id, {metadataRevision: metadata.updatedAt, promise: resolution});
     try {
       const material = await resolution;

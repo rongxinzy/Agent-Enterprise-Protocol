@@ -15,9 +15,11 @@ const state = new AgentState(path.join(dataDirectory, 'agent.sqlite'));
 const platform = normalizePlatform(process.platform);
 const client = new AepClient({
   baseUrl: process.env.AEP_BASE_URL ?? 'http://localhost:8080',
-  agentId: process.env.AEP_AGENT_ID ?? 'example-agent',
-  agentVersion: '0.1.0',
-  platform,
+  ...(process.env.AEP_AGENT_ID ? {
+    agentId: process.env.AEP_AGENT_ID,
+    agentVersion: '0.1.0',
+    platform,
+  } : {}),
   tokenStore: state,
 });
 const reconciler = new SkillReconciler(client, state, path.join(dataDirectory, 'managed-skills'));
@@ -28,7 +30,7 @@ const agent = new ExampleAgent({
   agentVersion: '0.1.0',
   platform,
   credentials: {
-    enterpriseId: process.env.AEP_ENTERPRISE_ID ?? 'demo',
+    deploymentId: process.env.AEP_DEPLOYMENT_ID ?? process.env.AEP_ENTERPRISE_ID ?? 'demo',
     username: required('AEP_USERNAME'),
     password: required('AEP_PASSWORD'),
   },
@@ -47,7 +49,7 @@ try {
     await agent.reconcileSkills();
   } else if (command === 'chat') {
     await client.loginWithPassword({
-      enterpriseId: process.env.AEP_ENTERPRISE_ID ?? 'demo',
+      deploymentId: process.env.AEP_DEPLOYMENT_ID ?? process.env.AEP_ENTERPRISE_ID ?? 'demo',
       username: required('AEP_USERNAME'),
       password: required('AEP_PASSWORD'),
     });
@@ -63,7 +65,7 @@ try {
     }
   } else if (command === 'credential') {
     await client.loginWithPassword({
-      enterpriseId: process.env.AEP_ENTERPRISE_ID ?? 'demo',
+      deploymentId: process.env.AEP_DEPLOYMENT_ID ?? process.env.AEP_ENTERPRISE_ID ?? 'demo',
       username: required('AEP_USERNAME'),
       password: required('AEP_PASSWORD'),
     });
