@@ -7,16 +7,14 @@
 ## 范围与版本
 
 - 数据库：PostgreSQL（`timestamptz`、`jsonb`、数组和 `bytea`）。
-- 迁移：`001_init.sql` 至 `006_model_reasoning.sql`，由服务启动时幂等执行。
-- 业务表：21 张。
-- 运行时表：`schema_migrations` 1 张，因此已完成全部迁移的数据库通常有 22 张表。
+- 迁移：`001_init.sql` 至 `007_licenses.sql`，由服务启动时幂等执行。
+- 业务表：23 张。
+- 运行时表：`schema_migrations` 1 张，因此已完成全部迁移的数据库通常有 24 张表。
 - 直接带有 `enterprise_id` 的业务表以该字段作为租户边界；其余表通过企业根实体的
   外键链路或脱敏键参与隔离。复合外键用于防止跨企业引用。
 
-> **快照漂移提示**：当前 `schema.sql` 只包含 19 张 `CREATE TABLE`，尚未同步
-> `004_data_plane.sql` 的 `data_plane_desired_states` 和 `data_plane_statuses`。
-> 因此生产环境和集成测试必须执行全部版本化迁移；后续应补一个仅同步快照的 PR，
-> 不要通过修改已执行的迁移来修复这个差异。
+当前 `schema.sql` 已同步到迁移 `007_licenses.sql`，包含全部 23 张业务表。
+生产升级仍必须执行版本化迁移，不能只修改快照文件。
 
 ## 表结构
 
@@ -365,6 +363,48 @@ Agent Skill 期望状态收敛结果和安装摘要。
 | `source_hash` | `text` | NN；来源脱敏哈希 |
 | `created_at` | `timestamptz` | NN, DF `now()` |
 
+### 22. `licenses`
+
+企业购买 License 在 Control Service 中的注册记录。服务启动时从 License 文件验签，
+再将摘要和授权额度写入本表；私钥和完整签发环境不进入数据库。
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `license_id` | `text` | PK |
+| `enterprise_id` | `text` | NN, FK -> `enterprises.id` ON DELETE CASCADE |
+| `customer_id` | `text` | NN；厂商客户标识 |
+| `deployment_id` | `text` | NN；部署标识 |
+| `digest` | `text` | NN；签名 envelope SHA-256 |
+| `key_id` | `text` | NN；签发公钥 ID |
+| `status` | `text` | NN, DF `active`；CK `active`/`revoked` |
+| `issued_at` | `timestamptz` | NN |
+| `expires_at` | `timestamptz` | NN |
+| `grace_ends_at` | `timestamptz` | NN |
+| `user_limit` | `integer` | NN；CK 大于 0 |
+| `agent_limit` | `integer` | NN；CK 大于 0 |
+| `features` | `text[]` | NN, DF `'{}'` |
+| `payload` | `jsonb` | NN；已验签的 License claims |
+| `revoked_at` | `timestamptz` | 可空 |
+| `created_at` | `timestamptz` | NN, DF `now()` |
+| `updated_at` | `timestamptz` | NN, DF `now()` |
+
+### 23. `license_activations`
+
+License 与企业用户/Agent 的激活绑定和最后活跃时间，用于席位限制和撤销。
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `id` | `text` | PK |
+| `license_id` | `text` | NN, FK -> `licenses.license_id` ON DELETE CASCADE |
+| `enterprise_id` | `text` | NN, FK -> `enterprises.id` ON DELETE CASCADE |
+| `user_id` | `text` | NN, FK -> `users.id` ON DELETE CASCADE |
+| `agent_id` | `text` | NN, FK -> `agents.agent_id` ON DELETE CASCADE |
+| `activated_at` | `timestamptz` | NN, DF `now()` |
+| `last_seen_at` | `timestamptz` | NN, DF `now()` |
+| `revoked_at` | `timestamptz` | 可空 |
+
+UQ：`(license_id, agent_id)`。
+
 ### 22. `schema_migrations`（运行时表）
 
 迁移器自动创建的版本跟踪表，不属于企业业务域。每个迁移文件成功执行后写入一行。
@@ -389,6 +429,8 @@ Agent Skill 期望状态收敛结果和安装摘要。
 | `idx_credential_resolution_audit` | `credential_resolution_audit` | `(enterprise_id, credential_id, created_at DESC)` | 查询凭证解析审计时间线 |
 | `idx_login_rate_limits_updated` | `login_rate_limits` | `(updated_at)` | 清理过期限流记录 |
 | `idx_authentication_audit_enterprise_time` | `authentication_audit_events` | `(enterprise_id, created_at DESC)` | 管理员按企业查询认证审计 |
+| `idx_licenses_enterprise_status` | `licenses` | `(enterprise_id, status, expires_at)` | 查询企业 License 状态和过期记录 |
+| `idx_license_activations_enterprise` | `license_activations` | `(enterprise_id, license_id, revoked_at)` | 统计席位、查询激活和撤销实例 |
 
 ### PostgreSQL 自动索引
 
@@ -432,7 +474,7 @@ Token 哈希和业务审计信息。
 
 ## 当前索引评估与后续建议
 
-当前 9 个显式索引已覆盖 M0 的 Agent 拉取、授权解析、遥测和审计查询。随着数据量增长，
+当前 11 个显式索引已覆盖 M0 的 Agent 拉取、授权解析、遥测、审计和 License 激活查询。随着数据量增长，
 建议用真实查询计划（`EXPLAIN (ANALYZE, BUFFERS)`）评估后再增加索引，优先关注：
 
 1. `control_events` 按企业、作用域和过期时间筛选的组合查询。
