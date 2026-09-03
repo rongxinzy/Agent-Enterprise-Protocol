@@ -95,14 +95,14 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	if h.requireEntitlement {
 		checker, ok := h.verifier.(EntitlementVerifier)
 		if !ok {
-			writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Enterprise entitlement status could not be checked.")
+			writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Deployment entitlement status could not be checked.")
 			return
 		}
 		if err := checker.CheckEntitlement(request.Context(), claims); err != nil {
 			if errors.Is(err, ErrEntitlementInactive) {
 				writeProblem(response, request, http.StatusForbidden, "LICENSE_REVOKED", "The enterprise License entitlement is inactive.")
 			} else {
-				writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Enterprise entitlement status could not be checked.")
+				writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Deployment entitlement status could not be checked.")
 			}
 			return
 		}

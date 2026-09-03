@@ -49,7 +49,7 @@ func TestVerifierAcceptsAEPModelTokenAndCachesJWKS(t *testing.T) {
 	}
 }
 
-func TestVerifierAcceptsEnterpriseEntitlementToken(t *testing.T) {
+func TestVerifierAcceptsDeploymentEntitlementToken(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestVerifierAcceptsEnterpriseEntitlementToken(t *testing.T) {
 	}
 }
 
-func TestVerifierChecksAndCachesEnterpriseLicenseStatus(t *testing.T) {
+func TestVerifierChecksAndCachesDeploymentLicenseStatus(t *testing.T) {
 	var calls atomic.Int32
 	status := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		calls.Add(1)

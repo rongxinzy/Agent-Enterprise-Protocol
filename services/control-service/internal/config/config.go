@@ -55,10 +55,9 @@ type Config struct {
 	LicenseFile               string
 	LicenseDeploymentID       string
 	LicenseCustomerID         string
-	LicenseEnterpriseID       string
 	RefreshTTL                time.Duration
-	BootstrapEnterpriseID     string
-	BootstrapEnterpriseName   string
+	BootstrapDeploymentID     string
+	BootstrapDeploymentName   string
 	BootstrapAdminUsername    string
 	BootstrapAdminPassword    string
 	BootstrapAdminDisplayName string
@@ -123,11 +122,10 @@ func Load() (Config, error) {
 		CredentialMasterKeyFile:   os.Getenv("AEP_CREDENTIAL_MASTER_KEY_FILE"),
 		LicenseTrustedKeysFile:    os.Getenv("AEP_LICENSE_TRUSTED_KEYS_FILE"),
 		LicenseFile:               os.Getenv("AEP_LICENSE_FILE"),
-		LicenseDeploymentID:       value("AEP_LICENSE_DEPLOYMENT_ID", value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"))),
+		LicenseDeploymentID:       value("AEP_LICENSE_DEPLOYMENT_ID", value("AEP_LICENSE_ENTERPRISE_ID", value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo")))),
 		LicenseCustomerID:         os.Getenv("AEP_LICENSE_CUSTOMER_ID"),
-		LicenseEnterpriseID:       os.Getenv("AEP_LICENSE_ENTERPRISE_ID"),
-		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", value("AEP_DEPLOYMENT_ID", "demo")),
-		BootstrapEnterpriseName:   value("AEP_BOOTSTRAP_ENTERPRISE_NAME", value("AEP_DEPLOYMENT_NAME", "Demo Deployment")),
+		BootstrapDeploymentID:     value("AEP_BOOTSTRAP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", value("AEP_DEPLOYMENT_ID", "demo"))),
+		BootstrapDeploymentName:   value("AEP_BOOTSTRAP_DEPLOYMENT_NAME", value("AEP_BOOTSTRAP_ENTERPRISE_NAME", value("AEP_DEPLOYMENT_NAME", "Demo Deployment"))),
 		BootstrapAdminUsername:    value("AEP_BOOTSTRAP_ADMIN_USERNAME", "admin"),
 		BootstrapAdminPassword:    adminPassword,
 		BootstrapAdminDisplayName: value("AEP_BOOTSTRAP_ADMIN_DISPLAY_NAME", "AEP Administrator"),
@@ -224,8 +222,6 @@ func (cfg Config) Validate() error {
 			return errors.New("AEP_LICENSE_DEPLOYMENT_ID is required in production")
 		case strings.TrimSpace(cfg.LicenseCustomerID) == "":
 			return errors.New("AEP_LICENSE_CUSTOMER_ID is required in production")
-		case strings.TrimSpace(cfg.LicenseEnterpriseID) == "":
-			return errors.New("AEP_LICENSE_ENTERPRISE_ID is required in production")
 		case strings.TrimSpace(cfg.LicenseFile) == "":
 			return errors.New("AEP_LICENSE_FILE is required in production")
 		}

@@ -141,7 +141,7 @@ func insertAuthenticationAudit(ctx context.Context, executor authenticationAudit
 	if reason != "" {
 		nullableReason = reason
 	}
-	_, err := executor.Exec(ctx, `INSERT INTO authentication_audit_events (enterprise_id,user_id,agent_id,event_type,outcome,reason,principal_hash,source_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, enterpriseID, nullableUserID, boundedAuditID(agentID), eventType, outcome, nullableReason, fingerprint.PrincipalHash, fingerprint.SourceHash, now)
+	_, err := executor.Exec(ctx, `INSERT INTO authentication_audit_events (deployment_id,user_id,agent_id,event_type,outcome,reason,principal_hash,source_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, enterpriseID, nullableUserID, boundedAuditID(agentID), eventType, outcome, nullableReason, fingerprint.PrincipalHash, fingerprint.SourceHash, now)
 	return err
 }
 

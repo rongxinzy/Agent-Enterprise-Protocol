@@ -36,7 +36,7 @@ type dataPlaneDesiredStateWrite struct {
 
 type dataPlaneDesiredState struct {
 	dataPlaneDesiredStateWrite
-	EnterpriseID string    `json:"enterpriseId"`
+	DeploymentID string    `json:"deploymentId"`
 	PublishedAt  time.Time `json:"publishedAt"`
 	ContentHash  string    `json:"contentHash"`
 }
@@ -90,9 +90,9 @@ func (s *Server) getDataPlaneDesiredState(response http.ResponseWriter, request 
 	var state dataPlaneDesiredStateWrite
 	var enterpriseID, revision, contentHash string
 	var publishedAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT enterprise_id,revision,routes,content_hash,published_at FROM data_plane_desired_states WHERE enterprise_id=$1`, claimsFrom(request).Tenant).Scan(&enterpriseID, &revision, &state.Routes, &contentHash, &publishedAt)
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT deployment_id,revision,routes,content_hash,published_at FROM data_plane_desired_states WHERE deployment_id=$1`, claimsFrom(request).Tenant).Scan(&enterpriseID, &revision, &state.Routes, &contentHash, &publishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(response, http.StatusOK, map[string]any{"enterpriseId": claimsFrom(request).Tenant, "revision": "", "routes": []dataPlaneRoute{}, "publishedAt": time.Time{}, "contentHash": dataPlaneHash(dataPlaneDesiredStateWrite{Revision: "", Routes: []dataPlaneRoute{}})})
+		writeJSON(response, http.StatusOK, map[string]any{"deploymentId": claimsFrom(request).Tenant, "revision": "", "routes": []dataPlaneRoute{}, "publishedAt": time.Time{}, "contentHash": dataPlaneHash(dataPlaneDesiredStateWrite{Revision: "", Routes: []dataPlaneRoute{}})})
 		return
 	}
 	if err != nil {
@@ -100,7 +100,7 @@ func (s *Server) getDataPlaneDesiredState(response http.ResponseWriter, request 
 		return
 	}
 	state.Revision = revision
-	writeJSON(response, http.StatusOK, dataPlaneDesiredState{dataPlaneDesiredStateWrite: state, EnterpriseID: enterpriseID, PublishedAt: publishedAt, ContentHash: contentHash})
+	writeJSON(response, http.StatusOK, dataPlaneDesiredState{dataPlaneDesiredStateWrite: state, DeploymentID: enterpriseID, PublishedAt: publishedAt, ContentHash: contentHash})
 }
 
 func (s *Server) putDataPlaneDesiredState(response http.ResponseWriter, request *http.Request) {
@@ -116,21 +116,21 @@ func (s *Server) putDataPlaneDesiredState(response http.ResponseWriter, request 
 	hash := dataPlaneHash(normalized)
 	tenant := claimsFrom(request).Tenant
 	var publishedAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO data_plane_desired_states (enterprise_id,revision,routes,content_hash)
+	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO data_plane_desired_states (deployment_id,revision,routes,content_hash)
 VALUES ($1,$2,$3::jsonb,$4)
-ON CONFLICT (enterprise_id) DO UPDATE SET revision=EXCLUDED.revision,routes=EXCLUDED.routes,content_hash=EXCLUDED.content_hash,published_at=now(),updated_at=now()
+ON CONFLICT (deployment_id) DO UPDATE SET revision=EXCLUDED.revision,routes=EXCLUDED.routes,content_hash=EXCLUDED.content_hash,published_at=now(),updated_at=now()
 RETURNING published_at`, tenant, normalized.Revision, normalized.Routes, hash).Scan(&publishedAt)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	_, _ = s.app.Pool.Exec(request.Context(), `INSERT INTO data_plane_statuses (enterprise_id,state,resource_count,updated_at) VALUES ($1,'pending',$2,now()) ON CONFLICT (enterprise_id) DO UPDATE SET state='pending',error_code=NULL,message=NULL,updated_at=now()`, tenant, len(normalized.Routes))
-	writeJSON(response, http.StatusOK, dataPlaneDesiredState{dataPlaneDesiredStateWrite: normalized, EnterpriseID: tenant, PublishedAt: publishedAt, ContentHash: hash})
+	_, _ = s.app.Pool.Exec(request.Context(), `INSERT INTO data_plane_statuses (deployment_id,state,resource_count,updated_at) VALUES ($1,'pending',$2,now()) ON CONFLICT (deployment_id) DO UPDATE SET state='pending',error_code=NULL,message=NULL,updated_at=now()`, tenant, len(normalized.Routes))
+	writeJSON(response, http.StatusOK, dataPlaneDesiredState{dataPlaneDesiredStateWrite: normalized, DeploymentID: tenant, PublishedAt: publishedAt, ContentHash: hash})
 }
 
 func (s *Server) getDataPlaneStatus(response http.ResponseWriter, request *http.Request) {
 	var status dataPlaneStatus
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count FROM data_plane_statuses WHERE enterprise_id=$1`, claimsFrom(request).Tenant).Scan(&status.State, &status.ObservedRevision, &status.ContentHash, &status.LastAppliedAt, &status.ErrorCode, &status.Message, &status.ResourceCount)
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count FROM data_plane_statuses WHERE deployment_id=$1`, claimsFrom(request).Tenant).Scan(&status.State, &status.ObservedRevision, &status.ContentHash, &status.LastAppliedAt, &status.ErrorCode, &status.Message, &status.ResourceCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		status.State = "pending"
 		writeJSON(response, http.StatusOK, status)
@@ -156,9 +156,9 @@ func (s *Server) putInternalDataPlaneStatus(response http.ResponseWriter, reques
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATUS", "The data-plane status message is too long.")
 		return
 	}
-	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO data_plane_statuses (enterprise_id,state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count,updated_at)
+	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO data_plane_statuses (deployment_id,state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count,updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
-ON CONFLICT (enterprise_id) DO UPDATE SET state=EXCLUDED.state,observed_revision=EXCLUDED.observed_revision,content_hash=EXCLUDED.content_hash,last_applied_at=EXCLUDED.last_applied_at,error_code=EXCLUDED.error_code,message=EXCLUDED.message,resource_count=EXCLUDED.resource_count,updated_at=now()`, claimsFrom(request).Tenant, input.State, input.ObservedRevision, input.ContentHash, input.LastAppliedAt, input.ErrorCode, input.Message, input.ResourceCount)
+ON CONFLICT (deployment_id) DO UPDATE SET state=EXCLUDED.state,observed_revision=EXCLUDED.observed_revision,content_hash=EXCLUDED.content_hash,last_applied_at=EXCLUDED.last_applied_at,error_code=EXCLUDED.error_code,message=EXCLUDED.message,resource_count=EXCLUDED.resource_count,updated_at=now()`, claimsFrom(request).Tenant, input.State, input.ObservedRevision, input.ContentHash, input.LastAppliedAt, input.ErrorCode, input.Message, input.ResourceCount)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

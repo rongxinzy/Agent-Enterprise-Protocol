@@ -208,7 +208,7 @@ func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE enterprise_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.Tenant, scopes)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.Tenant, scopes)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -231,7 +231,7 @@ func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) listModels(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE enterprise_id=$1 ORDER BY id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -278,12 +278,12 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 		return
 	}
 	if *input.IsDefault {
-		if _, err := tx.Exec(request.Context(), "UPDATE models SET is_default=false,updated_at=now() WHERE enterprise_id=$1 AND is_default=true", tenant); err != nil {
+		if _, err := tx.Exec(request.Context(), "UPDATE models SET is_default=false,updated_at=now() WHERE deployment_id=$1 AND is_default=true", tenant); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
-	model, err := scanModel(tx.QueryRow(request.Context(), `INSERT INTO models (enterprise_id,id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled)
+	model, err := scanModel(tx.QueryRow(request.Context(), `INSERT INTO models (deployment_id,id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+modelColumns,
 		tenant, input.ID, input.DisplayName, input.SourceType, input.Protocol, optionalString(input.Endpoint), optionalString(input.UpstreamModel), optionalString(input.LocalModelRef), optionalString(input.CredentialID), capabilities, input.ReasoningCompatibility, optionalInt32(input.ContextWindow), *input.IsDefault, *input.Enabled))
 	if err != nil {
@@ -302,7 +302,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+modelColumns
 }
 
 func (s *Server) getModel(response http.ResponseWriter, request *http.Request) {
-	model, err := scanModel(s.app.Pool.QueryRow(request.Context(), "SELECT "+modelColumns+" FROM models WHERE enterprise_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "modelId")))
+	model, err := scanModel(s.app.Pool.QueryRow(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "modelId")))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
 		return
@@ -349,7 +349,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 		}
 	}
 	if input.IsDefault != nil && *input.IsDefault {
-		if _, err := tx.Exec(request.Context(), "UPDATE models SET is_default=false,updated_at=now() WHERE enterprise_id=$1 AND id<>$2 AND is_default=true", tenant, modelID); err != nil {
+		if _, err := tx.Exec(request.Context(), "UPDATE models SET is_default=false,updated_at=now() WHERE deployment_id=$1 AND id<>$2 AND is_default=true", tenant, modelID); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
@@ -386,7 +386,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 	if input.Enabled != nil {
 		appendModelUpdate(&sets, &arguments, "enabled", *input.Enabled)
 	}
-	query := "UPDATE models SET " + strings.Join(sets, ",") + " WHERE enterprise_id=$1 AND id=$2 RETURNING " + modelColumns
+	query := "UPDATE models SET " + strings.Join(sets, ",") + " WHERE deployment_id=$1 AND id=$2 RETURNING " + modelColumns
 	model, err := scanModel(tx.QueryRow(request.Context(), query, arguments...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
@@ -404,7 +404,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM models WHERE enterprise_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "modelId"))
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "modelId"))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -417,11 +417,11 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 }
 
 func validModelSubject(subjectType string) bool {
-	return subjectType == "user" || subjectType == "role" || subjectType == "team"
+	return subjectType == "enterprise" || subjectType == "organization" || subjectType == "user" || subjectType == "agent" || subjectType == "role" || subjectType == "team"
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,model_id,subject_type,subject_id,created_at FROM model_assignments WHERE enterprise_id=$1 ORDER BY created_at,id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,model_id,subject_type,subject_id,created_at FROM model_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -464,7 +464,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 	}
 	tenant := claimsFrom(request).Tenant
 	var exists bool
-	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM models WHERE enterprise_id=$1 AND id=$2)", tenant, input.ModelID).Scan(&exists); err != nil {
+	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM models WHERE deployment_id=$1 AND id=$2)", tenant, input.ModelID).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -474,7 +474,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 	}
 	id := uuid.NewString()
 	var createdAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO model_assignments (id,enterprise_id,model_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5) RETURNING created_at`, id, tenant, input.ModelID, input.Subject.Type, input.Subject.ID).Scan(&createdAt)
+	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO model_assignments (id,deployment_id,model_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5) RETURNING created_at`, id, tenant, input.ModelID, input.Subject.Type, input.Subject.ID).Scan(&createdAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The model assignment already exists.")
@@ -490,7 +490,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 }
 
 func (s *Server) deleteModelAssignment(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM model_assignments WHERE id=$1 AND enterprise_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM model_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

@@ -15,19 +15,21 @@ import (
 )
 
 type createUserRequest struct {
-	EnterpriseID          string   `json:"enterpriseId"`
+	DeploymentID          string   `json:"deploymentId"`
+	EnterpriseID          string   `json:"enterpriseId"` // Deprecated v1 alias.
 	Username              string   `json:"username"`
 	DisplayName           string   `json:"displayName"`
 	Email                 *string  `json:"email"`
 	TemporaryPassword     string   `json:"temporaryPassword"`
-	OrganizationIDs       []string `json:"organizationIds"`
+	TeamIDs               []string `json:"teamIds"`
+	OrganizationIDs       []string `json:"organizationIds"` // Deprecated v1 alias.
 	RoleIDs               []string `json:"roleIds"`
 	RequirePasswordChange *bool    `json:"requirePasswordChange"`
 }
 
 func (s *Server) listUsers(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	items, err := s.app.DB.ListUsers(request.Context(), db.ListUsersParams{EnterpriseID: claims.Tenant, Column2: request.URL.Query().Get("cursor"), Limit: limit(request)})
+	items, err := s.app.DB.ListUsers(request.Context(), db.ListUsersParams{DeploymentID: claims.Tenant, Column2: request.URL.Query().Get("cursor"), Limit: limit(request)})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -48,7 +50,13 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.EnterpriseID != claimsFrom(request).Tenant {
+	if input.DeploymentID == "" {
+		input.DeploymentID = input.EnterpriseID
+	}
+	if input.TeamIDs == nil {
+		input.TeamIDs = input.OrganizationIDs
+	}
+	if input.DeploymentID != claimsFrom(request).Tenant {
 		writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "Administrators can only create users in their enterprise.")
 		return
 	}
@@ -70,14 +78,16 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 
 func (s *Server) importUsers(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		EnterpriseID string `json:"enterpriseId"`
+		DeploymentID string `json:"deploymentId"`
+		EnterpriseID string `json:"enterpriseId"` // Deprecated v1 alias.
 		Users        []struct {
 			ExternalRowID         string   `json:"externalRowId"`
 			Username              string   `json:"username"`
 			DisplayName           string   `json:"displayName"`
 			Email                 *string  `json:"email"`
 			TemporaryPassword     string   `json:"temporaryPassword"`
-			OrganizationIDs       []string `json:"organizationIds"`
+			TeamIDs               []string `json:"teamIds"`
+			OrganizationIDs       []string `json:"organizationIds"` // Deprecated v1 alias.
 			RoleIDs               []string `json:"roleIds"`
 			RequirePasswordChange *bool    `json:"requirePasswordChange"`
 		} `json:"users"`
@@ -85,14 +95,21 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.EnterpriseID != claimsFrom(request).Tenant || len(input.Users) == 0 || len(input.Users) > 1000 {
+	if input.DeploymentID == "" {
+		input.DeploymentID = input.EnterpriseID
+	}
+	if input.DeploymentID != claimsFrom(request).Tenant || len(input.Users) == 0 || len(input.Users) > 1000 {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The import must contain 1 to 1000 users for the current enterprise.")
 		return
 	}
 	created := 0
 	errorsResult := make([]map[string]string, 0)
 	for _, item := range input.Users {
-		_, err := s.insertUser(request, createUserRequest{EnterpriseID: input.EnterpriseID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, OrganizationIDs: item.OrganizationIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
+		teamIDs := item.TeamIDs
+		if teamIDs == nil {
+			teamIDs = item.OrganizationIDs
+		}
+		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: teamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
 		if err != nil {
 			code := "USER_IMPORT_FAILED"
 			detail := "The account could not be created."
@@ -122,10 +139,10 @@ func (s *Server) insertUser(request *http.Request, input createUserRequest) (db.
 		email = pgtype.Text{String: *input.Email, Valid: true}
 	}
 	return s.app.DB.CreateUser(request.Context(), db.CreateUserParams{
-		ID: uuid.NewString(), EnterpriseID: input.EnterpriseID, Username: input.Username,
+		ID: uuid.NewString(), DeploymentID: input.DeploymentID, Username: input.Username,
 		DisplayName: input.DisplayName, Email: email, PasswordHash: hash,
 		RequirePasswordChange: requireChange, IsAdmin: false,
-		OrganizationIds: input.OrganizationIDs, RoleIds: input.RoleIDs,
+		TeamIds: input.TeamIDs, RoleIds: input.RoleIDs,
 	})
 }
 
@@ -134,11 +151,15 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		DisplayName     *string   `json:"displayName"`
 		Email           *string   `json:"email"`
 		Status          *string   `json:"status"`
-		OrganizationIDs *[]string `json:"organizationIds"`
+		TeamIDs         *[]string `json:"teamIds"`
+		OrganizationIDs *[]string `json:"organizationIds"` // Deprecated v1 alias.
 		RoleIDs         *[]string `json:"roleIds"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
+	}
+	if input.TeamIDs == nil {
+		input.TeamIDs = input.OrganizationIDs
 	}
 	params := db.UpdateUserParams{ID: chi.URLParam(request, "userId")}
 	if input.DisplayName != nil {
@@ -150,8 +171,8 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 	if input.Status != nil {
 		params.Status = pgtype.Text{String: *input.Status, Valid: true}
 	}
-	if input.OrganizationIDs != nil {
-		params.OrganizationIds = *input.OrganizationIDs
+	if input.TeamIDs != nil {
+		params.TeamIds = *input.TeamIDs
 	}
 	if input.RoleIDs != nil {
 		params.RoleIds = *input.RoleIDs
@@ -213,9 +234,9 @@ func publicUser(user db.User) map[string]any {
 		email = user.Email.String
 	}
 	return map[string]any{
-		"id": user.ID, "enterpriseId": user.EnterpriseID, "username": user.Username,
+		"id": user.ID, "deploymentId": user.DeploymentID, "username": user.Username,
 		"displayName": user.DisplayName, "email": email, "status": user.Status,
-		"organizationIds": user.OrganizationIds, "roleIds": user.RoleIds,
+		"teamIds": user.TeamIds, "roleIds": user.RoleIds,
 		"createdAt": user.CreatedAt.Time, "updatedAt": user.UpdatedAt.Time,
 	}
 }

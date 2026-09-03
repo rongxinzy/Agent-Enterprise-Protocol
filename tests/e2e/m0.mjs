@@ -192,7 +192,7 @@ async function assertPasswordSecurity() {
   const recovered = await passwordLogin(username, changedPassword);
   assert(recovered.status === 200, `Login did not recover after backoff: ${recovered.status}`);
 
-  const auditCount = Number(await queryDatabase(`SELECT count(*) FROM authentication_audit_events WHERE enterprise_id='demo' AND agent_id LIKE 'forced-agent-%'`));
+  const auditCount = Number(await queryDatabase(`SELECT count(*) FROM authentication_audit_events WHERE deployment_id='demo' AND agent_id LIKE 'forced-agent-%'`));
   assert(auditCount >= 6, `Authentication audit recorded only ${auditCount} events`);
 }
 

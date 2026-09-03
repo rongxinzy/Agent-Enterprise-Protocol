@@ -96,7 +96,7 @@ func validDeliveryMode(value string) bool {
 }
 
 func validCredentialSubject(value string) bool {
-	return value == "user" || value == "role" || value == "team"
+	return value == "enterprise" || value == "organization" || value == "user" || value == "agent" || value == "role" || value == "team"
 }
 
 func (s *Server) listAgentCredentials(response http.ResponseWriter, request *http.Request) {
@@ -106,13 +106,13 @@ func (s *Server) listAgentCredentials(response http.ResponseWriter, request *htt
 	claims := claimsFrom(request)
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT `+credentialColumnsQualified+`
 FROM credentials c
-JOIN users u ON u.id=$2 AND u.enterprise_id=$1
-WHERE c.enterprise_id=$1 AND c.enabled=true AND c.delivery_mode='agent'
+JOIN users u ON u.id=$2 AND u.deployment_id=$1
+WHERE c.deployment_id=$1 AND c.enabled=true AND c.delivery_mode='agent'
 AND EXISTS (
   SELECT 1 FROM credential_assignments ca
-  WHERE ca.enterprise_id=c.enterprise_id AND ca.credential_id=c.id AND (
+  WHERE ca.deployment_id=c.deployment_id AND ca.credential_id=c.id AND (
     (ca.subject_type='enterprise' AND ca.subject_id=$1)
-    OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.organization_ids))
+    OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.team_ids))
     OR (ca.subject_type='user' AND ca.subject_id=$2)
     OR (ca.subject_type='agent' AND ca.subject_id=$3)
     OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
@@ -164,7 +164,7 @@ func (s *Server) resolveAgentCredential(response http.ResponseWriter, request *h
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	record, err := scanCredential(tx.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE enterprise_id=$1 AND id=$2 FOR SHARE", claims.Tenant, credentialID))
+	record, err := scanCredential(tx.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2 FOR SHARE", claims.Tenant, credentialID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if !s.writeCredentialResolutionAudit(response, request, tx, credentialID, input.Purpose, "denied", "not_found") {
 			return
@@ -185,10 +185,10 @@ func (s *Server) resolveAgentCredential(response http.ResponseWriter, request *h
 		var authorized bool
 		err = tx.QueryRow(request.Context(), `SELECT EXISTS (
 SELECT 1 FROM credential_assignments ca
-JOIN users u ON u.id=$2 AND u.enterprise_id=$1
-WHERE ca.enterprise_id=$1 AND ca.credential_id=$4 AND (
+JOIN users u ON u.id=$2 AND u.deployment_id=$1
+WHERE ca.deployment_id=$1 AND ca.credential_id=$4 AND (
   (ca.subject_type='enterprise' AND ca.subject_id=$1)
-  OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.organization_ids))
+  OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.team_ids))
   OR (ca.subject_type='user' AND ca.subject_id=$2)
   OR (ca.subject_type='agent' AND ca.subject_id=$3)
   OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
@@ -238,7 +238,7 @@ WHERE ca.enterprise_id=$1 AND ca.credential_id=$4 AND (
 
 func (s *Server) writeCredentialResolutionAudit(response http.ResponseWriter, request *http.Request, tx pgx.Tx, credentialID, purpose, outcome, reason string) bool {
 	claims := claimsFrom(request)
-	if _, err := tx.Exec(request.Context(), `INSERT INTO credential_resolution_audit (id,enterprise_id,credential_id,user_id,agent_id,purpose,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, uuid.NewString(), claims.Tenant, credentialID, claims.Subject, claims.AgentID, purpose, outcome, optionalAuditReason(reason)); err != nil {
+	if _, err := tx.Exec(request.Context(), `INSERT INTO credential_resolution_audit (id,deployment_id,credential_id,user_id,agent_id,purpose,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, uuid.NewString(), claims.Tenant, credentialID, claims.Subject, claims.AgentID, purpose, outcome, optionalAuditReason(reason)); err != nil {
 		databaseFailure(response, request, err)
 		return false
 	}
@@ -260,7 +260,7 @@ func (s *Server) listCredentials(response http.ResponseWriter, request *http.Req
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE enterprise_id=$1 ORDER BY id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -301,7 +301,7 @@ func (s *Server) createCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusInternalServerError, "CREDENTIAL_ENCRYPT_FAILED", "The credential could not be encrypted.")
 		return
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), `INSERT INTO credentials (enterprise_id,id,name,service,type,delivery_mode,encrypted_value,nonce,key_id,masked_value,enabled)
+	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), `INSERT INTO credentials (deployment_id,id,name,service,type,delivery_mode,encrypted_value,nonce,key_id,masked_value,enabled)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+credentialColumns,
 		tenant, id, input.Name, input.Service, input.Type, input.DeliveryMode,
 		envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value), *input.Enabled))
@@ -316,7 +316,7 @@ func (s *Server) getCredential(response http.ResponseWriter, request *http.Reque
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE enterprise_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "credentialId")))
+	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "credentialId")))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
@@ -363,7 +363,7 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 	if input.Enabled != nil {
 		appendCredentialUpdate(&sets, &arguments, "enabled", *input.Enabled)
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "UPDATE credentials SET "+strings.Join(sets, ",")+" WHERE enterprise_id=$1 AND id=$2 RETURNING "+credentialColumns, arguments...))
+	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "UPDATE credentials SET "+strings.Join(sets, ",")+" WHERE deployment_id=$1 AND id=$2 RETURNING "+credentialColumns, arguments...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
@@ -391,7 +391,7 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 	}
 	tenant, id := claimsFrom(request).Tenant, chi.URLParam(request, "credentialId")
 	var exists bool
-	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE enterprise_id=$1 AND id=$2)", tenant, id).Scan(&exists); err != nil {
+	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, id).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -405,7 +405,7 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 		return
 	}
 	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), `UPDATE credentials SET encrypted_value=$3,nonce=$4,key_id=$5,masked_value=$6,rotated_at=now(),updated_at=now()
-WHERE enterprise_id=$1 AND id=$2 RETURNING `+credentialColumns, tenant, id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value)))
+WHERE deployment_id=$1 AND id=$2 RETURNING `+credentialColumns, tenant, id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value)))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -417,7 +417,7 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credentials WHERE enterprise_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "credentialId"))
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "credentialId"))
 	if isForeignKeyViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "CREDENTIAL_IN_USE", "The credential is referenced by a model and cannot be deleted.")
 		return
@@ -442,7 +442,7 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,credential_id,subject_type,subject_id,created_at FROM credential_assignments WHERE enterprise_id=$1 ORDER BY created_at,id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,credential_id,subject_type,subject_id,created_at FROM credential_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -486,7 +486,7 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		return
 	}
 	var exists bool
-	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE enterprise_id=$1 AND id=$2)", tenant, input.CredentialID).Scan(&exists); err != nil {
+	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, input.CredentialID).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -496,7 +496,7 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 	}
 	id := uuid.NewString()
 	var createdAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO credential_assignments (id,enterprise_id,credential_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5) RETURNING created_at`, id, tenant, input.CredentialID, input.Subject.Type, input.Subject.ID).Scan(&createdAt)
+	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO credential_assignments (id,deployment_id,credential_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5) RETURNING created_at`, id, tenant, input.CredentialID, input.Subject.Type, input.Subject.ID).Scan(&createdAt)
 	if isUniqueViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The credential assignment already exists.")
 		return
@@ -515,7 +515,7 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credential_assignments WHERE id=$1 AND enterprise_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credential_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -536,6 +536,6 @@ func validateCredentialReference(ctx context.Context, query credentialReferenceQ
 		return true, nil
 	}
 	var exists bool
-	err := query.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM credentials WHERE enterprise_id=$1 AND id=$2)", tenant, *id).Scan(&exists)
+	err := query.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, *id).Scan(&exists)
 	return exists, err
 }

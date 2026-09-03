@@ -304,19 +304,19 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 		resourceID = &input.Resource.ID
 		resourceRevision = &input.Resource.Revision
 	}
-	_, err = tx.Exec(request.Context(), `INSERT INTO control_events (event_id,enterprise_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, eventID, claims.Tenant, input.Type, input.Scope.Type, input.Scope.ID, resourceType, resourceID, resourceRevision, input.Task.Type, input.SupersedesKey, input.ExpiresAt, claims.Subject)
+	_, err = tx.Exec(request.Context(), `INSERT INTO control_events (event_id,deployment_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, eventID, claims.Tenant, input.Type, input.Scope.Type, input.Scope.ID, resourceType, resourceID, resourceRevision, input.Task.Type, input.SupersedesKey, input.ExpiresAt, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	if input.SupersedesKey != nil {
-		_, err = tx.Exec(request.Context(), `WITH old AS (UPDATE control_events SET state='superseded' WHERE enterprise_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id), old_deliveries AS (UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'), session_deliveries AS (UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending') SELECT 1`, claims.Tenant, *input.SupersedesKey, eventID)
+		_, err = tx.Exec(request.Context(), `WITH old AS (UPDATE control_events SET state='superseded' WHERE deployment_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id), old_deliveries AS (UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'), session_deliveries AS (UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending') SELECT 1`, claims.Tenant, *input.SupersedesKey, eventID)
 		if err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
-	rows, err := tx.Query(request.Context(), `SELECT a.agent_id FROM agents a JOIN users u ON u.id=a.user_id WHERE a.enterprise_id=$1 AND ($2='global' OR ($2='agent' AND a.agent_id=$3) OR ($2='user' AND a.user_id=$3) OR ($2='organization' AND $3=ANY(u.organization_ids)))`, claims.Tenant, input.Scope.Type, input.Scope.ID)
+	rows, err := tx.Query(request.Context(), `SELECT a.agent_id FROM agents a JOIN users u ON u.id=a.user_id WHERE a.deployment_id=$1 AND ($2='global' OR ($2='agent' AND a.agent_id=$3) OR ($2='user' AND a.user_id=$3) OR ($2='organization' AND $3=ANY(u.team_ids)))`, claims.Tenant, input.Scope.Type, input.Scope.ID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -343,7 +343,7 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 	// an independent cursor and acknowledgement state.
 	rows, err = tx.Query(request.Context(), `SELECT DISTINCT s.session_id
 FROM user_sessions s
-JOIN users u ON u.id=s.user_id AND u.enterprise_id=$1
+JOIN users u ON u.id=s.user_id AND u.deployment_id=$1
 WHERE s.deployment_id=$1 AND s.revoked_at IS NULL
   AND ($2='global' OR ($2='user' AND s.user_id=$3) OR ($2='team' AND EXISTS (
     SELECT 1 FROM user_team_bindings utb
@@ -387,7 +387,7 @@ func (s *Server) getAdminControlEvent(response http.ResponseWriter, request *htt
 func (s *Server) adminEvents(response http.ResponseWriter, request *http.Request, eventID string) {
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
 count(*) FILTER(WHERE d.state='pending'),count(*) FILTER(WHERE d.state='received'),count(*) FILTER(WHERE d.state='running'),count(*) FILTER(WHERE d.state='succeeded'),count(*) FILTER(WHERE d.state='failed'),count(*) FILTER(WHERE d.state='expired'),count(*) FILTER(WHERE d.state='superseded')
-FROM control_events e LEFT JOIN (SELECT event_id,state FROM control_deliveries UNION ALL SELECT event_id,state FROM session_control_deliveries) d ON d.event_id=e.event_id WHERE e.enterprise_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).Tenant, eventID, limit(request))
+FROM control_events e LEFT JOIN (SELECT event_id,state FROM control_deliveries UNION ALL SELECT event_id,state FROM session_control_deliveries) d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).Tenant, eventID, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -419,7 +419,7 @@ FROM control_events e LEFT JOIN (SELECT event_id,state FROM control_deliveries U
 
 func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
-	result, err := s.app.Pool.Exec(request.Context(), `WITH cancelled AS (UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND enterprise_id=$2 AND state='active' RETURNING event_id), old AS (UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN(SELECT event_id FROM cancelled) AND state='pending' RETURNING event_id), current AS (UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN(SELECT event_id FROM cancelled) AND state='pending' RETURNING event_id) SELECT event_id FROM cancelled`, eventID, claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), `WITH cancelled AS (UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active' RETURNING event_id), old AS (UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN(SELECT event_id FROM cancelled) AND state='pending' RETURNING event_id), current AS (UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN(SELECT event_id FROM cancelled) AND state='pending' RETURNING event_id) SELECT event_id FROM cancelled`, eventID, claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -434,17 +434,17 @@ func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.
 func (s *Server) listControlEventDeliveries(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
 	tenant := claimsFrom(request).Tenant
-	_, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.enterprise_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
+	_, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.enterprise_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
+	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.agent_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM (
 SELECT d.delivery_id,d.event_id,d.agent_id,NULL::text AS session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message,d.cursor FROM control_deliveries d
 UNION ALL
 SELECT d.delivery_id,d.event_id,NULL::text AS agent_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message,d.cursor FROM session_control_deliveries d
-) d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.enterprise_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
+) d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -500,9 +500,9 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 		}
 		var err error
 		if claims.SessionID != "" {
-			_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,enterprise_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.Tenant, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
+			_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.Tenant, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
 		} else {
-			_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,enterprise_id,user_id,agent_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.Tenant, claims.Subject, claims.AgentID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
+			_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,agent_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.Tenant, claims.Subject, claims.AgentID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
 		}
 		if err != nil {
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "INTERNAL_ERROR"})
@@ -514,7 +514,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,agent_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE enterprise_id=$1 AND ($2='' OR agent_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).Tenant, request.URL.Query().Get("agentId"), limit(request))
+	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,agent_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE deployment_id=$1 AND ($2='' OR agent_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).Tenant, request.URL.Query().Get("agentId"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -539,7 +539,7 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 }
 
 func (s *Server) listAgents(response http.ResponseWriter, request *http.Request) {
-	items, err := s.app.DB.ListAgents(request.Context(), db.ListAgentsParams{EnterpriseID: claimsFrom(request).Tenant, Column2: request.URL.Query().Get("cursor"), Column3: request.URL.Query().Get("userId"), Limit: limit(request)})
+	items, err := s.app.DB.ListAgents(request.Context(), db.ListAgentsParams{DeploymentID: claimsFrom(request).Tenant, Column2: request.URL.Query().Get("cursor"), Column3: request.URL.Query().Get("userId"), Limit: limit(request)})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -556,7 +556,7 @@ func (s *Server) listAgents(response http.ResponseWriter, request *http.Request)
 }
 func (s *Server) getAgent(response http.ResponseWriter, request *http.Request) {
 	agent, err := s.app.DB.GetAgent(request.Context(), chi.URLParam(request, "agentId"))
-	if errors.Is(err, pgx.ErrNoRows) || agent.EnterpriseID != claimsFrom(request).Tenant {
+	if errors.Is(err, pgx.ErrNoRows) || agent.DeploymentID != claimsFrom(request).Tenant {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Agent was not found.")
 		return
 	}
@@ -567,7 +567,7 @@ func (s *Server) getAgent(response http.ResponseWriter, request *http.Request) {
 	writeJSON(response, http.StatusOK, publicAgent(agent))
 }
 func publicAgent(agent db.Agent) map[string]any {
-	return map[string]any{"agentId": agent.AgentID, "enterpriseId": agent.EnterpriseID, "userId": agent.UserID, "agentVersion": agent.AgentVersion, "platform": agent.Platform, "firstSeenAt": agent.FirstSeenAt.Time, "lastSeenAt": agent.LastSeenAt.Time, "appliedSkillRevision": nullablePGText(agent.AppliedSkillRevision), "installedSkillIds": agent.InstalledSkillIds}
+	return map[string]any{"agentId": agent.AgentID, "deploymentId": agent.DeploymentID, "userId": agent.UserID, "agentVersion": agent.AgentVersion, "platform": agent.Platform, "firstSeenAt": agent.FirstSeenAt.Time, "lastSeenAt": agent.LastSeenAt.Time, "appliedSkillRevision": nullablePGText(agent.AppliedSkillRevision), "installedSkillIds": agent.InstalledSkillIds}
 }
 func nullablePGText(value pgtype.Text) any {
 	if !value.Valid {

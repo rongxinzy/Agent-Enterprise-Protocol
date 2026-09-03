@@ -18,7 +18,7 @@ import (
 type passwordLoginRequest struct {
 	app.AgentContext
 	DeploymentID string `json:"deploymentId"`
-	EnterpriseID string `json:"enterpriseId"`
+	EnterpriseID string `json:"enterpriseId"` // Deprecated v1 alias.
 	SessionID    string `json:"sessionId"`
 	Username     string `json:"username"`
 	Password     string `json:"password"`
@@ -38,7 +38,7 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 	if enterpriseID == "" {
 		enterpriseID = s.storageTenantID()
 	}
-	enterprise, err := s.app.DB.GetEnterprise(request.Context(), enterpriseID)
+	enterprise, err := s.app.DB.GetDeployment(request.Context(), enterpriseID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The enterprise was not found.")
 		return
@@ -92,7 +92,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{EnterpriseID: enterpriseID, Username: input.Username})
+	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{DeploymentID: enterpriseID, Username: input.Username})
 	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
 		databaseFailure(response, request, lookupErr)
 		return
@@ -135,7 +135,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		databaseFailure(response, request, err)
 		return
 	}
-	s.recordLoginSuccess(request.Context(), fingerprint, user.EnterpriseID, user.ID, input.AgentID, now)
+	s.recordLoginSuccess(request.Context(), fingerprint, user.DeploymentID, user.ID, input.AgentID, now)
 	slog.Info("authentication event", "event", "login.succeeded", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
@@ -147,7 +147,6 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 	}
 	var input struct {
 		DeploymentID        string `json:"deploymentId"`
-		EnterpriseID        string `json:"enterpriseId"`
 		MethodID            string `json:"methodId"`
 		RedirectURI         string `json:"redirectUri"`
 		CodeChallenge       string `json:"codeChallenge"`
@@ -160,12 +159,12 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method was not found.")
 		return
 	}
-	enterpriseID, validDeployment := s.resolveTenant(input.DeploymentID, input.EnterpriseID)
+	enterpriseID, validDeployment := s.resolveTenant(input.DeploymentID, input.DeploymentID)
 	if !validDeployment {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
-	if _, err := s.app.DB.GetEnterprise(request.Context(), enterpriseID); err != nil {
+	if _, err := s.app.DB.GetDeployment(request.Context(), enterpriseID); err != nil {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The enterprise was not found.")
 		return
 	}
@@ -173,7 +172,7 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 	state := uuid.NewString()
 	expiresAt := time.Now().UTC().Add(5 * time.Minute)
 	s.transactionMu.Lock()
-	s.transactions[transactionID] = federatedTransaction{EnterpriseID: enterpriseID, State: state, ExpiresAt: expiresAt}
+	s.transactions[transactionID] = federatedTransaction{DeploymentID: enterpriseID, State: state, ExpiresAt: expiresAt}
 	s.transactionMu.Unlock()
 	writeJSON(response, http.StatusOK, map[string]any{
 		"transactionId":    transactionID,
@@ -184,7 +183,7 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) storageTenantID() string {
-	if value := s.app.Config.BootstrapEnterpriseID; value != "" {
+	if value := s.app.Config.BootstrapDeploymentID; value != "" {
 		return value
 	}
 	return s.app.DeploymentID()
@@ -231,7 +230,7 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, http.StatusUnauthorized, "AUTHORIZATION_CODE_INVALID", "The authorization code is invalid or expired.")
 		return
 	}
-	user, err := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{EnterpriseID: transaction.EnterpriseID, Username: s.app.Config.BootstrapAdminUsername})
+	user, err := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{DeploymentID: transaction.DeploymentID, Username: s.app.Config.BootstrapAdminUsername})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -339,8 +338,8 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 			databaseFailure(response, request, err)
 			return
 		}
-		fingerprint := s.loginFingerprint(request, user.EnterpriseID, user.Username)
-		s.recordPasswordChanged(request.Context(), fingerprint, user.EnterpriseID, user.ID, "", time.Now().UTC())
+		fingerprint := s.loginFingerprint(request, user.DeploymentID, user.Username)
+		s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, "", time.Now().UTC())
 		writeJSON(response, http.StatusOK, tokens)
 		return
 	}
@@ -354,8 +353,8 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
-	fingerprint := s.loginFingerprint(request, user.EnterpriseID, user.Username)
-	s.recordPasswordChanged(request.Context(), fingerprint, user.EnterpriseID, user.ID, input.AgentID, time.Now().UTC())
+	fingerprint := s.loginFingerprint(request, user.DeploymentID, user.Username)
+	s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, input.AgentID, time.Now().UTC())
 	slog.Info("authentication event", "event", "password.changed", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
@@ -367,7 +366,7 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
-	enterprise, err := s.app.DB.GetEnterprise(request.Context(), user.EnterpriseID)
+	enterprise, err := s.app.DB.GetDeployment(request.Context(), user.DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

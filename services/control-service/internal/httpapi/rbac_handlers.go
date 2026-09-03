@@ -173,7 +173,7 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 	defer func() { _ = tx.Rollback(ctx) }()
 	userID := chi.URLParam(request, "userId")
 	var exists bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id=$1 AND enterprise_id=$2)`, userID, claimsFrom(request).Tenant).Scan(&exists); err != nil || !exists {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id=$1 AND deployment_id=$2)`, userID, claimsFrom(request).Tenant).Scan(&exists); err != nil || !exists {
 		if err != nil {
 			databaseFailure(response, request, err)
 		} else {
