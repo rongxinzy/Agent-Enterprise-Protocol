@@ -37,6 +37,36 @@ const server = http.createServer(async (request, response) => {
       return;
     }
   }
+  const lastUserMessage = [...(body.messages ?? [])]
+    .reverse()
+    .find(message => message.role === 'user');
+  const lastUserText = messageText(lastUserMessage?.content);
+  if (lastUserText.includes('AEP_TOOL_CONTINUATION')) {
+    const toolResult = body.messages?.find(
+      message => message.role === 'tool' && message.tool_call_id === 'call-aep-electron',
+    );
+    if (toolResult) {
+      const assistant = body.messages?.find(message =>
+        message.role === 'assistant'
+        && message.tool_calls?.some(toolCall => toolCall.id === 'call-aep-electron'),
+      );
+      if (assistant?.reasoning_content !== 'Use the read-only conversation history tool.') {
+        sendJSON(response, 400, {error: {message: 'assistant reasoning content was lost before tool continuation'}});
+        return;
+      }
+      streamCompletion(response, 'AEP_TOOL_CONTINUATION_OK', 'Tool result received.');
+      return;
+    }
+    const availableTools = (body.tools ?? []).map(tool => tool?.function?.name).filter(Boolean);
+    if (availableTools.includes('conversation_history')) {
+      streamToolCall(response);
+      return;
+    }
+  }
+  if (lastUserText.includes('AEP_CANCEL_SLOW')) {
+    streamSlowCompletion(request, response);
+    return;
+  }
   response.setHeader('X-Mock-Provider-Auth', 'accepted');
   if (body.stream === true) {
     response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
@@ -59,6 +89,48 @@ server.listen(port, '0.0.0.0');
 
 function chunk(content, reasoningContent, finishReason = null) {
   return {id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel, choices: [{index: 0, delta: {...(content ? {content} : {}), ...(reasoningContent ? {reasoning_content: reasoningContent} : {})}, finish_reason: finishReason}]};
+}
+
+function messageText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(part => typeof part === 'string' ? part : part?.type === 'text' ? part.text ?? '' : '')
+    .join('');
+}
+
+function streamCompletion(response, content, reasoningContent) {
+  response.setHeader('X-Mock-Provider-Auth', 'accepted');
+  response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
+  response.write(`data: ${JSON.stringify(chunk('', reasoningContent))}\n\n`);
+  response.write(`data: ${JSON.stringify(chunk(content, undefined, 'stop'))}\n\n`);
+  response.end('data: [DONE]\n\n');
+}
+
+function streamToolCall(response) {
+  response.setHeader('X-Mock-Provider-Auth', 'accepted');
+  response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
+  response.write(`data: ${JSON.stringify(chunk('', 'Use the read-only conversation history tool.'))}\n\n`);
+  response.write(`data: ${JSON.stringify({
+    id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel,
+    choices: [{index: 0, delta: {tool_calls: [{
+      index: 0, id: 'call-aep-electron', type: 'function',
+      function: {name: 'conversation_history', arguments: '{"query":"AEP_TOOL_CONTINUATION","limit":1}'},
+    }]}, finish_reason: null}],
+  })}\n\n`);
+  response.write(`data: ${JSON.stringify(chunk('', undefined, 'tool_calls'))}\n\n`);
+  response.end('data: [DONE]\n\n');
+}
+
+function streamSlowCompletion(_request, response) {
+  response.setHeader('X-Mock-Provider-Auth', 'accepted');
+  response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
+  response.write(`data: ${JSON.stringify(chunk('', 'Waiting for cancellation.'))}\n\n`);
+  const timer = setTimeout(() => {
+    response.write(`data: ${JSON.stringify(chunk('AEP_CANCEL_NOT_ABORTED', undefined, 'stop'))}\n\n`);
+    response.end('data: [DONE]\n\n');
+  }, 10_000);
+  response.once('close', () => clearTimeout(timer));
 }
 
 function sendJSON(response, status, value) {
