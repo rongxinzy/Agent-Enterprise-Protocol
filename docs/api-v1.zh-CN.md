@@ -176,17 +176,11 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 ### `POST /agent/activation`
 
-Agent 在本地验签企业 License 后，将 License 证据交换为短期服务端签发的
-entitlement token：
+Agent 在本地验签企业 License 后，将完整签名 envelope 提交给 Control Service。
+服务端使用配置的厂商公钥重新验签，再交换为短期服务端签发的 entitlement token：
 
 ```json
-{
-  "licenseId": "lic_123",
-  "licenseDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "deploymentId": "deployment_001",
-  "expiresAt": "2027-01-01T00:00:00Z",
-  "features": ["enterprise.models", "enterprise.skills"]
-}
+{"license":{"format":"zhiyuan-license-v1","keyId":"license-prod-1","payload":{"licenseId":"lic_123","customerId":"customer_001","deploymentId":"deployment_001","edition":"enterprise","issuedAt":"2026-01-01T00:00:00.000Z","expiresAt":"2027-01-01T00:00:00.000Z","graceDays":7,"limits":{"users":100,"agents":100},"features":["enterprise.models","enterprise.skills"]},"signature":"base64url-ed25519-signature"}}
 ```
 
 响应包含 `entitlementToken`、`expiresAt` 和规范化后的功能列表。Token 绑定当前

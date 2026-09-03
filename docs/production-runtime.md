@@ -4,7 +4,7 @@ This baseline makes the AEP control service and gateway authorizer operable unde
 
 ## Configuration Gate
 
-Set `AEP_ENVIRONMENT=production`. The control service then refuses to start with an ephemeral JWT signing key, the development PostgreSQL URL, default MinIO credentials, or the default/short bootstrap administrator password. Invalid booleans, durations, URLs, log settings, request limits, and header limits always fail startup instead of silently reverting to defaults.
+Set `AEP_ENVIRONMENT=production`. The control service then refuses to start with an ephemeral JWT signing key, the development PostgreSQL URL, default MinIO credentials, or the default/short bootstrap administrator password, and requires a License trusted-key file, License file, customer ID, and deployment ID. Startup verifies the mounted License and refuses invalid or expired licenses. Invalid booleans, durations, URLs, log settings, request limits, and header limits always fail startup instead of silently reverting to defaults.
 
 Mock federated authentication is a development and test fixture. Production defaults it off and rejects AEP_ENABLE_MOCK_FEDERATED_AUTH=true. Do not advertise or expose federated_auth until a real enterprise identity adapter is configured.
 

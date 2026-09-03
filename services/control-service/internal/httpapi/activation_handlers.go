@@ -1,49 +1,62 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
-	"regexp"
 	"sort"
-	"strings"
 	"time"
 )
 
-var licenseDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-
 type licenseActivationRequest struct {
-	LicenseID     string   `json:"licenseId"`
-	LicenseDigest string   `json:"licenseDigest"`
-	DeploymentID  string   `json:"deploymentId"`
-	ExpiresAt     string   `json:"expiresAt"`
-	Features      []string `json:"features"`
+	License json.RawMessage `json:"license"`
 }
 
-// activateLicense exchanges evidence from a locally verified license for a
-// short-lived, service-signed entitlement. The service never receives a
-// license private key or a signing operation.
+// activateLicense verifies the complete vendor-signed envelope against the
+// deployment License and issues a short-lived entitlement. The service never
+// receives a license private key or performs License signing.
 func (s *Server) activateLicense(response http.ResponseWriter, request *http.Request) {
 	var input licenseActivationRequest
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if !validActivationRequest(input) {
+	if len(input.License) == 0 || s.app.LicenseVerifier == nil || s.app.License == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_LICENSE_ACTIVATION", "The license activation evidence is invalid.")
 		return
 	}
-	expiresAt, err := time.Parse(time.RFC3339, input.ExpiresAt)
-	if err != nil || !expiresAt.After(time.Now().UTC()) {
+	verified, err := s.app.LicenseVerifier.Verify(input.License)
+	if err != nil {
+		writeProblem(response, request, http.StatusForbidden, "INVALID_LICENSE", "The enterprise license could not be verified.")
+		return
+	}
+	if verified.Digest != s.app.License.Digest || verified.Claims.LicenseID != s.app.License.Claims.LicenseID || verified.Claims.CustomerID != s.app.License.Claims.CustomerID {
+		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The license is not registered for this enterprise deployment.")
+		return
+	}
+	if s.app.Config.LicenseEnterpriseID != "" && claimsFrom(request).Tenant != s.app.Config.LicenseEnterpriseID {
+		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The authenticated enterprise is not licensed for this deployment.")
+		return
+	}
+	if verified.Status == "enterprise-expired" {
 		writeProblem(response, request, http.StatusForbidden, "LICENSE_EXPIRED", "The enterprise license is expired.")
 		return
 	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, verified.Claims.ExpiresAt)
+	if err != nil {
+		writeProblem(response, request, http.StatusForbidden, "INVALID_LICENSE", "The enterprise license expiry is invalid.")
+		return
+	}
+	if verified.Status == "enterprise-grace" {
+		expiresAt = verified.GraceEndsAt
+	}
 	claims := claimsFrom(request)
-	features := normalizeActivationFeatures(input.Features)
+	features := normalizeActivationFeatures(verified.Claims.Features)
 	token, tokenExpiresAt, err := s.app.Tokens.IssueEntitlement(
 		claims.Subject,
 		claims.Tenant,
 		claims.AgentID,
-		input.DeploymentID,
-		input.LicenseID,
-		input.LicenseDigest,
+		verified.Claims.DeploymentID,
+		verified.Claims.LicenseID,
+		verified.Digest,
 		features,
 		expiresAt,
 	)
@@ -56,28 +69,11 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		"tokenType":        "Bearer",
 		"expiresAt":        tokenExpiresAt,
 		"expiresIn":        maxInt64(1, int64(time.Until(tokenExpiresAt).Seconds())),
-		"licenseId":        input.LicenseID,
-		"licenseDigest":    input.LicenseDigest,
-		"deploymentId":     input.DeploymentID,
+		"licenseId":        verified.Claims.LicenseID,
+		"licenseDigest":    verified.Digest,
+		"deploymentId":     verified.Claims.DeploymentID,
 		"features":         features,
 	})
-}
-
-func validActivationRequest(input licenseActivationRequest) bool {
-	return input.LicenseID != "" && len(input.LicenseID) <= 256 &&
-		licenseDigestPattern.MatchString(input.LicenseDigest) &&
-		input.DeploymentID != "" && len(input.DeploymentID) <= 256 &&
-		input.ExpiresAt != "" && len(input.Features) <= 256 &&
-		allActivationFeaturesValid(input.Features)
-}
-
-func allActivationFeaturesValid(features []string) bool {
-	for _, feature := range features {
-		if feature == "" || len(feature) > 128 || strings.TrimSpace(feature) != feature {
-			return false
-		}
-	}
-	return true
 }
 
 func normalizeActivationFeatures(features []string) []string {

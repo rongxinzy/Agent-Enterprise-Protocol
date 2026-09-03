@@ -121,10 +121,11 @@ paths:
       tags: [Authentication]
       operationId: activateEnterpriseLicense
       description: >-
-        Exchanges evidence from a locally verified enterprise license for a
-        short-lived Control Service entitlement token. The service never
-        receives license signing private keys. Clients MUST verify the signed
-        license envelope locally before calling this operation.
+        Exchanges a signed enterprise license for a short-lived Control Service
+        entitlement token. The service verifies the complete signed envelope
+        with its configured vendor public keys and never receives license
+        signing private keys. Clients MUST verify the envelope locally before
+        calling this operation.
       security:
         - aepBearerAuth: []
       requestBody:
@@ -375,21 +376,19 @@ components:
             model scopes until the password is changed.
     LicenseActivationRequest:
       type: object
-      required: [licenseId, licenseDigest, deploymentId, expiresAt, features]
+      required: [license]
       additionalProperties: false
       properties:
-        licenseId: {type: string, minLength: 1, maxLength: 256}
-        licenseDigest:
-          type: string
-          pattern: '^sha256:[0-9a-f]{64}$'
-          description: SHA-256 digest of the canonical signed license envelope.
-        deploymentId: {type: string, minLength: 1, maxLength: 256}
-        expiresAt: {type: string, format: date-time}
-        features:
-          type: array
-          maxItems: 256
-          uniqueItems: true
-          items: {type: string, minLength: 1, maxLength: 128}
+        license:
+          type: object
+          additionalProperties: false
+          required: [format, keyId, payload, signature]
+          description: Complete vendor-signed License envelope.
+          properties:
+            format: {type: string, const: zhiyuan-license-v1}
+            keyId: {type: string, minLength: 1, maxLength: 128}
+            payload: {type: object, additionalProperties: false}
+            signature: {type: string, minLength: 1, maxLength: 256}
     EntitlementTokenResponse:
       type: object
       required: [entitlementToken, tokenType, expiresAt, expiresIn, licenseId, licenseDigest, deploymentId, features]

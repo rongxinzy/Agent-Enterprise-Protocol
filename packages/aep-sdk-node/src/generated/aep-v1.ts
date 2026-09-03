@@ -159,7 +159,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Exchanges evidence from a locally verified enterprise license for a short-lived Control Service entitlement token. The service never receives license signing private keys. Clients MUST verify the signed license envelope locally before calling this operation. */
+        /** @description Exchanges a signed enterprise license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation. */
         post: operations["activateEnterpriseLicense"];
         delete?: never;
         options?: never;
@@ -1008,13 +1008,14 @@ export interface components {
             refreshToken: string;
         };
         LicenseActivationRequest: {
-            licenseId: string;
-            /** @description SHA-256 digest of the canonical signed license envelope. */
-            licenseDigest: string;
-            deploymentId: string;
-            /** Format: date-time */
-            expiresAt: string;
-            features: string[];
+            /** @description Complete vendor-signed License envelope. */
+            license: {
+                /** @constant */
+                format: "zhiyuan-license-v1";
+                keyId: string;
+                payload: Record<string, never>;
+                signature: string;
+            };
         };
         EntitlementTokenResponse: {
             /** @description Short-lived service-signed token for enterprise runtime checks. */

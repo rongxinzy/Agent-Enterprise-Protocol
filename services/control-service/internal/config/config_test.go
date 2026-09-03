@@ -14,6 +14,7 @@ var environmentKeys = []string{
 	"AEP_MINIO_SECRET_KEY", "AEP_MINIO_SECRET_KEY_FILE", "AEP_MINIO_SECURE",
 	"AEP_SIGNING_KEY_BASE64", "AEP_SIGNING_KEY_BASE64_FILE",
 	"AEP_CREDENTIAL_MASTER_KEY_BASE64", "AEP_CREDENTIAL_MASTER_KEY_BASE64_FILE",
+	"AEP_LICENSE_TRUSTED_KEYS_FILE", "AEP_LICENSE_FILE", "AEP_LICENSE_DEPLOYMENT_ID", "AEP_LICENSE_CUSTOMER_ID", "AEP_LICENSE_ENTERPRISE_ID",
 	"AEP_BOOTSTRAP_ADMIN_PASSWORD", "AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE",
 	"AEP_DATA_PLANE_RECONCILER_TOKEN", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
@@ -144,4 +145,13 @@ func validProductionEnvironment(t *testing.T) {
 	t.Setenv("AEP_MINIO_SECRET_KEY", "production-secret")
 	t.Setenv("AEP_SIGNING_KEY_BASE64", "production-signing-seed")
 	t.Setenv("AEP_BOOTSTRAP_ADMIN_PASSWORD", "production-admin-password")
+	keyFile := filepath.Join(t.TempDir(), "license-public-keys.json")
+	if err := os.WriteFile(keyFile, []byte(`{"license-prod-1":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEP_LICENSE_TRUSTED_KEYS_FILE", keyFile)
+	t.Setenv("AEP_LICENSE_DEPLOYMENT_ID", "deployment-enterprise-001")
+	t.Setenv("AEP_LICENSE_CUSTOMER_ID", "customer-enterprise-001")
+	t.Setenv("AEP_LICENSE_ENTERPRISE_ID", "enterprise")
+	t.Setenv("AEP_LICENSE_FILE", filepath.Join(t.TempDir(), "license.zylic"))
 }
