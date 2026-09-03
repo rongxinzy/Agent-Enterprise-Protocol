@@ -29,6 +29,71 @@ CREATE TABLE IF NOT EXISTS users (
   UNIQUE (enterprise_id, username)
 );
 
+CREATE TABLE IF NOT EXISTS deployments (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS permissions (
+  id text PRIMARY KEY,
+  description text NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  id text NOT NULL,
+  name text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  built_in boolean NOT NULL DEFAULT false,
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, id),
+  UNIQUE (deployment_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  deployment_id text NOT NULL,
+  role_id text NOT NULL,
+  permission_id text NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+  PRIMARY KEY (deployment_id, role_id, permission_id),
+  FOREIGN KEY (deployment_id, role_id) REFERENCES roles(deployment_id, id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS teams (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  id text NOT NULL,
+  name text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  built_in boolean NOT NULL DEFAULT false,
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, id),
+  UNIQUE (deployment_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS user_role_bindings (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id text NOT NULL,
+  is_primary boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, user_id, role_id),
+  FOREIGN KEY (deployment_id, role_id) REFERENCES roles(deployment_id, id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_team_bindings (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  team_id text NOT NULL,
+  is_primary boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, user_id, team_id),
+  FOREIGN KEY (deployment_id, team_id) REFERENCES teams(deployment_id, id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS agents (
   agent_id text PRIMARY KEY,
   enterprise_id text NOT NULL REFERENCES enterprises(id),
@@ -76,7 +141,7 @@ CREATE TABLE IF NOT EXISTS skill_assignments (
   id text PRIMARY KEY,
   enterprise_id text NOT NULL REFERENCES enterprises(id),
   skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent')),
+  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent', 'role', 'team')),
   subject_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (enterprise_id, skill_id, subject_type, subject_id)
@@ -104,7 +169,7 @@ CREATE TABLE IF NOT EXISTS credential_assignments (
   id text PRIMARY KEY,
   enterprise_id text NOT NULL,
   credential_id text NOT NULL,
-  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent')),
+  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent', 'role', 'team')),
   subject_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (enterprise_id, credential_id) REFERENCES credentials(enterprise_id, id) ON DELETE CASCADE,
@@ -147,7 +212,7 @@ CREATE TABLE IF NOT EXISTS model_assignments (
   id text PRIMARY KEY,
   enterprise_id text NOT NULL,
   model_id text NOT NULL,
-  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent')),
+  subject_type text NOT NULL CHECK (subject_type IN ('enterprise', 'organization', 'user', 'agent', 'role', 'team')),
   subject_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (enterprise_id, model_id) REFERENCES models(enterprise_id, id) ON DELETE CASCADE,
