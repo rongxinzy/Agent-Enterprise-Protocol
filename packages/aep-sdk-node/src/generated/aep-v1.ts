@@ -990,6 +990,10 @@ export interface components {
             id: string;
             name: string;
         };
+        Deployment: {
+            id: string;
+            name: string;
+        };
         AuthenticationMethod: {
             id: string;
             /** @enum {string} */
@@ -1001,6 +1005,8 @@ export interface components {
         /** @description Authentication methods enabled for the enterprise. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured. */
         AuthenticationMethods: {
             enterprise: components["schemas"]["Enterprise"];
+            deployment: components["schemas"]["Deployment"];
+            deploymentId?: string;
             /** @description The ID of the preferred enabled method. Defaults to zhiyuan-password for the password-only production profile. */
             preferredMethodId?: string | null;
             methods: components["schemas"]["AuthenticationMethod"][];
@@ -1022,11 +1028,12 @@ export interface components {
             /** @enum {string} */
             platform: "windows" | "macos" | "linux";
         };
-        PasswordLoginRequest: components["schemas"]["AgentContext"] & {
-            enterpriseId: string;
+        PasswordLoginRequest: components["schemas"]["AgentContext"] & ({
+            deploymentId?: string;
+            enterpriseId?: string;
             username: string;
             password: string;
-        };
+        } | unknown | unknown);
         TokenResponse: {
             /** @description Bearer token for AEP management APIs. */
             accessToken: string;
@@ -1037,11 +1044,13 @@ export interface components {
             tokenType: "Bearer";
             expiresIn: number;
             modelAccessExpiresIn: number;
+            deploymentId?: string;
             /** @description When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed. */
             passwordChangeRequired: boolean;
         };
         FederatedLoginStartRequest: {
-            enterpriseId: string;
+            deploymentId?: string;
+            enterpriseId?: string;
             methodId: string;
             /** Format: uri */
             redirectUri: string;
@@ -1051,7 +1060,7 @@ export interface components {
              * @constant
              */
             codeChallengeMethod: "S256";
-        };
+        } | unknown | unknown;
         FederatedLoginStartResponse: {
             transactionId: string;
             /** Format: uri */
@@ -1107,6 +1116,8 @@ export interface components {
         CurrentIdentity: {
             user: components["schemas"]["User"];
             enterprise: components["schemas"]["Enterprise"];
+            deployment: components["schemas"]["Deployment"];
+            deploymentId: string;
             roles: string[];
             /** Format: date-time */
             sessionExpiresAt: string;

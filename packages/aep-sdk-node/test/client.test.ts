@@ -57,6 +57,11 @@ describe('AepClient SDK gate', () => {
     expect((await client.getCurrentIdentity()).user.id).toBe('user-1');
   });
 
+  test('supports deployment-only password login during tenant migration', async () => {
+    await expect(client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'})).resolves.toBeTruthy();
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/auth/password/login');
+  });
+
   test('activates a locally verified enterprise license', async () => {
     await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
     await expect(client.activateEnterpriseLicense({

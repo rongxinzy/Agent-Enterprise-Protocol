@@ -17,6 +17,7 @@ import (
 
 type passwordLoginRequest struct {
 	app.AgentContext
+	DeploymentID string `json:"deploymentId"`
 	EnterpriseID string `json:"enterpriseId"`
 	Username     string `json:"username"`
 	Password     string `json:"password"`
@@ -26,6 +27,16 @@ const zhiYuanPasswordMethodID = "zhiyuan-password"
 
 func (s *Server) authenticationMethods(response http.ResponseWriter, request *http.Request) {
 	enterpriseID := request.URL.Query().Get("enterpriseHint")
+	if deploymentHint := request.URL.Query().Get("deploymentHint"); deploymentHint != "" {
+		if !s.acceptsDeployment(deploymentHint) {
+			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
+			return
+		}
+		enterpriseID = s.storageTenantID()
+	}
+	if enterpriseID == "" {
+		enterpriseID = s.storageTenantID()
+	}
 	enterprise, err := s.app.DB.GetEnterprise(request.Context(), enterpriseID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The enterprise was not found.")
@@ -45,6 +56,8 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"enterprise":        map[string]string{"id": enterprise.ID, "name": enterprise.Name},
+		"deployment":        map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
+		"deploymentId":      s.app.DeploymentID(),
 		"preferredMethodId": zhiYuanPasswordMethodID,
 		"methods":           methods,
 	})
@@ -55,15 +68,20 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	enterpriseID, validDeployment := s.resolveTenant(input.DeploymentID, input.EnterpriseID)
+	if !validDeployment {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
+		return
+	}
 	now := time.Now().UTC()
-	fingerprint := s.loginFingerprint(request, input.EnterpriseID, input.Username)
+	fingerprint := s.loginFingerprint(request, enterpriseID, input.Username)
 	retryAfter, err := s.loginThrottle(request.Context(), fingerprint.KeyHash, now)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	if retryAfter > 0 {
-		if err := s.recordLoginThrottled(request.Context(), fingerprint, input.EnterpriseID, input.AgentID, now); err != nil {
+		if err := s.recordLoginThrottled(request.Context(), fingerprint, enterpriseID, input.AgentID, now); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
@@ -73,7 +91,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{EnterpriseID: input.EnterpriseID, Username: input.Username})
+	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{EnterpriseID: enterpriseID, Username: input.Username})
 	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
 		databaseFailure(response, request, lookupErr)
 		return
@@ -88,7 +106,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		if lookupErr == nil {
 			userID = user.ID
 		}
-		backoff, err := s.recordLoginFailure(request.Context(), fingerprint, input.EnterpriseID, userID, input.AgentID, now)
+		backoff, err := s.recordLoginFailure(request.Context(), fingerprint, enterpriseID, userID, input.AgentID, now)
 		if err != nil {
 			databaseFailure(response, request, err)
 			return
@@ -122,6 +140,7 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	var input struct {
+		DeploymentID        string `json:"deploymentId"`
 		EnterpriseID        string `json:"enterpriseId"`
 		MethodID            string `json:"methodId"`
 		RedirectURI         string `json:"redirectUri"`
@@ -135,7 +154,12 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method was not found.")
 		return
 	}
-	if _, err := s.app.DB.GetEnterprise(request.Context(), input.EnterpriseID); err != nil {
+	enterpriseID, validDeployment := s.resolveTenant(input.DeploymentID, input.EnterpriseID)
+	if !validDeployment {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
+		return
+	}
+	if _, err := s.app.DB.GetEnterprise(request.Context(), enterpriseID); err != nil {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The enterprise was not found.")
 		return
 	}
@@ -143,7 +167,7 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 	state := uuid.NewString()
 	expiresAt := time.Now().UTC().Add(5 * time.Minute)
 	s.transactionMu.Lock()
-	s.transactions[transactionID] = federatedTransaction{EnterpriseID: input.EnterpriseID, State: state, ExpiresAt: expiresAt}
+	s.transactions[transactionID] = federatedTransaction{EnterpriseID: enterpriseID, State: state, ExpiresAt: expiresAt}
 	s.transactionMu.Unlock()
 	writeJSON(response, http.StatusOK, map[string]any{
 		"transactionId":    transactionID,
@@ -151,6 +175,30 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 		"state":            state,
 		"expiresIn":        300,
 	})
+}
+
+func (s *Server) storageTenantID() string {
+	if value := s.app.Config.BootstrapEnterpriseID; value != "" {
+		return value
+	}
+	return s.app.DeploymentID()
+}
+
+func (s *Server) acceptsDeployment(deploymentID string) bool {
+	return deploymentID == s.app.DeploymentID() || deploymentID == s.storageTenantID()
+}
+
+func (s *Server) resolveTenant(deploymentID, enterpriseID string) (string, bool) {
+	if deploymentID != "" && !s.acceptsDeployment(deploymentID) {
+		return "", false
+	}
+	if enterpriseID != "" && enterpriseID != s.storageTenantID() && enterpriseID != s.app.DeploymentID() {
+		return "", false
+	}
+	if enterpriseID != "" {
+		return enterpriseID, true
+	}
+	return s.storageTenantID(), true
 }
 
 func (s *Server) federatedExchange(response http.ResponseWriter, request *http.Request) {
@@ -287,6 +335,8 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 	writeJSON(response, http.StatusOK, map[string]any{
 		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": nullablePGText(user.Email)},
 		"enterprise":             map[string]string{"id": enterprise.ID, "name": enterprise.Name},
+		"deployment":             map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
+		"deploymentId":           s.app.DeploymentID(),
 		"roles":                  user.RoleIds,
 		"sessionExpiresAt":       claims.ExpiresAt.Time,
 		"passwordChangeRequired": claims.PasswordChangeRequired,

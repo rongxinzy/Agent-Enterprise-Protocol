@@ -108,6 +108,29 @@ func TestMetadataAdvertisesMockFederatedAuthOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestMetadataAdvertisesDeploymentIdentity(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/aep/v1/metadata", nil)
+	response := httptest.NewRecorder()
+	application := &app.App{Config: config.Config{DeploymentID: "deployment-42", DeploymentName: "Zhiyuan deployment"}}
+	New(application).Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("metadata status = %d", response.Code)
+	}
+	var document struct {
+		DeploymentID string `json:"deploymentId"`
+		Deployment   struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.DeploymentID != "deployment-42" || document.Deployment.ID != "deployment-42" || document.Deployment.Name != "Zhiyuan deployment" {
+		t.Fatalf("metadata deployment = %#v", document)
+	}
+}
+
 func TestProductionNeverEnablesMockFederatedAuth(t *testing.T) {
 	if mockFederatedAuthEnabled(config.Config{Environment: "production", EnableMockFederatedAuth: true}) {
 		t.Fatal("production enabled mock federated authentication")

@@ -12,6 +12,7 @@ export interface AepTokens {
   tokenType: 'Bearer';
   expiresIn: number;
   modelAccessExpiresIn: number;
+  deploymentId?: string;
   passwordChangeRequired: boolean;
 }
 
@@ -68,11 +69,13 @@ export interface AepTransport {
 }
 
 export interface ServiceMetadata {
-  service: string;
-  supportedProtocolVersions: string[];
-  capabilities: AepCapability[];
-  jwksUri: string;
-  modelGateway?: ModelGatewayMetadata;
+	service: string;
+	supportedProtocolVersions: string[];
+	capabilities: AepCapability[];
+	jwksUri: string;
+	deploymentId?: string;
+	deployment?: {id: string; name: string};
+	modelGateway?: ModelGatewayMetadata;
 }
 
 export type CredentialMetadata = components['schemas']['CredentialMetadata'];
@@ -115,14 +118,18 @@ export interface AuthenticationMethod {
 }
 
 export interface AuthenticationMethods {
-  enterprise: {id: string; name: string};
+	enterprise: {id: string; name: string};
+	deployment?: {id: string; name: string};
+	deploymentId?: string;
   preferredMethodId?: string | null;
   methods: AuthenticationMethod[];
 }
 
 export interface CurrentIdentity {
-  user: {id: string; displayName: string; email?: string | null};
-  enterprise: {id: string; name: string};
+	user: {id: string; displayName: string; email?: string | null};
+	enterprise: {id: string; name: string};
+	deployment?: {id: string; name: string};
+	deploymentId?: string;
   roles: string[];
   sessionExpiresAt: string;
   passwordChangeRequired: boolean;

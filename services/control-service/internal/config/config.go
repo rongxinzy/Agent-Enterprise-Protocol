@@ -44,6 +44,8 @@ type Config struct {
 	AccessTTL                 time.Duration
 	ModelAccessTTL            time.Duration
 	ModelGatewayBaseURL       string
+	DeploymentID              string
+	DeploymentName            string
 	DataPlaneReconcilerToken  string
 	GatewayLicenseStatusToken string
 	CredentialMasterKeyBase64 string
@@ -113,17 +115,19 @@ func Load() (Config, error) {
 		Issuer:                    value("AEP_ISSUER", "http://localhost:8080"),
 		SigningKeyBase64:          signingKey,
 		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
+		DeploymentID:              value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo")),
+		DeploymentName:            value("AEP_DEPLOYMENT_NAME", value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Deployment")),
 		DataPlaneReconcilerToken:  dataPlaneToken,
 		GatewayLicenseStatusToken: gatewayLicenseToken,
 		CredentialMasterKeyBase64: credentialKey,
 		CredentialMasterKeyFile:   os.Getenv("AEP_CREDENTIAL_MASTER_KEY_FILE"),
 		LicenseTrustedKeysFile:    os.Getenv("AEP_LICENSE_TRUSTED_KEYS_FILE"),
 		LicenseFile:               os.Getenv("AEP_LICENSE_FILE"),
-		LicenseDeploymentID:       os.Getenv("AEP_LICENSE_DEPLOYMENT_ID"),
+		LicenseDeploymentID:       value("AEP_LICENSE_DEPLOYMENT_ID", value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"))),
 		LicenseCustomerID:         os.Getenv("AEP_LICENSE_CUSTOMER_ID"),
 		LicenseEnterpriseID:       os.Getenv("AEP_LICENSE_ENTERPRISE_ID"),
-		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo"),
-		BootstrapEnterpriseName:   value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Enterprise"),
+		BootstrapEnterpriseID:     value("AEP_BOOTSTRAP_ENTERPRISE_ID", value("AEP_DEPLOYMENT_ID", "demo")),
+		BootstrapEnterpriseName:   value("AEP_BOOTSTRAP_ENTERPRISE_NAME", value("AEP_DEPLOYMENT_NAME", "Demo Deployment")),
 		BootstrapAdminUsername:    value("AEP_BOOTSTRAP_ADMIN_USERNAME", "admin"),
 		BootstrapAdminPassword:    adminPassword,
 		BootstrapAdminDisplayName: value("AEP_BOOTSTRAP_ADMIN_DISPLAY_NAME", "AEP Administrator"),
@@ -195,6 +199,9 @@ func (cfg Config) Validate() error {
 	}
 	if strings.TrimSpace(cfg.MinioEndpoint) == "" || strings.TrimSpace(cfg.MinioBucket) == "" {
 		return errors.New("AEP_MINIO_ENDPOINT and AEP_MINIO_BUCKET must not be empty")
+	}
+	if strings.TrimSpace(cfg.DeploymentID) == "" || strings.TrimSpace(cfg.DeploymentName) == "" {
+		return errors.New("AEP_DEPLOYMENT_ID and AEP_DEPLOYMENT_NAME must not be empty")
 	}
 	if cfg.LoginBackoffMax < cfg.LoginBackoffBase {
 		return errors.New("AEP_LOGIN_BACKOFF_MAX must be greater than or equal to AEP_LOGIN_BACKOFF_BASE")

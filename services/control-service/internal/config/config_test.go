@@ -17,6 +17,7 @@ var environmentKeys = []string{
 	"AEP_LICENSE_TRUSTED_KEYS_FILE", "AEP_LICENSE_FILE", "AEP_LICENSE_DEPLOYMENT_ID", "AEP_LICENSE_CUSTOMER_ID", "AEP_LICENSE_ENTERPRISE_ID",
 	"AEP_BOOTSTRAP_ADMIN_PASSWORD", "AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE",
 	"AEP_DATA_PLANE_RECONCILER_TOKEN", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE",
+	"AEP_DEPLOYMENT_ID", "AEP_DEPLOYMENT_NAME",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
 	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
 }
@@ -27,8 +28,21 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginBackoffBase != 30*time.Second {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
+	}
+}
+
+func TestLoadUsesExplicitDeploymentIdentity(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_DEPLOYMENT_ID", "deployment-42")
+	t.Setenv("AEP_DEPLOYMENT_NAME", "Zhiyuan deployment")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeploymentID != "deployment-42" || cfg.DeploymentName != "Zhiyuan deployment" {
+		t.Fatalf("deployment configuration = %q/%q", cfg.DeploymentID, cfg.DeploymentName)
 	}
 }
 
