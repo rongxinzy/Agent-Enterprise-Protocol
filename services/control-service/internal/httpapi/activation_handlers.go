@@ -22,7 +22,8 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if len(input.License) == 0 || s.app.LicenseVerifier == nil || s.app.License == nil {
+	currentLicense := s.app.CurrentLicense()
+	if len(input.License) == 0 || s.app.LicenseVerifier == nil || currentLicense == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_LICENSE_ACTIVATION", "The license activation evidence is invalid.")
 		return
 	}
@@ -31,7 +32,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, http.StatusForbidden, "INVALID_LICENSE", "The enterprise license could not be verified.")
 		return
 	}
-	if verified.Digest != s.app.License.Digest || verified.Claims.LicenseID != s.app.License.Claims.LicenseID || verified.Claims.CustomerID != s.app.License.Claims.CustomerID {
+	if verified.Digest != currentLicense.Digest || verified.Claims.LicenseID != currentLicense.Claims.LicenseID || verified.Claims.CustomerID != currentLicense.Claims.CustomerID {
 		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The license is not registered for this enterprise deployment.")
 		return
 	}

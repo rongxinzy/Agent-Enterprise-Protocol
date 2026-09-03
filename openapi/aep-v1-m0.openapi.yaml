@@ -147,6 +147,14 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/AdminAgent'}
         '404': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/licenses:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses'
+  /aep/v1/admin/licenses/{licenseId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses~1{licenseId}'
+  /aep/v1/admin/licenses/import:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses~1import'
+  /aep/v1/admin/licenses/{licenseId}/revoke:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses~1{licenseId}~1revoke'
   /aep/v1/admin/events:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1events'
 components:

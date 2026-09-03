@@ -621,6 +621,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/licenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listLicenses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/licenses/{licenseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                licenseId: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getLicense"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/licenses/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["importLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/licenses/{licenseId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["revokeLicense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/events": {
         parameters: {
             query?: never;
@@ -1485,6 +1551,55 @@ export interface components {
             items: components["schemas"]["AdminDelivery"][];
             nextCursor: string | null;
         };
+        License: {
+            licenseId: string;
+            enterpriseId: string;
+            customerId: string;
+            deploymentId: string;
+            digest: string;
+            keyId: string;
+            /** @enum {string} */
+            status: "active" | "revoked";
+            /** Format: date-time */
+            issuedAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: date-time */
+            graceEndsAt: string;
+            limits: {
+                users: number;
+                agents: number;
+            };
+            features: string[];
+            activeAgents: number;
+            activeUsers: number;
+            /** Format: date-time */
+            revokedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            readonly payload?: Record<string, never>;
+        };
+        LicensePage: {
+            items: components["schemas"]["License"][];
+            nextCursor: string | null;
+        };
+        LicenseImportRequest: {
+            /** @description Complete vendor-signed license envelope. Private keys are never accepted. */
+            license: {
+                /** @constant */
+                format: "zhiyuan-license-v1";
+                keyId: string;
+                payload: Record<string, never>;
+                signature: string;
+            };
+        };
+        LicenseRevocation: {
+            licenseId: string;
+            /** @constant */
+            status: "revoked";
+        };
         StoredEvent: components["schemas"]["AgentEvent"] & {
             /** Format: date-time */
             receivedAt: string;
@@ -1635,6 +1750,33 @@ export interface components {
                 "application/json": components["schemas"]["Assignment"];
             };
         };
+        /** @description Registered enterprise licenses */
+        LicenseList: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["LicensePage"];
+            };
+        };
+        /** @description Registered enterprise license metadata */
+        License: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["License"];
+            };
+        };
+        /** @description License revocation result */
+        LicenseRevocation: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["LicenseRevocation"];
+            };
+        };
         /** @description Masked credential metadata */
         CredentialMetadata: {
             headers: {
@@ -1704,6 +1846,7 @@ export interface components {
         UserId: string;
         AssignmentId: string;
         EventId: string;
+        LicenseId: string;
         ModelId: string;
     };
     requestBodies: never;
@@ -2742,6 +2885,69 @@ export interface operations {
                     "application/json": components["schemas"]["AdminAgent"];
                 };
             };
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    listLicenses: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["LicenseList"];
+        };
+    };
+    getLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                licenseId: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["License"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    importLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LicenseImportRequest"];
+            };
+        };
+        responses: {
+            201: components["responses"]["License"];
+            409: components["responses"]["Problem-2"];
+            422: components["responses"]["Problem-2"];
+        };
+    };
+    revokeLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                licenseId: components["parameters"]["LicenseId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["LicenseRevocation"];
             404: components["responses"]["Problem-2"];
         };
     };

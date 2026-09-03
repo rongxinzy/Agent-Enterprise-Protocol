@@ -7,13 +7,13 @@
 ## 范围与版本
 
 - 数据库：PostgreSQL（`timestamptz`、`jsonb`、数组和 `bytea`）。
-- 迁移：`001_init.sql` 至 `007_licenses.sql`，由服务启动时幂等执行。
-- 业务表：23 张。
-- 运行时表：`schema_migrations` 1 张，因此已完成全部迁移的数据库通常有 24 张表。
+- 迁移：`001_init.sql` 至 `008_license_operations.sql`，由服务启动时幂等执行。
+- 业务表：24 张。
+- 运行时表：`schema_migrations` 1 张，因此已完成全部迁移的数据库通常有 25 张表。
 - 直接带有 `enterprise_id` 的业务表以该字段作为租户边界；其余表通过企业根实体的
   外键链路或脱敏键参与隔离。复合外键用于防止跨企业引用。
 
-当前 `schema.sql` 已同步到迁移 `007_licenses.sql`，包含全部 23 张业务表。
+当前 `schema.sql` 已同步到迁移 `008_license_operations.sql`，包含全部 24 张业务表。
 生产升级仍必须执行版本化迁移，不能只修改快照文件。
 
 ## 表结构
@@ -405,6 +405,21 @@ License 与企业用户/Agent 的激活绑定和最后活跃时间，用于席�
 
 UQ：`(license_id, agent_id)`。
 
+### 24. `license_audit_events`
+
+License 导入和撤销的管理员操作审计，不保存签名私钥或完整 envelope。
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `id` | `text` | PK |
+| `enterprise_id` | `text` | NN, FK -> `enterprises.id` ON DELETE CASCADE |
+| `license_id` | `text` | NN；License 标识 |
+| `actor_user_id` | `text` | NN；管理员用户标识 |
+| `action` | `text` | NN；`import` 或 `revoke` |
+| `outcome` | `text` | NN；`success` 或 `failure` |
+| `reason` | `text` | 可空 |
+| `created_at` | `timestamptz` | NN, DF `now()` |
+
 ### 22. `schema_migrations`（运行时表）
 
 迁移器自动创建的版本跟踪表，不属于企业业务域。每个迁移文件成功执行后写入一行。
@@ -431,6 +446,8 @@ UQ：`(license_id, agent_id)`。
 | `idx_authentication_audit_enterprise_time` | `authentication_audit_events` | `(enterprise_id, created_at DESC)` | 管理员按企业查询认证审计 |
 | `idx_licenses_enterprise_status` | `licenses` | `(enterprise_id, status, expires_at)` | 查询企业 License 状态和过期记录 |
 | `idx_license_activations_enterprise` | `license_activations` | `(enterprise_id, license_id, revoked_at)` | 统计席位、查询激活和撤销实例 |
+| `idx_license_audit_enterprise_time` | `license_audit_events` | `(enterprise_id, created_at DESC)` | 按企业查询 License 运维审计 |
+| `idx_license_audit_license_time` | `license_audit_events` | `(license_id, created_at DESC)` | 查询单个 License 的操作时间线 |
 
 ### PostgreSQL 自动索引
 

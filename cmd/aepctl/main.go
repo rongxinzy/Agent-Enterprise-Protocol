@@ -48,7 +48,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.username, "username", env("AEPCTL_USERNAME", "admin"), "administrator username")
 	root.PersistentFlags().StringVar(&opts.password, "password", os.Getenv("AEPCTL_PASSWORD"), "administrator password (prefer AEPCTL_PASSWORD)")
 	root.PersistentFlags().StringVar(&opts.agentID, "agent-id", env("AEPCTL_AGENT_ID", "aepctl"), "stable CLI Agent identifier")
-	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), dataPlaneCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
+	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), licenseCommand(opts), dataPlaneCommand(opts), eventCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
 	return root
 }
 
