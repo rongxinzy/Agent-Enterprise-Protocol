@@ -45,6 +45,7 @@ func run() error {
 		return fmt.Errorf("configure logger: %w", err)
 	}
 	verifier := gateway.NewVerifier(config.JWKSURL, config.Issuer, config.JWKSTTL, config.RequestTimeout)
+	verifier.ConfigureLicenseStatus(config.LicenseStatusURL, config.LicenseStatusToken, config.LicenseStatusTTL)
 	gatewayHandler, err := gateway.NewHandler(config, verifier)
 	if err != nil {
 		return fmt.Errorf("configure handler: %w", err)

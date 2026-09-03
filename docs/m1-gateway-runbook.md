@@ -86,6 +86,9 @@ Relevant authorizer environment variables are:
 | `AEP_GATEWAY_JWKS_TTL` | `5m` | Public-key cache TTL |
 | `AEP_GATEWAY_REQUEST_LIMIT` | `2097152` | Maximum inference body bytes |
 | `AEP_GATEWAY_REQUIRE_ENTITLEMENT` | `false` | Require an activated enterprise entitlement JWT |
+| `AEP_GATEWAY_LICENSE_STATUS_URL` | unset | Internal Control Service License status endpoint |
+| `AEP_GATEWAY_LICENSE_STATUS_TOKEN` | unset | Shared internal Token for License status checks |
+| `AEP_GATEWAY_LICENSE_STATUS_TTL` | `15s` | Cache lifetime for a License status decision |
 
 ## Production Deployment
 

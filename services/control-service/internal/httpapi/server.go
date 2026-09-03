@@ -55,6 +55,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 	router.Get("/aep/v1/metadata", server.metadata)
 	router.Get("/internal/data-plane/desired-state", server.internalDataPlane(server.getDataPlaneDesiredState))
 	router.Put("/internal/data-plane/status", server.internalDataPlane(server.putInternalDataPlaneStatus))
+	router.Get("/internal/gateway/licenses/{licenseId}", server.internalLicenseStatus)
 	router.Get("/aep/v1/auth/methods", server.authenticationMethods)
 	router.Post("/aep/v1/auth/password/login", server.passwordLogin)
 	router.Post("/aep/v1/auth/federated/start", server.federatedStart)

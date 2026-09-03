@@ -22,6 +22,10 @@ type TokenVerifier interface {
 	Ready(ctx context.Context) error
 }
 
+type EntitlementVerifier interface {
+	CheckEntitlement(context.Context, *ModelClaims) error
+}
+
 type Handler struct {
 	verifier           TokenVerifier
 	proxy              *httputil.ReverseProxy
@@ -87,6 +91,21 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	if h.requireEntitlement && claims.TokenUse != "entitlement" {
 		writeProblem(response, request, http.StatusForbidden, "ENTITLEMENT_REQUIRED", "An active enterprise entitlement token is required.")
 		return
+	}
+	if h.requireEntitlement {
+		checker, ok := h.verifier.(EntitlementVerifier)
+		if !ok {
+			writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Enterprise entitlement status could not be checked.")
+			return
+		}
+		if err := checker.CheckEntitlement(request.Context(), claims); err != nil {
+			if errors.Is(err, ErrEntitlementInactive) {
+				writeProblem(response, request, http.StatusForbidden, "LICENSE_REVOKED", "The enterprise License entitlement is inactive.")
+			} else {
+				writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Enterprise entitlement status could not be checked.")
+			}
+			return
+		}
 	}
 	body, model, err := readModelRequest(request.Body, h.limit)
 	if err != nil {

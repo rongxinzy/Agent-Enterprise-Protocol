@@ -45,6 +45,7 @@ type Config struct {
 	ModelAccessTTL            time.Duration
 	ModelGatewayBaseURL       string
 	DataPlaneReconcilerToken  string
+	GatewayLicenseStatusToken string
 	CredentialMasterKeyBase64 string
 	CredentialMasterKeyFile   string
 	LicenseTrustedKeys        map[string]string
@@ -95,6 +96,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gatewayLicenseToken, err := secret("AEP_GATEWAY_LICENSE_STATUS_TOKEN", "")
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Environment:               environment,
 		LogFormat:                 value("AEP_LOG_FORMAT", defaultLogFormat),
@@ -109,6 +114,7 @@ func Load() (Config, error) {
 		SigningKeyBase64:          signingKey,
 		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
 		DataPlaneReconcilerToken:  dataPlaneToken,
+		GatewayLicenseStatusToken: gatewayLicenseToken,
 		CredentialMasterKeyBase64: credentialKey,
 		CredentialMasterKeyFile:   os.Getenv("AEP_CREDENTIAL_MASTER_KEY_FILE"),
 		LicenseTrustedKeysFile:    os.Getenv("AEP_LICENSE_TRUSTED_KEYS_FILE"),
