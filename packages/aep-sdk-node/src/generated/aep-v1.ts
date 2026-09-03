@@ -1166,15 +1166,13 @@ export interface components {
              */
             type: "GlobalScope";
         };
-        OrganizationScope: {
+        TeamScope: {
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
-            type: "OrganizationScope";
+            type: "TeamScope";
             id: string;
-            /** @default false */
-            includeDescendants: boolean;
         };
         UserScope: {
             /**
@@ -1184,15 +1182,7 @@ export interface components {
             type: "UserScope";
             id: string;
         };
-        AgentScope: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "AgentScope";
-            id: string;
-        };
-        ControlEventScope: components["schemas"]["GlobalScope"] | components["schemas"]["OrganizationScope"] | components["schemas"]["UserScope"] | components["schemas"]["AgentScope"];
+        ControlEventScope: components["schemas"]["GlobalScope"] | components["schemas"]["TeamScope"] | components["schemas"]["UserScope"];
         ControlEventResource: {
             /** @enum {string} */
             type: "skill" | "plugin" | "credential" | "model";
@@ -1517,7 +1507,7 @@ export interface components {
             subject: components["schemas"]["Subject"];
         };
         /** @enum {string} */
-        ControlEventScopeType: "global" | "organization" | "user" | "agent";
+        ControlEventScopeType: "global" | "team" | "user";
         CreateControlEventRequest: {
             type: components["schemas"]["ControlEventType"];
             scope: components["schemas"]["ControlEventScope"];
@@ -1554,11 +1544,12 @@ export interface components {
         AdminDelivery: {
             deliveryId: string;
             eventId: string;
-            agentId: string;
+            agentId?: string | null;
+            sessionId?: string | null;
             state: components["schemas"]["DeliveryState"];
             attemptCount?: number;
             /** Format: date-time */
-            createdAt: string;
+            createdAt?: string;
             /** Format: date-time */
             receivedAt?: string | null;
             /** Format: date-time */
@@ -2121,7 +2112,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-AEP-Agent-ID": components["parameters"]["AepAgentId"];
+                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2154,7 +2145,7 @@ export interface operations {
                 limit?: components["parameters"]["Limit"];
             };
             header: {
-                "X-AEP-Agent-ID": components["parameters"]["AepAgentId"];
+                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2179,7 +2170,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-AEP-Agent-ID": components["parameters"]["AepAgentId"];
+                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2209,7 +2200,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-AEP-Agent-ID": components["parameters"]["AepAgentId"];
+                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2841,7 +2832,7 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
                 state?: components["schemas"]["DeliveryState"];
-                agentId?: string;
+                sessionId?: string;
             };
             header?: never;
             path: {

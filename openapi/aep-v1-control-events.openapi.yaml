@@ -172,7 +172,7 @@ paths:
         - name: state
           in: query
           schema: {$ref: '#/components/schemas/DeliveryState'}
-        - name: agentId
+        - name: sessionId
           in: query
           schema: {type: string}
       responses:
@@ -189,7 +189,7 @@ components:
     AepAgentId:
       name: X-AEP-Agent-ID
       in: header
-      required: true
+      required: false
       schema: {type: string}
     AepProtocolVersion:
       name: X-AEP-Protocol-Version
@@ -277,13 +277,12 @@ components:
         - model.catalog.changed
     ControlEventScopeType:
       type: string
-      enum: [global, organization, user, agent]
+      enum: [global, team, user]
     ControlEventScope:
       oneOf:
         - {$ref: '#/components/schemas/GlobalScope'}
-        - {$ref: '#/components/schemas/OrganizationScope'}
+        - {$ref: '#/components/schemas/TeamScope'}
         - {$ref: '#/components/schemas/UserScope'}
-        - {$ref: '#/components/schemas/AgentScope'}
       discriminator:
         propertyName: type
     GlobalScope:
@@ -292,26 +291,18 @@ components:
       properties:
         type: {type: string, const: global}
       additionalProperties: false
-    OrganizationScope:
+    TeamScope:
       type: object
       required: [type, id]
       properties:
-        type: {type: string, const: organization}
+        type: {type: string, const: team}
         id: {type: string}
-        includeDescendants: {type: boolean, default: false}
       additionalProperties: false
     UserScope:
       type: object
       required: [type, id]
       properties:
         type: {type: string, const: user}
-        id: {type: string}
-      additionalProperties: false
-    AgentScope:
-      type: object
-      required: [type, id]
-      properties:
-        type: {type: string, const: agent}
         id: {type: string}
       additionalProperties: false
     ControlEventResource:
@@ -408,11 +399,12 @@ components:
       enum: [pending, received, running, succeeded, failed, expired, superseded]
     AdminDelivery:
       type: object
-      required: [deliveryId, eventId, agentId, state, createdAt, updatedAt]
+      required: [deliveryId, eventId, state, updatedAt]
       properties:
         deliveryId: {type: string}
         eventId: {type: string}
-        agentId: {type: string}
+        agentId: {type: [string, 'null']}
+        sessionId: {type: [string, 'null']}
         state: {$ref: '#/components/schemas/DeliveryState'}
         attemptCount: {type: integer, minimum: 0}
         createdAt: {type: string, format: date-time}

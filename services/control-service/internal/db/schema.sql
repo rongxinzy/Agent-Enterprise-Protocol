@@ -276,11 +276,29 @@ CREATE TABLE IF NOT EXISTS control_deliveries (
   UNIQUE (event_id, agent_id)
 );
 
+CREATE TABLE IF NOT EXISTS session_control_deliveries (
+  cursor bigserial UNIQUE,
+  delivery_id text PRIMARY KEY,
+  event_id text NOT NULL REFERENCES control_events(event_id) ON DELETE CASCADE,
+  session_id text NOT NULL REFERENCES user_sessions(session_id) ON DELETE CASCADE,
+  state text NOT NULL DEFAULT 'pending',
+  attempt_count integer NOT NULL DEFAULT 0,
+  received_at timestamptz,
+  started_at timestamptz,
+  completed_at timestamptz,
+  applied_revision text,
+  error_code text,
+  message text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (event_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS telemetry_events (
   event_id text PRIMARY KEY,
   enterprise_id text NOT NULL REFERENCES enterprises(id),
   user_id text NOT NULL REFERENCES users(id),
-  agent_id text NOT NULL REFERENCES agents(agent_id),
+  agent_id text REFERENCES agents(agent_id),
+  session_id text REFERENCES user_sessions(session_id) ON DELETE SET NULL,
   type text NOT NULL,
   resource_type text,
   resource_id text,
@@ -325,7 +343,10 @@ CREATE TABLE IF NOT EXISTS data_plane_statuses (
 
 CREATE INDEX IF NOT EXISTS idx_agents_user ON agents (enterprise_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_deliveries_agent_state ON control_deliveries (agent_id, state, cursor);
+CREATE INDEX IF NOT EXISTS idx_session_deliveries_session_state ON session_control_deliveries (session_id, state, cursor);
+CREATE INDEX IF NOT EXISTS idx_session_deliveries_event ON session_control_deliveries (event_id, cursor);
 CREATE INDEX IF NOT EXISTS idx_telemetry_search ON telemetry_events (enterprise_id, agent_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_session_search ON telemetry_events (enterprise_id, session_id, occurred_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_models_default ON models (enterprise_id) WHERE is_default;
 CREATE INDEX IF NOT EXISTS idx_model_assignments_subject ON model_assignments (enterprise_id, subject_type, subject_id, model_id);
 CREATE INDEX IF NOT EXISTS idx_credential_assignments_subject ON credential_assignments (enterprise_id, subject_type, subject_id, credential_id);

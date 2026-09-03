@@ -190,7 +190,7 @@ export interface ControlEvent {
   eventId: string;
   cursor: string;
   type: string;
-  scope: {type: 'global' | 'organization' | 'user' | 'agent'; id?: string};
+  scope: {type: 'global' | 'team' | 'user'; id?: string};
   resource?: {type: string; id: string; revision: string};
   task: {type: string};
   createdAt: string;
