@@ -72,6 +72,14 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		return
 	}
 	features := normalizeActivationFeatures(verified.Claims.Features)
+	var modelScopes []string
+	if s.app.Pool != nil {
+		modelScopes, err = s.app.ModelScopes(request.Context(), claims.Tenant, claims.Subject, claims.AgentID)
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
 	token, tokenExpiresAt, err := s.app.Tokens.IssueEntitlement(
 		claims.Subject,
 		claims.Tenant,
@@ -80,6 +88,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		verified.Claims.LicenseID,
 		verified.Digest,
 		features,
+		modelScopes,
 		expiresAt,
 	)
 	if err != nil {

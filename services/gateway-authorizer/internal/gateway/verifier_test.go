@@ -49,6 +49,33 @@ func TestVerifierAcceptsAEPModelTokenAndCachesJWKS(t *testing.T) {
 	}
 }
 
+func TestVerifierAcceptsEnterpriseEntitlementToken(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(response).Encode(map[string]any{"keys": []map[string]string{{
+			"kty": "OKP", "kid": "test-key", "use": "sig", "alg": "EdDSA", "crv": "Ed25519",
+			"x": base64.RawURLEncoding.EncodeToString(public),
+		}}})
+	}))
+	defer server.Close()
+	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
+	raw := signModelToken(t, private, "test-key", ModelClaims{
+		Tenant: "enterprise-a", AgentID: "agent-a", LicenseID: "license-a", LicenseDigest: "sha256:abc", DeploymentID: "deployment-a",
+		ModelScopes: []string{"model-a"}, TokenUse: "entitlement",
+		RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-entitlement"),
+	})
+	claims, err := verifier.Verify(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("verify entitlement token: %v", err)
+	}
+	if claims.TokenUse != "entitlement" || claims.LicenseID != "license-a" || !contains(claims.ModelScopes, "model-a") {
+		t.Fatalf("unexpected entitlement claims: %#v", claims)
+	}
+}
+
 func TestVerifierRefreshesFreshJWKSForUnknownKID(t *testing.T) {
 	firstPublic, firstPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

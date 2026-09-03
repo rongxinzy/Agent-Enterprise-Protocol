@@ -391,7 +391,7 @@ components:
             signature: {type: string, minLength: 1, maxLength: 256}
     EntitlementTokenResponse:
       type: object
-      required: [entitlementToken, tokenType, expiresAt, expiresIn, licenseId, licenseDigest, deploymentId, features]
+      required: [entitlementToken, tokenType, expiresAt, expiresIn, licenseId, licenseDigest, deploymentId, features, modelScopes]
       properties:
         entitlementToken:
           type: string
@@ -403,6 +403,10 @@ components:
         licenseDigest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
         deploymentId: {type: string}
         features: {type: array, items: {type: string}}
+        modelScopes:
+          description: Model identifiers authorized for this enterprise entitlement.
+          type: array
+          items: {type: string}
     CreatePlatformUserRequest:
       type: object
       required: [enterpriseId, username, displayName, temporaryPassword]

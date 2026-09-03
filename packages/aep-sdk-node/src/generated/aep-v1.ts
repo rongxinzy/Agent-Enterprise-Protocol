@@ -1095,6 +1095,8 @@ export interface components {
             licenseDigest: string;
             deploymentId: string;
             features: string[];
+            /** @description Model identifiers authorized for this enterprise entitlement. */
+            modelScopes: string[];
         };
         User: {
             id: string;
