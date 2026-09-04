@@ -12,13 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	db "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db/generated"
 )
 
 func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		AgentVersion         string   `json:"agentVersion"`
-		Platform             string   `json:"platform"`
 		AppliedSkillRevision *string  `json:"appliedSkillRevision"`
 		InstalledSkillIDs    []string `json:"installedSkillIds"`
 	}
@@ -26,39 +23,11 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	claims := claimsFrom(request)
-	if claims.SessionID != "" {
-		s.heartbeatUserSession(response, request, claims.SessionID, input.AppliedSkillRevision, input.InstalledSkillIDs)
+	if claims.SessionID == "" {
+		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
 		return
 	}
-	agent, err := s.app.DB.GetAgent(request.Context(), claims.AgentID)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	if input.AgentVersion == "" {
-		input.AgentVersion = agent.AgentVersion
-	}
-	if input.Platform == "" {
-		input.Platform = agent.Platform
-	}
-	_, err = s.app.Pool.Exec(request.Context(), `UPDATE agents SET agent_version=$2,platform=$3,last_seen_at=now(),applied_skill_revision=COALESCE($4,applied_skill_revision),installed_skill_ids=CASE WHEN cardinality($5::text[])>0 THEN $5 ELSE installed_skill_ids END WHERE agent_id=$1`, claims.AgentID, input.AgentVersion, input.Platform, input.AppliedSkillRevision, input.InstalledSkillIDs)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	_, err = s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.agent_id=$1 AND d.state='pending' AND e.expires_at<=now()`, claims.AgentID)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	var pending bool
-	var watermark *string
-	err = s.app.Pool.QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.agent_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM control_deliveries WHERE agent_id=$1)`, claims.AgentID).Scan(&pending, &watermark)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"serverTime": time.Now().UTC(), "hasPendingControlEvents": pending, "controlEventWatermark": watermark, "nextHeartbeatAfterSeconds": 30})
+	s.heartbeatUserSession(response, request, claims.SessionID, input.AppliedSkillRevision, input.InstalledSkillIDs)
 }
 
 func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *http.Request, sessionID string, _ *string, _ []string) {
@@ -76,45 +45,11 @@ func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *htt
 func (s *Server) listAgentControlEvents(response http.ResponseWriter, request *http.Request) {
 	after, _ := strconv.ParseInt(request.URL.Query().Get("afterCursor"), 10, 64)
 	claims := claimsFrom(request)
-	if claims.SessionID != "" {
-		s.listUserSessionControlEvents(response, request, claims.SessionID, after)
+	if claims.SessionID == "" {
+		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
 		return
 	}
-	_, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.agent_id=$1 AND d.state='pending' AND e.expires_at<=now()`, claims.AgentID)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.created_at,e.expires_at FROM control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.agent_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now() AND d.cursor>$2 ORDER BY d.cursor LIMIT $3`, claims.AgentID, after, limit(request))
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	defer rows.Close()
-	items := make([]map[string]any, 0)
-	var next *string
-	for rows.Next() {
-		var deliveryID, eventID, eventType, scopeType, taskType string
-		var cursor int64
-		var scopeID, resourceType, resourceID, resourceRevision *string
-		var createdAt, expiresAt time.Time
-		if err := rows.Scan(&deliveryID, &eventID, &cursor, &eventType, &scopeType, &scopeID, &resourceType, &resourceID, &resourceRevision, &taskType, &createdAt, &expiresAt); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-		scope := map[string]any{"type": scopeType}
-		if scopeID != nil {
-			scope["id"] = *scopeID
-		}
-		item := map[string]any{"deliveryId": deliveryID, "eventId": eventID, "cursor": strconv.FormatInt(cursor, 10), "type": eventType, "scope": scope, "task": map[string]string{"type": taskType}, "createdAt": createdAt, "expiresAt": expiresAt}
-		if resourceID != nil {
-			item["resource"] = map[string]any{"type": resourceType, "id": resourceID, "revision": resourceRevision}
-		}
-		items = append(items, item)
-		value := strconv.FormatInt(cursor, 10)
-		next = &value
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+	s.listUserSessionControlEvents(response, request, claims.SessionID, after)
 }
 
 func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, request *http.Request, sessionID string, after int64) {
@@ -169,28 +104,11 @@ func (s *Server) acknowledgeControlEvent(response http.ResponseWriter, request *
 	}
 	deliveryID := chi.URLParam(request, "deliveryId")
 	claims := claimsFrom(request)
-	if claims.SessionID != "" {
-		s.acknowledgeUserSessionDelivery(response, request, deliveryID, claims.SessionID, input.ReceivedAt)
+	if claims.SessionID == "" {
+		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries SET state='received',received_at=COALESCE(received_at,$3),updated_at=now(),attempt_count=attempt_count+1 WHERE delivery_id=$1 AND agent_id=$2 AND state IN ('pending','failed')`, deliveryID, claims.AgentID, input.ReceivedAt)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	if result.RowsAffected() == 0 {
-		var state string
-		err = s.app.Pool.QueryRow(request.Context(), `SELECT state FROM control_deliveries WHERE delivery_id=$1 AND agent_id=$2`, deliveryID, claims.AgentID).Scan(&state)
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The delivery was not found.")
-			return
-		}
-		if state != "received" && state != "running" && state != "succeeded" && state != "failed" {
-			writeProblem(response, request, http.StatusConflict, "DELIVERY_STATE_CONFLICT", "The delivery cannot be acknowledged in its current state.")
-			return
-		}
-	}
-	response.WriteHeader(http.StatusNoContent)
+	s.acknowledgeUserSessionDelivery(response, request, deliveryID, claims.SessionID, input.ReceivedAt)
 }
 
 func (s *Server) acknowledgeUserSessionDelivery(response http.ResponseWriter, request *http.Request, deliveryID, sessionID string, receivedAt time.Time) {
@@ -233,20 +151,11 @@ func (s *Server) reportControlEventResult(response http.ResponseWriter, request 
 	}
 	deliveryID := chi.URLParam(request, "deliveryId")
 	claims := claimsFrom(request)
-	if claims.SessionID != "" {
-		s.reportUserSessionDeliveryResult(response, request, deliveryID, claims.SessionID, input.Status, input.StartedAt, input.CompletedAt, input.AppliedRevision, input.ErrorCode, input.Message)
+	if claims.SessionID == "" {
+		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries SET state=$3,started_at=CASE WHEN $3='running' THEN COALESCE($4,now()) ELSE COALESCE($4,started_at) END,completed_at=CASE WHEN $3='running' THEN NULL ELSE COALESCE($5,completed_at) END,applied_revision=CASE WHEN $3='running' THEN NULL ELSE COALESCE($6,applied_revision) END,error_code=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($7,error_code) END,message=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($8,message) END,updated_at=now() WHERE delivery_id=$1 AND agent_id=$2 AND (state IN ('received','running') OR state=$3)`, deliveryID, claims.AgentID, input.Status, input.StartedAt, input.CompletedAt, input.AppliedRevision, input.ErrorCode, input.Message)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusConflict, "DELIVERY_STATE_CONFLICT", "The delivery cannot accept this result.")
-		return
-	}
-	response.WriteHeader(http.StatusNoContent)
+	s.reportUserSessionDeliveryResult(response, request, deliveryID, claims.SessionID, input.Status, input.StartedAt, input.CompletedAt, input.AppliedRevision, input.ErrorCode, input.Message)
 }
 
 func (s *Server) reportUserSessionDeliveryResult(response http.ResponseWriter, request *http.Request, deliveryID, sessionID, status string, startedAt, completedAt *time.Time, appliedRevision, errorCode, message *string) {
@@ -290,6 +199,10 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The event expiry must be in the future.")
 		return
 	}
+	if input.Scope.Type != "global" && input.Scope.Type != "team" && input.Scope.Type != "user" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE", "Control event scope must be global, team, or user.")
+		return
+	}
 	claims := claimsFrom(request)
 	eventID := uuid.NewString()
 	tx, err := s.app.Pool.Begin(request.Context())
@@ -304,36 +217,14 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 		resourceID = &input.Resource.ID
 		resourceRevision = &input.Resource.Revision
 	}
-	_, err = tx.Exec(request.Context(), `INSERT INTO control_events (event_id,deployment_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, eventID, claims.Tenant, input.Type, input.Scope.Type, input.Scope.ID, resourceType, resourceID, resourceRevision, input.Task.Type, input.SupersedesKey, input.ExpiresAt, claims.Subject)
+	_, err = tx.Exec(request.Context(), `INSERT INTO control_events (event_id,deployment_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, eventID, claims.DeploymentID, input.Type, input.Scope.Type, input.Scope.ID, resourceType, resourceID, resourceRevision, input.Task.Type, input.SupersedesKey, input.ExpiresAt, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	if input.SupersedesKey != nil {
-		_, err = tx.Exec(request.Context(), `WITH old AS (UPDATE control_events SET state='superseded' WHERE deployment_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id), old_deliveries AS (UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'), session_deliveries AS (UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending') SELECT 1`, claims.Tenant, *input.SupersedesKey, eventID)
+		_, err = tx.Exec(request.Context(), `WITH old AS (UPDATE control_events SET state='superseded' WHERE deployment_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id) UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'`, claims.DeploymentID, *input.SupersedesKey, eventID)
 		if err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-	}
-	rows, err := tx.Query(request.Context(), `SELECT a.agent_id FROM agents a JOIN users u ON u.id=a.user_id WHERE a.deployment_id=$1 AND ($2='global' OR ($2='agent' AND a.agent_id=$3) OR ($2='user' AND a.user_id=$3) OR ($2='organization' AND $3=ANY(u.team_ids)))`, claims.Tenant, input.Scope.Type, input.Scope.ID)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	agentIDs := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			databaseFailure(response, request, err)
-			return
-		}
-		agentIDs = append(agentIDs, id)
-	}
-	rows.Close()
-	for _, agentID := range agentIDs {
-		if _, err = tx.Exec(request.Context(), `INSERT INTO control_deliveries (delivery_id,event_id,agent_id) VALUES ($1,$2,$3)`, uuid.NewString(), eventID, agentID); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
@@ -341,14 +232,14 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 	// New user sessions receive one durable delivery per terminal. The user
 	// topic is represented by the session rows, so every active terminal gets
 	// an independent cursor and acknowledgement state.
-	rows, err = tx.Query(request.Context(), `SELECT DISTINCT s.session_id
+	rows, err := tx.Query(request.Context(), `SELECT DISTINCT s.session_id
 FROM user_sessions s
 JOIN users u ON u.id=s.user_id AND u.deployment_id=$1
 WHERE s.deployment_id=$1 AND s.revoked_at IS NULL
   AND ($2='global' OR ($2='user' AND s.user_id=$3) OR ($2='team' AND EXISTS (
     SELECT 1 FROM user_team_bindings utb
     WHERE utb.deployment_id=$1 AND utb.user_id=s.user_id AND utb.team_id=$3
-  )))`, claims.Tenant, input.Scope.Type, input.Scope.ID)
+  )))`, claims.DeploymentID, input.Scope.Type, input.Scope.ID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -374,7 +265,7 @@ WHERE s.deployment_id=$1 AND s.revoked_at IS NULL
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"eventId": eventID, "type": input.Type, "scope": input.Scope, "resource": input.Resource, "task": input.Task, "expiresAt": input.ExpiresAt, "state": "active", "createdAt": time.Now().UTC(), "createdBy": claims.Subject, "deliverySummary": map[string]int{"pending": len(agentIDs) + len(sessionIDs), "received": 0, "running": 0, "succeeded": 0, "failed": 0, "expired": 0, "superseded": 0}})
+	writeJSON(response, http.StatusCreated, map[string]any{"eventId": eventID, "type": input.Type, "scope": input.Scope, "resource": input.Resource, "task": input.Task, "expiresAt": input.ExpiresAt, "state": "active", "createdAt": time.Now().UTC(), "createdBy": claims.Subject, "deliverySummary": map[string]int{"pending": len(sessionIDs), "received": 0, "running": 0, "succeeded": 0, "failed": 0, "expired": 0, "superseded": 0}})
 }
 
 func (s *Server) listAdminControlEvents(response http.ResponseWriter, request *http.Request) {
@@ -387,7 +278,7 @@ func (s *Server) getAdminControlEvent(response http.ResponseWriter, request *htt
 func (s *Server) adminEvents(response http.ResponseWriter, request *http.Request, eventID string) {
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
 count(*) FILTER(WHERE d.state='pending'),count(*) FILTER(WHERE d.state='received'),count(*) FILTER(WHERE d.state='running'),count(*) FILTER(WHERE d.state='succeeded'),count(*) FILTER(WHERE d.state='failed'),count(*) FILTER(WHERE d.state='expired'),count(*) FILTER(WHERE d.state='superseded')
-FROM control_events e LEFT JOIN (SELECT event_id,state FROM control_deliveries UNION ALL SELECT event_id,state FROM session_control_deliveries) d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).Tenant, eventID, limit(request))
+FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).Tenant, eventID, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -419,7 +310,7 @@ FROM control_events e LEFT JOIN (SELECT event_id,state FROM control_deliveries U
 
 func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
-	result, err := s.app.Pool.Exec(request.Context(), `WITH cancelled AS (UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active' RETURNING event_id), old AS (UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN(SELECT event_id FROM cancelled) AND state='pending' RETURNING event_id), current AS (UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN(SELECT event_id FROM cancelled) AND state='pending' RETURNING event_id) SELECT event_id FROM cancelled`, eventID, claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active'`, eventID, claimsFrom(request).Tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -428,23 +319,19 @@ func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusConflict, "EVENT_STATE_CONFLICT", "The event cannot be cancelled.")
 		return
 	}
+	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id=$1 AND state='pending'`, eventID)
 	s.adminEvents(response, request, eventID)
 }
 
 func (s *Server) listControlEventDeliveries(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
 	tenant := claimsFrom(request).Tenant
-	_, err := s.app.Pool.Exec(request.Context(), `UPDATE control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
+	_, err := s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.agent_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM (
-SELECT d.delivery_id,d.event_id,d.agent_id,NULL::text AS session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message,d.cursor FROM control_deliveries d
-UNION ALL
-SELECT d.delivery_id,d.event_id,NULL::text AS agent_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message,d.cursor FROM session_control_deliveries d
-) d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
+	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -453,16 +340,16 @@ SELECT d.delivery_id,d.event_id,NULL::text AS agent_id,d.session_id,d.state,d.at
 	items := make([]map[string]any, 0)
 	for rows.Next() {
 		var deliveryID, eventID, state string
-		var agentID, sessionID pgtype.Text
+		var sessionID pgtype.Text
 		var attempts int
 		var receivedAt, completedAt *time.Time
 		var updatedAt time.Time
 		var errorCode, message *string
-		if err := rows.Scan(&deliveryID, &eventID, &agentID, &sessionID, &state, &attempts, &receivedAt, &completedAt, &updatedAt, &errorCode, &message); err != nil {
+		if err := rows.Scan(&deliveryID, &eventID, &sessionID, &state, &attempts, &receivedAt, &completedAt, &updatedAt, &errorCode, &message); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
-		items = append(items, map[string]any{"deliveryId": deliveryID, "eventId": eventID, "agentId": nullablePGText(agentID), "sessionId": nullablePGText(sessionID), "state": state, "attemptCount": attempts, "receivedAt": receivedAt, "completedAt": completedAt, "updatedAt": updatedAt, "errorCode": errorCode, "message": message})
+		items = append(items, map[string]any{"deliveryId": deliveryID, "eventId": eventID, "sessionId": nullablePGText(sessionID), "state": state, "attemptCount": attempts, "receivedAt": receivedAt, "completedAt": completedAt, "updatedAt": updatedAt, "errorCode": errorCode, "message": message})
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nil})
 }
@@ -498,12 +385,11 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			resourceType = &event.Resource.Type
 			resourceID = &event.Resource.ID
 		}
-		var err error
-		if claims.SessionID != "" {
-			_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.Tenant, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
-		} else {
-			_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,agent_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.Tenant, claims.Subject, claims.AgentID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
+		if claims.SessionID == "" {
+			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED"})
+			continue
 		}
+		_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
 		if err != nil {
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "INTERNAL_ERROR"})
 			continue
@@ -514,7 +400,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,agent_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE deployment_id=$1 AND ($2='' OR agent_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).Tenant, request.URL.Query().Get("agentId"), limit(request))
+	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE deployment_id=$1 AND ($2='' OR user_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).Tenant, request.URL.Query().Get("userId"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -523,52 +409,21 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 	items := make([]map[string]any, 0)
 	for rows.Next() {
 		var eventID, userID, eventType string
-		var agentID, sessionID pgtype.Text
+		var sessionID pgtype.Text
 		var resourceType, resourceID, result pgtype.Text
 		var payload []byte
 		var occurredAt, receivedAt time.Time
-		if err := rows.Scan(&eventID, &userID, &agentID, &sessionID, &eventType, &resourceType, &resourceID, &result, &payload, &occurredAt, &receivedAt); err != nil {
+		if err := rows.Scan(&eventID, &userID, &sessionID, &eventType, &resourceType, &resourceID, &result, &payload, &occurredAt, &receivedAt); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 		var data any
 		_ = json.Unmarshal(payload, &data)
-		items = append(items, map[string]any{"eventId": eventID, "userId": userID, "agentId": nullablePGText(agentID), "sessionId": nullablePGText(sessionID), "type": eventType, "resourceType": nullablePGText(resourceType), "resourceId": nullablePGText(resourceID), "result": nullablePGText(result), "data": data, "occurredAt": occurredAt, "receivedAt": receivedAt})
+		items = append(items, map[string]any{"eventId": eventID, "userId": userID, "sessionId": nullablePGText(sessionID), "type": eventType, "resourceType": nullablePGText(resourceType), "resourceId": nullablePGText(resourceID), "result": nullablePGText(result), "data": data, "occurredAt": occurredAt, "receivedAt": receivedAt})
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nil})
 }
 
-func (s *Server) listAgents(response http.ResponseWriter, request *http.Request) {
-	items, err := s.app.DB.ListAgents(request.Context(), db.ListAgentsParams{DeploymentID: claimsFrom(request).Tenant, Column2: request.URL.Query().Get("cursor"), Column3: request.URL.Query().Get("userId"), Limit: limit(request)})
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	result := make([]map[string]any, 0, len(items))
-	for _, agent := range items {
-		result = append(result, publicAgent(agent))
-	}
-	var next any
-	if len(items) == int(limit(request)) {
-		next = items[len(items)-1].AgentID
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": result, "nextCursor": next})
-}
-func (s *Server) getAgent(response http.ResponseWriter, request *http.Request) {
-	agent, err := s.app.DB.GetAgent(request.Context(), chi.URLParam(request, "agentId"))
-	if errors.Is(err, pgx.ErrNoRows) || agent.DeploymentID != claimsFrom(request).Tenant {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Agent was not found.")
-		return
-	}
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, publicAgent(agent))
-}
-func publicAgent(agent db.Agent) map[string]any {
-	return map[string]any{"agentId": agent.AgentID, "deploymentId": agent.DeploymentID, "userId": agent.UserID, "agentVersion": agent.AgentVersion, "platform": agent.Platform, "firstSeenAt": agent.FirstSeenAt.Time, "lastSeenAt": agent.LastSeenAt.Time, "appliedSkillRevision": nullablePGText(agent.AppliedSkillRevision), "installedSkillIds": agent.InstalledSkillIds}
-}
 func nullablePGText(value pgtype.Text) any {
 	if !value.Valid {
 		return nil

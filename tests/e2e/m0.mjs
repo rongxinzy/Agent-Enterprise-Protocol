@@ -34,8 +34,8 @@ try {
 }
 
 async function runScenario() {
-  const admin = new AepClient({baseUrl, agentId: `e2e-admin-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: new MemoryTokenStore()});
-  await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const admin = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  await admin.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
 
   await assertUserSessionLogin();
   const sessions = await admin.listUserSessions();
@@ -55,24 +55,23 @@ async function runScenario() {
   await runCli(['skill', 'publish', '--skill-id', skillId, '--version', '1.0.0']);
   const assignment = await runCli(['skill', 'assign', '--skill-id', skillId, '--subject-type', 'user', '--subject-id', String(user.id)]);
 
-  const agentId = `e2e-agent-${runId}`;
   const agentData = path.join(tempDirectory, 'agent');
   const installEventId = await automaticSkillEventId(skillId, 'assigned:');
   const installedSkill = path.join(agentData, 'managed-skills', skillId, 'SKILL.md');
   await runCompose('stop', 'minio');
-  await runAgent(agentId, username, password, agentData);
+  await runAgent(username, password, agentData);
   assert(!fs.existsSync(installedSkill), 'Skill was installed while MinIO was unavailable');
   await assertDelivery(admin, installEventId, 'failed');
 
   await runCompose('start', 'minio');
-  await waitForSkillInstall(agentId, username, password, agentData, installedSkill);
+  await waitForSkillInstall(username, password, agentData, installedSkill);
   const recoveredDelivery = await assertDelivery(admin, installEventId, 'succeeded');
   assert(recoveredDelivery.attemptCount >= 2, 'Recovered delivery did not record a retry');
   assert(!recoveredDelivery.errorCode && !recoveredDelivery.message, 'Recovered delivery retained stale error details');
 
-  const telemetryBeforeReplay = await admin.searchEvents({agentId});
-  await runAgent(agentId, username, password, agentData);
-  const telemetryAfterReplay = await admin.searchEvents({agentId});
+  const telemetryBeforeReplay = await admin.searchEvents({userId: String(user.id)});
+  await runAgent(username, password, agentData);
+  const telemetryAfterReplay = await admin.searchEvents({userId: String(user.id)});
   assert(telemetryAfterReplay.items.length === telemetryBeforeReplay.items.length, 'Succeeded delivery was executed more than once');
 
   await runCompose('restart', 'postgres');
@@ -82,29 +81,27 @@ async function runScenario() {
 
   await runCli(['skill', 'revoke', '--assignment-id', String(assignment.id)]);
   const removeEventId = await automaticSkillEventId(skillId, 'revoked:');
-  await runAgent(agentId, username, password, agentData);
+  await runAgent(username, password, agentData);
   assert(!fs.existsSync(path.join(agentData, 'managed-skills', skillId)), 'Revoked managed Skill still exists');
   await assertDelivery(admin, removeEventId, 'succeeded');
 
   const expiredEvent = await admin.createControlEvent({
-    type: 'skill.manifest.changed', scope: {type: 'agent', id: agentId},
+    type: 'skill.manifest.changed', scope: {type: 'user', id: String(user.id)},
     resource: {type: 'skill', id: skillId, revision: 'expired'}, task: {type: 'skill.reconcile'},
-    expiresAt: new Date(Date.now() + 1_000).toISOString(), supersedesKey: `expired:${skillId}:${agentId}`,
+    expiresAt: new Date(Date.now() + 1_000).toISOString(), supersedesKey: `expired:${skillId}:${user.id}`,
   });
   await new Promise(resolve => setTimeout(resolve, 1_500));
-  await runAgent(agentId, username, password, agentData);
+  await runAgent(username, password, agentData);
   await assertDelivery(admin, String(expiredEvent.eventId), 'expired');
 
-  const telemetryClient = new AepClient({baseUrl, agentId, agentVersion: 'e2e', platform: platform(), tokenStore: new MemoryTokenStore()});
-  await telemetryClient.loginWithPassword({enterpriseId: 'demo', username, password});
+  const telemetryClient = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  await telemetryClient.loginWithPassword({deploymentId: 'demo', username, password});
   const duplicateEventId = `duplicate-${runId}`;
   const duplicateTelemetry = {eventId: duplicateEventId, type: 'e2e.duplicate', occurredAt: new Date().toISOString(), result: 'succeeded', data: {}};
   await telemetryClient.uploadEventBatch([duplicateTelemetry, duplicateTelemetry]);
   await telemetryClient.uploadEventBatch([duplicateTelemetry]);
 
-  const agent = await admin.getAgent(agentId);
-  assert((agent.installedSkillIds ?? []).length === 0, 'Agent state still reports an installed Skill');
-  const audit = await admin.searchEvents({agentId});
+  const audit = await admin.searchEvents({userId: String(user.id)});
   assert(Array.isArray(audit.items) && audit.items.length >= 3, 'Expected Skill telemetry was not recorded');
   assert(audit.items.filter(item => item.eventId === duplicateEventId).length === 1, 'Telemetry eventId was not deduplicated');
   await runCli(['metadata']);
@@ -171,16 +168,16 @@ async function assertPasswordSecurity() {
   await runCli(['user', 'create', '--user', username, '--display-name', `Forced Change ${runId}`, '--temporary-password', temporaryPassword]);
 
   const store = new MemoryTokenStore();
-  const client = new AepClient({baseUrl, agentId: `forced-agent-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: store});
-  const restricted = await client.loginWithPassword({enterpriseId: 'demo', username, password: temporaryPassword});
+  const client = new AepClient({baseUrl, tokenStore: store});
+  const restricted = await client.loginWithPassword({deploymentId: 'demo', username, password: temporaryPassword});
   assert(restricted.passwordChangeRequired === true, 'Temporary-password login was not marked as restricted');
   const identity = await client.getCurrentIdentity();
   assert(identity.passwordChangeRequired === true && identity.sessionExpiresAt, 'Restricted identity state was incomplete');
-  await assertProblem(client.listAgentModels(), 'PASSWORD_CHANGE_REQUIRED');
+  await assertProblem(client.listModels(), 'PASSWORD_CHANGE_REQUIRED');
 
   const changed = await client.changePassword(temporaryPassword, changedPassword);
   assert(changed.passwordChangeRequired === false, 'Password change did not rotate to an unrestricted session');
-  await client.listAgentModels();
+  await client.listModels();
   await client.logout();
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -194,7 +191,7 @@ async function assertPasswordSecurity() {
   const recovered = await passwordLogin(username, changedPassword);
   assert(recovered.status === 200, `Login did not recover after backoff: ${recovered.status}`);
 
-  const auditCount = Number(await queryDatabase(`SELECT count(*) FROM authentication_audit_events WHERE deployment_id='demo' AND agent_id LIKE 'forced-agent-%'`));
+  const auditCount = Number(await queryDatabase(`SELECT count(*) FROM authentication_audit_events WHERE deployment_id='demo' AND user_id IN (SELECT id FROM users WHERE username='${username}')`));
   assert(auditCount >= 6, `Authentication audit recorded only ${auditCount} events`);
 }
 
@@ -202,7 +199,7 @@ async function passwordLogin(username, password) {
   return fetch(`${baseUrl}/aep/v1/auth/password/login`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-AEP-Protocol-Version': '1.0'},
-    body: JSON.stringify({enterpriseId: 'demo', username, password, agentId: `forced-agent-${runId}`, agentVersion: 'e2e', platform: platform()}),
+    body: JSON.stringify({deploymentId: 'demo', username, password}),
   });
 }
 
@@ -224,10 +221,9 @@ async function runCli(args) {
   const output = await commandOutput('go', [
     'run', './cmd/aepctl',
     '--base-url', baseUrl,
-    '--enterprise', 'demo',
+    '--deployment', 'demo',
     '--username', 'admin',
     '--password', 'change-this-admin-password',
-    '--agent-id', `e2e-cli-${runId}`,
     ...args,
   ]);
   if (!output) return null;
@@ -238,23 +234,22 @@ async function runCompose(...args) {
   await command('docker', ['compose', '-p', project, '-f', composeFile, ...args], composeEnv);
 }
 
-async function waitForSkillInstall(agentId, username, password, dataDirectory, installedSkill) {
+async function waitForSkillInstall(username, password, dataDirectory, installedSkill) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    await runAgent(agentId, username, password, dataDirectory);
+    await runAgent(username, password, dataDirectory);
     if (fs.existsSync(installedSkill)) return;
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   throw new Error('Skill was not installed after MinIO recovered');
 }
 
-async function runAgent(agentId, username, password, dataDirectory) {
+async function runAgent(username, password, dataDirectory) {
   await command(process.execPath, [path.join(root, 'examples', 'node-agent', 'dist', 'index.js'), 'once'], {
     AEP_BASE_URL: baseUrl,
-    AEP_ENTERPRISE_ID: 'demo',
+    AEP_DEPLOYMENT_ID: 'demo',
     AEP_USERNAME: username,
     AEP_PASSWORD: password,
-    AEP_AGENT_ID: agentId,
     AEP_AGENT_DATA_DIR: dataDirectory,
   });
 }

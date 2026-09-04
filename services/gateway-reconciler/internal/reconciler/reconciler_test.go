@@ -68,7 +68,7 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 	desired.ContentHash = canonicalHash(desired)
 	statuses := make([]Status, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("X-AEP-Data-Plane-Token") != "token" || request.Header.Get("X-AEP-Tenant-ID") != "demo" {
+		if request.Header.Get("X-AEP-Data-Plane-Token") != "token" || request.Header.Get("X-AEP-Deployment-ID") != "demo" {
 			response.WriteHeader(http.StatusUnauthorized)
 			return
 		}

@@ -8,32 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type Agent struct {
-	AgentID              string             `json:"agent_id"`
-	DeploymentID         string             `json:"deployment_id"`
-	UserID               string             `json:"user_id"`
-	AgentVersion         string             `json:"agent_version"`
-	Platform             string             `json:"platform"`
-	FirstSeenAt          pgtype.Timestamptz `json:"first_seen_at"`
-	LastSeenAt           pgtype.Timestamptz `json:"last_seen_at"`
-	AppliedSkillRevision pgtype.Text        `json:"applied_skill_revision"`
-	InstalledSkillIds    []string           `json:"installed_skill_ids"`
-}
-
-type ControlDelivery struct {
-	Cursor          pgtype.Int8        `json:"cursor"`
-	DeliveryID      string             `json:"delivery_id"`
-	EventID         string             `json:"event_id"`
-	AgentID         string             `json:"agent_id"`
-	State           string             `json:"state"`
-	AttemptCount    int32              `json:"attempt_count"`
-	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
-	StartedAt       pgtype.Timestamptz `json:"started_at"`
-	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
-	AppliedRevision pgtype.Text        `json:"applied_revision"`
-	ErrorCode       pgtype.Text        `json:"error_code"`
-	Message         pgtype.Text        `json:"message"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+type AuthenticationAuditEvent struct {
+	Cursor        int64              `json:"cursor"`
+	DeploymentID  string             `json:"deployment_id"`
+	UserID        pgtype.Text        `json:"user_id"`
+	SessionID     pgtype.Text        `json:"session_id"`
+	EventType     string             `json:"event_type"`
+	Outcome       string             `json:"outcome"`
+	Reason        pgtype.Text        `json:"reason"`
+	PrincipalHash string             `json:"principal_hash"`
+	SourceHash    string             `json:"source_hash"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ControlEvent struct {
@@ -53,28 +38,135 @@ type ControlEvent struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type Credential struct {
+	DeploymentID   string             `json:"deployment_id"`
+	ID             string             `json:"id"`
+	Name           string             `json:"name"`
+	Service        string             `json:"service"`
+	Type           string             `json:"type"`
+	DeliveryMode   string             `json:"delivery_mode"`
+	EncryptedValue []byte             `json:"encrypted_value"`
+	Nonce          []byte             `json:"nonce"`
+	KeyID          string             `json:"key_id"`
+	MaskedValue    string             `json:"masked_value"`
+	Enabled        bool               `json:"enabled"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	RotatedAt      pgtype.Timestamptz `json:"rotated_at"`
+}
+
+type CredentialAssignment struct {
+	ID           string             `json:"id"`
+	DeploymentID string             `json:"deployment_id"`
+	CredentialID string             `json:"credential_id"`
+	SubjectType  string             `json:"subject_type"`
+	SubjectID    string             `json:"subject_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type CredentialResolutionAudit struct {
+	ID           string             `json:"id"`
+	DeploymentID string             `json:"deployment_id"`
+	CredentialID string             `json:"credential_id"`
+	UserID       string             `json:"user_id"`
+	SessionID    pgtype.Text        `json:"session_id"`
+	Purpose      string             `json:"purpose"`
+	Outcome      string             `json:"outcome"`
+	Reason       pgtype.Text        `json:"reason"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type DataPlaneDesiredState struct {
+	DeploymentID string             `json:"deployment_id"`
+	Revision     string             `json:"revision"`
+	Routes       []byte             `json:"routes"`
+	ContentHash  string             `json:"content_hash"`
+	PublishedAt  pgtype.Timestamptz `json:"published_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DataPlaneStatus struct {
+	DeploymentID     string             `json:"deployment_id"`
+	State            string             `json:"state"`
+	ObservedRevision pgtype.Text        `json:"observed_revision"`
+	ContentHash      pgtype.Text        `json:"content_hash"`
+	LastAppliedAt    pgtype.Timestamptz `json:"last_applied_at"`
+	ErrorCode        pgtype.Text        `json:"error_code"`
+	Message          pgtype.Text        `json:"message"`
+	ResourceCount    int32              `json:"resource_count"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Deployment struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type License struct {
+	LicenseID       string             `json:"license_id"`
+	DeploymentID    string             `json:"deployment_id"`
+	CustomerID      string             `json:"customer_id"`
+	Digest          string             `json:"digest"`
+	KeyID           string             `json:"key_id"`
+	Status          string             `json:"status"`
+	IssuedAt        pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	GraceEndsAt     pgtype.Timestamptz `json:"grace_ends_at"`
+	UserLimit       int32              `json:"user_limit"`
+	ActivationLimit int32              `json:"activation_limit"`
+	Features        []string           `json:"features"`
+	Payload         []byte             `json:"payload"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LicenseActivation struct {
+	ID           string             `json:"id"`
+	LicenseID    string             `json:"license_id"`
+	DeploymentID string             `json:"deployment_id"`
+	UserID       string             `json:"user_id"`
+	ActivatedAt  pgtype.Timestamptz `json:"activated_at"`
+	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
+	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type LicenseAuditEvent struct {
+	ID           string             `json:"id"`
+	DeploymentID string             `json:"deployment_id"`
+	LicenseID    string             `json:"license_id"`
+	ActorUserID  string             `json:"actor_user_id"`
+	Action       string             `json:"action"`
+	Outcome      string             `json:"outcome"`
+	Reason       pgtype.Text        `json:"reason"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type LoginRateLimit struct {
+	KeyHash      string             `json:"key_hash"`
+	FailureCount int32              `json:"failure_count"`
+	BlockedUntil pgtype.Timestamptz `json:"blocked_until"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Model struct {
-	DeploymentID  string             `json:"deployment_id"`
-	ID            string             `json:"id"`
-	DisplayName   string             `json:"display_name"`
-	SourceType    string             `json:"source_type"`
-	Protocol      string             `json:"protocol"`
-	Endpoint      pgtype.Text        `json:"endpoint"`
-	UpstreamModel pgtype.Text        `json:"upstream_model"`
-	LocalModelRef pgtype.Text        `json:"local_model_ref"`
-	CredentialID  pgtype.Text        `json:"credential_id"`
-	Capabilities  []string           `json:"capabilities"`
-	ContextWindow pgtype.Int4        `json:"context_window"`
-	IsDefault     bool               `json:"is_default"`
-	Enabled       bool               `json:"enabled"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	DeploymentID           string             `json:"deployment_id"`
+	ID                     string             `json:"id"`
+	DisplayName            string             `json:"display_name"`
+	SourceType             string             `json:"source_type"`
+	Protocol               string             `json:"protocol"`
+	Endpoint               pgtype.Text        `json:"endpoint"`
+	UpstreamModel          pgtype.Text        `json:"upstream_model"`
+	LocalModelRef          pgtype.Text        `json:"local_model_ref"`
+	CredentialID           pgtype.Text        `json:"credential_id"`
+	Capabilities           []string           `json:"capabilities"`
+	ReasoningCompatibility []byte             `json:"reasoning_compatibility"`
+	ContextWindow          pgtype.Int4        `json:"context_window"`
+	IsDefault              bool               `json:"is_default"`
+	Enabled                bool               `json:"enabled"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ModelAssignment struct {
@@ -86,22 +178,42 @@ type ModelAssignment struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
-type Team struct {
-	ID           string             `json:"id"`
-	DeploymentID string             `json:"deployment_id"`
-	Name         string             `json:"name"`
-	ParentID     pgtype.Text        `json:"parent_id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+type Permission struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
 }
 
-type RefreshSession struct {
-	TokenHash    string             `json:"token_hash"`
+type Role struct {
 	DeploymentID string             `json:"deployment_id"`
-	UserID       string             `json:"user_id"`
-	AgentID      string             `json:"agent_id"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	BuiltIn      bool               `json:"built_in"`
+	Enabled      bool               `json:"enabled"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type RolePermission struct {
+	DeploymentID string `json:"deployment_id"`
+	RoleID       string `json:"role_id"`
+	PermissionID string `json:"permission_id"`
+}
+
+type SessionControlDelivery struct {
+	Cursor          pgtype.Int8        `json:"cursor"`
+	DeliveryID      string             `json:"delivery_id"`
+	EventID         string             `json:"event_id"`
+	SessionID       string             `json:"session_id"`
+	State           string             `json:"state"`
+	AttemptCount    int32              `json:"attempt_count"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	AppliedRevision pgtype.Text        `json:"applied_revision"`
+	ErrorCode       pgtype.Text        `json:"error_code"`
+	Message         pgtype.Text        `json:"message"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Skill struct {
@@ -126,7 +238,7 @@ type SkillSyncResult struct {
 	ID                string             `json:"id"`
 	DeploymentID      string             `json:"deployment_id"`
 	UserID            string             `json:"user_id"`
-	AgentID           string             `json:"agent_id"`
+	SessionID         pgtype.Text        `json:"session_id"`
 	Revision          string             `json:"revision"`
 	Status            string             `json:"status"`
 	InstalledSkillIds []string           `json:"installed_skill_ids"`
@@ -145,11 +257,22 @@ type SkillVersion struct {
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
+type Team struct {
+	DeploymentID string             `json:"deployment_id"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	BuiltIn      bool               `json:"built_in"`
+	Enabled      bool               `json:"enabled"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TelemetryEvent struct {
 	EventID      string             `json:"event_id"`
 	DeploymentID string             `json:"deployment_id"`
 	UserID       string             `json:"user_id"`
-	AgentID      string             `json:"agent_id"`
+	SessionID    pgtype.Text        `json:"session_id"`
 	Type         string             `json:"type"`
 	ResourceType pgtype.Text        `json:"resource_type"`
 	ResourceID   pgtype.Text        `json:"resource_id"`
@@ -169,8 +292,40 @@ type User struct {
 	Status                string             `json:"status"`
 	RequirePasswordChange bool               `json:"require_password_change"`
 	IsAdmin               bool               `json:"is_admin"`
-	TeamIds       []string           `json:"team_ids"`
-	RoleIds               []string           `json:"role_ids"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserRoleBinding struct {
+	DeploymentID string             `json:"deployment_id"`
+	UserID       string             `json:"user_id"`
+	RoleID       string             `json:"role_id"`
+	IsPrimary    bool               `json:"is_primary"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserSession struct {
+	SessionID    string             `json:"session_id"`
+	DeploymentID string             `json:"deployment_id"`
+	UserID       string             `json:"user_id"`
+	Topic        string             `json:"topic"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
+	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type UserSessionToken struct {
+	TokenHash string             `json:"token_hash"`
+	SessionID string             `json:"session_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserTeamBinding struct {
+	DeploymentID string             `json:"deployment_id"`
+	UserID       string             `json:"user_id"`
+	TeamID       string             `json:"team_id"`
+	IsPrimary    bool               `json:"is_primary"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }

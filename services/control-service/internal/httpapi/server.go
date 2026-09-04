@@ -66,21 +66,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 		protected.Use(server.authenticate)
 		protected.Post("/aep/v1/auth/password/change", server.changePassword)
 		protected.Post("/aep/v1/auth/logout", server.logout)
-		protected.Post("/aep/v1/agent/activation", server.activateLicense)
-		protected.Get("/aep/v1/agent/me", server.currentIdentity)
-		protected.Get("/aep/v1/agent/models", server.listAgentModels)
-		protected.Get("/aep/v1/agent/credentials", server.listAgentCredentials)
-		protected.Post("/aep/v1/agent/credentials/{credentialId}/resolve", server.resolveAgentCredential)
-		protected.Post("/aep/v1/agent/heartbeat", server.heartbeat)
-		protected.Get("/aep/v1/agent/control-events", server.listAgentControlEvents)
-		protected.Post("/aep/v1/agent/control-events/{deliveryId}/acknowledge", server.acknowledgeControlEvent)
-		protected.Post("/aep/v1/agent/control-events/{deliveryId}/result", server.reportControlEventResult)
-		protected.Get("/aep/v1/agent/skills/manifest", server.skillManifest)
-		protected.Get("/aep/v1/agent/skills/{skillId}/versions/{version}/package", server.downloadSkillPackage)
-		protected.Post("/aep/v1/agent/skills/sync-results", server.reportSkillSyncResult)
-		protected.Post("/aep/v1/agent/events/batch", server.uploadTelemetryBatch)
-		// Canonical user-session surface. Legacy /agent paths remain aliases for
-		// one release so existing clients can rotate without a flag day.
+		protected.Post("/aep/v1/user/activation", server.activateLicense)
 		protected.Get("/aep/v1/user/me", server.currentIdentity)
 		protected.Get("/aep/v1/user/models", server.listAgentModels)
 		protected.Get("/aep/v1/user/credentials", server.listAgentCredentials)
@@ -122,8 +108,6 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Get("/aep/v1/admin/control-events/{eventId}", server.getAdminControlEvent)
 			admin.Post("/aep/v1/admin/control-events/{eventId}/cancel", server.cancelControlEvent)
 			admin.Get("/aep/v1/admin/control-events/{eventId}/deliveries", server.listControlEventDeliveries)
-			admin.Get("/aep/v1/admin/agents", server.listAgents)
-			admin.Get("/aep/v1/admin/agents/{agentId}", server.getAgent)
 			admin.Get("/aep/v1/admin/sessions", server.listUserSessions)
 			admin.Get("/aep/v1/admin/licenses", server.listLicenses)
 			admin.Get("/aep/v1/admin/licenses/{licenseId}", server.getLicense)
@@ -210,10 +194,6 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "The access token is invalid or expired.")
 			return
 		}
-		if agentID := request.Header.Get("X-AEP-Agent-ID"); agentID != "" && claims.AgentID != "" && agentID != claims.AgentID {
-			writeProblem(response, request, http.StatusConflict, "AGENT_IDENTITY_CONFLICT", "The Agent header does not match the authenticated session.")
-			return
-		}
 		if claims.PasswordChangeRequired && !passwordChangeRouteAllowed(request) {
 			writeProblem(response, request, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "The temporary password must be changed before using this operation.")
 			return
@@ -226,7 +206,7 @@ func passwordChangeRouteAllowed(request *http.Request) bool {
 	if request.Method == http.MethodPost && (request.URL.Path == "/aep/v1/auth/password/change" || request.URL.Path == "/aep/v1/auth/logout") {
 		return true
 	}
-	return request.Method == http.MethodGet && request.URL.Path == "/aep/v1/agent/me"
+	return request.Method == http.MethodGet && request.URL.Path == "/aep/v1/user/me"
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
@@ -354,12 +334,12 @@ func (s *Server) internalDataPlane(next http.HandlerFunc) http.HandlerFunc {
 			writeProblem(response, request, http.StatusUnauthorized, "INTERNAL_AUTH_REQUIRED", "A valid data-plane service token is required.")
 			return
 		}
-		tenant := strings.TrimSpace(request.Header.Get("X-AEP-Tenant-ID"))
-		if tenant == "" || len(tenant) > 200 {
-			writeProblem(response, request, http.StatusBadRequest, "TENANT_REQUIRED", "The tenant header is required.")
+		deploymentID := strings.TrimSpace(request.Header.Get("X-AEP-Deployment-ID"))
+		if deploymentID == "" || len(deploymentID) > 200 {
+			writeProblem(response, request, http.StatusBadRequest, "DEPLOYMENT_REQUIRED", "The deployment header is required.")
 			return
 		}
-		claims := &auth.Claims{Tenant: tenant}
+		claims := &auth.Claims{DeploymentID: deploymentID}
 		next(response, request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims)))
 	}
 }

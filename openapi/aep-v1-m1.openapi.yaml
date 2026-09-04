@@ -14,12 +14,11 @@ security:
 tags:
   - {name: Service}
   - {name: Authentication}
-  - {name: Agent}
-  - {name: Agent Control Events}
+  - {name: User Runtime}
+  - {name: User Control Events}
   - {name: Admin Users}
   - {name: Admin Skills}
   - {name: Admin Control Events}
-  - {name: Admin Agents}
   - {name: Admin Models}
 paths:
   /.well-known/jwks.json:
@@ -73,28 +72,28 @@ paths:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1refresh'
   /aep/v1/auth/logout:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1logout'
-  /aep/v1/agent/activation:
-    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1agent~1activation'
-  /aep/v1/agent/me:
-    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1me'
-  /aep/v1/agent/heartbeat:
-    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1heartbeat'
-  /aep/v1/agent/control-events:
-    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1control-events'
-  /aep/v1/agent/control-events/{deliveryId}/acknowledge:
-    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1control-events~1{deliveryId}~1acknowledge'
-  /aep/v1/agent/control-events/{deliveryId}/result:
-    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1agent~1control-events~1{deliveryId}~1result'
-  /aep/v1/agent/skills/manifest:
-    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1skills~1manifest'
-  /aep/v1/agent/skills/{skillId}/versions/{version}/package:
-    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1skills~1{skillId}~1versions~1{version}~1package'
-  /aep/v1/agent/skills/sync-results:
-    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1skills~1sync-results'
-  /aep/v1/agent/events/batch:
-    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1events~1batch'
-  /aep/v1/agent/models:
-    $ref: './aep-v1.openapi.yaml#/paths/~1agent~1models'
+  /aep/v1/user/activation:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1user~1activation'
+  /aep/v1/user/me:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1me'
+  /aep/v1/user/heartbeat:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1user~1heartbeat'
+  /aep/v1/user/control-events:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1user~1control-events'
+  /aep/v1/user/control-events/{deliveryId}/acknowledge:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1user~1control-events~1{deliveryId}~1acknowledge'
+  /aep/v1/user/control-events/{deliveryId}/result:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1user~1control-events~1{deliveryId}~1result'
+  /aep/v1/user/skills/manifest:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1skills~1manifest'
+  /aep/v1/user/skills/{skillId}/versions/{version}/package:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1skills~1{skillId}~1versions~1{version}~1package'
+  /aep/v1/user/skills/sync-results:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1skills~1sync-results'
+  /aep/v1/user/events/batch:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1events~1batch'
+  /aep/v1/user/models:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1models'
   /aep/v1/admin/users:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1users'
   /aep/v1/admin/users/import:
@@ -123,33 +122,6 @@ paths:
     $ref: './aep-v1-control-events.openapi.yaml#/paths/~1admin~1control-events~1{eventId}~1cancel'
   /aep/v1/admin/control-events/{eventId}/deliveries:
     $ref: './aep-v1-control-events.openapi.yaml#/paths/~1admin~1control-events~1{eventId}~1deliveries'
-  /aep/v1/admin/agents:
-    get:
-      tags: [Admin Agents]
-      operationId: listAgents
-      parameters:
-        - {name: cursor, in: query, schema: {type: [string, 'null']}}
-        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
-        - {name: userId, in: query, schema: {type: string}}
-      responses:
-        '200':
-          description: Registered Agent instances
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/AgentPage'}
-  /aep/v1/admin/agents/{agentId}:
-    get:
-      tags: [Admin Agents]
-      operationId: getAgent
-      parameters:
-        - {name: agentId, in: path, required: true, schema: {type: string}}
-      responses:
-        '200':
-          description: Agent state and latest synchronization summary
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/AdminAgent'}
-        '404': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/licenses:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses'
   /aep/v1/admin/licenses/{licenseId}:
@@ -201,27 +173,6 @@ components:
       properties:
         currentPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
         newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
-        agentId: {type: string, minLength: 1}
-        sessionId: {type: string, minLength: 1}
-    AdminAgent:
-      type: object
-      required: [agentId, enterpriseId, userId, agentVersion, platform, firstSeenAt, lastSeenAt]
-      properties:
-        agentId: {type: string}
-        enterpriseId: {type: string}
-        userId: {type: string}
-        agentVersion: {type: string}
-        platform: {type: string, enum: [windows, macos, linux]}
-        firstSeenAt: {type: string, format: date-time}
-        lastSeenAt: {type: string, format: date-time}
-        appliedSkillRevision: {type: [string, 'null']}
-        installedSkillIds: {type: array, items: {type: string}}
-    AgentPage:
-      type: object
-      required: [items, nextCursor]
-      properties:
-        items: {type: array, items: {$ref: '#/components/schemas/AdminAgent'}}
-        nextCursor: {type: [string, 'null']}
     JsonWebKeySet:
       type: object
       required: [keys]

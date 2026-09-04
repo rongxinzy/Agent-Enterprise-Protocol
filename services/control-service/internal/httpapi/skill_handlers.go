@@ -197,7 +197,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.Subject.Type != "enterprise" && input.Subject.Type != "organization" && input.Subject.Type != "user" && input.Subject.Type != "agent" && input.Subject.Type != "role" && input.Subject.Type != "team" {
+	if input.Subject.Type != "user" && input.Subject.Type != "role" && input.Subject.Type != "team" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
 		return
 	}
@@ -209,7 +209,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,deployment_id,skill_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5)`, id, claims.Tenant, input.SkillID, input.Subject.Type, input.Subject.ID)
+	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,deployment_id,skill_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5)`, id, claims.DeploymentID, input.SkillID, input.Subject.Type, input.Subject.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The assignment already exists.")
@@ -218,7 +218,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
-	if err := createSkillAssignmentEvent(request.Context(), tx, claims.Tenant, claims.Subject, input.SkillID, input.Subject.Type, input.Subject.ID, "assigned:"+id); err != nil {
+	if err := createSkillAssignmentEvent(request.Context(), tx, claims.DeploymentID, claims.Subject, input.SkillID, input.Subject.Type, input.Subject.ID, "assigned:"+id); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -239,7 +239,7 @@ func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *ht
 	defer func() { _ = tx.Rollback(request.Context()) }()
 	assignmentID := chi.URLParam(request, "assignmentId")
 	var skillID, subjectType, subjectID string
-	err = tx.QueryRow(request.Context(), `DELETE FROM skill_assignments WHERE id=$1 AND deployment_id=$2 RETURNING skill_id,subject_type,subject_id`, assignmentID, claims.Tenant).Scan(&skillID, &subjectType, &subjectID)
+	err = tx.QueryRow(request.Context(), `DELETE FROM skill_assignments WHERE id=$1 AND deployment_id=$2 RETURNING skill_id,subject_type,subject_id`, assignmentID, claims.DeploymentID).Scan(&skillID, &subjectType, &subjectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The assignment was not found.")
 		return
@@ -248,7 +248,7 @@ func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
-	if err := createSkillAssignmentEvent(request.Context(), tx, claims.Tenant, claims.Subject, skillID, subjectType, subjectID, "revoked:"+assignmentID); err != nil {
+	if err := createSkillAssignmentEvent(request.Context(), tx, claims.DeploymentID, claims.Subject, skillID, subjectType, subjectID, "revoked:"+assignmentID); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -267,7 +267,7 @@ func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, cr
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `WITH old AS (UPDATE control_events SET state='superseded' WHERE deployment_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id) UPDATE control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'`, enterpriseID, supersedesKey, eventID)
+	_, err = tx.Exec(ctx, `WITH old AS (UPDATE control_events SET state='superseded' WHERE deployment_id=$1 AND supersedes_key=$2 AND event_id<>$3 AND state='active' RETURNING event_id) UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id IN (SELECT event_id FROM old) AND state='pending'`, enterpriseID, supersedesKey, eventID)
 	if err != nil {
 		return err
 	}
@@ -275,31 +275,15 @@ func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, cr
 SELECT gen_random_uuid()::text,$1,s.session_id
 FROM user_sessions s JOIN users u ON u.id=s.user_id
 WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
-  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND $4=ANY(u.team_ids)))
+  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)))
 ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
 	if err != nil {
 		return err
 	}
-	// Transitional delivery for pre-session clients. It is removed with the
-	// legacy Agent tables in the final identity cleanup migration.
-	_, err = tx.Exec(ctx, `INSERT INTO control_deliveries (delivery_id,event_id,agent_id)
-SELECT gen_random_uuid()::text,$1,a.agent_id
-FROM agents a JOIN users u ON u.id=a.user_id
-WHERE a.deployment_id=$2 AND ($3='global' OR ($3='agent' AND a.agent_id=$4) OR ($3='user' AND a.user_id=$4) OR ($3='organization' AND $4=ANY(u.team_ids)))
-ON CONFLICT (event_id,agent_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
-	return err
+	return nil
 }
 
 func skillAssignmentEventScope(subjectType, subjectID string) (string, *string) {
-	if subjectType == "enterprise" {
-		return "global", nil
-	}
-	if subjectType == "organization" {
-		return "team", &subjectID
-	}
-	if subjectType == "agent" {
-		return "agent", &subjectID
-	}
 	return subjectType, &subjectID
 }
 
@@ -310,9 +294,9 @@ SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes
 FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
 JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
 JOIN users u ON u.id=$2
-WHERE sk.enabled=true AND ((sa.subject_type='enterprise' AND sa.subject_id=$1) OR (sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='agent' AND sa.subject_id=$3) OR (sa.subject_type='organization' AND sa.subject_id=ANY(u.team_ids)) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
+WHERE sk.enabled=true AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
 ), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,version DESC)
-SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.Tenant, claims.Subject, claims.AgentID)
+SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.DeploymentID, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -326,7 +310,7 @@ SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.Tenant
 			databaseFailure(response, request, err)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "version": version, "enabled": true, "package": map[string]any{"url": "/aep/v1/agent/skills/" + id + "/versions/" + version + "/package", "sha256": sha, "size": size}})
+		items = append(items, map[string]any{"id": id, "name": name, "version": version, "enabled": true, "package": map[string]any{"url": "/aep/v1/user/skills/" + id + "/versions/" + version + "/package", "sha256": sha, "size": size}})
 	}
 	encoded, _ := json.Marshal(items)
 	digest := sha256.Sum256(encoded)
@@ -344,7 +328,7 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 	claims := claimsFrom(request)
 	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
 	var objectKey string
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$4 AND sv.version=$5 AND sv.published=true AND sa.deployment_id=$1 AND ((sa.subject_type='enterprise' AND sa.subject_id=$1) OR (sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='agent' AND sa.subject_id=$3) OR (sa.subject_type='organization' AND sa.subject_id=ANY(u.team_ids)) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.Tenant, claims.Subject, claims.AgentID, skillID, version).Scan(&objectKey)
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusForbidden, "SKILL_NOT_ASSIGNED", "The Skill version is not assigned.")
 		return
@@ -391,14 +375,11 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	if claims.SessionID != "" {
-		_, err = tx.Exec(request.Context(), "INSERT INTO skill_sync_results (id,deployment_id,user_id,session_id,revision,status,installed_skill_ids,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), claims.Tenant, claims.Subject, claims.SessionID, input.Revision, input.Status, installed, payload)
-	} else {
-		_, err = tx.Exec(request.Context(), "INSERT INTO skill_sync_results (id,deployment_id,user_id,agent_id,revision,status,installed_skill_ids,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), claims.Tenant, claims.Subject, claims.AgentID, input.Revision, input.Status, installed, payload)
-		if err == nil {
-			_, err = tx.Exec(request.Context(), "UPDATE agents SET applied_skill_revision=$2,installed_skill_ids=$3,last_seen_at=now() WHERE agent_id=$1", claims.AgentID, input.Revision, installed)
-		}
+	if claims.SessionID == "" {
+		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
+		return
 	}
+	_, err = tx.Exec(request.Context(), "INSERT INTO skill_sync_results (id,deployment_id,user_id,session_id,revision,status,installed_skill_ids,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), claims.DeploymentID, claims.Subject, claims.SessionID, input.Revision, input.Status, installed, payload)
 	if err == nil {
 		err = tx.Commit(request.Context())
 	}

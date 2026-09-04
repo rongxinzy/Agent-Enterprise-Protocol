@@ -203,12 +203,12 @@ func validReasoningCompatibility(value *modelReasoningCompatibility) bool {
 
 func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	scopes, err := s.app.ModelScopes(request.Context(), claims.Tenant, claims.Subject, claims.AgentID)
+	scopes, err := s.app.ModelScopes(request.Context(), claims.DeploymentID, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.Tenant, scopes)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.DeploymentID, scopes)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -417,7 +417,7 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 }
 
 func validModelSubject(subjectType string) bool {
-	return subjectType == "enterprise" || subjectType == "organization" || subjectType == "user" || subjectType == "agent" || subjectType == "role" || subjectType == "team"
+	return subjectType == "user" || subjectType == "role" || subjectType == "team"
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {

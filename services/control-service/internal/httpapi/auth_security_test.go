@@ -46,8 +46,8 @@ func TestPasswordChangeRouteAllowlist(t *testing.T) {
 	}{
 		{http.MethodPost, "/aep/v1/auth/password/change", true},
 		{http.MethodPost, "/aep/v1/auth/logout", true},
-		{http.MethodGet, "/aep/v1/agent/me", true},
-		{http.MethodGet, "/aep/v1/agent/models", false},
+		{http.MethodGet, "/aep/v1/user/me", true},
+		{http.MethodGet, "/aep/v1/user/models", false},
 		{http.MethodPost, "/aep/v1/admin/users", false},
 		{http.MethodGet, "/aep/v1/auth/password/change", false},
 	}

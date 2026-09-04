@@ -9,15 +9,14 @@ servers:
 security:
   - bearerAuth: []
 tags:
-  - {name: Agent Control Events}
+  - {name: User Control Events}
   - {name: Admin Control Events}
 paths:
-  /agent/heartbeat:
+  /user/heartbeat:
     post:
-      tags: [Agent Control Events]
-      operationId: reportAgentHeartbeat
+      tags: [User Control Events]
+      operationId: reportUserHeartbeat
       parameters:
-        - {$ref: '#/components/parameters/AepAgentId'}
         - {$ref: '#/components/parameters/AepProtocolVersion'}
         - {$ref: '#/components/parameters/RequestId'}
       requestBody:
@@ -33,13 +32,12 @@ paths:
               schema: {$ref: '#/components/schemas/HeartbeatResponse'}
         '400': {$ref: '#/components/responses/Problem'}
         '401': {$ref: '#/components/responses/Problem'}
-  /agent/control-events:
+  /user/control-events:
     get:
-      tags: [Agent Control Events]
-      operationId: listAgentControlEvents
+      tags: [User Control Events]
+      operationId: listUserControlEvents
       description: Reading does not consume an event. Unacknowledged deliveries may be returned again.
       parameters:
-        - {$ref: '#/components/parameters/AepAgentId'}
         - {$ref: '#/components/parameters/AepProtocolVersion'}
         - {$ref: '#/components/parameters/RequestId'}
         - name: afterCursor
@@ -53,14 +51,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ControlEventPage'}
         '401': {$ref: '#/components/responses/Problem'}
-  /agent/control-events/{deliveryId}/acknowledge:
+  /user/control-events/{deliveryId}/acknowledge:
     post:
-      tags: [Agent Control Events]
+      tags: [User Control Events]
       operationId: acknowledgeControlEvent
       description: Call only after the delivery is committed to the durable local inbox.
       parameters:
         - {$ref: '#/components/parameters/DeliveryId'}
-        - {$ref: '#/components/parameters/AepAgentId'}
         - {$ref: '#/components/parameters/AepProtocolVersion'}
         - {$ref: '#/components/parameters/RequestId'}
       requestBody:
@@ -72,13 +69,12 @@ paths:
         '204': {description: Durable receipt recorded}
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
-  /agent/control-events/{deliveryId}/result:
+  /user/control-events/{deliveryId}/result:
     post:
-      tags: [Agent Control Events]
+      tags: [User Control Events]
       operationId: reportControlEventResult
       parameters:
         - {$ref: '#/components/parameters/DeliveryId'}
-        - {$ref: '#/components/parameters/AepAgentId'}
         - {$ref: '#/components/parameters/AepProtocolVersion'}
         - {$ref: '#/components/parameters/RequestId'}
       requestBody:
@@ -177,7 +173,7 @@ paths:
           schema: {type: string}
       responses:
         '200':
-          description: Per-Agent delivery states
+          description: Per-session delivery states
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DeliveryPage'}
@@ -186,11 +182,6 @@ components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
   parameters:
-    AepAgentId:
-      name: X-AEP-Agent-ID
-      in: header
-      required: false
-      schema: {type: string}
     AepProtocolVersion:
       name: X-AEP-Protocol-Version
       in: header
@@ -228,10 +219,8 @@ components:
   schemas:
     HeartbeatRequest:
       type: object
-      required: [agentVersion, platform, status]
+      required: [status]
       properties:
-        agentVersion: {type: string}
-        platform: {type: string, enum: [windows, macos, linux]}
         lastControlEventCursor: {type: [string, 'null']}
         status: {type: string, enum: [online, idle, busy]}
     HeartbeatResponse:
@@ -403,7 +392,6 @@ components:
       properties:
         deliveryId: {type: string}
         eventId: {type: string}
-        agentId: {type: [string, 'null']}
         sessionId: {type: [string, 'null']}
         state: {$ref: '#/components/schemas/DeliveryState'}
         attemptCount: {type: integer, minimum: 0}

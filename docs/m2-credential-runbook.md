@@ -1,8 +1,8 @@
 # AEP M2 Credential Runbook
 
-M2 adds encrypted Credential management to the control service. Administrators create, rotate, disable, assign, and delete Credential records through the management API or `aepctl`. Agents can discover and resolve only enabled Credentials with `deliveryMode: agent` that match their enterprise, organization, user, or Agent identity.
+M2 adds encrypted Credential management to the control service. Administrators create, rotate, disable, assign, and delete Credential records through the management API or `aepctl`. Signed-in client sessions can discover and resolve only enabled Credentials with `deliveryMode: client` that match their deployment, user, role, or team authorization.
 
-`server_only` Credentials remain control-plane metadata and cannot be listed or resolved by an Agent. Successful resolve responses include `Cache-Control: no-store`, and every resolve decision is recorded without secret material in `credential_resolution_audit`.
+`server_only` Credentials remain control-plane metadata and cannot be listed or resolved by a client session. Successful resolve responses include `Cache-Control: no-store`, and every resolve decision is recorded without secret material in `credential_resolution_audit`.
 
 ## Master Key Configuration
 

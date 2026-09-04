@@ -40,7 +40,7 @@ func TestAccessAndModelClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, model, err := service.Issue("user-1", "tenant-1", "agent-1", true, false, []string{"admin"}, []string{"model-a"})
+	access, model, err := service.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", true, false, []string{"admin"}, []string{"model-a"})
 	if err != nil || model == "" {
 		t.Fatalf("issue failed: %v", err)
 	}
@@ -48,14 +48,14 @@ func TestAccessAndModelClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Tenant != "tenant-1" || claims.AgentID != "agent-1" || !claims.Admin {
+	if claims.DeploymentID != "deployment-1" || claims.SessionID != "session-1" || !claims.Admin {
 		t.Fatalf("unexpected claims: %#v", claims)
 	}
 	modelClaims, err := service.ParseModel(model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if modelClaims.Tenant != "tenant-1" || modelClaims.AgentID != "agent-1" || len(modelClaims.ModelScopes) != 1 || modelClaims.ModelScopes[0] != "model-a" {
+	if modelClaims.DeploymentID != "deployment-1" || modelClaims.SessionID != "session-1" || len(modelClaims.ModelScopes) != 1 || modelClaims.ModelScopes[0] != "model-a" {
 		t.Fatalf("unexpected model claims: %#v", modelClaims)
 	}
 	if _, err := service.ParseAccess(model); err == nil {
@@ -66,12 +66,12 @@ func TestAccessAndModelClaims(t *testing.T) {
 	}
 }
 
-func TestIssueWithDeploymentCarriesExplicitDeploymentClaim(t *testing.T) {
+func TestIssueWithDeploymentSessionCarriesExplicitDeploymentClaim(t *testing.T) {
 	service, err := NewService("https://issuer.example", "", time.Minute, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, model, err := service.IssueWithDeployment("user-1", "legacy-tenant", "deployment-1", "agent-1", false, false, []string{"admin"}, []string{"model-a"})
+	access, model, err := service.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", false, false, []string{"admin"}, []string{"model-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,14 +79,14 @@ func TestIssueWithDeploymentCarriesExplicitDeploymentClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accessClaims.Tenant != "legacy-tenant" || accessClaims.DeploymentID != "deployment-1" {
+	if accessClaims.DeploymentID != "deployment-1" || accessClaims.SessionID != "session-1" {
 		t.Fatalf("access claims = %#v", accessClaims)
 	}
 	modelClaims, err := service.ParseModel(model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if modelClaims.Tenant != "legacy-tenant" || modelClaims.DeploymentID != "deployment-1" {
+	if modelClaims.DeploymentID != "deployment-1" || modelClaims.SessionID != "session-1" {
 		t.Fatalf("model claims = %#v", modelClaims)
 	}
 }
@@ -96,7 +96,7 @@ func TestIssueWithDeploymentSessionOmitsAgentAndCarriesSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, model, err := service.IssueWithDeploymentSession("user-1", "tenant-1", "deployment-1", "session-1", false, false, nil, []string{"model-a"})
+	access, model, err := service.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", false, false, nil, []string{"model-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,14 +104,14 @@ func TestIssueWithDeploymentSessionOmitsAgentAndCarriesSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accessClaims.AgentID != "" || accessClaims.SessionID != "session-1" {
+	if accessClaims.SessionID != "session-1" {
 		t.Fatalf("access session claims = %#v", accessClaims)
 	}
 	modelClaims, err := service.ParseModel(model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if modelClaims.AgentID != "" || modelClaims.SessionID != "session-1" {
+	if modelClaims.SessionID != "session-1" {
 		t.Fatalf("model session claims = %#v", modelClaims)
 	}
 }
@@ -121,7 +121,7 @@ func TestPasswordChangeRequiredClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, model, err := service.Issue("user-1", "tenant-1", "agent-1", false, true, nil, nil)
+	access, model, err := service.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", false, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

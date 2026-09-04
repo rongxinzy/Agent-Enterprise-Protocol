@@ -53,7 +53,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		expiresAt = verified.GraceEndsAt
 	}
 	claims := claimsFrom(request)
-	if err := s.app.ActivateLicense(request.Context(), verified.Claims.LicenseID, claims.Tenant, claims.Subject, claims.AgentID); err != nil {
+	if err := s.app.ActivateLicense(request.Context(), verified.Claims.LicenseID, claims.DeploymentID, claims.Subject); err != nil {
 		code := "LICENSE_ACTIVATION_FAILED"
 		status := http.StatusForbidden
 		switch {
@@ -74,7 +74,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 	features := normalizeActivationFeatures(verified.Claims.Features)
 	var modelScopes []string
 	if s.app.Pool != nil {
-		modelScopes, err = s.app.ModelScopes(request.Context(), claims.Tenant, claims.Subject, claims.AgentID)
+		modelScopes, err = s.app.ModelScopes(request.Context(), claims.DeploymentID, claims.Subject)
 		if err != nil {
 			databaseFailure(response, request, err)
 			return
@@ -82,8 +82,6 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 	}
 	token, tokenExpiresAt, err := s.app.Tokens.IssueEntitlement(
 		claims.Subject,
-		claims.Tenant,
-		claims.AgentID,
 		verified.Claims.DeploymentID,
 		verified.Claims.LicenseID,
 		verified.Digest,

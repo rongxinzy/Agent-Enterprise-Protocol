@@ -16,7 +16,7 @@ func TestVerifySignedEnvelopeAndDigest(t *testing.T) {
 	payload := map[string]any{
 		"licenseId": "lic-1", "customerId": "customer-1", "deploymentId": "deployment-1", "edition": "enterprise",
 		"issuedAt": "2026-01-01T00:00:00.000Z", "expiresAt": "2027-01-01T00:00:00.000Z", "graceDays": json.Number("7"),
-		"limits": map[string]any{"users": json.Number("10"), "agents": json.Number("5")}, "features": []any{"enterprise.models"},
+		"limits": map[string]any{"users": json.Number("10"), "activations": json.Number("5")}, "features": []any{"enterprise.models"},
 	}
 	canonical, err := canonicalizeValue(payload)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestVerifySignedEnvelopeAndDigest(t *testing.T) {
 
 func TestVerifyRejectsDeploymentMismatch(t *testing.T) {
 	public, private, _ := ed25519.GenerateKey(nil)
-	payload := map[string]any{"licenseId": "lic-1", "customerId": "customer-1", "deploymentId": "deployment-2", "edition": "enterprise", "issuedAt": "2026-01-01T00:00:00.000Z", "expiresAt": "2027-01-01T00:00:00.000Z", "graceDays": json.Number("0"), "limits": map[string]any{"users": json.Number("1"), "agents": json.Number("1")}, "features": []any{}}
+	payload := map[string]any{"licenseId": "lic-1", "customerId": "customer-1", "deploymentId": "deployment-2", "edition": "enterprise", "issuedAt": "2026-01-01T00:00:00.000Z", "expiresAt": "2027-01-01T00:00:00.000Z", "graceDays": json.Number("0"), "limits": map[string]any{"users": json.Number("1"), "activations": json.Number("1")}, "features": []any{}}
 	canonical, _ := canonicalizeValue(payload)
 	envelope := map[string]any{"format": formatV1, "keyId": "key-1", "payload": payload, "signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, []byte(canonical)))}
 	raw, _ := json.Marshal(envelope)
@@ -123,7 +123,7 @@ func signedLicense(t *testing.T, overrides map[string]any) ([]byte, ed25519.Publ
 	payload := map[string]any{
 		"licenseId": "lic-lifecycle", "customerId": "customer-1", "deploymentId": "deployment-1", "edition": "enterprise",
 		"issuedAt": "2026-01-01T00:00:00.000Z", "expiresAt": "2027-01-01T00:00:00.000Z", "graceDays": json.Number("0"),
-		"limits": map[string]any{"users": json.Number("10"), "agents": json.Number("5")}, "features": []any{"enterprise.models"},
+		"limits": map[string]any{"users": json.Number("10"), "activations": json.Number("5")}, "features": []any{"enterprise.models"},
 	}
 	for key, value := range overrides {
 		payload[key] = value

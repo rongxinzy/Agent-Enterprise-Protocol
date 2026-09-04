@@ -58,7 +58,7 @@ func (s *Server) loginThrottle(ctx context.Context, keyHash string, now time.Tim
 	return 0, nil
 }
 
-func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID, agentID string, now time.Time) (time.Duration, error) {
+func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID string, now time.Time) (time.Duration, error) {
 	tx, err := s.app.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -92,7 +92,7 @@ func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFinger
 		outcome = "denied"
 		reason = "failure_limit_reached"
 	}
-	if err := insertAuthenticationAudit(ctx, tx, enterpriseID, userID, agentID, "", eventType, outcome, reason, fingerprint, now); err != nil {
+	if err := insertAuthenticationAudit(ctx, tx, enterpriseID, userID, eventType, outcome, reason, fingerprint, now); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -101,18 +101,18 @@ func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFinger
 	return backoff, nil
 }
 
-func (s *Server) recordLoginThrottled(ctx context.Context, fingerprint loginFingerprint, enterpriseID, agentID string, now time.Time) error {
-	return insertAuthenticationAudit(ctx, s.app.Pool, enterpriseID, "", agentID, "", "login.throttled", "denied", "backoff_active", fingerprint, now)
+func (s *Server) recordLoginThrottled(ctx context.Context, fingerprint loginFingerprint, enterpriseID string, now time.Time) error {
+	return insertAuthenticationAudit(ctx, s.app.Pool, enterpriseID, "", "login.throttled", "denied", "backoff_active", fingerprint, now)
 }
 
-func (s *Server) recordLoginSuccess(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID, agentID string, now time.Time) {
+func (s *Server) recordLoginSuccess(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID string, now time.Time) {
 	tx, err := s.app.Pool.Begin(ctx)
 	if err == nil {
 		defer func() { _ = tx.Rollback(ctx) }()
 		_, err = tx.Exec(ctx, `DELETE FROM login_rate_limits WHERE key_hash=$1`, fingerprint.KeyHash)
 	}
 	if err == nil {
-		err = insertAuthenticationAudit(ctx, tx, enterpriseID, userID, agentID, "", "login.succeeded", "success", "", fingerprint, now)
+		err = insertAuthenticationAudit(ctx, tx, enterpriseID, userID, "login.succeeded", "success", "", fingerprint, now)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -122,8 +122,8 @@ func (s *Server) recordLoginSuccess(ctx context.Context, fingerprint loginFinger
 	}
 }
 
-func (s *Server) recordPasswordChanged(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID, agentID string, now time.Time) {
-	if err := insertAuthenticationAudit(ctx, s.app.Pool, enterpriseID, userID, agentID, "", "password.changed", "success", "", fingerprint, now); err != nil {
+func (s *Server) recordPasswordChanged(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID string, now time.Time) {
+	if err := insertAuthenticationAudit(ctx, s.app.Pool, enterpriseID, userID, "password.changed", "success", "", fingerprint, now); err != nil {
 		slog.Error("authentication audit failed", "event", "password.changed", "principal_hash", fingerprint.PrincipalHash, "error", err)
 	}
 }
@@ -132,7 +132,7 @@ type authenticationAuditExecutor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
-func insertAuthenticationAudit(ctx context.Context, executor authenticationAuditExecutor, enterpriseID, userID, agentID, sessionID, eventType, outcome, reason string, fingerprint loginFingerprint, now time.Time) error {
+func insertAuthenticationAudit(ctx context.Context, executor authenticationAuditExecutor, enterpriseID, userID, eventType, outcome, reason string, fingerprint loginFingerprint, now time.Time) error {
 	var nullableUserID any
 	if userID != "" {
 		nullableUserID = userID
@@ -141,15 +141,7 @@ func insertAuthenticationAudit(ctx context.Context, executor authenticationAudit
 	if reason != "" {
 		nullableReason = reason
 	}
-	var nullableAgentID any
-	if agentID != "" {
-		nullableAgentID = boundedAuditID(agentID)
-	}
-	var nullableSessionID any
-	if sessionID != "" {
-		nullableSessionID = sessionID
-	}
-	_, err := executor.Exec(ctx, `INSERT INTO authentication_audit_events (deployment_id,user_id,agent_id,session_id,event_type,outcome,reason,principal_hash,source_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, enterpriseID, nullableUserID, nullableAgentID, nullableSessionID, eventType, outcome, nullableReason, fingerprint.PrincipalHash, fingerprint.SourceHash, now)
+	_, err := executor.Exec(ctx, `INSERT INTO authentication_audit_events (deployment_id,user_id,event_type,outcome,reason,principal_hash,source_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, enterpriseID, nullableUserID, eventType, outcome, nullableReason, fingerprint.PrincipalHash, fingerprint.SourceHash, now)
 	return err
 }
 

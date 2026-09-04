@@ -20,7 +20,7 @@ func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, _, err := tokens.Issue("user-1", "tenant-1", "agent-1", false, false, nil, nil)
+	access, _, err := tokens.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", false, false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(map[string]any{"license": json.RawMessage(envelope)})
-	request := httptest.NewRequest(http.MethodPost, "/aep/v1/agent/activation", bytes.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, "/aep/v1/user/activation", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Subject != "user-1" || claims.Tenant != "tenant-1" || claims.AgentID != "agent-1" || claims.DeploymentID != "deployment-1" || claims.LicenseID != "lic-1" {
+	if claims.Subject != "user-1" || claims.DeploymentID != "deployment-1" || claims.SessionID != "" || claims.LicenseID != "lic-1" {
 		t.Fatalf("entitlement identity binding = %#v", claims)
 	}
 	if len(document.Features) != 1 || document.Features[0] != "enterprise.models" {
@@ -67,7 +67,7 @@ func TestActivateLicenseRejectsExpiredEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, _, err := tokens.Issue("user-1", "tenant-1", "agent-1", false, false, nil, nil)
+	access, _, err := tokens.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", false, false, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestActivateLicenseRejectsExpiredEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(map[string]any{"license": json.RawMessage(envelope)})
-	request := httptest.NewRequest(http.MethodPost, "/aep/v1/agent/activation", bytes.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, "/aep/v1/user/activation", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
@@ -102,7 +102,7 @@ func signedLicense(t *testing.T, expiresAt time.Time) ([]byte, string) {
 		issued = "2019-01-01T00:00:00.000Z"
 	}
 	expires := expiresAt.UTC().Format("2006-01-02T15:04:05.000Z")
-	payload := []byte(`{"customerId":"customer-1","deploymentId":"deployment-1","edition":"enterprise","expiresAt":"` + expires + `","features":["enterprise.models"],"graceDays":0,"issuedAt":"` + issued + `","licenseId":"lic-1","limits":{"agents":10,"users":10}}`)
+	payload := []byte(`{"customerId":"customer-1","deploymentId":"deployment-1","edition":"enterprise","expiresAt":"` + expires + `","features":["enterprise.models"],"graceDays":0,"issuedAt":"` + issued + `","licenseId":"lic-1","limits":{"activations":10,"users":10}}`)
 	signature := ed25519.Sign(private, payload)
 	envelope := []byte(`{"format":"zhiyuan-license-v1","keyId":"license-prod-1","payload":` + string(payload) + `,"signature":"` + base64.RawURLEncoding.EncodeToString(signature) + `"}`)
 	return envelope, base64.RawURLEncoding.EncodeToString(public)

@@ -1,6 +1,6 @@
 import http from 'node:http';
 
-import type {AgentModel, ModelConnection} from '@aep/sdk-node';
+import type {UserModel, ModelConnection} from '@aep/sdk-node';
 import {afterEach, expect, test} from 'vitest';
 
 import {OpenAIModelClient} from '../src/models.js';
@@ -132,7 +132,7 @@ test('persists redacted failure telemetry for an upstream error', async () => {
   state.close();
 });
 
-function model(id: string, isDefault = false): AgentModel {
+function model(id: string, isDefault = false): UserModel {
   return {
     id,
     displayName: id,
@@ -153,7 +153,7 @@ function connection(baseUrl: string, apiKey: string): ModelConnection {
   };
 }
 
-function controlClient(models: AgentModel[], modelConnection: ModelConnection) {
+function controlClient(models: UserModel[], modelConnection: ModelConnection) {
   return {
     async listModels() {
       return {models};

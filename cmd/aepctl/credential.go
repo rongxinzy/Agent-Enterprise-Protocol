@@ -37,7 +37,7 @@ func credentialCommand(opts *options) *cobra.Command {
 	create.Flags().StringVar(&name, "name", "", "credential display name")
 	create.Flags().StringVar(&service, "service", "", "service identifier")
 	create.Flags().StringVar(&credentialType, "type", "api_key", "credential type")
-	create.Flags().StringVar(&deliveryMode, "delivery-mode", "server_only", "server_only or agent")
+	create.Flags().StringVar(&deliveryMode, "delivery-mode", "server_only", "server_only or client")
 	create.Flags().StringVar(&rawValue, "value", "", "secret value (prefer AEPCTL_CREDENTIAL_VALUE or --value-file)")
 	create.Flags().StringVar(&valueFile, "value-file", "", "path containing the secret value")
 	create.Flags().BoolVar(&enabled, "enabled", true, "make this credential available")
@@ -79,7 +79,7 @@ func credentialCommand(opts *options) *cobra.Command {
 	update.Flags().StringVar(&updateID, "credential-id", "", "credential identifier")
 	update.Flags().StringVar(&updateName, "name", "", "credential display name")
 	update.Flags().StringVar(&updateService, "service", "", "service identifier")
-	update.Flags().StringVar(&updateDeliveryMode, "delivery-mode", "", "server_only or agent")
+	update.Flags().StringVar(&updateDeliveryMode, "delivery-mode", "", "server_only or client")
 	update.Flags().BoolVar(&updateEnabled, "enabled", true, "set credential availability")
 	_ = update.MarkFlagRequired("credential-id")
 
@@ -116,7 +116,7 @@ func credentialCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})}
 	assign.Flags().StringVar(&assignCredentialID, "credential-id", "", "credential identifier")
-	assign.Flags().StringVar(&subjectType, "subject-type", "user", "enterprise, organization, user, or agent")
+	assign.Flags().StringVar(&subjectType, "subject-type", "user", "user, role, or team")
 	assign.Flags().StringVar(&subjectID, "subject-id", "", "subject identifier")
 	_ = assign.MarkFlagRequired("credential-id")
 	_ = assign.MarkFlagRequired("subject-id")

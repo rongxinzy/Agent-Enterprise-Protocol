@@ -2,7 +2,6 @@ import {AEP_PROTOCOL_VERSION, AepCapability, HttpMethod} from './constants.js';
 import {AepProblem} from './problem.js';
 import {FetchTransport} from './transport.js';
 import type {
-  AdminAgent,
   AdminModel,
   AdminModelList,
   AdminModelPatch,
@@ -13,7 +12,7 @@ import type {
   AepSessionState,
   AepTokens,
   AepTransport,
-  AgentModelList,
+  UserModelList,
   AuthenticationMethods,
   ControlEventPage,
   CredentialAssignment,
@@ -37,8 +36,8 @@ import type {
   ModelAssignmentList,
   ModelAssignmentWrite,
   ModelConnection,
-  Page,
   PlatformUser,
+  Page,
   Query,
   ResolvedCredential,
   ServiceMetadata,
@@ -48,9 +47,6 @@ import type {
 
 export class AepClient {
   readonly #baseUrl: string;
-  readonly #agentId?: string;
-  readonly #agentVersion?: string;
-  readonly #platform: AepClientOptions['platform'];
   #sessionId?: string;
   readonly #tokenStore: AepClientOptions['tokenStore'];
   readonly #transport: AepTransport;
@@ -58,9 +54,6 @@ export class AepClient {
 
   constructor(options: AepClientOptions) {
     this.#baseUrl = options.baseUrl;
-    this.#agentId = options.agentId;
-    this.#agentVersion = options.agentVersion;
-    this.#platform = options.platform;
     this.#sessionId = options.sessionId;
     this.#tokenStore = options.tokenStore;
     this.#transport = options.transport ?? new FetchTransport();
@@ -82,33 +75,20 @@ export class AepClient {
   }
 
   async loginWithPassword(input: {
-    /** New single-deployment identity. */
-    deploymentId?: string;
-    /** @deprecated Use deploymentId. Kept for protocol v1 transitional clients. */
-    enterpriseId?: string;
+    deploymentId: string;
     sessionId?: string;
     username: string;
     password: string;
   }): Promise<AepTokens> {
-    const deploymentId = input.deploymentId ?? input.enterpriseId;
-    if (!deploymentId) {
-      throw new AepProblem({
-        type: 'https://aep.example/problems/invalid-request',
-        title: 'Deployment identity is required',
-        status: 400,
-        code: 'DEPLOYMENT_ID_REQUIRED',
-      });
-    }
     const tokens = await this.#send<AepTokens>(
       {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/password/login',
         body: asJson({
-          deploymentId,
+          deploymentId: input.deploymentId,
           username: input.username,
           password: input.password,
           sessionId: input.sessionId ?? this.#sessionId,
-          ...this.#agentContext(),
         }),
       },
       false,
@@ -119,24 +99,14 @@ export class AepClient {
   }
 
   startFederatedLogin(input: {
-    deploymentId?: string;
-    enterpriseId?: string;
+    deploymentId: string;
     methodId: string;
     redirectUri: string;
     codeChallenge: string;
     codeChallengeMethod?: 'S256';
   }): Promise<JsonObject> {
-    const deploymentId = input.deploymentId ?? input.enterpriseId;
-    if (!deploymentId) {
-      throw new AepProblem({
-        type: 'https://aep.example/problems/invalid-request',
-        title: 'Deployment identity is required',
-        status: 400,
-        code: 'DEPLOYMENT_ID_REQUIRED',
-      });
-    }
     return this.#send(
-      {method: HttpMethod.Post, path: '/aep/v1/auth/federated/start', body: asJson({...input, deploymentId})},
+      {method: HttpMethod.Post, path: '/aep/v1/auth/federated/start', body: asJson(input)},
       false,
     );
   }
@@ -151,7 +121,7 @@ export class AepClient {
       {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/exchange',
-        body: asJson({...this.#agentContext(), ...input, sessionId: this.#sessionId}),
+        body: asJson({...input, sessionId: this.#sessionId}),
       },
       false,
     );
@@ -164,7 +134,7 @@ export class AepClient {
     const tokens = await this.#send<AepTokens>({
       method: HttpMethod.Post,
       path: '/aep/v1/auth/password/change',
-      body: this.#sessionBody({currentPassword, newPassword}),
+      body: asJson({currentPassword, newPassword}),
     });
     await this.#tokenStore.set(tokens);
     this.#sessionId = tokens.sessionId ?? this.#sessionId;
@@ -209,7 +179,7 @@ export class AepClient {
   }
 
   getCurrentIdentity(): Promise<CurrentIdentity> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/me'});
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/me'});
   }
 
   /** Canonical user-session identity method. */
@@ -220,37 +190,13 @@ export class AepClient {
   activateEnterpriseLicense(input: LicenseActivationRequest): Promise<EntitlementTokenResponse> {
     return this.#send({
       method: HttpMethod.Post,
-      path: '/aep/v1/agent/activation',
+      path: '/aep/v1/user/activation',
       body: asJson(input),
     });
   }
 
-  listAgentCredentials(): Promise<CredentialList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/credentials'});
-  }
-
-  /** Canonical user-session credential discovery method. */
   listCredentialsForUser(): Promise<CredentialList> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/credentials'});
-  }
-
-  async resolveAgentCredential(credentialId: string, purpose: string): Promise<ResolvedCredential> {
-    const response = await this.#request<ResolvedCredential>({
-      method: HttpMethod.Post,
-      path: '/aep/v1/agent/credentials/' + segment(credentialId) + '/resolve',
-      body: {purpose},
-      retry: false,
-    });
-    this.#assertSuccess(response);
-    if (!hasNoStore(response.headers)) {
-      throw new AepProblem({
-        type: 'https://aep.example/problems/credential-response-cacheable',
-        title: 'Credential response is missing Cache-Control: no-store',
-        status: 502,
-        code: 'CREDENTIAL_RESPONSE_CACHEABLE',
-      });
-    }
-    return response.data;
   }
 
   async resolveCredentialForUser(credentialId: string, purpose: string): Promise<ResolvedCredential> {
@@ -272,12 +218,7 @@ export class AepClient {
     return response.data;
   }
 
-  listAgentModels(): Promise<AgentModelList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/agent/models'});
-  }
-
-  /** Canonical user-session model discovery method. */
-  listModels(): Promise<AgentModelList> {
+  listModels(): Promise<UserModelList> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/models'});
   }
 
@@ -314,7 +255,7 @@ export class AepClient {
   async getSkillManifest(etag?: string): Promise<SkillManifestResult> {
     const response = await this.#request<SkillManifest>({
       method: HttpMethod.Get,
-      path: '/aep/v1/agent/skills/manifest',
+      path: '/aep/v1/user/skills/manifest',
       headers: etag ? {'If-None-Match': etag} : undefined,
     });
     const responseEtag = response.headers.get('ETag');
@@ -330,7 +271,7 @@ export class AepClient {
   downloadSkillPackage(skillId: string, version: string): Promise<Uint8Array> {
     return this.#send({
       method: HttpMethod.Get,
-      path: `/aep/v1/agent/skills/${segment(skillId)}/versions/${segment(version)}/package`,
+      path: `/aep/v1/user/skills/${segment(skillId)}/versions/${segment(version)}/package`,
       responseType: 'bytes',
     });
   }
@@ -346,7 +287,7 @@ export class AepClient {
   reportSkillSyncResult(result: JsonObject): Promise<void> {
     return this.#send({
       method: HttpMethod.Post,
-      path: '/aep/v1/agent/skills/sync-results',
+      path: '/aep/v1/user/skills/sync-results',
       body: result,
       responseType: 'empty',
     });
@@ -355,7 +296,7 @@ export class AepClient {
   uploadEventBatch(events: JsonObject[]): Promise<JsonObject> {
     return this.#send({
       method: HttpMethod.Post,
-      path: '/aep/v1/agent/events/batch',
+      path: '/aep/v1/user/events/batch',
       body: {events},
     });
   }
@@ -365,7 +306,7 @@ export class AepClient {
   }
 
   heartbeat(input: JsonObject): Promise<HeartbeatResponse> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/agent/heartbeat', body: input});
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/user/heartbeat', body: input});
   }
 
   heartbeatUser(input: JsonObject): Promise<HeartbeatResponse> {
@@ -375,7 +316,7 @@ export class AepClient {
   listControlEvents(afterCursor?: string, limit = 50): Promise<ControlEventPage> {
     return this.#send({
       method: HttpMethod.Get,
-      path: `/aep/v1/agent/control-events?${query({afterCursor, limit})}`,
+      path: `/aep/v1/user/control-events?${query({afterCursor, limit})}`,
     });
   }
 
@@ -386,7 +327,7 @@ export class AepClient {
   acknowledgeControlEvent(deliveryId: string, receivedAt: string): Promise<void> {
     return this.#send({
       method: HttpMethod.Post,
-      path: `/aep/v1/agent/control-events/${segment(deliveryId)}/acknowledge`,
+      path: `/aep/v1/user/control-events/${segment(deliveryId)}/acknowledge`,
       body: {status: 'received', receivedAt},
       responseType: 'empty',
     });
@@ -403,7 +344,7 @@ export class AepClient {
   reportControlEventResult(deliveryId: string, result: JsonObject): Promise<void> {
     return this.#send({
       method: HttpMethod.Post,
-      path: `/aep/v1/agent/control-events/${segment(deliveryId)}/result`,
+      path: `/aep/v1/user/control-events/${segment(deliveryId)}/result`,
       body: result,
       responseType: 'empty',
     });
@@ -647,14 +588,6 @@ export class AepClient {
     });
   }
 
-  listAgents(filters: Query = {}): Promise<Page<AdminAgent>> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/agents?${query(filters)}`});
-  }
-
-  getAgent(agentId: string): Promise<AdminAgent> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/agents/${segment(agentId)}`});
-  }
-
   searchEvents(filters: Query = {}): Promise<JsonObject> {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/events?${query(filters)}`});
   }
@@ -678,7 +611,7 @@ export class AepClient {
   }
 
   async #request<T>(request: AepRequest, authenticated = true): Promise<AepResponse<T>> {
-    const headers = {...request.headers, ...this.#agentHeaders()};
+    const headers = {...request.headers, ...this.#sessionHeaders()};
     let usedAccessToken: string | null = null;
     if (authenticated) {
       const tokens = await this.#loadOrRestoreTokens();
@@ -716,7 +649,7 @@ export class AepClient {
       const response = await this.#transport.request<AepTokens>(this.#baseUrl, {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/refresh',
-        headers: this.#agentHeaders(),
+        headers: this.#sessionHeaders(),
         body: this.#sessionBody({refreshToken}),
       });
       if (response.status < 200 || response.status >= 300) {
@@ -739,24 +672,15 @@ export class AepClient {
     throw AepProblem.from(response.status, response.data, response.headers.get('X-Request-ID'));
   }
 
-  #agentHeaders(): Record<string, string> {
+  #sessionHeaders(): Record<string, string> {
     return {
-      ...(this.#agentId ? {'X-AEP-Agent-ID': this.#agentId} : {}),
       'X-AEP-Protocol-Version': AEP_PROTOCOL_VERSION,
       'X-Request-ID': requestId(),
     };
   }
 
-  #agentContext(): object {
-    return {
-      ...(this.#agentId ? {agentId: this.#agentId} : {}),
-      ...(this.#agentVersion ? {agentVersion: this.#agentVersion} : {}),
-      ...(this.#platform ? {platform: this.#platform} : {}),
-    };
-  }
-
   #sessionBody(body: Record<string, string>): Record<string, string> {
-    return this.#sessionId ? {...body, sessionId: this.#sessionId} : {...body, agentId: this.#agentId ?? ''};
+    return this.#sessionId ? {...body, sessionId: this.#sessionId} : body;
   }
 }
 

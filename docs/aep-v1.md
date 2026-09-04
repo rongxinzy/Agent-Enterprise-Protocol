@@ -218,13 +218,12 @@ prompts and responses unless a separate enterprise policy explicitly enables it.
 
 ### 9.2 Control Event Scope
 
-Control events use one of four scopes: `global`, `organization`, `user`, or
-`agent`. The server derives applicable scopes from the authenticated identity
-and registered Agent instance. A client MUST NOT select its own organization
+Control events use one of three scopes: `global`, `team`, or `user`. The server derives applicable scopes from the authenticated identity
+and its role/team bindings. A client MUST NOT select its own team
 or user scope.
 
-A global, organization, or user event has an independent delivery state for
-every applicable Agent. There is no shared `consumed` flag on the event itself.
+A global, team, or user event has an independent delivery state for
+every applicable user session. There is no shared `consumed` flag on the event itself.
 
 ### 9.3 Discovery and Delivery
 

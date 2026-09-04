@@ -16,9 +16,7 @@ import (
 )
 
 type passwordLoginRequest struct {
-	app.AgentContext
 	DeploymentID string `json:"deploymentId"`
-	EnterpriseID string `json:"enterpriseId"` // Deprecated v1 alias.
 	SessionID    string `json:"sessionId"`
 	Username     string `json:"username"`
 	Password     string `json:"password"`
@@ -27,20 +25,17 @@ type passwordLoginRequest struct {
 const zhiYuanPasswordMethodID = "zhiyuan-password"
 
 func (s *Server) authenticationMethods(response http.ResponseWriter, request *http.Request) {
-	enterpriseID := request.URL.Query().Get("enterpriseHint")
-	if deploymentHint := request.URL.Query().Get("deploymentHint"); deploymentHint != "" {
-		if !s.acceptsDeployment(deploymentHint) {
+	deploymentID := request.URL.Query().Get("deploymentHint")
+	if deploymentID != "" {
+		if !s.acceptsDeployment(deploymentID) {
 			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 			return
 		}
-		enterpriseID = s.storageTenantID()
 	}
-	if enterpriseID == "" {
-		enterpriseID = s.storageTenantID()
-	}
-	enterprise, err := s.app.DB.GetDeployment(request.Context(), enterpriseID)
+	deploymentID = s.storageTenantID()
+	deployment, err := s.app.DB.GetDeployment(request.Context(), deploymentID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The enterprise was not found.")
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
 	if err != nil {
@@ -56,8 +51,7 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 		})
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"enterprise":        map[string]string{"id": enterprise.ID, "name": enterprise.Name},
-		"deployment":        map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
+		"deployment":        map[string]string{"id": deployment.ID, "name": deployment.Name},
 		"deploymentId":      s.app.DeploymentID(),
 		"preferredMethodId": zhiYuanPasswordMethodID,
 		"methods":           methods,
@@ -69,20 +63,20 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	enterpriseID, validDeployment := s.resolveTenant(input.DeploymentID, input.EnterpriseID)
+	deploymentID, validDeployment := s.resolveTenant(input.DeploymentID)
 	if !validDeployment {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
 	now := time.Now().UTC()
-	fingerprint := s.loginFingerprint(request, enterpriseID, input.Username)
+	fingerprint := s.loginFingerprint(request, deploymentID, input.Username)
 	retryAfter, err := s.loginThrottle(request.Context(), fingerprint.KeyHash, now)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	if retryAfter > 0 {
-		if err := s.recordLoginThrottled(request.Context(), fingerprint, enterpriseID, input.AgentID, now); err != nil {
+		if err := s.recordLoginThrottled(request.Context(), fingerprint, deploymentID, now); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
@@ -92,7 +86,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{DeploymentID: enterpriseID, Username: input.Username})
+	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{DeploymentID: deploymentID, Username: input.Username})
 	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
 		databaseFailure(response, request, lookupErr)
 		return
@@ -107,7 +101,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		if lookupErr == nil {
 			userID = user.ID
 		}
-		backoff, err := s.recordLoginFailure(request.Context(), fingerprint, enterpriseID, userID, input.AgentID, now)
+		backoff, err := s.recordLoginFailure(request.Context(), fingerprint, deploymentID, userID, now)
 		if err != nil {
 			databaseFailure(response, request, err)
 			return
@@ -121,23 +115,12 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The username or password is invalid.")
 		return
 	}
-	// All new logins are user sessions. A non-empty AgentID selects the
-	// transitional legacy path so existing M1/M2 clients can upgrade safely.
-	var tokens app.TokenResponse
-	if input.AgentID != "" && input.SessionID == "" {
-		tokens, err = s.app.IssueSession(request.Context(), user, input.AgentContext)
-	} else {
-		tokens, err = s.app.IssueUserSession(request.Context(), user)
-	}
-	if errors.Is(err, app.ErrAgentConflict) {
-		writeProblem(response, request, http.StatusConflict, "AGENT_IDENTITY_CONFLICT", err.Error())
-		return
-	}
+	tokens, err := s.app.IssueUserSession(request.Context(), user)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	s.recordLoginSuccess(request.Context(), fingerprint, user.DeploymentID, user.ID, input.AgentID, now)
+	s.recordLoginSuccess(request.Context(), fingerprint, user.DeploymentID, user.ID, now)
 	slog.Info("authentication event", "event", "login.succeeded", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
@@ -161,20 +144,20 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The authentication method was not found.")
 		return
 	}
-	enterpriseID, validDeployment := s.resolveTenant(input.DeploymentID, input.DeploymentID)
+	deploymentID, validDeployment := s.resolveTenant(input.DeploymentID)
 	if !validDeployment {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
-	if _, err := s.app.DB.GetDeployment(request.Context(), enterpriseID); err != nil {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The enterprise was not found.")
+	if _, err := s.app.DB.GetDeployment(request.Context(), deploymentID); err != nil {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
 	transactionID := uuid.NewString()
 	state := uuid.NewString()
 	expiresAt := time.Now().UTC().Add(5 * time.Minute)
 	s.transactionMu.Lock()
-	s.transactions[transactionID] = federatedTransaction{DeploymentID: enterpriseID, State: state, ExpiresAt: expiresAt}
+	s.transactions[transactionID] = federatedTransaction{DeploymentID: deploymentID, State: state, ExpiresAt: expiresAt}
 	s.transactionMu.Unlock()
 	writeJSON(response, http.StatusOK, map[string]any{
 		"transactionId":    transactionID,
@@ -195,15 +178,9 @@ func (s *Server) acceptsDeployment(deploymentID string) bool {
 	return deploymentID == s.app.DeploymentID() || deploymentID == s.storageTenantID()
 }
 
-func (s *Server) resolveTenant(deploymentID, enterpriseID string) (string, bool) {
+func (s *Server) resolveTenant(deploymentID string) (string, bool) {
 	if deploymentID != "" && !s.acceptsDeployment(deploymentID) {
 		return "", false
-	}
-	if enterpriseID != "" && enterpriseID != s.storageTenantID() && enterpriseID != s.app.DeploymentID() {
-		return "", false
-	}
-	if enterpriseID != "" {
-		return enterpriseID, true
 	}
 	return s.storageTenantID(), true
 }
@@ -214,7 +191,6 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		return
 	}
 	var input struct {
-		app.AgentContext
 		SessionID         string `json:"sessionId"`
 		TransactionID     string `json:"transactionId"`
 		AuthorizationCode string `json:"authorizationCode"`
@@ -237,12 +213,7 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		databaseFailure(response, request, err)
 		return
 	}
-	var tokens app.TokenResponse
-	if input.AgentID != "" && input.SessionID == "" {
-		tokens, err = s.app.IssueSession(request.Context(), user, input.AgentContext)
-	} else {
-		tokens, err = s.app.IssueUserSession(request.Context(), user)
-	}
+	tokens, err := s.app.IssueUserSession(request.Context(), user)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -253,19 +224,12 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 func (s *Server) refreshSession(response http.ResponseWriter, request *http.Request) {
 	var input struct {
 		RefreshToken string `json:"refreshToken"`
-		AgentID      string `json:"agentId"`
 		SessionID    string `json:"sessionId"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	var tokens app.TokenResponse
-	var err error
-	if input.AgentID != "" && input.SessionID == "" {
-		tokens, err = s.app.RefreshSession(request.Context(), input.RefreshToken, input.AgentID)
-	} else {
-		tokens, err = s.app.RefreshUserSession(request.Context(), input.RefreshToken, input.SessionID)
-	}
+	tokens, err := s.app.RefreshUserSession(request.Context(), input.RefreshToken, input.SessionID)
 	if errors.Is(err, app.ErrRefreshTokenInvalid) {
 		writeProblem(response, request, http.StatusUnauthorized, "REFRESH_TOKEN_INVALID", err.Error())
 		return
@@ -285,12 +249,7 @@ func (s *Server) logout(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	claims := claimsFrom(request)
-	if claims.SessionID != "" {
-		if err := s.app.RevokeUserSession(request.Context(), input.RefreshToken, claims.SessionID); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-	} else if err := s.app.DB.RevokeRefreshSession(request.Context(), auth.HashRefreshToken(input.RefreshToken)); err != nil {
+	if err := s.app.RevokeUserSession(request.Context(), input.RefreshToken, claims.SessionID); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -301,7 +260,6 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 	var input struct {
 		CurrentPassword string `json:"currentPassword"`
 		NewPassword     string `json:"newPassword"`
-		AgentID         string `json:"agentId"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
@@ -325,10 +283,6 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
-	if err := s.app.DB.RevokeUserSessions(request.Context(), user.ID); err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
 	if err := s.app.RevokeUserSessionSet(request.Context(), user.ID); err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -340,7 +294,7 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	fingerprint := s.loginFingerprint(request, user.DeploymentID, user.Username)
-	s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, "", time.Now().UTC())
+	s.recordPasswordChanged(request.Context(), fingerprint, user.DeploymentID, user.ID, time.Now().UTC())
 	slog.Info("authentication event", "event", "password.changed", "outcome", "success", "principal_hash", fingerprint.PrincipalHash, "request_id", request.Context().Value(contextKey("request-id")))
 	writeJSON(response, http.StatusOK, tokens)
 }
@@ -352,18 +306,17 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
-	enterprise, err := s.app.DB.GetDeployment(request.Context(), user.DeploymentID)
+	roles, err := s.app.UserRoleIDs(request.Context(), user.DeploymentID, user.ID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": nullablePGText(user.Email)},
-		"enterprise":             map[string]string{"id": enterprise.ID, "name": enterprise.Name},
 		"deployment":             map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 		"deploymentId":           s.app.DeploymentID(),
 		"sessionId":              claims.SessionID,
-		"roles":                  user.RoleIds,
+		"roles":                  roles,
 		"sessionExpiresAt":       claims.ExpiresAt.Time,
 		"passwordChangeRequired": claims.PasswordChangeRequired,
 	})

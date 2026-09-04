@@ -12,7 +12,7 @@ PR #53 将运行时身份收敛为三个概念：
 
 SDK 的 canonical 方法包括 `getCurrentUser`、`listModels`、
 `listCredentialsForUser`、`getUserSkillManifest`、`listUserControlEvents` 和
-`uploadUserEventBatch`。旧的 `listAgent*` 方法和 `X-AEP-Agent-ID` 仅保留迁移窗口，
+`uploadUserEventBatch`。旧的 `listAgent*` 方法和 `X-AEP-Agent-ID` 已移除，
 不会被新示例客户端或 `aepctl` 发送。
 
 管理员可以通过：

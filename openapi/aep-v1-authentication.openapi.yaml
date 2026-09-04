@@ -24,10 +24,6 @@ paths:
       operationId: getAuthenticationMethods
       security: []
       parameters:
-        - name: enterpriseHint
-          in: query
-          required: false
-          schema: {type: string, minLength: 1}
         - name: deploymentHint
           in: query
           required: false
@@ -121,12 +117,12 @@ paths:
       responses:
         '204': {description: Session revoked}
         '401': {$ref: '#/components/responses/Problem'}
-  /agent/activation:
+  /user/activation:
     post:
       tags: [Authentication]
-      operationId: activateEnterpriseLicense
+      operationId: activateDeploymentLicense
       description: >-
-        Exchanges a signed enterprise license for a short-lived Control Service
+        Exchanges a signed deployment license for a short-lived Control Service
         entitlement token. The service verifies the complete signed envelope
         with its configured vendor public keys and never receives license
         signing private keys. Clients MUST verify the envelope locally before
@@ -140,7 +136,7 @@ paths:
             schema: {$ref: '#/components/schemas/LicenseActivationRequest'}
       responses:
         '200':
-          description: Enterprise entitlement token
+          description: Deployment entitlement token
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EntitlementTokenResponse'}
@@ -364,13 +360,12 @@ components:
     AuthenticationMethods:
       type: object
       description: >-
-        Authentication methods enabled for the enterprise. The built-in
+        Authentication methods enabled for the deployment. The built-in
         password method has the stable ID zhiyuan-password. Federated methods
         are optional and MUST NOT be returned unless a production identity
         adapter is configured.
-      required: [enterprise, deployment, methods]
+      required: [deployment, methods]
       properties:
-        enterprise: {$ref: '#/components/schemas/Enterprise'}
         deployment: {$ref: '#/components/schemas/Deployment'}
         deploymentId: {type: string, minLength: 1}
         preferredMethodId:
@@ -388,49 +383,25 @@ components:
         type: {type: string, enum: [password, federated]}
         protocol: {type: [string, 'null'], enum: [oidc, saml, custom, null]}
         displayName: {type: string}
-    Enterprise:
-      type: object
-      required: [id, name]
-      properties:
-        id: {type: string}
-        name: {type: string}
     Deployment:
       type: object
       required: [id, name]
       properties:
         id: {type: string}
         name: {type: string}
-    AgentContext:
-      type: object
-      required: [agentId, agentVersion, platform]
-      properties:
-        agentId: {type: string, minLength: 1}
-        agentVersion: {type: string, minLength: 1}
-        platform: {type: string, enum: [windows, macos, linux]}
     PasswordLoginRequest:
       type: object
-      required: [username, password]
-      anyOf:
-        - required: [deploymentId]
-        - required: [enterpriseId]
+      required: [deploymentId, username, password]
       properties:
         deploymentId: {type: string, minLength: 1}
-        enterpriseId: {type: string, minLength: 1}
         sessionId: {type: string, minLength: 1}
-        agentId: {type: string, minLength: 1}
-        agentVersion: {type: string, minLength: 1}
-        platform: {type: string, enum: [windows, macos, linux]}
         username: {type: string, minLength: 1, maxLength: 256}
         password: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
     FederatedLoginStartRequest:
       type: object
-      required: [methodId, redirectUri, codeChallenge]
-      anyOf:
-        - required: [deploymentId]
-        - required: [enterpriseId]
+      required: [deploymentId, methodId, redirectUri, codeChallenge]
       properties:
         deploymentId: {type: string, minLength: 1}
-        enterpriseId: {type: string, minLength: 1}
         sessionId: {type: string, minLength: 1}
         methodId: {type: string, minLength: 1}
         redirectUri: {type: string, format: uri}
@@ -452,17 +423,12 @@ components:
         authorizationCode: {type: string, minLength: 1}
         redirectUri: {type: string, format: uri}
         codeVerifier: {type: string, minLength: 43, maxLength: 128, writeOnly: true}
-        sessionId: {type: string, minLength: 1}
-        agentId: {type: string, minLength: 1}
-        agentVersion: {type: string, minLength: 1}
-        platform: {type: string, enum: [windows, macos, linux]}
     RefreshRequest:
       type: object
       required: [refreshToken]
       properties:
         refreshToken: {type: string, minLength: 1, writeOnly: true}
         sessionId: {type: string, minLength: 1, description: User session identifier.}
-        agentId: {type: string, minLength: 1, deprecated: true}
     LogoutRequest:
       type: object
       required: [refreshToken]
@@ -520,7 +486,7 @@ components:
       properties:
         entitlementToken:
           type: string
-          description: Short-lived service-signed token for enterprise runtime checks.
+          description: Short-lived service-signed token for deployment runtime checks.
         tokenType: {type: string, const: Bearer}
         expiresAt: {type: string, format: date-time}
         expiresIn: {type: integer, minimum: 1}
@@ -529,26 +495,26 @@ components:
         deploymentId: {type: string}
         features: {type: array, items: {type: string}}
         modelScopes:
-          description: Model identifiers authorized for this enterprise entitlement.
+          description: Model identifiers authorized for this deployment entitlement.
           type: array
           items: {type: string}
     CreatePlatformUserRequest:
       type: object
-      required: [enterpriseId, username, displayName, temporaryPassword]
+      required: [deploymentId, username, displayName, temporaryPassword]
       properties:
-        enterpriseId: {type: string}
+        deploymentId: {type: string}
         username: {type: string, minLength: 1, maxLength: 256}
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
         temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
-        organizationIds: {type: array, items: {type: string}, uniqueItems: true}
+        teamIds: {type: array, items: {type: string}, uniqueItems: true}
         roleIds: {type: array, items: {type: string}, uniqueItems: true}
         requirePasswordChange: {type: boolean, default: true}
     ImportPlatformUsersRequest:
       type: object
-      required: [enterpriseId, users]
+      required: [deploymentId, users]
       properties:
-        enterpriseId: {type: string}
+        deploymentId: {type: string}
         users:
           type: array
           minItems: 1
@@ -563,7 +529,7 @@ components:
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
         temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
-        organizationIds: {type: array, items: {type: string}, uniqueItems: true}
+        teamIds: {type: array, items: {type: string}, uniqueItems: true}
         roleIds: {type: array, items: {type: string}, uniqueItems: true}
         requirePasswordChange: {type: boolean, default: true}
     ImportPlatformUsersResponse:
@@ -588,7 +554,7 @@ components:
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
         status: {type: string, enum: [active, disabled]}
-        organizationIds: {type: array, items: {type: string}, uniqueItems: true}
+        teamIds: {type: array, items: {type: string}, uniqueItems: true}
         roleIds: {type: array, items: {type: string}, uniqueItems: true}
     ResetPasswordRequest:
       type: object
@@ -598,15 +564,15 @@ components:
         requirePasswordChange: {type: boolean, default: true}
     PlatformUser:
       type: object
-      required: [id, enterpriseId, username, displayName, status, createdAt, updatedAt]
+      required: [id, deploymentId, username, displayName, status, createdAt, updatedAt]
       properties:
         id: {type: string}
-        enterpriseId: {type: string}
+        deploymentId: {type: string}
         username: {type: string}
         displayName: {type: string}
         email: {type: [string, 'null'], format: email}
         status: {type: string, enum: [active, disabled]}
-        organizationIds: {type: array, items: {type: string}}
+        teamIds: {type: array, items: {type: string}}
         roleIds: {type: array, items: {type: string}}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}

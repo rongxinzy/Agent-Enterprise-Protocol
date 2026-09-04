@@ -92,11 +92,11 @@ func validCredentialValue(value string) bool {
 }
 
 func validDeliveryMode(value string) bool {
-	return value == "server_only" || value == "agent"
+	return value == "server_only" || value == "client"
 }
 
 func validCredentialSubject(value string) bool {
-	return value == "enterprise" || value == "organization" || value == "user" || value == "agent" || value == "role" || value == "team"
+	return value == "user" || value == "role" || value == "team"
 }
 
 func (s *Server) listAgentCredentials(response http.ResponseWriter, request *http.Request) {
@@ -107,19 +107,16 @@ func (s *Server) listAgentCredentials(response http.ResponseWriter, request *htt
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT `+credentialColumnsQualified+`
 FROM credentials c
 JOIN users u ON u.id=$2 AND u.deployment_id=$1
-WHERE c.deployment_id=$1 AND c.enabled=true AND c.delivery_mode='agent'
+WHERE c.deployment_id=$1 AND c.enabled=true AND c.delivery_mode='client'
 AND EXISTS (
   SELECT 1 FROM credential_assignments ca
   WHERE ca.deployment_id=c.deployment_id AND ca.credential_id=c.id AND (
-    (ca.subject_type='enterprise' AND ca.subject_id=$1)
-    OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.team_ids))
-    OR (ca.subject_type='user' AND ca.subject_id=$2)
-    OR (ca.subject_type='agent' AND ca.subject_id=$3)
+    (ca.subject_type='user' AND ca.subject_id=$2)
     OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
     OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
   )
 )
-ORDER BY c.id`, claims.Tenant, claims.Subject, claims.AgentID)
+ORDER BY c.id`, claims.DeploymentID, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -164,7 +161,7 @@ func (s *Server) resolveAgentCredential(response http.ResponseWriter, request *h
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	record, err := scanCredential(tx.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2 FOR SHARE", claims.Tenant, credentialID))
+	record, err := scanCredential(tx.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2 FOR SHARE", claims.DeploymentID, credentialID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if !s.writeCredentialResolutionAudit(response, request, tx, credentialID, input.Purpose, "denied", "not_found") {
 			return
@@ -179,21 +176,18 @@ func (s *Server) resolveAgentCredential(response http.ResponseWriter, request *h
 	reason := ""
 	if !record.Enabled {
 		reason = "disabled"
-	} else if record.DeliveryMode != "agent" {
+	} else if record.DeliveryMode != "client" {
 		reason = "server_only"
 	} else {
 		var authorized bool
 		err = tx.QueryRow(request.Context(), `SELECT EXISTS (
 SELECT 1 FROM credential_assignments ca
 JOIN users u ON u.id=$2 AND u.deployment_id=$1
-WHERE ca.deployment_id=$1 AND ca.credential_id=$4 AND (
-  (ca.subject_type='enterprise' AND ca.subject_id=$1)
-  OR (ca.subject_type='organization' AND ca.subject_id=ANY(u.team_ids))
-  OR (ca.subject_type='user' AND ca.subject_id=$2)
-  OR (ca.subject_type='agent' AND ca.subject_id=$3)
+WHERE ca.deployment_id=$1 AND ca.credential_id=$3 AND (
+  (ca.subject_type='user' AND ca.subject_id=$2)
   OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
   OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
-))`, claims.Tenant, claims.Subject, claims.AgentID, credentialID).Scan(&authorized)
+))`, claims.DeploymentID, claims.Subject, credentialID).Scan(&authorized)
 		if err != nil {
 			databaseFailure(response, request, err)
 			return
@@ -206,7 +200,7 @@ WHERE ca.deployment_id=$1 AND ca.credential_id=$4 AND (
 		if !s.writeCredentialResolutionAudit(response, request, tx, credentialID, input.Purpose, "denied", reason) {
 			return
 		}
-		code, detail := "ACCESS_DENIED", "The credential is not assigned to this Agent identity."
+		code, detail := "ACCESS_DENIED", "The credential is not assigned to this user."
 		if reason == "disabled" {
 			code, detail = "CREDENTIAL_DISABLED", "The credential is disabled."
 		} else if reason == "server_only" {
@@ -217,7 +211,7 @@ WHERE ca.deployment_id=$1 AND ca.credential_id=$4 AND (
 	}
 	plaintext, err := s.app.Credentials.Open(request.Context(), credential.Envelope{
 		KeyID: record.KeyID, Nonce: record.Nonce, Ciphertext: record.EncryptedValue,
-	}, credential.AssociatedData(claims.Tenant, record.ID))
+	}, credential.AssociatedData(claims.DeploymentID, record.ID))
 	if err != nil {
 		if !s.writeCredentialResolutionAudit(response, request, tx, credentialID, input.Purpose, "denied", "decrypt_failed") {
 			return
@@ -238,7 +232,7 @@ WHERE ca.deployment_id=$1 AND ca.credential_id=$4 AND (
 
 func (s *Server) writeCredentialResolutionAudit(response http.ResponseWriter, request *http.Request, tx pgx.Tx, credentialID, purpose, outcome, reason string) bool {
 	claims := claimsFrom(request)
-	if _, err := tx.Exec(request.Context(), `INSERT INTO credential_resolution_audit (id,deployment_id,credential_id,user_id,agent_id,purpose,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, uuid.NewString(), claims.Tenant, credentialID, claims.Subject, claims.AgentID, purpose, outcome, optionalAuditReason(reason)); err != nil {
+	if _, err := tx.Exec(request.Context(), `INSERT INTO credential_resolution_audit (id,deployment_id,credential_id,user_id,session_id,purpose,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, uuid.NewString(), claims.DeploymentID, credentialID, claims.Subject, claims.SessionID, purpose, outcome, optionalAuditReason(reason)); err != nil {
 		databaseFailure(response, request, err)
 		return false
 	}
@@ -481,10 +475,6 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		return
 	}
 	tenant := claimsFrom(request).Tenant
-	if input.Subject.Type == "enterprise" && input.Subject.ID != tenant {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "An enterprise assignment must target the current enterprise.")
-		return
-	}
 	var exists bool
 	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, input.CredentialID).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)

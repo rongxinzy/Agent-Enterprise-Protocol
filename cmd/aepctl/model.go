@@ -149,7 +149,7 @@ func modelCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})}
 	assign.Flags().StringVar(&assignModelID, "model-id", "", "model identifier")
-	assign.Flags().StringVar(&subjectType, "subject-type", "user", "enterprise, organization, user, or agent")
+	assign.Flags().StringVar(&subjectType, "subject-type", "user", "user, role, or team")
 	assign.Flags().StringVar(&subjectID, "subject-id", "", "subject identifier")
 	_ = assign.MarkFlagRequired("model-id")
 	_ = assign.MarkFlagRequired("subject-id")

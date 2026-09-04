@@ -14,9 +14,6 @@ describe('AepClient SDK gate', () => {
     store = new MemoryTokenStore();
     client = new AepClient({
       baseUrl: server.baseUrl,
-      agentId: 'agent-1',
-      agentVersion: '0.1.0',
-      platform: 'windows',
       tokenStore: store,
       transport: new FetchTransport({defaultTimeoutMs: 2_000, maxRetries: 2}),
     });
@@ -31,7 +28,7 @@ describe('AepClient SDK gate', () => {
     const metadata = await client.getMetadata();
     expect(metadata.capabilities).toContain('skills');
     const request = server.requests.at(-1);
-    expect(request?.headers['x-aep-agent-id']).toBe('agent-1');
+    expect(request?.headers['x-aep-agent-id']).toBeUndefined();
     expect(request?.headers['x-aep-protocol-version']).toBe('1.0');
     expect(request?.headers['x-request-id']).toBeTruthy();
     expect(server.requests.filter(item => item.path === '/aep/v1/metadata')).toHaveLength(2);
@@ -52,7 +49,7 @@ describe('AepClient SDK gate', () => {
   });
 
   test('stores login tokens and loads current identity', async () => {
-    const tokens = await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    const tokens = await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     expect((await store.get())?.accessToken).toBe(tokens.accessToken);
     expect((await client.getCurrentIdentity()).user.id).toBe('user-1');
   });
@@ -87,7 +84,7 @@ describe('AepClient SDK gate', () => {
   });
 
   test('activates a locally verified enterprise license', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     await expect(client.activateEnterpriseLicense({
       license: {
         format: 'zhiyuan-license-v1',
@@ -96,14 +93,14 @@ describe('AepClient SDK gate', () => {
         signature: 'signed-license',
       },
     })).resolves.toMatchObject({entitlementToken: 'entitlement-1', tokenType: 'Bearer'});
-    expect(server.requests.at(-1)?.path).toBe('/aep/v1/agent/activation');
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/activation');
   });
 
   test('discovers models and returns an OpenAI-compatible gateway connection', async () => {
     await expect(client.getModelConnection()).rejects.toMatchObject({code: 'NO_SESSION', status: 401});
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
 
-    expect((await client.listAgentModels()).models[0]).toMatchObject({
+    expect((await client.listModels()).models[0]).toMatchObject({
       id: 'model-1',
       protocol: 'openai-compatible',
       upstreamModel: 'qwen3-32b',
@@ -124,7 +121,7 @@ describe('AepClient SDK gate', () => {
   });
 
   test('covers model administration APIs', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     const write = {
       id: 'model-1',
       displayName: 'Enterprise Model',
@@ -145,14 +142,14 @@ describe('AepClient SDK gate', () => {
     };
 
     expect((await client.listAdminModels()).models).toHaveLength(1);
-    await expect(client.listAgentModels()).resolves.toMatchObject({models: [{reasoningCompatibility: {thinkingFormat: 'deepseek'}}]});
+    await expect(client.listModels()).resolves.toMatchObject({models: [{reasoningCompatibility: {thinkingFormat: 'deepseek'}}]});
     await expect(client.createModel(write)).resolves.toMatchObject({id: 'model-1'});
     await expect(client.getModel('model-1')).resolves.toMatchObject({id: 'model-1'});
     await expect(client.updateModel('model-1', {enabled: false})).resolves.toMatchObject({id: 'model-1'});
     await client.deleteModel('model-1');
 
     expect((await client.listModelAssignments()).assignments).toHaveLength(1);
-    const subjectTypes = ['enterprise', 'organization', 'user', 'agent'] as const;
+    const subjectTypes = ['user', 'role', 'team'] as const;
     for (const type of subjectTypes) {
       await expect(client.createModelAssignment({modelId: 'model-1', subject: {type, id: type + '-1'}})).resolves.toMatchObject({id: 'assignment-1'});
     }
@@ -160,7 +157,7 @@ describe('AepClient SDK gate', () => {
   });
 
   test('publishes and observes data-plane desired state without secret values', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     const desired = await client.getDataPlaneDesiredState();
     expect(desired.revision).toBe('rev-1');
     expect(desired.routes[0].providerType).toBe('deepseek');
@@ -174,18 +171,18 @@ describe('AepClient SDK gate', () => {
   });
 
   test('covers Credential delivery and administration without caching secrets', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
 
-    expect((await client.listAgentCredentials()).credentials).toEqual([
-      expect.objectContaining({id: 'credential-1', deliveryMode: 'agent', maskedValue: '****cdef'}),
+    expect((await client.listCredentialsForUser()).credentials).toEqual([
+      expect.objectContaining({id: 'credential-1', deliveryMode: 'client', maskedValue: '****cdef'}),
     ]);
-    await expect(client.resolveAgentCredential('credential-1', 'Call the example service')).resolves.toEqual({
+    await expect(client.resolveCredentialForUser('credential-1', 'Call the example service')).resolves.toEqual({
       credentialId: 'credential-1',
       type: 'api_key',
       value: 'resolved-secret',
       expiresAt: null,
     });
-    await expect(client.resolveAgentCredential('server-only', 'Call the gateway')).rejects.toMatchObject({
+    await expect(client.resolveCredentialForUser('server-only', 'Call the gateway')).rejects.toMatchObject({
       status: 403,
       code: 'CREDENTIAL_NOT_DELIVERABLE',
     });
@@ -195,7 +192,7 @@ describe('AepClient SDK gate', () => {
       name: 'Agent API key',
       service: 'example-service',
       type: 'api_key' as const,
-      deliveryMode: 'agent' as const,
+      deliveryMode: 'client' as const,
       value: 'new-secret',
       enabled: true,
     };
@@ -207,7 +204,7 @@ describe('AepClient SDK gate', () => {
     await expect(client.deleteCredential('credential-in-use')).rejects.toMatchObject({status: 409, code: 'CREDENTIAL_IN_USE'});
 
     expect((await client.listCredentialAssignments()).assignments).toHaveLength(1);
-    const subjectTypes = ['enterprise', 'organization', 'user', 'agent'] as const;
+    const subjectTypes = ['user', 'role', 'team'] as const;
     for (const type of subjectTypes) {
       await expect(
         client.createCredentialAssignment({
@@ -219,14 +216,14 @@ describe('AepClient SDK gate', () => {
     await client.deleteCredentialAssignment('credential-assignment-1');
 
     server.omitCredentialNoStore();
-    await expect(client.resolveAgentCredential('credential-1', 'Unsafe response')).rejects.toMatchObject({
+    await expect(client.resolveCredentialForUser('credential-1', 'Unsafe response')).rejects.toMatchObject({
       status: 502,
       code: 'CREDENTIAL_RESPONSE_CACHEABLE',
     });
   });
 
   test('single-flights concurrent 401 refreshes', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     server.delayUnauthorizedResponses([0, 0, 0, 0, 50, 50, 50, 50]);
     server.expireAccessToken();
     const identities = await Promise.all(Array.from({length: 8}, () => client.getCurrentIdentity()));
@@ -236,7 +233,7 @@ describe('AepClient SDK gate', () => {
   });
 
   test('clears the session when refresh is rejected', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     server.expireAccessToken();
     server.failRefresh();
     await expect(client.getCurrentIdentity()).rejects.toMatchObject({code: 'REFRESH_TOKEN_INVALID'});
@@ -244,29 +241,29 @@ describe('AepClient SDK gate', () => {
   });
 
   test('supports ETag manifests and binary package downloads', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
-    const first = await client.getSkillManifest();
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    const first = await client.getUserSkillManifest();
     expect(first.notModified).toBe(false);
-    const second = await client.getSkillManifest('"skills-1"');
+    const second = await client.getUserSkillManifest('"skills-1"');
     expect(second).toEqual({notModified: true, etag: '"skills-1"'});
-    const archive = await client.downloadSkillPackage('review', '1.0.0');
+    const archive = await client.downloadUserSkillPackage('review', '1.0.0');
     expect([...archive]).toEqual([0x50, 0x4b, 0x03, 0x04]);
   });
 
   test('maps RFC 9457 responses to AepProblem', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
-    const failure = client.getAgent('missing');
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    const failure = client.getModel('missing');
     await expect(failure).rejects.toBeInstanceOf(AepProblem);
     await expect(failure).rejects.toMatchObject({status: 404, code: 'RESOURCE_NOT_FOUND', requestId: 'req-mock'});
   });
 
   test('covers control, telemetry, and administration APIs', async () => {
-    await client.loginWithPassword({enterpriseId: 'ent-1', username: 'demo', password: 'password'});
-    expect((await client.heartbeat({agentVersion: '0.1.0', platform: 'windows'})).hasPendingControlEvents).toBe(true);
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    expect((await client.heartbeatUser({clientVersion: '0.1.0', platform: 'windows'})).hasPendingControlEvents).toBe(true);
     expect((await client.listControlEvents()).items).toEqual([]);
     await client.acknowledgeControlEvent('delivery-1', '2026-08-20T00:00:00Z');
     await client.reportControlEventResult('delivery-1', {status: 'succeeded', completedAt: '2026-08-20T00:00:01Z'});
     expect(await client.uploadEventBatch([{eventId: 'event-1', type: 'auth.login'}])).toMatchObject({accepted: ['event-1']});
-    expect((await client.listAgents()).items).toEqual([]);
+    expect((await client.listUsers()).items).toEqual([]);
   });
 });

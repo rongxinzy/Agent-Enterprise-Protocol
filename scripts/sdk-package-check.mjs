@@ -99,7 +99,7 @@ async function verifyInstalledPackage(archive, consumerDirectory) {
     "import {AepClient, ProtectedRefreshTokenStore, type AepProtectedStorage, type AepSessionState} from '@aep/sdk-node';\n" +
       'declare const storage: AepProtectedStorage;\n' +
       'const store = new ProtectedRefreshTokenStore(storage);\n' +
-      "const client = new AepClient({baseUrl: 'https://aep.example', agentId: 'agent-1', agentVersion: '1.0.0', platform: 'windows', tokenStore: store});\n" +
+      "const client = new AepClient({baseUrl: 'https://aep.example', tokenStore: store});\n" +
       'const session: Promise<AepSessionState> = client.getSessionState();\n' +
       'void session;\n',
     'utf8',

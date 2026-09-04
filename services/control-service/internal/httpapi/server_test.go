@@ -49,12 +49,12 @@ func TestPasswordChangeRequiredSessionIsRestricted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, _, err := tokens.Issue("user-1", "tenant-1", "agent-1", false, true, nil, nil)
+	access, _, err := tokens.IssueWithDeploymentSession("user-1", "deployment-1", "session-1", false, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler := New(&app.App{Tokens: tokens}).Handler()
-	request := httptest.NewRequest(http.MethodGet, "/aep/v1/agent/models", nil)
+	request := httptest.NewRequest(http.MethodGet, "/aep/v1/user/models", nil)
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
@@ -196,7 +196,7 @@ func TestProtocolVersionGate(t *testing.T) {
 	if observedResponses != 2 {
 		t.Fatalf("runtime middleware observed %d protocol rejections", observedResponses)
 	}
-	request := httptest.NewRequest(http.MethodGet, "/aep/v1/agent/me", nil)
+	request := httptest.NewRequest(http.MethodGet, "/aep/v1/user/me", nil)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

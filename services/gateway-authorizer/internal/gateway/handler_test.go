@@ -29,7 +29,7 @@ func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 		if request.Header.Get("Authorization") != "" {
 			t.Error("client authorization reached the upstream")
 		}
-		if request.Header.Get("X-AEP-Tenant-ID") != "enterprise-a" || request.Header.Get("X-AEP-Agent-ID") != "agent-a" || request.Header.Get("X-AEP-User-ID") != "user-a" || request.Header.Get("X-AEP-Model-ID") != "model-a" {
+		if request.Header.Get("X-AEP-Deployment-ID") != "deployment-a" || request.Header.Get("X-AEP-Session-ID") != "session-a" || request.Header.Get("X-AEP-User-ID") != "user-a" || request.Header.Get("X-AEP-Model-ID") != "model-a" {
 			t.Errorf("unexpected trusted headers: %#v", request.Header)
 		}
 		body, _ := io.ReadAll(request.Body)
@@ -41,7 +41,7 @@ func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 	}))
 	defer upstream.Close()
 	handler, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 1024}, verifierStub{claims: &ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", ModelScopes: []string{"model-a"},
+		DeploymentID: "deployment-a", SessionID: "session-a", ModelScopes: []string{"model-a"},
 		RegisteredClaims: jwt.RegisteredClaims{Subject: "user-a"},
 	}})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 	}
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{\"model\":\"model-a\",\"stream\":true}"))
 	request.Header.Set("Authorization", "Bearer model-token")
-	request.Header.Set("X-AEP-Tenant-ID", "attacker")
+	request.Header.Set("X-AEP-Deployment-ID", "attacker")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || response.Body.String() != "data: ok\n\n" {
@@ -91,7 +91,7 @@ func TestHandlerRequiresEntitlementWhenConfigured(t *testing.T) {
 	}))
 	defer upstream.Close()
 	handler, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 1024, RequireEntitlement: true}, verifierStub{claims: &ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
+		DeploymentID: "deployment-a", SessionID: "session-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
 	}})
 	if err != nil {
 		t.Fatal(err)

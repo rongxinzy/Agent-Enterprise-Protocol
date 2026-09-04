@@ -12,14 +12,8 @@ import {AgentState} from './state.js';
 const dataDirectory = path.resolve(process.env.AEP_AGENT_DATA_DIR ?? '.aep-agent');
 fs.mkdirSync(dataDirectory, {recursive: true});
 const state = new AgentState(path.join(dataDirectory, 'agent.sqlite'));
-const platform = normalizePlatform(process.platform);
 const client = new AepClient({
   baseUrl: process.env.AEP_BASE_URL ?? 'http://localhost:8080',
-  ...(process.env.AEP_AGENT_ID ? {
-    agentId: process.env.AEP_AGENT_ID,
-    agentVersion: '0.1.0',
-    platform,
-  } : {}),
   tokenStore: state,
 });
 const reconciler = new SkillReconciler(client, state, path.join(dataDirectory, 'managed-skills'));
@@ -27,8 +21,6 @@ const agent = new ExampleAgent({
   client,
   state,
   reconciler,
-  agentVersion: '0.1.0',
-  platform,
   credentials: {
     deploymentId: process.env.AEP_DEPLOYMENT_ID ?? process.env.AEP_ENTERPRISE_ID ?? 'demo',
     username: required('AEP_USERNAME'),
@@ -99,12 +91,6 @@ function required(key: string): string {
   const value = process.env[key];
   if (!value) throw new Error(`${key} is required`);
   return value;
-}
-
-function normalizePlatform(value: NodeJS.Platform): 'windows' | 'macos' | 'linux' {
-  if (value === 'win32') return 'windows';
-  if (value === 'darwin') return 'macos';
-  return 'linux';
 }
 
 function parseBoolean(value: string | undefined): boolean {

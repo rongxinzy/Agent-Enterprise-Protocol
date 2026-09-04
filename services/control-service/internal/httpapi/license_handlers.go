@@ -20,7 +20,6 @@ type licenseImportRequest struct {
 
 type licenseRecord struct {
 	LicenseID    string
-	EnterpriseID string
 	DeploymentID string
 	CustomerID   string
 	Digest       string
@@ -30,38 +29,38 @@ type licenseRecord struct {
 	ExpiresAt    time.Time
 	GraceEndsAt  time.Time
 	UserLimit    int
-	AgentLimit   int
+	ActivationLimit int
 	Features     []string
 	Payload      []byte
 	RevokedAt    *time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	ActiveAgents int
+	ActiveActivations int
 	ActiveUsers  int
 }
 
 func scanLicense(row interface{ Scan(...any) error }) (licenseRecord, error) {
 	var value licenseRecord
-	err := row.Scan(&value.LicenseID, &value.EnterpriseID, &value.DeploymentID, &value.CustomerID,
+	err := row.Scan(&value.LicenseID, &value.DeploymentID, &value.CustomerID,
 		&value.Digest, &value.KeyID, &value.Status, &value.IssuedAt, &value.ExpiresAt, &value.GraceEndsAt,
-		&value.UserLimit, &value.AgentLimit, &value.Features, &value.Payload, &value.RevokedAt,
-		&value.CreatedAt, &value.UpdatedAt, &value.ActiveAgents, &value.ActiveUsers)
+		&value.UserLimit, &value.ActivationLimit, &value.Features, &value.Payload, &value.RevokedAt,
+		&value.CreatedAt, &value.UpdatedAt, &value.ActiveActivations, &value.ActiveUsers)
 	return value, err
 }
 
-const licenseColumns = `l.license_id,l.enterprise_id,l.deployment_id,l.customer_id,l.digest,l.key_id,l.status,
- l.issued_at,l.expires_at,l.grace_ends_at,l.user_limit,l.agent_limit,l.features,l.payload,l.revoked_at,
+const licenseColumns = `l.license_id,l.deployment_id,l.customer_id,l.digest,l.key_id,l.status,
+ l.issued_at,l.expires_at,l.grace_ends_at,l.user_limit,l.activation_limit,l.features,l.payload,l.revoked_at,
  l.created_at,l.updated_at,
  (SELECT count(*) FROM license_activations a WHERE a.license_id=l.license_id AND a.revoked_at IS NULL),
  (SELECT count(DISTINCT a.user_id) FROM license_activations a WHERE a.license_id=l.license_id AND a.revoked_at IS NULL)`
 
 func licenseJSON(value licenseRecord, includePayload bool) map[string]any {
 	result := map[string]any{
-		"licenseId": value.LicenseID, "enterpriseId": value.EnterpriseID, "deploymentId": value.DeploymentID, "customerId": value.CustomerID,
+		"licenseId": value.LicenseID, "deploymentId": value.DeploymentID, "customerId": value.CustomerID,
 		"digest": value.Digest, "keyId": value.KeyID, "status": value.Status,
 		"issuedAt": value.IssuedAt, "expiresAt": value.ExpiresAt, "graceEndsAt": value.GraceEndsAt,
-		"limits":   map[string]int{"users": value.UserLimit, "agents": value.AgentLimit},
-		"features": value.Features, "activeAgents": value.ActiveAgents, "activeUsers": value.ActiveUsers,
+		"limits":   map[string]int{"users": value.UserLimit, "activations": value.ActivationLimit},
+		"features": value.Features, "activeActivations": value.ActiveActivations, "activeUsers": value.ActiveUsers,
 		"revokedAt": value.RevokedAt, "createdAt": value.CreatedAt, "updatedAt": value.UpdatedAt,
 	}
 	if includePayload {
@@ -76,7 +75,7 @@ func licenseJSON(value licenseRecord, includePayload bool) map[string]any {
 func (s *Server) listLicenses(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
 	query := `SELECT ` + licenseColumns + ` FROM licenses l WHERE l.deployment_id=$1`
-	args := []any{claims.Tenant}
+	args := []any{claims.DeploymentID}
 	if cursor := request.URL.Query().Get("cursor"); cursor != "" {
 		query += ` AND l.license_id>$2`
 		args = append(args, cursor)

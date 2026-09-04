@@ -17,23 +17,11 @@ export interface AepTokens {
   passwordChangeRequired: boolean;
 }
 
-export interface AgentContext {
-  agentId: string;
-  agentVersion: string;
-  platform: 'windows' | 'macos' | 'linux';
-}
-
 export interface AepClientOptions {
   baseUrl: string;
   tokenStore: AepTokenStore;
   sessionId?: string;
   transport?: AepTransport;
-  /** @deprecated Agent identity is no longer used; sessions are user-scoped. */
-  agentId?: string;
-  /** @deprecated Retained for transitional clients. */
-  agentVersion?: string;
-  /** @deprecated Retained for transitional clients. */
-  platform?: AgentContext['platform'];
 }
 
 export interface AepTokenStore {
@@ -98,8 +86,8 @@ export type CredentialAssignmentList = components['schemas']['CredentialAssignme
 export type CredentialAssignmentWrite = components['schemas']['CredentialAssignmentWrite'];
 export type ModelGatewayMetadata = components['schemas']['ModelGatewayMetadata'];
 export type ModelReasoningCompatibility = components['schemas']['ModelReasoningCompatibility'];
-export type AgentModel = components['schemas']['AgentModel'];
-export type AgentModelList = components['schemas']['AgentModelList'];
+export type UserModel = components['schemas']['UserModel'];
+export type UserModelList = components['schemas']['UserModelList'];
 export type AdminModel = components['schemas']['AdminModel'];
 export type AdminModelList = components['schemas']['AdminModelList'];
 export type AdminModelWrite = components['schemas']['AdminModelWrite'];
@@ -126,18 +114,16 @@ export interface AuthenticationMethod {
 }
 
 export interface AuthenticationMethods {
-	enterprise: {id: string; name: string};
-	deployment?: {id: string; name: string};
-	deploymentId?: string;
+  deployment: {id: string; name: string};
+  deploymentId: string;
   preferredMethodId?: string | null;
   methods: AuthenticationMethod[];
 }
 
 export interface CurrentIdentity {
-	user: {id: string; displayName: string; email?: string | null};
-	enterprise: {id: string; name: string};
-	deployment?: {id: string; name: string};
-	deploymentId?: string;
+  user: {id: string; displayName: string; email?: string | null};
+  deployment: {id: string; name: string};
+  deploymentId: string;
   roles: string[];
   sessionExpiresAt: string;
   passwordChangeRequired: boolean;
@@ -216,29 +202,13 @@ export interface Page<T> {
 export interface PlatformUser {
   id: string;
   deploymentId: string;
-  /** @deprecated Use deploymentId. */
-  enterpriseId?: string;
   username: string;
   displayName: string;
   status: 'active' | 'disabled';
   teamIds?: string[];
   roleIds: string[];
-  /** @deprecated Use teamIds. */
-  organizationIds?: string[];
   createdAt: string;
   updatedAt: string;
-}
-
-export interface AdminAgent {
-  agentId: string;
-  enterpriseId: string;
-  userId: string;
-  agentVersion: string;
-  platform: AgentContext['platform'];
-  firstSeenAt: string;
-  lastSeenAt: string;
-  appliedSkillRevision?: string | null;
-  installedSkillIds?: string[];
 }
 
 export interface Query {
