@@ -254,6 +254,12 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 
 func requiredAdminPermission(method, path string) string {
 	switch {
+	case strings.HasPrefix(path, "/aep/v1/admin/model-assignments"):
+		return "models.assign"
+	case strings.HasPrefix(path, "/aep/v1/admin/skill-assignments"):
+		return "skills.assign"
+	case strings.HasPrefix(path, "/aep/v1/admin/credential-assignments"):
+		return "credentials.assign"
 	case strings.HasPrefix(path, "/aep/v1/admin/permissions") || strings.HasPrefix(path, "/aep/v1/admin/roles"):
 		if method == http.MethodGet {
 			return "roles.read"
@@ -274,25 +280,16 @@ func requiredAdminPermission(method, path string) string {
 	case strings.HasPrefix(path, "/aep/v1/admin/sessions"):
 		return "users.read"
 	case strings.HasPrefix(path, "/aep/v1/admin/models"):
-		if strings.Contains(path, "assignment") {
-			return "models.assign"
-		}
 		if method == http.MethodGet {
 			return "models.read"
 		}
 		return "models.write"
 	case strings.HasPrefix(path, "/aep/v1/admin/skills"):
-		if strings.Contains(path, "assignment") {
-			return "skills.assign"
-		}
 		if method == http.MethodGet {
 			return "skills.read"
 		}
 		return "skills.write"
 	case strings.HasPrefix(path, "/aep/v1/admin/credentials"):
-		if strings.Contains(path, "assignment") {
-			return "credentials.assign"
-		}
 		if method == http.MethodGet {
 			return "credentials.read"
 		}

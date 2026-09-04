@@ -305,6 +305,10 @@ func (a *App) UserRoleIDs(ctx context.Context, deploymentID, userID string) ([]s
 	return a.Store.Deployment(deploymentID).UserRoleIDs(ctx, userID)
 }
 
+func (a *App) UserPermissions(ctx context.Context, deploymentID, userID string) ([]string, error) {
+	return a.Store.Deployment(deploymentID).UserPermissions(ctx, userID)
+}
+
 // IssueUserSession creates a refreshable terminal session that is scoped to a
 // user topic. It does not create or touch a legacy Agent record.
 func (a *App) IssueUserSession(ctx context.Context, user repository.User) (TokenResponse, error) {
