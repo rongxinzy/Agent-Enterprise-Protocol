@@ -38,6 +38,18 @@ async function runScenario() {
 
   const skillId = 'm2-withdraw-' + runId;
   await admin.createSkill({id: skillId, name: 'M2 withdraw test', description: 'Skill version withdrawal test'});
+  const createdSkills = await admin.listSkills();
+  const createdSkill = Array.isArray(createdSkills.skills)
+    ? createdSkills.skills.find(item => item.id === skillId)
+    : undefined;
+  assert(createdSkill?.state === 'active', 'Admin Skill list omitted the canonical active state');
+  await admin.updateSkill(skillId, {state: 'withdrawn'});
+  const withdrawnSkills = await admin.listSkills();
+  const withdrawnSkill = Array.isArray(withdrawnSkills.skills)
+    ? withdrawnSkills.skills.find(item => item.id === skillId)
+    : undefined;
+  assert(withdrawnSkill?.state === 'withdrawn', 'Admin Skill state update was not persisted');
+  await admin.updateSkill(skillId, {state: 'active'});
   await admin.uploadSkillVersion(skillId, '1.0.0', new Uint8Array(Buffer.from('skill-version-package')));
   await admin.publishSkillVersion(skillId, '1.0.0');
   await admin.deleteSkillVersion(skillId, '1.0.0');

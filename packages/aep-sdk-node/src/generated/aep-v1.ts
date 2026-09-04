@@ -1191,6 +1191,7 @@ export interface components {
             deploymentId: string;
             sessionId: string;
             roles: string[];
+            permissions: string[];
             /** Format: date-time */
             sessionExpiresAt: string;
             passwordChangeRequired: boolean;

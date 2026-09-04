@@ -643,13 +643,14 @@ components:
         passwordChangeRequired: {type: boolean}
     CurrentIdentity:
       type: object
-      required: [user, deployment, deploymentId, sessionId, roles, sessionExpiresAt, passwordChangeRequired]
+      required: [user, deployment, deploymentId, sessionId, roles, permissions, sessionExpiresAt, passwordChangeRequired]
       properties:
         user: {$ref: '#/components/schemas/User'}
         deployment: {$ref: '#/components/schemas/Deployment'}
         deploymentId: {type: string, minLength: 1}
         sessionId: {type: string}
         roles: {type: array, items: {type: string}}
+        permissions: {type: array, uniqueItems: true, items: {type: string}}
         sessionExpiresAt: {type: string, format: date-time}
         passwordChangeRequired: {type: boolean}
     User:

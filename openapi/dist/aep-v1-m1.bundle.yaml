@@ -1690,6 +1690,7 @@ components:
         - deploymentId
         - sessionId
         - roles
+        - permissions
         - sessionExpiresAt
         - passwordChangeRequired
       properties:
@@ -1704,6 +1705,11 @@ components:
           type: string
         roles:
           type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          uniqueItems: true
           items:
             type: string
         sessionExpiresAt:
