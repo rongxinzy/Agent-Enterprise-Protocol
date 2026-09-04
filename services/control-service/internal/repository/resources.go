@@ -228,6 +228,13 @@ func (s *Store) PublishSkillVersion(ctx context.Context, skillID, version string
 	return resultError(result)
 }
 
+func (s *Store) DeleteSkillVersion(ctx context.Context, skillID, version string) error {
+	result := s.db.WithContext(ctx).
+		Where("skill_id = ? AND version = ?", skillID, version).
+		Delete(&SkillVersion{})
+	return resultError(result)
+}
+
 func (s *DeploymentStore) ListSkillAssignments(ctx context.Context) ([]SkillAssignment, error) {
 	items := make([]SkillAssignment, 0)
 	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("id").Find(&items).Error
