@@ -100,9 +100,12 @@ breaking change.
 - Treat all client-provided tenant, user, Agent, model, Skill, and scope values
   as untrusted. Derive authorization from the authenticated session and stored
   assignments.
-- Database migrations are versioned and forward-only. Use the existing
-  PostgreSQL/sqlc patterns and advisory-lock startup behavior; do not edit
-  generated sqlc files by hand.
+- Database migrations are versioned and forward-only. Use GORM repositories
+  for ordinary runtime persistence, keep complex lock-sensitive operations as
+  explicit PostgreSQL queries, and preserve advisory-lock startup behavior.
+  Production code must never call `AutoMigrate`; schema changes belong in the
+  reviewed SQL migrations. Do not edit generated sqlc files by hand while
+  transitional sqlc queries remain.
 
 ## Control Plane and Data Plane
 

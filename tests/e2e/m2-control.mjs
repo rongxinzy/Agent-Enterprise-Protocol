@@ -57,6 +57,16 @@ async function runScenario() {
     temporaryPassword: password, requirePasswordChange: false,
     teamIds: [teamId], roleIds: [roleId],
   });
+  const users = await admin.listUsers();
+  const listedUser = users.items.find(item => item.id === user.id);
+  assert(listedUser?.roleIds?.includes(roleId), 'User list omitted the assigned Role');
+  assert(listedUser?.teamIds?.includes(teamId), 'User list omitted the assigned Team');
+  const roles = await adminGet('/aep/v1/admin/roles', adminStore);
+  const listedRole = roles.roles.find(item => item.id === roleId);
+  assert(listedRole?.permissions?.includes('credentials.read'), 'Role list omitted the assigned permission');
+  const teams = await adminGet('/aep/v1/admin/teams', adminStore);
+  const listedTeam = teams.teams.find(item => item.id === teamId);
+  assert(listedTeam?.memberCount === 1, 'Team list returned the wrong member count');
   const userStore = new MemoryTokenStore();
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
   await userClient.loginWithPassword({deploymentId: 'demo', username, password});
@@ -215,6 +225,20 @@ async function adminRequest(path, body, tokenStore) {
       'X-AEP-Protocol-Version': '1.0',
     },
     body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error('Admin request ' + path + ' failed with ' + response.status + ': ' + text);
+  return text ? JSON.parse(text) : null;
+}
+
+async function adminGet(path, tokenStore) {
+  const tokens = await tokenStore.get();
+  assert(tokens?.accessToken, 'Admin session did not provide an access token');
+  const response = await fetch(baseUrl + path, {
+    headers: {
+      Authorization: 'Bearer ' + tokens.accessToken,
+      'X-AEP-Protocol-Version': '1.0',
+    },
   });
   const text = await response.text();
   if (!response.ok) throw new Error('Admin request ' + path + ' failed with ' + response.status + ': ' + text);

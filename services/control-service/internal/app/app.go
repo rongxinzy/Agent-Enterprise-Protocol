@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -11,14 +12,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/blob"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 	database "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db"
-	db "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db/generated"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/license"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 var (
@@ -33,7 +38,8 @@ var (
 type App struct {
 	Config          config.Config
 	Pool            *pgxpool.Pool
-	DB              *db.Queries
+	SQLDB           *sql.DB
+	Store           *repository.Store
 	Blobs           blob.Store
 	Tokens          *auth.Service
 	Credentials     *credential.Sealer
@@ -124,15 +130,30 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 		pool.Close()
 		return nil, fmt.Errorf("license verifier: %w", err)
 	}
-	application := &App{Config: cfg, Pool: pool, DB: db.New(pool), Blobs: blobs, Tokens: tokens, Credentials: credentials, LicenseVerifier: licenseVerifier}
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	ormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		_ = sqlDB.Close()
+		pool.Close()
+		return nil, fmt.Errorf("open GORM: %w", err)
+	}
+	application := &App{
+		Config: cfg, Pool: pool, SQLDB: sqlDB, Store: repository.New(ormDB),
+		Blobs: blobs, Tokens: tokens, Credentials: credentials, LicenseVerifier: licenseVerifier,
+	}
 	if cfg.LicenseFile != "" {
 		licenseBytes, readErr := os.ReadFile(cfg.LicenseFile)
 		if readErr != nil {
+			_ = sqlDB.Close()
 			pool.Close()
 			return nil, fmt.Errorf("read AEP_LICENSE_FILE: %w", readErr)
 		}
 		verified, verifyErr := licenseVerifier.Verify(licenseBytes)
 		if verifyErr != nil || verified.Status == "enterprise-expired" || (cfg.LicenseCustomerID != "" && verified.Claims.CustomerID != cfg.LicenseCustomerID) {
+			_ = sqlDB.Close()
 			pool.Close()
 			if verifyErr != nil {
 				return nil, fmt.Errorf("verify AEP_LICENSE_FILE: %w", verifyErr)
@@ -142,11 +163,13 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 		application.SetLicense(verified)
 	}
 	if err := application.bootstrap(ctx); err != nil {
+		_ = sqlDB.Close()
 		pool.Close()
 		return nil, err
 	}
 	if application.License != nil {
 		if err := application.RegisterLicense(ctx, *application.License); err != nil {
+			_ = sqlDB.Close()
 			pool.Close()
 			return nil, err
 		}
@@ -155,6 +178,9 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 }
 
 func (a *App) Close() {
+	if a.SQLDB != nil {
+		_ = a.SQLDB.Close()
+	}
 	a.Pool.Close()
 }
 
@@ -276,25 +302,12 @@ ORDER BY m.id`, deploymentID, userID)
 }
 
 func (a *App) UserRoleIDs(ctx context.Context, deploymentID, userID string) ([]string, error) {
-	rows, err := a.Pool.Query(ctx, `SELECT role_id FROM user_role_bindings WHERE deployment_id=$1 AND user_id=$2 ORDER BY role_id`, deploymentID, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	roles := make([]string, 0)
-	for rows.Next() {
-		var roleID string
-		if err := rows.Scan(&roleID); err != nil {
-			return nil, err
-		}
-		roles = append(roles, roleID)
-	}
-	return roles, rows.Err()
+	return a.Store.Deployment(deploymentID).UserRoleIDs(ctx, userID)
 }
 
 // IssueUserSession creates a refreshable terminal session that is scoped to a
 // user topic. It does not create or touch a legacy Agent record.
-func (a *App) IssueUserSession(ctx context.Context, user db.User) (TokenResponse, error) {
+func (a *App) IssueUserSession(ctx context.Context, user repository.User) (TokenResponse, error) {
 	if a.Pool == nil {
 		return TokenResponse{}, errors.New("database is unavailable")
 	}
@@ -363,17 +376,21 @@ func (a *App) RefreshUserSession(ctx context.Context, rawToken, requestedSession
 	var sessionID, userID, userDeploymentID, deploymentID string
 	var expires time.Time
 	var revokedAt, sessionRevokedAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.deployment_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at
+	var user repository.User
+	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.deployment_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at,u.status,u.require_password_change,u.is_admin
 FROM user_session_tokens t
 JOIN user_sessions s ON s.session_id=t.session_id
 JOIN users u ON u.id=s.user_id
-	WHERE t.token_hash=$1 FOR UPDATE`, hash).Scan(&sessionID, &userID, &userDeploymentID, &deploymentID, &expires, &revokedAt, &sessionRevokedAt)
+	WHERE t.token_hash=$1 FOR UPDATE`, hash).Scan(
+		&sessionID, &userID, &userDeploymentID, &deploymentID, &expires, &revokedAt, &sessionRevokedAt,
+		&user.Status, &user.RequirePasswordChange, &user.IsAdmin,
+	)
 	if err != nil || revokedAt != nil || sessionRevokedAt != nil || time.Now().After(expires) || (requestedSessionID != "" && requestedSessionID != sessionID) {
 		return TokenResponse{}, ErrRefreshTokenInvalid
 	}
-	queries := db.New(tx)
-	user, err := queries.GetUser(ctx, userID)
-	if err != nil || user.Status != "active" {
+	user.ID = userID
+	user.DeploymentID = userDeploymentID
+	if user.Status != "active" {
 		return TokenResponse{}, ErrRefreshTokenInvalid
 	}
 	modelScopes, err := a.ModelScopes(ctx, userDeploymentID, user.ID)
@@ -455,11 +472,10 @@ func (a *App) bootstrap(ctx context.Context) error {
 			_ = connection.Conn().Close(unlockContext)
 		}
 	}()
-	queries := db.New(connection)
-	if _, err := connection.Exec(ctx, `INSERT INTO deployments (id, name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`, a.DeploymentID(), a.DeploymentName()); err != nil {
+	if _, err := a.Store.UpsertDeployment(ctx, repository.Deployment{ID: a.DeploymentID(), Name: a.DeploymentName()}); err != nil {
 		return fmt.Errorf("bootstrap deployment: %w", err)
 	}
-	if _, err := queries.CreateDeployment(ctx, db.CreateDeploymentParams{ID: a.Config.BootstrapDeploymentID, Name: a.Config.BootstrapDeploymentName}); err != nil {
+	if _, err := a.Store.UpsertDeployment(ctx, repository.Deployment{ID: a.Config.BootstrapDeploymentID, Name: a.Config.BootstrapDeploymentName}); err != nil {
 		return err
 	}
 	if _, err := connection.Exec(ctx, `INSERT INTO roles (deployment_id, id, name, built_in) VALUES ($1, 'admin', 'Administrator', true) ON CONFLICT (deployment_id, id) DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
@@ -471,16 +487,22 @@ func (a *App) bootstrap(ctx context.Context) error {
 	if _, err := connection.Exec(ctx, `INSERT INTO teams (deployment_id, id, name, description, built_in) VALUES ($1, 'all-users', 'All users', 'Default team for every deployment user', true) ON CONFLICT (deployment_id, id) DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
 		return fmt.Errorf("bootstrap default team: %w", err)
 	}
-	user, err := queries.GetUserByUsername(ctx, db.GetUserByUsernameParams{DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	deploymentStore := a.Store.Deployment(a.Config.BootstrapDeploymentID)
+	user, err := deploymentStore.GetUserByUsername(ctx, a.Config.BootstrapAdminUsername)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return err
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, repository.ErrNotFound) {
 		passwordHash, hashErr := auth.HashPassword(a.Config.BootstrapAdminPassword)
 		if hashErr != nil {
 			return hashErr
 		}
-		user, err = queries.CreateUser(ctx, db.CreateUserParams{ID: uuid.NewString(), DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true})
+		created, createErr := deploymentStore.CreateUser(ctx, repository.CreateUserParams{
+			ID: uuid.NewString(), Username: a.Config.BootstrapAdminUsername,
+			DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash,
+			RequirePasswordChange: false, IsAdmin: true,
+		})
+		user, err = created.User, createErr
 		if err != nil {
 			return fmt.Errorf("bootstrap administrator: %w", err)
 		}
