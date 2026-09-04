@@ -22,6 +22,12 @@ export interface AepClientOptions {
   tokenStore: AepTokenStore;
   sessionId?: string;
   transport?: AepTransport;
+  /** @deprecated Agent metadata is ignored by the control-plane client. */
+  agentId?: string;
+  /** @deprecated Agent metadata is ignored by the control-plane client. */
+  agentVersion?: string;
+  /** @deprecated Agent metadata is ignored by the control-plane client. */
+  platform?: 'windows' | 'macos' | 'linux';
 }
 
 export interface AepTokenStore {
@@ -106,6 +112,10 @@ export type ModelGatewayMetadata = components['schemas']['ModelGatewayMetadata']
 export type ModelReasoningCompatibility = components['schemas']['ModelReasoningCompatibility'];
 export type UserModel = components['schemas']['UserModel'];
 export type UserModelList = components['schemas']['UserModelList'];
+/** @deprecated Use UserModel. */
+export type AgentModel = UserModel;
+/** @deprecated Use UserModelList. */
+export type AgentModelList = UserModelList;
 export type AdminModel = components['schemas']['AdminModel'];
 export type AdminModelList = components['schemas']['AdminModelList'];
 export type AdminModelWrite = components['schemas']['AdminModelWrite'];
@@ -142,6 +152,8 @@ export interface CurrentIdentity {
   user: {id: string; displayName: string; email?: string | null};
   deployment: {id: string; name: string};
   deploymentId: string;
+  /** @deprecated Use deployment/deploymentId. */
+  enterprise: {id: string; name: string};
   roles: string[];
   sessionExpiresAt: string;
   passwordChangeRequired: boolean;
