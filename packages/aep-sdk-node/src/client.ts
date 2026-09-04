@@ -6,6 +6,7 @@ import type {
   AdminModelList,
   AdminModelPatch,
   AdminModelWrite,
+  AgentModelList,
   AdminControlEvent,
   AdminControlEventPage,
   AepClientOptions,
@@ -92,7 +93,9 @@ export class AepClient {
   }
 
   async loginWithPassword(input: {
-    deploymentId: string;
+    deploymentId?: string;
+    /** @deprecated Use deploymentId. */
+    enterpriseId?: string;
     sessionId?: string;
     username: string;
     password: string;
@@ -102,7 +105,7 @@ export class AepClient {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/password/login',
         body: asJson({
-          deploymentId: input.deploymentId,
+          deploymentId: input.deploymentId ?? input.enterpriseId,
           username: input.username,
           password: input.password,
           sessionId: input.sessionId ?? this.#sessionId,
@@ -195,8 +198,10 @@ export class AepClient {
     }
   }
 
-  getCurrentIdentity(): Promise<CurrentIdentity> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/me'});
+  async getCurrentIdentity(): Promise<CurrentIdentity> {
+    const identity = await this.#send<CurrentIdentity>({method: HttpMethod.Get, path: '/aep/v1/user/me'});
+    const deployment = identity.deployment ?? identity.enterprise;
+    return {...identity, deployment, deploymentId: identity.deploymentId ?? deployment.id, enterprise: identity.enterprise ?? deployment};
   }
 
   /** Canonical user-session identity method. */
@@ -237,6 +242,11 @@ export class AepClient {
 
   listModels(): Promise<UserModelList> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/models'});
+  }
+
+  /** @deprecated Use listModels. */
+  listAgentModels(): Promise<AgentModelList> {
+    return this.listModels();
   }
 
   listUserSessions(filters: Query = {}): Promise<JsonObject> {
