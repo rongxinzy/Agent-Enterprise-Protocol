@@ -27,7 +27,12 @@ func (s *Server) listSkills(response http.ResponseWriter, request *http.Request)
 	}
 	items := make([]map[string]any, 0, len(skills))
 	for _, skill := range skills {
-		items = append(items, skillJSON(skill))
+		versions, versionErr := s.app.Store.ListSkillVersions(request.Context(), skill.ID)
+		if versionErr != nil {
+			databaseFailure(response, request, versionErr)
+			return
+		}
+		items = append(items, skillJSON(skill, versions))
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
@@ -57,7 +62,7 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, skillJSON(skill))
+	writeJSON(response, http.StatusCreated, skillJSON(skill, nil))
 }
 
 func (s *Server) getSkill(response http.ResponseWriter, request *http.Request) {
@@ -70,7 +75,12 @@ func (s *Server) getSkill(response http.ResponseWriter, request *http.Request) {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, skillJSON(skill))
+	versions, versionErr := s.app.Store.ListSkillVersions(request.Context(), skill.ID)
+	if versionErr != nil {
+		databaseFailure(response, request, versionErr)
+		return
+	}
+	writeJSON(response, http.StatusOK, skillJSON(skill, versions))
 }
 
 func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request) {
@@ -93,7 +103,12 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, skillJSON(skill))
+	versions, versionErr := s.app.Store.ListSkillVersions(request.Context(), skill.ID)
+	if versionErr != nil {
+		databaseFailure(response, request, versionErr)
+		return
+	}
+	writeJSON(response, http.StatusOK, skillJSON(skill, versions))
 }
 
 func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request) {
@@ -109,11 +124,30 @@ func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request
 	response.WriteHeader(http.StatusNoContent)
 }
 
-func skillJSON(skill repository.Skill) map[string]any {
+func skillJSON(skill repository.Skill, versions []repository.SkillVersion) map[string]any {
 	return map[string]any{
 		"id": skill.ID, "name": skill.Name, "description": skill.Description,
 		"enabled": skill.Enabled, "createdAt": skill.CreatedAt, "updatedAt": skill.UpdatedAt,
+		"versions": skillVersionsJSON(versions),
 	}
+}
+
+func skillVersionsJSON(versions []repository.SkillVersion) []map[string]any {
+	items := make([]map[string]any, 0, len(versions))
+	for _, version := range versions {
+		state := "draft"
+		if version.Published {
+			state = "published"
+		}
+		items = append(items, map[string]any{
+			"version":   version.Version,
+			"state":     state,
+			"sha256":    version.SHA256,
+			"size":      version.SizeBytes,
+			"createdAt": version.CreatedAt,
+		})
+	}
+	return items
 }
 
 func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.Request) {
