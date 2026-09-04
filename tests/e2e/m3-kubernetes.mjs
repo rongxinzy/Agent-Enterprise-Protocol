@@ -22,7 +22,7 @@ let proxy;
 const reconcilers = [];
 
 const control = createServer(async (request, response) => {
-  if (request.headers['x-aep-data-plane-token'] !== 'kind-control-token' || request.headers['x-aep-tenant-id'] !== 'demo') {
+  if (request.headers['x-aep-data-plane-token'] !== 'kind-control-token' || request.headers['x-aep-deployment-id'] !== 'demo') {
     response.writeHead(401).end();
     return;
   }
