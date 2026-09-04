@@ -33,13 +33,14 @@
     "test:e2e:m3-data-plane": "npm run build --workspace @aep/sdk-node && node tests/e2e/m3-data-plane.mjs",
     "test:e2e:m3-kubernetes": "node tests/e2e/m3-kubernetes.mjs",
     "test:e2e:load": "node tests/e2e/load-soak.mjs",
+    "test:e2e:backup-restore": "node tests/e2e/backup-restore.mjs",
     "compose:up": "docker compose -f deploy/compose/compose.yaml up -d --build",
     "compose:down": "docker compose -f deploy/compose/compose.yaml down",
     "compose:gateway:up": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build",
     "compose:gateway:down": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml down",
     "release:audit": "node scripts/release-audit.mjs",
     "sdk:package:check": "npm run build --workspace @aep/sdk-node && node scripts/sdk-package-check.mjs",
-    "release:check": "npm run check && npm run release:audit && npm run sdk:package:check && go test ./... && go test -race ./... && go vet ./... && go build ./... && npm run test:e2e",
+    "release:check": "npm run check && npm run release:audit && npm run sdk:package:check && go test ./... && go test -race ./... && go vet ./... && go build ./... && npm run test:e2e && npm run test:e2e:backup-restore",
     "check": "npm run openapi:lint && npm run build && npm test"
   },
   "devDependencies": {
