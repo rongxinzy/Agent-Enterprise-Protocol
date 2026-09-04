@@ -161,6 +161,21 @@ paths:
                   nextCursor: {type: [string, 'null']}
         '401': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
         '403': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/sessions/{sessionId}/revoke:
+    post:
+      tags: [Admin Users]
+      operationId: revokeUserSession
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '204': {description: Session revoked}
+        '401': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+        '403': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+        '404': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/skills:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills'
   /aep/v1/admin/skills/{skillId}:

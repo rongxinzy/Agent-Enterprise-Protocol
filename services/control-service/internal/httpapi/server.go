@@ -116,6 +116,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Post("/aep/v1/admin/control-events/{eventId}/cancel", server.cancelControlEvent)
 			admin.Get("/aep/v1/admin/control-events/{eventId}/deliveries", server.listControlEventDeliveries)
 			admin.Get("/aep/v1/admin/sessions", server.listUserSessions)
+			admin.Post("/aep/v1/admin/sessions/{sessionId}/revoke", server.revokeUserSession)
 			admin.Get("/aep/v1/admin/licenses", server.listLicenses)
 			admin.Get("/aep/v1/admin/licenses/{licenseId}", server.getLicense)
 			admin.Post("/aep/v1/admin/licenses/import", server.importLicense)
@@ -272,6 +273,9 @@ func requiredAdminPermission(method, path string) string {
 		}
 		return "users.write"
 	case strings.HasPrefix(path, "/aep/v1/admin/sessions"):
+		if strings.HasSuffix(path, "/revoke") {
+			return "sessions.write"
+		}
 		return "users.read"
 	case strings.HasPrefix(path, "/aep/v1/admin/models"):
 		if strings.Contains(path, "assignment") {

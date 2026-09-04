@@ -33,6 +33,7 @@ var (
 	ErrLicenseConflict      = errors.New("license ID is already registered with a different digest")
 	ErrLicenseAgentLimit    = errors.New("license agent limit exceeded")
 	ErrLicenseUserLimit     = errors.New("license user limit exceeded")
+	ErrSessionNotFound      = errors.New("user session not found")
 )
 
 type App struct {
@@ -442,6 +443,39 @@ func (a *App) RevokeUserSession(ctx context.Context, rawToken, sessionID string)
 	}
 	_, err = a.Pool.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE session_id=$1`, sessionID)
 	return err
+}
+
+// RevokeUserSessionByID revokes every refresh token associated with one
+// deployment session. It is intentionally idempotent: an already revoked
+// session is still considered successfully revoked, while an unknown session
+// is reported to the admin API as not found.
+func (a *App) RevokeUserSessionByID(ctx context.Context, deploymentID, sessionID string) error {
+	if a.Pool == nil {
+		return nil
+	}
+	if deploymentID == "" || sessionID == "" {
+		return ErrSessionNotFound
+	}
+	tx, err := a.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_sessions WHERE deployment_id=$1 AND session_id=$2)`, deploymentID, sessionID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrSessionNotFound
+	}
+	if _, err := tx.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=COALESCE(revoked_at,now()) WHERE session_id=$1`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE user_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE deployment_id=$1 AND session_id=$2`, deploymentID, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (a *App) RevokeUserSessionSet(ctx context.Context, userID string) error {
