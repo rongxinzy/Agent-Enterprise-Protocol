@@ -27,6 +27,10 @@ model-token authorization, and telemetry redaction. A disposable real-client pil
 was completed separately with the Zhiyuan password profile; no provider API key or
 session secret is part of this record.
 
-The remaining GA validation gate is intentionally still open for load/soak testing,
-external security review, backup and disaster-recovery rehearsal, SBOM publication,
-and signed artifacts.
+The repeatable load/soak workflow and PostgreSQL/MinIO backup and disaster-recovery
+rehearsal are now automated and have passed in isolated Compose environments. The
+remaining GA work is an external security review, formal customer artifact signing
+and SBOM publication, and cleanup of the remaining draft-profile gaps.
+
+Operational procedures are documented in the [GA validation runbook](../../docs/ga-validation-runbook.md)
+and [backup and disaster-recovery runbook](../../docs/backup-restore-runbook.md).

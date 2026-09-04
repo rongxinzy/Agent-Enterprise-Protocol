@@ -29,6 +29,8 @@ to use MCP.
 - [AEP M1 Node Agent model runbook](docs/m1-client-runbook.md)
 - [AEP M2 Credential runbook](docs/m2-credential-runbook.md)
 - [AEP production runtime baseline](docs/production-runtime.md)
+- [GA validation runbook](docs/ga-validation-runbook.md)
+- [Backup and disaster-recovery runbook](docs/backup-restore-runbook.md)
 - [Desktop main-process session integration](docs/desktop-session.md)
 - [AEP v1 foundation release readiness](docs/release-readiness.md)
 - [Local enterprise License signing boundary](docs/license-signing-local.md)
@@ -40,7 +42,7 @@ to use MCP.
 ## Status
 
 The protocol specification remains an initial draft and may still receive breaking changes.
-The M3 enterprise-foundation implementation is a 90% release candidate for independent
+The M3 enterprise-foundation implementation is a 95% release candidate for independent
 integration and controlled pilots; it is not a general-availability release.
 
 ## License

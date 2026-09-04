@@ -51,7 +51,7 @@ The gateway reconciler now applies tenant Ingress and Higress WasmPlugin resourc
 
 ## Remaining 5%
 
-GA validation, 5%: complete load and soak testing, external security review, backup and disaster-recovery rehearsal, signed artifacts and SBOM publication, and remaining draft-profile cleanup. The M3 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
+GA validation, 5%: the repeatable load/soak workflow and PostgreSQL/MinIO backup and disaster-recovery rehearsal are complete. The remaining work is an external security review, formal customer artifact signing and SBOM publication, and remaining draft-profile cleanup. See the [GA validation runbook](ga-validation-runbook.md) and [backup and disaster-recovery runbook](backup-restore-runbook.md). The M3 profile does not yet expose single Skill-version withdrawal; administrators can revoke assignments, disable or delete the Skill until that lifecycle operation is added.
 
 ## Go Or No-Go
 
