@@ -79,7 +79,7 @@ try {
 function state(revision, routes) {
   const sorted = [...routes].sort((a, b) => a.modelId.localeCompare(b.modelId));
   const contentHash = createHash('sha256').update(JSON.stringify({revision, routes: sorted})).digest('hex');
-  return {enterpriseId: 'demo', revision, publishedAt: new Date().toISOString(), contentHash, routes: sorted};
+  return {deploymentId: 'demo', revision, publishedAt: new Date().toISOString(), contentHash, routes: sorted};
 }
 
 function suffix(value) {

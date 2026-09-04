@@ -38,27 +38,23 @@ try {
 async function runScenario() {
   const admin = new AepClient({
     baseUrl: controlBaseUrl,
-    agentId: 'm2-agent-admin-' + runId,
-    agentVersion: 'e2e',
-    platform: platform(),
     tokenStore: new MemoryTokenStore(),
   });
   await admin.loginWithPassword({
-    enterpriseId: 'demo',
+    deploymentId: 'demo',
     username: 'admin',
     password: 'change-this-admin-password',
   });
 
   const username = 'm2-agent-user-' + runId;
   const password = 'temporary-password-123';
-  const agentId = 'm2-reference-agent-' + runId;
   const user = await admin.createUser({
-    enterpriseId: 'demo',
+    deploymentId: 'demo',
     username,
     displayName: 'M2 Reference Agent ' + runId,
     temporaryPassword: password,
     requirePasswordChange: false,
-    organizationIds: [],
+    teamIds: [],
     roleIds: [],
   });
   const firstSecret = 'agent-credential-first-' + runId;
@@ -68,13 +64,13 @@ async function runScenario() {
     name: 'Reference Agent HTTP',
     service: 'e2e-protected-service',
     type: 'api_key',
-    deliveryMode: 'agent',
+    deliveryMode: 'client',
     value: firstSecret,
     enabled: true,
   });
   const assignment = await admin.createCredentialAssignment({
     credentialId: credential.id,
-    subject: {type: 'agent', id: agentId},
+    subject: {type: 'user', id: user.id},
   });
   const serverOnly = await admin.createCredential({
     name: 'Reference Agent server-only',
@@ -97,10 +93,9 @@ async function runScenario() {
   });
   const sharedEnv = {
     AEP_BASE_URL: controlBaseUrl,
-    AEP_ENTERPRISE_ID: 'demo',
+    AEP_DEPLOYMENT_ID: 'demo',
     AEP_USERNAME: username,
     AEP_PASSWORD: password,
-    AEP_AGENT_ID: agentId,
     AEP_AGENT_DATA_DIR: dataDirectory,
     AEP_CREDENTIAL_URL: consumerUrl,
     AEP_CREDENTIAL_CACHE_MS: '1000',
@@ -128,7 +123,7 @@ async function runScenario() {
   for (const secret of [firstSecret, rotatedSecret, serverOnlySecret]) {
     assert(!directoryContains(dataDirectory, secret), 'Agent state persisted Credential material');
   }
-  const telemetry = await admin.searchEvents({agentId});
+  const telemetry = await admin.searchEvents({userId: user.id});
   const serializedTelemetry = JSON.stringify(telemetry);
   for (const secret of [firstSecret, rotatedSecret, serverOnlySecret]) {
     assert(!serializedTelemetry.includes(secret), 'Telemetry persisted Credential material');
