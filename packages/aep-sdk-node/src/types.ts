@@ -150,8 +150,8 @@ export interface AuthenticationMethods {
 
 export interface CurrentIdentity {
   user: {id: string; displayName: string; email?: string | null};
-  deployment: {id: string; name: string};
-  deploymentId: string;
+  deployment?: {id: string; name: string};
+  deploymentId?: string;
   /** @deprecated Use deployment/deploymentId. */
   enterprise: {id: string; name: string};
   roles: string[];
