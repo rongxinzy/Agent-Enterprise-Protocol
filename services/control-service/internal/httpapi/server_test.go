@@ -248,6 +248,15 @@ func TestRequiredAdminPermissionForLicenseLifecycle(t *testing.T) {
 	}
 }
 
+func TestRequiredAdminPermissionForSessionLifecycle(t *testing.T) {
+	if got := requiredAdminPermission(http.MethodGet, "/aep/v1/admin/sessions"); got != "users.read" {
+		t.Fatalf("session list permission = %q, want users.read", got)
+	}
+	if got := requiredAdminPermission(http.MethodPost, "/aep/v1/admin/sessions/session-1/revoke"); got != "sessions.write" {
+		t.Fatalf("session revoke permission = %q, want sessions.write", got)
+	}
+}
+
 func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {

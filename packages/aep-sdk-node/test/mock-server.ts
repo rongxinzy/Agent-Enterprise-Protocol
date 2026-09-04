@@ -187,6 +187,7 @@ export class MockAepServer {
       return json(response, 200, team('support'));
     }
     if (path === '/aep/v1/admin/users/user-1/rbac') return json(response, 200, {userId: 'user-1', roleIds: ['operator'], teamIds: ['support']});
+    if (path === '/aep/v1/admin/sessions/session-1/revoke') return empty(response, 204);
     if (path === '/aep/v1/admin/credentials/credential-1/rotate') return json(response, 200, credential('client'));
     if (path === '/aep/v1/admin/credentials/credential-1') {
       if (request.method === 'DELETE') return empty(response, 204);

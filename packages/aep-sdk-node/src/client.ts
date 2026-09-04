@@ -253,6 +253,15 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/sessions?${query(filters)}`});
   }
 
+  revokeUserSession(sessionId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: `/aep/v1/admin/sessions/${segment(sessionId)}/revoke`,
+      responseType: 'empty',
+      retry: false,
+    });
+  }
+
   async getModelConnection(): Promise<ModelConnection> {
     const [metadata, tokens] = await Promise.all([this.getMetadata(), this.#loadOrRestoreTokens()]);
     if (!metadata.capabilities.includes(AepCapability.ModelGateway) || !metadata.modelGateway) {
