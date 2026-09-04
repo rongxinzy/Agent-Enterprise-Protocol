@@ -15,25 +15,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 func (s *Server) listSkills(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT id, name, description, enabled, created_at, updated_at FROM skills ORDER BY id`)
+	skills, err := s.app.Store.ListSkills(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	items := make([]map[string]any, 0)
-	for rows.Next() {
-		var id, name, description string
-		var enabled bool
-		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&id, &name, &description, &enabled, &createdAt, &updatedAt); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-		items = append(items, map[string]any{"id": id, "name": name, "description": description, "enabled": enabled, "createdAt": createdAt, "updatedAt": updatedAt})
+	items := make([]map[string]any, 0, len(skills))
+	for _, skill := range skills {
+		items = append(items, skillJSON(skill))
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }
@@ -52,8 +46,9 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
-	var createdAt, updatedAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO skills (id,name,description,enabled) VALUES ($1,$2,$3,$4) RETURNING created_at,updated_at`, input.ID, input.Name, input.Description, enabled).Scan(&createdAt, &updatedAt)
+	skill, err := s.app.Store.CreateSkill(request.Context(), repository.Skill{
+		ID: input.ID, Name: input.Name, Description: input.Description, Enabled: enabled,
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "SKILL_ALREADY_EXISTS", "The Skill already exists.")
@@ -62,15 +57,12 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": input.ID, "name": input.Name, "description": input.Description, "enabled": enabled, "createdAt": createdAt, "updatedAt": updatedAt})
+	writeJSON(response, http.StatusCreated, skillJSON(skill))
 }
 
 func (s *Server) getSkill(response http.ResponseWriter, request *http.Request) {
-	var id, name, description string
-	var enabled bool
-	var createdAt, updatedAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT id,name,description,enabled,created_at,updated_at FROM skills WHERE id=$1`, chi.URLParam(request, "skillId")).Scan(&id, &name, &description, &enabled, &createdAt, &updatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	skill, err := s.app.Store.GetSkill(request.Context(), chi.URLParam(request, "skillId"))
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
 		return
 	}
@@ -78,7 +70,7 @@ func (s *Server) getSkill(response http.ResponseWriter, request *http.Request) {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"id": id, "name": name, "description": description, "enabled": enabled, "createdAt": createdAt, "updatedAt": updatedAt})
+	writeJSON(response, http.StatusOK, skillJSON(skill))
 }
 
 func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request) {
@@ -90,11 +82,10 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	var id, name, description string
-	var enabled bool
-	var createdAt, updatedAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `UPDATE skills SET name=COALESCE($2,name), description=COALESCE($3,description), enabled=COALESCE($4,enabled), updated_at=now() WHERE id=$1 RETURNING id,name,description,enabled,created_at,updated_at`, chi.URLParam(request, "skillId"), input.Name, input.Description, input.Enabled).Scan(&id, &name, &description, &enabled, &createdAt, &updatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	skill, err := s.app.Store.UpdateSkill(request.Context(), chi.URLParam(request, "skillId"), repository.UpdateSkillParams{
+		Name: input.Name, Description: input.Description, Enabled: input.Enabled,
+	})
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
 		return
 	}
@@ -102,20 +93,27 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"id": id, "name": name, "description": description, "enabled": enabled, "createdAt": createdAt, "updatedAt": updatedAt})
+	writeJSON(response, http.StatusOK, skillJSON(skill))
 }
 
 func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), `DELETE FROM skills WHERE id=$1`, chi.URLParam(request, "skillId"))
+	err := s.app.Store.DeleteSkill(request.Context(), chi.URLParam(request, "skillId"))
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
-		return
-	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func skillJSON(skill repository.Skill) map[string]any {
+	return map[string]any{
+		"id": skill.ID, "name": skill.Name, "description": skill.Description,
+		"enabled": skill.Enabled, "createdAt": skill.CreatedAt, "updatedAt": skill.UpdatedAt,
+	}
 }
 
 func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.Request) {
@@ -144,7 +142,9 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		databaseFailure(response, request, err)
 		return
 	}
-	_, err = s.app.Pool.Exec(request.Context(), `INSERT INTO skill_versions (skill_id,version,object_key,sha256,size_bytes) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (skill_id,version) DO UPDATE SET object_key=EXCLUDED.object_key,sha256=EXCLUDED.sha256,size_bytes=EXCLUDED.size_bytes,published=false,published_at=NULL`, skillID, version, objectKey, sha, len(archive))
+	err = s.app.Store.UpsertSkillVersion(request.Context(), repository.SkillVersion{
+		SkillID: skillID, Version: version, ObjectKey: objectKey, SHA256: sha, SizeBytes: int64(len(archive)),
+	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -154,34 +154,31 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 
 func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http.Request) {
 	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE skill_versions SET published=true,published_at=now() WHERE skill_id=$1 AND version=$2`, skillID, version)
-	if err != nil {
-		databaseFailure(response, request, err)
+	err := s.app.Store.PublishSkillVersion(request.Context(), skillID, version)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
+	if err != nil {
+		databaseFailure(response, request, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"skillId": skillID, "version": version, "published": true})
 }
 
 func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT id,skill_id,subject_type,subject_id,created_at FROM skill_assignments WHERE deployment_id=$1 ORDER BY id`, claimsFrom(request).DeploymentID)
+	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListSkillAssignments(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	items := make([]map[string]any, 0)
-	for rows.Next() {
-		var id, skillID, subjectType, subjectID string
-		var createdAt time.Time
-		if err := rows.Scan(&id, &skillID, &subjectType, &subjectID, &createdAt); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-		items = append(items, map[string]any{"id": id, "skillId": skillID, "subject": map[string]string{"type": subjectType, "id": subjectID}, "createdAt": createdAt})
+	items := make([]map[string]any, 0, len(assignments))
+	for _, assignment := range assignments {
+		items = append(items, map[string]any{
+			"id": assignment.ID, "skillId": assignment.SkillID,
+			"subject":   map[string]string{"type": assignment.SubjectType, "id": assignment.SubjectID},
+			"createdAt": assignment.CreatedAt,
+		})
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
 }

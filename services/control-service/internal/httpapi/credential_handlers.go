@@ -3,10 +3,8 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -15,26 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 const credentialColumns = `id,name,service,type,delivery_mode,encrypted_value,nonce,key_id,masked_value,enabled,created_at,updated_at,rotated_at`
 const credentialColumnsQualified = `c.id,c.name,c.service,c.type,c.delivery_mode,c.encrypted_value,c.nonce,c.key_id,c.masked_value,c.enabled,c.created_at,c.updated_at,c.rotated_at`
 
-type credentialRecord struct {
-	ID             string
-	Name           string
-	Service        string
-	Type           string
-	DeliveryMode   string
-	EncryptedValue []byte
-	Nonce          []byte
-	KeyID          string
-	MaskedValue    string
-	Enabled        bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	RotatedAt      time.Time
-}
+type credentialRecord = repository.Credential
 
 type credentialCreate struct {
 	Name         string `json:"name"`
@@ -254,24 +239,14 @@ func (s *Server) listCredentials(response http.ResponseWriter, request *http.Req
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).DeploymentID)
+	credentials, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListCredentials(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	items := make([]map[string]any, 0)
-	for rows.Next() {
-		record, err := scanCredential(rows)
-		if err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
+	items := make([]map[string]any, 0, len(credentials))
+	for _, record := range credentials {
 		items = append(items, credentialJSON(record))
-	}
-	if err := rows.Err(); err != nil {
-		databaseFailure(response, request, err)
-		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"credentials": items})
 }
@@ -295,10 +270,11 @@ func (s *Server) createCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusInternalServerError, "CREDENTIAL_ENCRYPT_FAILED", "The credential could not be encrypted.")
 		return
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), `INSERT INTO credentials (deployment_id,id,name,service,type,delivery_mode,encrypted_value,nonce,key_id,masked_value,enabled)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+credentialColumns,
-		tenant, id, input.Name, input.Service, input.Type, input.DeliveryMode,
-		envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value), *input.Enabled))
+	record, err := s.app.Store.Deployment(tenant).CreateCredential(request.Context(), repository.Credential{
+		ID: id, Name: input.Name, Service: input.Service, Type: input.Type,
+		DeliveryMode: input.DeliveryMode, EncryptedValue: envelope.Ciphertext, Nonce: envelope.Nonce,
+		KeyID: envelope.KeyID, MaskedValue: credential.Mask(input.Value), Enabled: *input.Enabled,
+	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -310,8 +286,9 @@ func (s *Server) getCredential(response http.ResponseWriter, request *http.Reque
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId")))
-	if errors.Is(err, pgx.ErrNoRows) {
+	record, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		GetCredential(request.Context(), chi.URLParam(request, "credentialId"))
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
 	}
@@ -326,11 +303,6 @@ func (input credentialPatch) hasChanges() bool {
 	return input.Name != nil || input.Service != nil || input.DeliveryMode != nil || input.Enabled != nil
 }
 
-func appendCredentialUpdate(sets *[]string, arguments *[]any, column string, value any) {
-	*arguments = append(*arguments, value)
-	*sets = append(*sets, fmt.Sprintf("%s=$%d", column, len(*arguments)))
-}
-
 func (s *Server) updateCredential(response http.ResponseWriter, request *http.Request) {
 	if !s.requireCredentialService(response, request) {
 		return
@@ -343,22 +315,20 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL", "At least one valid credential field is required.")
 		return
 	}
-	sets := []string{"updated_at=now()"}
-	arguments := []any{claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId")}
 	if input.Name != nil {
-		appendCredentialUpdate(&sets, &arguments, "name", strings.TrimSpace(*input.Name))
+		value := strings.TrimSpace(*input.Name)
+		input.Name = &value
 	}
 	if input.Service != nil {
-		appendCredentialUpdate(&sets, &arguments, "service", strings.TrimSpace(*input.Service))
+		value := strings.TrimSpace(*input.Service)
+		input.Service = &value
 	}
-	if input.DeliveryMode != nil {
-		appendCredentialUpdate(&sets, &arguments, "delivery_mode", *input.DeliveryMode)
-	}
-	if input.Enabled != nil {
-		appendCredentialUpdate(&sets, &arguments, "enabled", *input.Enabled)
-	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "UPDATE credentials SET "+strings.Join(sets, ",")+" WHERE deployment_id=$1 AND id=$2 RETURNING "+credentialColumns, arguments...))
-	if errors.Is(err, pgx.ErrNoRows) {
+	record, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateCredential(
+		request.Context(), chi.URLParam(request, "credentialId"), repository.UpdateCredentialParams{
+			Name: input.Name, Service: input.Service, DeliveryMode: input.DeliveryMode, Enabled: input.Enabled,
+		},
+	)
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
 	}
@@ -384,8 +354,8 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 		return
 	}
 	tenant, id := claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId")
-	var exists bool
-	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, id).Scan(&exists); err != nil {
+	exists, err := s.app.Store.Deployment(tenant).HasCredential(request.Context(), id)
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -398,8 +368,9 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusInternalServerError, "CREDENTIAL_ENCRYPT_FAILED", "The credential could not be encrypted.")
 		return
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), `UPDATE credentials SET encrypted_value=$3,nonce=$4,key_id=$5,masked_value=$6,rotated_at=now(),updated_at=now()
-WHERE deployment_id=$1 AND id=$2 RETURNING `+credentialColumns, tenant, id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value)))
+	record, err := s.app.Store.Deployment(tenant).RotateCredential(
+		request.Context(), id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value),
+	)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -411,17 +382,18 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId"))
+	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		DeleteCredential(request.Context(), chi.URLParam(request, "credentialId"))
 	if isForeignKeyViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "CREDENTIAL_IN_USE", "The credential is referenced by a model and cannot be deleted.")
 		return
 	}
-	if err != nil {
-		databaseFailure(response, request, err)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
+	if err != nil {
+		databaseFailure(response, request, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -436,28 +408,17 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,credential_id,subject_type,subject_id,created_at FROM credential_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).DeploymentID)
+	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListCredentialAssignments(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	assignments := make([]map[string]any, 0)
-	for rows.Next() {
-		var id, credentialID, subjectType, subjectID string
-		var createdAt time.Time
-		if err := rows.Scan(&id, &credentialID, &subjectType, &subjectID, &createdAt); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
+	assignments := make([]map[string]any, 0, len(items))
+	for _, item := range items {
 		assignments = append(assignments, map[string]any{
-			"id": id, "resourceType": "credential", "resourceId": credentialID,
-			"subject": map[string]string{"type": subjectType, "id": subjectID}, "createdAt": createdAt,
+			"id": item.ID, "resourceType": "credential", "resourceId": item.CredentialID,
+			"subject": map[string]string{"type": item.SubjectType, "id": item.SubjectID}, "createdAt": item.CreatedAt,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		databaseFailure(response, request, err)
-		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments})
 }
@@ -475,8 +436,8 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		return
 	}
 	tenant := claimsFrom(request).DeploymentID
-	var exists bool
-	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, input.CredentialID).Scan(&exists); err != nil {
+	exists, err := s.app.Store.Deployment(tenant).HasCredential(request.Context(), input.CredentialID)
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -485,8 +446,9 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		return
 	}
 	id := uuid.NewString()
-	var createdAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO credential_assignments (id,deployment_id,credential_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5) RETURNING created_at`, id, tenant, input.CredentialID, input.Subject.Type, input.Subject.ID).Scan(&createdAt)
+	assignment, err := s.app.Store.Deployment(tenant).CreateCredentialAssignment(request.Context(), repository.CredentialAssignment{
+		ID: id, CredentialID: input.CredentialID, SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
+	})
 	if isUniqueViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The credential assignment already exists.")
 		return
@@ -497,7 +459,7 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 	}
 	writeJSON(response, http.StatusCreated, map[string]any{
 		"id": id, "resourceType": "credential", "resourceId": input.CredentialID,
-		"subject": input.Subject, "createdAt": createdAt,
+		"subject": input.Subject, "createdAt": assignment.CreatedAt,
 	})
 }
 
@@ -505,13 +467,14 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credential_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).DeploymentID)
-	if err != nil {
-		databaseFailure(response, request, err)
+	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		DeleteCredentialAssignment(request.Context(), chi.URLParam(request, "assignmentId"))
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential assignment was not found.")
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential assignment was not found.")
+	if err != nil {
+		databaseFailure(response, request, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
