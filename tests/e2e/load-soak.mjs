@@ -1,3 +1,6 @@
+import {mkdir, writeFile} from 'node:fs/promises';
+import {dirname} from 'node:path';
+
 const baseUrl = process.env.AEP_LOAD_BASE_URL ?? 'http://localhost:8080';
 const durationSeconds = positiveNumber('AEP_LOAD_DURATION_SECONDS', 10);
 const concurrency = positiveNumber('AEP_LOAD_CONCURRENCY', 8);
@@ -45,7 +48,13 @@ const summary = {
   errorRate: Number(errorRate.toFixed(4)),
   p95Ms: Number(p95.toFixed(2)),
 };
-console.log(JSON.stringify(summary, null, 2));
+const serialized = JSON.stringify(summary, null, 2);
+console.log(serialized);
+const outputFile = process.env.AEP_LOAD_OUTPUT_FILE;
+if (outputFile) {
+  await mkdir(dirname(outputFile), {recursive: true});
+  await writeFile(outputFile, serialized + '\n', 'utf8');
+}
 if (errorRate > maxErrorRate) {
   throw new Error(`error rate ${errorRate.toFixed(4)} exceeded ${maxErrorRate.toFixed(4)}`);
 }
