@@ -51,7 +51,7 @@ gateway reconciler 现已通过 Kubernetes server-side apply 下发租户 Ingres
 
 ## 剩余 5%
 
-GA 验证，5%：完成负载与长稳测试、外部安全评审、备份与灾备演练、签名制品与 SBOM 发布，以及草案档位的剩余清理。M3 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
+GA 验证，5%：负载与长稳验证工作流，以及 PostgreSQL/MinIO 备份与灾备恢复演练均已完成。剩余工作是外部安全评审、正式客户制品签名与 SBOM 发布，以及草案档位的剩余清理。详见 [GA 验证手册](ga-validation-runbook.zh-CN.md) 和 [备份与灾备恢复手册](backup-restore-runbook.zh-CN.md)。M3 尚未开放单个 Skill 版本撤回接口；在补齐该生命周期操作前，管理员可以撤销授权、禁用或删除整个 Skill。
 
 ## Go 或 No-Go
 
