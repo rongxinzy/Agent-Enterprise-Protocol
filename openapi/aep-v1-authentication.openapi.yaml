@@ -257,6 +257,9 @@ paths:
       tags: [Admin RBAC]
       operationId: listRoles
       security: [{aepBearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
           description: Deployment roles
@@ -334,6 +337,9 @@ paths:
       tags: [Admin RBAC]
       operationId: listTeams
       security: [{aepBearerAuth: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
           description: Deployment teams
@@ -699,9 +705,10 @@ components:
         permissions: {type: array, items: {type: string}}
     RolePage:
       type: object
-      required: [roles]
+      required: [roles, nextCursor]
       properties:
         roles: {type: array, items: {$ref: '#/components/schemas/Role'}}
+        nextCursor: {type: [string, 'null']}
     CreateRoleRequest:
       type: object
       required: [id, name]
@@ -732,9 +739,10 @@ components:
         memberCount: {type: integer, minimum: 0}
     TeamPage:
       type: object
-      required: [teams]
+      required: [teams, nextCursor]
       properties:
         teams: {type: array, items: {$ref: '#/components/schemas/Team'}}
+        nextCursor: {type: [string, 'null']}
     CreateTeamRequest:
       type: object
       required: [id, name]

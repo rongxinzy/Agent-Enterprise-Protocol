@@ -239,16 +239,18 @@ func (s *Server) listCredentials(response http.ResponseWriter, request *http.Req
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	credentials, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListCredentials(request.Context())
+	pageSize := limit(request)
+	credentials, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListCredentialsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	credentials, nextCursor := page(credentials, pageSize, func(item repository.Credential) string { return item.ID })
 	items := make([]map[string]any, 0, len(credentials))
 	for _, record := range credentials {
 		items = append(items, credentialJSON(record))
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"credentials": items})
+	writeJSON(response, http.StatusOK, map[string]any{"credentials": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createCredential(response http.ResponseWriter, request *http.Request) {
