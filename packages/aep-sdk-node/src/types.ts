@@ -155,6 +155,7 @@ export interface CurrentIdentity {
   /** @deprecated Use deployment/deploymentId. */
   enterprise: {id: string; name: string};
   roles: string[];
+  permissions: string[];
   sessionExpiresAt: string;
   passwordChangeRequired: boolean;
 }
