@@ -591,6 +591,274 @@ paths:
           $ref: '#/components/responses/Problem'
         '404':
           $ref: '#/components/responses/Problem'
+  /aep/v1/admin/permissions:
+    get:
+      tags:
+        - Admin RBAC
+      operationId: listPermissions
+      security:
+        - aepBearerAuth: []
+      responses:
+        '200':
+          description: Permission catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionPage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/roles:
+    get:
+      tags:
+        - Admin RBAC
+      operationId: listRoles
+      security:
+        - aepBearerAuth: []
+      responses:
+        '200':
+          description: Deployment roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolePage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags:
+        - Admin RBAC
+      operationId: createRole
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Role created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/roles/{roleId}:
+    parameters:
+      - $ref: '#/components/parameters/RoleId'
+    get:
+      tags:
+        - Admin RBAC
+      operationId: getRole
+      security:
+        - aepBearerAuth: []
+      responses:
+        '200':
+          description: Deployment role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags:
+        - Admin RBAC
+      operationId: updateRole
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Updated role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags:
+        - Admin RBAC
+      operationId: deleteRole
+      security:
+        - aepBearerAuth: []
+      responses:
+        '204':
+          description: Role deleted
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/teams:
+    get:
+      tags:
+        - Admin RBAC
+      operationId: listTeams
+      security:
+        - aepBearerAuth: []
+      responses:
+        '200':
+          description: Deployment teams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags:
+        - Admin RBAC
+      operationId: createTeam
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTeamRequest'
+      responses:
+        '201':
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/teams/{teamId}:
+    parameters:
+      - $ref: '#/components/parameters/TeamId'
+    get:
+      tags:
+        - Admin RBAC
+      operationId: getTeam
+      security:
+        - aepBearerAuth: []
+      responses:
+        '200':
+          description: Deployment Team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags:
+        - Admin RBAC
+      operationId: updateTeam
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTeamRequest'
+      responses:
+        '200':
+          description: Updated Team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags:
+        - Admin RBAC
+      operationId: deleteTeam
+      security:
+        - aepBearerAuth: []
+      responses:
+        '204':
+          description: Team deleted
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/users/{userId}/rbac:
+    put:
+      tags:
+        - Admin RBAC
+      operationId: replaceUserRBAC
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceUserRBACRequest'
+      responses:
+        '200':
+          description: User role and Team bindings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserRBAC'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
   /aep/v1/admin/sessions:
     get:
       tags:
@@ -2643,6 +2911,204 @@ components:
         requirePasswordChange:
           type: boolean
           default: true
+    Permission:
+      type: object
+      required:
+        - id
+        - description
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+    PermissionPage:
+      type: object
+      required:
+        - permissions
+      properties:
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+    Role:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - builtIn
+        - enabled
+        - permissions
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        builtIn:
+          type: boolean
+        enabled:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            type: string
+    RolePage:
+      type: object
+      required:
+        - roles
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    CreateRoleRequest:
+      type: object
+      required:
+        - id
+        - name
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 1024
+        permissions:
+          type: array
+          maxItems: 128
+          uniqueItems: true
+          items:
+            type: string
+    UpdateRoleRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 1024
+        enabled:
+          type: boolean
+        permissions:
+          type: array
+          maxItems: 128
+          uniqueItems: true
+          items:
+            type: string
+    Team:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - builtIn
+        - enabled
+        - memberCount
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        builtIn:
+          type: boolean
+        enabled:
+          type: boolean
+        memberCount:
+          type: integer
+          minimum: 0
+    TeamPage:
+      type: object
+      required:
+        - teams
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/Team'
+    CreateTeamRequest:
+      type: object
+      required:
+        - id
+        - name
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 1024
+    UpdateTeamRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 1024
+        enabled:
+          type: boolean
+    ReplaceUserRBACRequest:
+      type: object
+      required:
+        - roleIds
+        - teamIds
+      additionalProperties: false
+      properties:
+        roleIds:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+        teamIds:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+    UserRBAC:
+      type: object
+      required:
+        - userId
+        - roleIds
+        - teamIds
+      properties:
+        userId:
+          type: string
+        roleIds:
+          type: array
+          items:
+            type: string
+        teamIds:
+          type: array
+          items:
+            type: string
     SkillVersion:
       type: object
       required:
@@ -3500,6 +3966,18 @@ components:
         default: 50
     UserId:
       name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+    RoleId:
+      name: roleId
+      in: path
+      required: true
+      schema:
+        type: string
+    TeamId:
+      name: teamId
       in: path
       required: true
       schema:

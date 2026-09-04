@@ -110,7 +110,8 @@ export class MockAepServer {
     if (path === '/aep/v1/agent/me' || path === '/aep/v1/user/me') {
       return json(response, 200, {
         user: {id: 'user-1', displayName: 'Demo User'},
-        enterprise: {id: 'ent-1', name: 'Demo'},
+        deployment: {id: 'ent-1', name: 'Demo'},
+        deploymentId: 'ent-1',
         roles: ['user'],
         sessionExpiresAt: '2026-08-20T01:00:00Z',
         passwordChangeRequired: false,
@@ -166,6 +167,24 @@ export class MockAepServer {
       if (request.method === 'GET') return json(response, 200, {credentials: [credential('client'), credential('server_only')]});
       return json(response, 201, credential('client'));
     }
+    if (path === '/aep/v1/admin/permissions') return json(response, 200, {permissions: [{id: 'models.read', description: 'Read models'}]});
+    if (path === '/aep/v1/admin/roles') {
+      if (request.method === 'POST') return json(response, 201, role('operator'));
+      return json(response, 200, {roles: [role('operator')]});
+    }
+    if (path === '/aep/v1/admin/roles/operator') {
+      if (request.method === 'DELETE') return empty(response, 204);
+      return json(response, 200, role('operator'));
+    }
+    if (path === '/aep/v1/admin/teams') {
+      if (request.method === 'POST') return json(response, 201, team('support'));
+      return json(response, 200, {teams: [team('support')]});
+    }
+    if (path === '/aep/v1/admin/teams/support') {
+      if (request.method === 'DELETE') return empty(response, 204);
+      return json(response, 200, team('support'));
+    }
+    if (path === '/aep/v1/admin/users/user-1/rbac') return json(response, 200, {userId: 'user-1', roleIds: ['operator'], teamIds: ['support']});
     if (path === '/aep/v1/admin/credentials/credential-1/rotate') return json(response, 200, credential('client'));
     if (path === '/aep/v1/admin/credentials/credential-1') {
       if (request.method === 'DELETE') return empty(response, 204);
@@ -205,6 +224,16 @@ export class MockAepServer {
     if (path === '/aep/v1/admin/data-plane/status') {
       return json(response, 200, {state: 'ready', observedRevision: this.#dataPlaneRevision, contentHash: 'a'.repeat(64), lastAppliedAt: '2026-08-24T00:00:00Z', errorCode: null, message: null, resourceCount: 1});
     }
+    if (path === '/aep/v1/admin/control-events') return json(response, 200, {items: [], nextCursor: null});
+    if (path === '/aep/v1/admin/control-events/event-1') {
+      if (request.method === 'POST') return json(response, 200, adminEvent());
+      return json(response, 200, adminEvent());
+    }
+    if (path === '/aep/v1/admin/control-events/event-1/cancel') return json(response, 200, adminEvent());
+    if (path === '/aep/v1/admin/licenses') return json(response, 200, {items: [license()]});
+    if (path === '/aep/v1/admin/licenses/lic-1') return json(response, 200, license());
+    if (path === '/aep/v1/admin/licenses/import') return json(response, 201, license());
+    if (path === '/aep/v1/admin/licenses/lic-1/revoke') return json(response, 200, {licenseId: 'lic-1', status: 'revoked'});
     if (path.startsWith('/aep/v1/admin/')) return json(response, 200, {items: [], nextCursor: null});
 
     return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
@@ -240,6 +269,22 @@ function credentialAssignment(): object {
     subject: {type: 'user', id: 'user-1'},
     createdAt: '2026-08-21T00:00:00Z',
   };
+}
+
+function role(id: string): object {
+  return {id, name: 'Operator', description: '', builtIn: false, enabled: true, permissions: ['models.read']};
+}
+
+function team(id: string): object {
+  return {id, name: 'Support', description: '', builtIn: false, enabled: true, memberCount: 1};
+}
+
+function adminEvent(): object {
+  return {eventId: 'event-1', type: 'model.catalog.changed', scope: {type: 'global'}, task: {type: 'model.reconcile'}, createdAt: '2026-08-24T00:00:00Z', expiresAt: '2026-08-25T00:00:00Z', state: 'active'};
+}
+
+function license(): object {
+  return {licenseId: 'lic-1', customerId: 'customer-1', deploymentId: 'ent-1', edition: 'enterprise', status: 'active', issuedAt: '2026-08-01T00:00:00Z', expiresAt: '2027-08-01T00:00:00Z', features: ['enterprise.models']};
 }
 
 function model(admin: boolean): object {

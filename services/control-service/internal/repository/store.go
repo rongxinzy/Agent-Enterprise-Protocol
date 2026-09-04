@@ -12,6 +12,7 @@ var (
 	ErrUnknownPermission = errors.New("unknown permission")
 	ErrUnknownRole       = errors.New("unknown role")
 	ErrUnknownTeam       = errors.New("unknown team")
+	ErrBuiltInResource   = errors.New("built-in resource")
 )
 
 type Store struct {

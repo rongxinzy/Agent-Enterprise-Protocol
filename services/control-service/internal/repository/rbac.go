@@ -1,6 +1,9 @@
 package repository
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
 	items := make([]Permission, 0)
@@ -70,6 +73,84 @@ func (s *DeploymentStore) CreateRole(ctx context.Context, role Role, permissions
 	})
 }
 
+func (s *DeploymentStore) GetRoleRecord(ctx context.Context, id string) (RoleRecord, error) {
+	var role Role
+	if err := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Take(&role).Error; err != nil {
+		return RoleRecord{}, err
+	}
+	roles, err := s.ListRoles(ctx)
+	if err != nil {
+		return RoleRecord{}, err
+	}
+	for _, item := range roles {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return RoleRecord{Role: role, Permissions: []string{}}, nil
+}
+
+func (s *DeploymentStore) UpdateRole(ctx context.Context, id string, name, description *string, enabled *bool, permissions *[]string) (RoleRecord, error) {
+	err := s.transaction(ctx, func(tx *DeploymentStore) error {
+		updates := map[string]any{"updated_at": time.Now().UTC()}
+		if name != nil {
+			updates["name"] = *name
+		}
+		if description != nil {
+			updates["description"] = *description
+		}
+		if enabled != nil {
+			updates["enabled"] = *enabled
+		}
+		result := tx.db.WithContext(ctx).Model(&Role{}).Where("deployment_id = ? AND id = ?", tx.deploymentID, id).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if permissions == nil {
+			return nil
+		}
+		items := uniqueStrings(*permissions)
+		if len(items) > 0 {
+			var count int64
+			if err := tx.db.Model(&Permission{}).Where("id IN ?", items).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != int64(len(items)) {
+				return ErrUnknownPermission
+			}
+		}
+		if err := tx.db.Where("deployment_id = ? AND role_id = ?", tx.deploymentID, id).Delete(&RolePermission{}).Error; err != nil {
+			return err
+		}
+		bindings := make([]RolePermission, 0, len(items))
+		for _, permissionID := range items {
+			bindings = append(bindings, RolePermission{DeploymentID: tx.deploymentID, RoleID: id, PermissionID: permissionID})
+		}
+		if len(bindings) > 0 {
+			return tx.db.Create(&bindings).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return RoleRecord{}, err
+	}
+	return s.GetRoleRecord(ctx, id)
+}
+
+func (s *DeploymentStore) DeleteRole(ctx context.Context, id string) error {
+	var role Role
+	if err := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Take(&role).Error; err != nil {
+		return err
+	}
+	if role.BuiltIn {
+		return ErrBuiltInResource
+	}
+	return resultError(s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&Role{}))
+}
+
 func (s *DeploymentStore) ListTeams(ctx context.Context) ([]TeamRecord, error) {
 	type row struct {
 		Team
@@ -95,6 +176,51 @@ func (s *DeploymentStore) CreateTeam(ctx context.Context, team Team) error {
 	team.DeploymentID = s.deploymentID
 	team.Enabled = true
 	return s.db.WithContext(ctx).Create(&team).Error
+}
+
+func (s *DeploymentStore) GetTeamRecord(ctx context.Context, id string) (TeamRecord, error) {
+	teams, err := s.ListTeams(ctx)
+	if err != nil {
+		return TeamRecord{}, err
+	}
+	for _, item := range teams {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return TeamRecord{}, ErrNotFound
+}
+
+func (s *DeploymentStore) UpdateTeam(ctx context.Context, id string, name, description *string, enabled *bool) (TeamRecord, error) {
+	updates := map[string]any{"updated_at": time.Now().UTC()}
+	if name != nil {
+		updates["name"] = *name
+	}
+	if description != nil {
+		updates["description"] = *description
+	}
+	if enabled != nil {
+		updates["enabled"] = *enabled
+	}
+	result := s.db.WithContext(ctx).Model(&Team{}).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Updates(updates)
+	if result.Error != nil {
+		return TeamRecord{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return TeamRecord{}, ErrNotFound
+	}
+	return s.GetTeamRecord(ctx, id)
+}
+
+func (s *DeploymentStore) DeleteTeam(ctx context.Context, id string) error {
+	var team Team
+	if err := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Take(&team).Error; err != nil {
+		return err
+	}
+	if team.BuiltIn {
+		return ErrBuiltInResource
+	}
+	return resultError(s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&Team{}))
 }
 
 func (s *DeploymentStore) ReplaceUserRBAC(ctx context.Context, userID string, roleIDs, teamIDs []string) error {

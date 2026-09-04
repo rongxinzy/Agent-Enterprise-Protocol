@@ -266,4 +266,36 @@ describe('AepClient SDK gate', () => {
     expect(await client.uploadEventBatch([{eventId: 'event-1', type: 'auth.login'}])).toMatchObject({accepted: ['event-1']});
     expect((await client.listUsers()).items).toEqual([]);
   });
+
+  test('covers RBAC, control-event, and license administration APIs', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    expect((await client.listPermissions()).permissions[0]?.id).toBe('models.read');
+    expect((await client.listRoles()).roles[0]?.id).toBe('operator');
+    expect((await client.createRole({id: 'operator', name: 'Operator'})).id).toBe('operator');
+    expect((await client.getRole('operator')).id).toBe('operator');
+    expect((await client.updateRole('operator', {enabled: false})).id).toBe('operator');
+    await client.deleteRole('operator');
+    expect((await client.listTeams()).teams[0]?.id).toBe('support');
+    expect((await client.createTeam({id: 'support', name: 'Support'})).id).toBe('support');
+    expect((await client.getTeam('support')).id).toBe('support');
+    expect((await client.updateTeam('support', {enabled: false})).id).toBe('support');
+    await client.deleteTeam('support');
+    expect((await client.replaceUserRBAC('user-1', {roleIds: ['operator'], teamIds: ['support']})).userId).toBe('user-1');
+    expect((await client.listAdminControlEvents()).items).toEqual([]);
+    expect((await client.getAdminControlEvent('event-1')).eventId).toBe('event-1');
+    expect((await client.cancelControlEvent('event-1')).eventId).toBe('event-1');
+    expect((await client.listLicenses()).items[0]?.licenseId).toBe('lic-1');
+    expect((await client.getLicense('lic-1')).licenseId).toBe('lic-1');
+    expect((await client.importLicense({license: {format: 'zhiyuan-license-v1', keyId: 'k1', payload: {}, signature: 'sig'}})).licenseId).toBe('lic-1');
+    expect((await client.revokeLicense('lic-1')).status).toBe('revoked');
+    const paths = server.requests.map(request => `${request.method} ${request.path}`);
+    expect(paths).toEqual(expect.arrayContaining([
+      'GET /aep/v1/admin/permissions', 'POST /aep/v1/admin/roles', 'PATCH /aep/v1/admin/roles/operator',
+      'DELETE /aep/v1/admin/roles/operator', 'POST /aep/v1/admin/teams', 'PATCH /aep/v1/admin/teams/support',
+      'DELETE /aep/v1/admin/teams/support', 'PUT /aep/v1/admin/users/user-1/rbac',
+      'GET /aep/v1/admin/control-events', 'GET /aep/v1/admin/control-events/event-1',
+      'POST /aep/v1/admin/control-events/event-1/cancel', 'POST /aep/v1/admin/licenses/import',
+      'POST /aep/v1/admin/licenses/lic-1/revoke',
+    ]));
+  });
 });
