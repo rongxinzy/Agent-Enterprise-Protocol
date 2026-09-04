@@ -28,29 +28,43 @@ try {
 }
 
 async function runScenario() {
+  const adminStore = new MemoryTokenStore();
   const admin = new AepClient({
-    baseUrl, tokenStore: new MemoryTokenStore(),
+    baseUrl, tokenStore: adminStore,
   });
   await admin.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
   const metadata = await admin.getMetadata();
   assert(metadata.capabilities.includes('credentials'), 'Configured Credential capability was not advertised');
 
-  const organizationId = 'm2-org-' + runId;
+  const roleId = 'm2-role-' + runId;
+  const teamId = 'm2-team-' + runId;
+  await adminRequest('/aep/v1/admin/roles', {
+    id: roleId,
+    name: 'M2 Role',
+    description: 'M2 credential control test role',
+    permissions: ['credentials.read'],
+  }, adminStore);
+  await adminRequest('/aep/v1/admin/teams', {
+    id: teamId,
+    name: 'M2 Team',
+    description: 'M2 credential control test team',
+  }, adminStore);
+
   const username = 'm2-user-' + runId;
   const password = 'temporary-password-123';
   const user = await admin.createUser({
     deploymentId: 'demo', username, displayName: 'M2 User ' + runId,
     temporaryPassword: password, requirePasswordChange: false,
-    teamIds: [organizationId], roleIds: [],
+    teamIds: [teamId], roleIds: [roleId],
   });
-  const agentStore = new MemoryTokenStore();
-  const agent = new AepClient({baseUrl, tokenStore: agentStore});
-  await agent.loginWithPassword({deploymentId: 'demo', username, password});
+  const userStore = new MemoryTokenStore();
+  const userClient = new AepClient({baseUrl, tokenStore: userStore});
+  await userClient.loginWithPassword({deploymentId: 'demo', username, password});
 
   const subjects = [
     {type: 'user', id: user.id},
-    {type: 'team', id: organizationId},
-    {type: 'role', id: 'role-user'},
+    {type: 'team', id: teamId},
+    {type: 'role', id: roleId},
   ];
   const assigned = [];
   for (const [index, subject] of subjects.entries()) {
@@ -80,15 +94,15 @@ async function runScenario() {
     deliveryMode: 'client', value: 'm2-unassigned-' + runId, enabled: true,
   });
 
-  const visible = (await agent.listCredentialsForUser()).credentials;
+  const visible = (await userClient.listCredentialsForUser()).credentials;
   assert(visible.length === 3, 'RBAC authorization union did not expose exactly three client credentials');
   assert(visible.every(item => item.deliveryMode === 'client' && item.enabled), 'Client list exposed an unavailable credential');
   for (const entry of assigned) {
-    const resolved = await agent.resolveCredentialForUser(entry.item.id, 'M2 integration test');
+    const resolved = await userClient.resolveCredentialForUser(entry.item.id, 'M2 integration test');
     assert(resolved.value === entry.secret && resolved.expiresAt === null, 'Resolved Credential value was incorrect');
   }
 
-  const rawTokens = await agentStore.get();
+  const rawTokens = await userStore.get();
   const rawResolve = await fetch(baseUrl + '/aep/v1/user/credentials/' + encodeURIComponent(assigned[0].item.id) + '/resolve', {
     method: 'POST',
     headers: {
@@ -101,9 +115,9 @@ async function runScenario() {
   assert(rawResolve.status === 200 && rawResolve.headers.get('cache-control') === 'no-store', 'Resolve response was cacheable');
   assert((await rawResolve.json()).value === assigned[0].secret, 'Raw resolve returned the wrong value');
 
-  await expectProblem(agent.resolveCredentialForUser(serverOnly.id, 'must stay server side'), 403, 'CREDENTIAL_SERVER_ONLY');
-  await expectProblem(agent.resolveCredentialForUser(disabled.id, 'must be enabled'), 403, 'CREDENTIAL_DISABLED');
-  await expectProblem(agent.resolveCredentialForUser(unassigned.id, 'not assigned'), 403, 'ACCESS_DENIED');
+  await expectProblem(userClient.resolveCredentialForUser(serverOnly.id, 'must stay server side'), 403, 'CREDENTIAL_SERVER_ONLY');
+  await expectProblem(userClient.resolveCredentialForUser(disabled.id, 'must be enabled'), 403, 'CREDENTIAL_DISABLED');
+  await expectProblem(userClient.resolveCredentialForUser(unassigned.id, 'not assigned'), 403, 'ACCESS_DENIED');
   await expectProblem(
     admin.createCredentialAssignment({credentialId: assigned[0].item.id, subject: subjects[0]}),
     409,
@@ -113,11 +127,11 @@ async function runScenario() {
   const rotatedSecret = 'm2-rotated-secret-' + runId;
   const rotated = await admin.rotateCredential(assigned[0].item.id, {value: rotatedSecret});
   assert(!JSON.stringify(rotated).includes(rotatedSecret), 'Rotate response leaked the new secret');
-  assert((await agent.resolveCredentialForUser(assigned[0].item.id, 'after rotation')).value === rotatedSecret, 'Rotation did not replace the resolved value');
+  assert((await userClient.resolveCredentialForUser(assigned[0].item.id, 'after rotation')).value === rotatedSecret, 'Rotation did not replace the resolved value');
 
   await admin.updateCredential(assigned[1].item.id, {deliveryMode: 'server_only'});
-  assert((await agent.listCredentialsForUser()).credentials.length === 2, 'Delivery-mode change did not update client discovery');
-  await expectProblem(agent.resolveCredentialForUser(assigned[1].item.id, 'after restriction'), 403, 'CREDENTIAL_SERVER_ONLY');
+  assert((await userClient.listCredentialsForUser()).credentials.length === 2, 'Delivery-mode change did not update client discovery');
+  await expectProblem(userClient.resolveCredentialForUser(assigned[1].item.id, 'after restriction'), 403, 'CREDENTIAL_SERVER_ONLY');
   await admin.updateCredential(assigned[1].item.id, {deliveryMode: 'client'});
 
   await expectProblem(admin.createModel({
@@ -140,20 +154,20 @@ async function runScenario() {
     assert(!serializedAdminList.includes(forbidden), 'Administrator metadata leaked a secret');
   }
   const cliList = await commandOutput('go', [
-    'run', './cmd/aepctl', '--base-url', baseUrl, '--enterprise', 'demo',
+    'run', './cmd/aepctl', '--base-url', baseUrl, '--deployment', 'demo',
     '--username', 'admin', '--password', 'change-this-admin-password',
-    '--agent-id', 'm2-cli-' + runId, 'credential', 'list',
+    'credential', 'list',
   ]);
-  assert(JSON.parse(cliList).credentials.length === 7, 'aepctl credential list returned an unexpected catalog');
+  assert(JSON.parse(cliList).credentials.length === 6, 'aepctl credential list returned an unexpected catalog');
   assert(!cliList.includes(rotatedSecret), 'aepctl output leaked a secret');
   const cliBaseArgs = [
-    'run', './cmd/aepctl', '--base-url', baseUrl, '--enterprise', 'demo',
+    'run', './cmd/aepctl', '--base-url', baseUrl, '--deployment', 'demo',
     '--username', 'admin', '--password', 'change-this-admin-password',
-    '--agent-id', 'm2-cli-' + runId, 'credential',
+    'credential',
   ];
   const cliSecret = 'm2-cli-secret-' + runId;
   const cliCredentialOutput = await commandOutput('go', [
-    ...cliBaseArgs, 'create', '--name', 'CLI Credential', '--service', 'cli-service', '--delivery-mode', 'agent',
+    ...cliBaseArgs, 'create', '--name', 'CLI Credential', '--service', 'cli-service', '--delivery-mode', 'client',
   ], {AEPCTL_CREDENTIAL_VALUE: cliSecret});
   const cliCredential = JSON.parse(cliCredentialOutput);
   assert(cliCredential.id && !cliCredentialOutput.includes(cliSecret), 'aepctl credential create leaked or omitted data');
@@ -178,16 +192,33 @@ async function runScenario() {
 
   await compose('restart', 'control-service');
   await waitForHealth();
-  assert((await agent.resolveAgentCredential(assigned[0].item.id, 'after service restart')).value === rotatedSecret, 'Credential could not be decrypted after service restart');
+  assert((await userClient.resolveCredentialForUser(assigned[0].item.id, 'after service restart')).value === rotatedSecret, 'Credential could not be decrypted after service restart');
 
-  await admin.deleteCredentialAssignment(assigned[3].assignment.id);
-  await expectProblem(agent.resolveAgentCredential(assigned[3].item.id, 'after revocation'), 403, 'ACCESS_DENIED');
+  await admin.deleteCredentialAssignment(assigned[2].assignment.id);
+  await expectProblem(userClient.resolveCredentialForUser(assigned[2].item.id, 'after revocation'), 403, 'ACCESS_DENIED');
   const audit = await postgres("SELECT outcome||':'||count(*) FROM credential_resolution_audit GROUP BY outcome ORDER BY outcome");
   assert(audit.includes('resolved:') && audit.includes('denied:'), 'Credential resolution audit did not retain both outcomes');
 
   await admin.deleteModel('m2-model-' + runId);
   await admin.deleteCredential(serverOnly.id);
   await expectProblem(admin.getCredential(serverOnly.id), 404, 'RESOURCE_NOT_FOUND');
+}
+
+async function adminRequest(path, body, tokenStore) {
+  const tokens = await tokenStore.get();
+  assert(tokens?.accessToken, 'Admin session did not provide an access token');
+  const response = await fetch(baseUrl + path, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + tokens.accessToken,
+      'Content-Type': 'application/json',
+      'X-AEP-Protocol-Version': '1.0',
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error('Admin request ' + path + ' failed with ' + response.status + ': ' + text);
+  return text ? JSON.parse(text) : null;
 }
 
 async function expectProblem(promise, status, code) {

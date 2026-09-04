@@ -462,26 +462,33 @@ func (a *App) bootstrap(ctx context.Context) error {
 	if _, err := queries.CreateDeployment(ctx, db.CreateDeploymentParams{ID: a.Config.BootstrapDeploymentID, Name: a.Config.BootstrapDeploymentName}); err != nil {
 		return err
 	}
-	_, err = queries.GetUserByUsername(ctx, db.GetUserByUsernameParams{DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername})
-	if err == nil {
-		return nil
+	if _, err := connection.Exec(ctx, `INSERT INTO roles (deployment_id, id, name, built_in) VALUES ($1, 'admin', 'Administrator', true) ON CONFLICT (deployment_id, id) DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
+		return fmt.Errorf("bootstrap administrator role definition: %w", err)
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := connection.Exec(ctx, `INSERT INTO role_permissions (deployment_id, role_id, permission_id) SELECT $1, 'admin', id FROM permissions ON CONFLICT DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
+		return fmt.Errorf("bootstrap administrator permissions: %w", err)
+	}
+	if _, err := connection.Exec(ctx, `INSERT INTO teams (deployment_id, id, name, description, built_in) VALUES ($1, 'all-users', 'All users', 'Default team for every deployment user', true) ON CONFLICT (deployment_id, id) DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
+		return fmt.Errorf("bootstrap default team: %w", err)
+	}
+	user, err := queries.GetUserByUsername(ctx, db.GetUserByUsernameParams{DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	passwordHash, err := auth.HashPassword(a.Config.BootstrapAdminPassword)
-	if err != nil {
-		return err
+	if errors.Is(err, pgx.ErrNoRows) {
+		passwordHash, hashErr := auth.HashPassword(a.Config.BootstrapAdminPassword)
+		if hashErr != nil {
+			return hashErr
+		}
+		user, err = queries.CreateUser(ctx, db.CreateUserParams{ID: uuid.NewString(), DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true})
+		if err != nil {
+			return fmt.Errorf("bootstrap administrator: %w", err)
+		}
 	}
-	userID := uuid.NewString()
-	_, err = queries.CreateUser(ctx, db.CreateUserParams{ID: userID, DeploymentID: a.Config.BootstrapDeploymentID, Username: a.Config.BootstrapAdminUsername, DisplayName: a.Config.BootstrapAdminDisplayName, PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: true})
-	if err != nil {
-		return fmt.Errorf("bootstrap administrator: %w", err)
-	}
-	if _, err = connection.Exec(ctx, `INSERT INTO user_role_bindings (deployment_id,user_id,role_id,is_primary) VALUES ($1,$2,'admin',true) ON CONFLICT DO NOTHING`, a.Config.BootstrapDeploymentID, userID); err != nil {
+	if _, err = connection.Exec(ctx, `INSERT INTO user_role_bindings (deployment_id,user_id,role_id,is_primary) VALUES ($1,$2,'admin',true) ON CONFLICT DO NOTHING`, a.Config.BootstrapDeploymentID, user.ID); err != nil {
 		return fmt.Errorf("bootstrap administrator role: %w", err)
 	}
-	if _, err = connection.Exec(ctx, `INSERT INTO user_team_bindings (deployment_id,user_id,team_id,is_primary) VALUES ($1,$2,'all-users',true) ON CONFLICT DO NOTHING`, a.Config.BootstrapDeploymentID, userID); err != nil {
+	if _, err = connection.Exec(ctx, `INSERT INTO user_team_bindings (deployment_id,user_id,team_id,is_primary) VALUES ($1,$2,'all-users',true) ON CONFLICT DO NOTHING`, a.Config.BootstrapDeploymentID, user.ID); err != nil {
 		return fmt.Errorf("bootstrap administrator team: %w", err)
 	}
 	return nil
