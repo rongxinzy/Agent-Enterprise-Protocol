@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 const modelColumns = `id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled,created_at,updated_at`
@@ -24,23 +24,7 @@ type modelReasoningCompatibility struct {
 	RequiresReasoningContentOnAssistantMessages bool   `json:"requiresReasoningContentOnAssistantMessages"`
 }
 
-type modelRecord struct {
-	ID                     string
-	DisplayName            string
-	SourceType             string
-	Protocol               string
-	Endpoint               pgtype.Text
-	UpstreamModel          pgtype.Text
-	LocalModelRef          pgtype.Text
-	CredentialID           pgtype.Text
-	Capabilities           []string
-	ReasoningCompatibility json.RawMessage
-	ContextWindow          pgtype.Int4
-	IsDefault              bool
-	Enabled                bool
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-}
+type modelRecord = repository.Model
 
 type modelWrite struct {
 	ID                     string                       `json:"id"`
@@ -208,49 +192,29 @@ func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.DeploymentID, scopes)
+	models, err := s.app.Store.Deployment(claims.DeploymentID).ListEnabledModelsByIDs(request.Context(), scopes)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	models := make([]map[string]any, 0)
-	for rows.Next() {
-		model, err := scanModel(rows)
-		if err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-		models = append(models, modelJSON(model, false))
+	items := make([]map[string]any, 0, len(models))
+	for _, model := range models {
+		items = append(items, modelJSON(model, false))
 	}
-	if err := rows.Err(); err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"models": models})
+	writeJSON(response, http.StatusOK, map[string]any{"models": items})
 }
 
 func (s *Server) listModels(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).DeploymentID)
+	models, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListModels(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	models := make([]map[string]any, 0)
-	for rows.Next() {
-		model, err := scanModel(rows)
-		if err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-		models = append(models, modelJSON(model, true))
+	items := make([]map[string]any, 0, len(models))
+	for _, model := range models {
+		items = append(items, modelJSON(model, true))
 	}
-	if err := rows.Err(); err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"models": models})
+	writeJSON(response, http.StatusOK, map[string]any{"models": items})
 }
 
 func (s *Server) createModel(response http.ResponseWriter, request *http.Request) {
@@ -302,8 +266,9 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+modelColumns
 }
 
 func (s *Server) getModel(response http.ResponseWriter, request *http.Request) {
-	model, err := scanModel(s.app.Pool.QueryRow(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId")))
-	if errors.Is(err, pgx.ErrNoRows) {
+	model, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		GetModel(request.Context(), chi.URLParam(request, "modelId"))
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
 		return
 	}
@@ -404,13 +369,14 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId"))
-	if err != nil {
-		databaseFailure(response, request, err)
+	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		DeleteModel(request.Context(), chi.URLParam(request, "modelId"))
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
+	if err != nil {
+		databaseFailure(response, request, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -421,28 +387,17 @@ func validModelSubject(subjectType string) bool {
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,model_id,subject_type,subject_id,created_at FROM model_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).DeploymentID)
+	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListModelAssignments(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	defer rows.Close()
-	assignments := make([]map[string]any, 0)
-	for rows.Next() {
-		var id, modelID, subjectType, subjectID string
-		var createdAt time.Time
-		if err := rows.Scan(&id, &modelID, &subjectType, &subjectID, &createdAt); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
+	assignments := make([]map[string]any, 0, len(items))
+	for _, item := range items {
 		assignments = append(assignments, map[string]any{
-			"id": id, "resourceType": "model", "resourceId": modelID,
-			"subject": map[string]string{"type": subjectType, "id": subjectID}, "createdAt": createdAt,
+			"id": item.ID, "resourceType": "model", "resourceId": item.ModelID,
+			"subject": map[string]string{"type": item.SubjectType, "id": item.SubjectID}, "createdAt": item.CreatedAt,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		databaseFailure(response, request, err)
-		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments})
 }
@@ -463,8 +418,8 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	tenant := claimsFrom(request).DeploymentID
-	var exists bool
-	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM models WHERE deployment_id=$1 AND id=$2)", tenant, input.ModelID).Scan(&exists); err != nil {
+	exists, err := s.app.Store.Deployment(tenant).HasModel(request.Context(), input.ModelID)
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -473,8 +428,9 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	id := uuid.NewString()
-	var createdAt time.Time
-	err := s.app.Pool.QueryRow(request.Context(), `INSERT INTO model_assignments (id,deployment_id,model_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5) RETURNING created_at`, id, tenant, input.ModelID, input.Subject.Type, input.Subject.ID).Scan(&createdAt)
+	assignment, err := s.app.Store.Deployment(tenant).CreateModelAssignment(request.Context(), repository.ModelAssignment{
+		ID: id, ModelID: input.ModelID, SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The model assignment already exists.")
@@ -485,18 +441,19 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 	}
 	writeJSON(response, http.StatusCreated, map[string]any{
 		"id": id, "resourceType": "model", "resourceId": input.ModelID,
-		"subject": input.Subject, "createdAt": createdAt,
+		"subject": input.Subject, "createdAt": assignment.CreatedAt,
 	})
 }
 
 func (s *Server) deleteModelAssignment(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM model_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).DeploymentID)
-	if err != nil {
-		databaseFailure(response, request, err)
+	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		DeleteModelAssignment(request.Context(), chi.URLParam(request, "assignmentId"))
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model assignment was not found.")
 		return
 	}
-	if result.RowsAffected() == 0 {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model assignment was not found.")
+	if err != nil {
+		databaseFailure(response, request, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)

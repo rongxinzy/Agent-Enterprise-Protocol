@@ -65,3 +65,13 @@ func uniqueStrings(values []string) []string {
 	}
 	return result
 }
+
+func resultError(result *gorm.DB) error {
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
