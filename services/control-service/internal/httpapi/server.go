@@ -301,6 +301,9 @@ func requiredAdminPermission(method, path string) string {
 		if strings.HasSuffix(path, "/revoke") {
 			return "licenses.revoke"
 		}
+		if method != http.MethodGet {
+			return "licenses.write"
+		}
 		return "licenses.read"
 	case strings.HasPrefix(path, "/aep/v1/admin/events") || strings.HasPrefix(path, "/aep/v1/admin/control-events"):
 		if method == http.MethodGet {

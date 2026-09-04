@@ -230,6 +230,24 @@ func TestProtocolVersionGate(t *testing.T) {
 	}
 }
 
+func TestRequiredAdminPermissionForLicenseLifecycle(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/aep/v1/admin/licenses", "licenses.read"},
+		{http.MethodGet, "/aep/v1/admin/licenses/lic-1", "licenses.read"},
+		{http.MethodPost, "/aep/v1/admin/licenses/import", "licenses.write"},
+		{http.MethodPost, "/aep/v1/admin/licenses/lic-1/revoke", "licenses.revoke"},
+	}
+	for _, test := range tests {
+		if got := requiredAdminPermission(test.method, test.path); got != test.want {
+			t.Errorf("requiredAdminPermission(%s, %s) = %q, want %q", test.method, test.path, got, test.want)
+		}
+	}
+}
+
 func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
