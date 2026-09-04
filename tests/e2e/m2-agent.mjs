@@ -54,8 +54,8 @@ async function runScenario() {
     displayName: 'M2 Reference Agent ' + runId,
     temporaryPassword: password,
     requirePasswordChange: false,
-    teamIds: [],
-    roleIds: [],
+    teamIds: ['all-users'],
+    roleIds: ['admin'],
   });
   const firstSecret = 'agent-credential-first-' + runId;
   const rotatedSecret = 'agent-credential-rotated-' + runId;

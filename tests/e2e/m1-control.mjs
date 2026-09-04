@@ -46,7 +46,7 @@ async function runScenario() {
   const user = await admin.createUser({
     deploymentId: 'demo', username, displayName: `Model User ${runId}`,
     temporaryPassword: password, requirePasswordChange: false,
-    teamIds: [], roleIds: [],
+    teamIds: ['all-users'], roleIds: ['admin'],
   });
   const descriptors = [
     {suffix: 'user', subject: {type: 'user', id: user.id}},

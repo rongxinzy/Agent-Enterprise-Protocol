@@ -2771,6 +2771,8 @@ components:
         - username
         - displayName
         - temporaryPassword
+        - teamIds
+        - roleIds
       properties:
         deploymentId:
           type: string
@@ -2794,11 +2796,15 @@ components:
           writeOnly: true
         teamIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
         roleIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
@@ -2812,6 +2818,8 @@ components:
         - username
         - displayName
         - temporaryPassword
+        - teamIds
+        - roleIds
       properties:
         externalRowId:
           type: string
@@ -2835,11 +2843,15 @@ components:
           writeOnly: true
         teamIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
         roleIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
