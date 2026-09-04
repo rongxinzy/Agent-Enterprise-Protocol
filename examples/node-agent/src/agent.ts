@@ -10,8 +10,6 @@ export interface ExampleAgentOptions {
   state: AgentState;
   reconciler: SkillReconciler;
   credentials: {deploymentId: string; username: string; password: string};
-  agentVersion: string;
-  platform: 'windows' | 'macos' | 'linux';
 }
 
 export class ExampleAgent {
@@ -26,8 +24,6 @@ export class ExampleAgent {
     await this.resumeInbox();
     const skills = this.options.state.managedSkills();
     const heartbeat = await this.options.client.heartbeatUser({
-      agentVersion: this.options.agentVersion,
-      platform: this.options.platform,
       appliedSkillRevision: this.options.state.getValue('skill_revision'),
       installedSkillIds: skills.map(skill => skill.skillId),
     });
@@ -63,7 +59,7 @@ export class ExampleAgent {
   private async execute(event: ControlEvent): Promise<void> {
     this.options.state.setInboxState(event.deliveryId, 'running');
     await this.options.client.reportUserControlEventResult(event.deliveryId, {status: 'running', startedAt: new Date().toISOString()});
-    try {
+      try {
       let appliedRevision: string | undefined;
       if (event.task.type === 'skill.reconcile') {
         const result = await this.options.reconciler.reconcile();

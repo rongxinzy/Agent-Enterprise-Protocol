@@ -16,12 +16,11 @@ security:
 tags:
   - name: Service
   - name: Authentication
-  - name: Agent
-  - name: Agent Control Events
+  - name: User Runtime
+  - name: User Control Events
   - name: Admin Users
   - name: Admin Skills
   - name: Admin Control Events
-  - name: Admin Agents
 paths:
   /.well-known/jwks.json:
     get:
@@ -56,12 +55,6 @@ paths:
       operationId: getAuthenticationMethods
       security: []
       parameters:
-        - name: enterpriseHint
-          in: query
-          required: false
-          schema:
-            type: string
-            minLength: 1
         - name: deploymentHint
           in: query
           required: false
@@ -199,12 +192,12 @@ paths:
           description: Session revoked
         '401':
           $ref: '#/components/responses/Problem'
-  /aep/v1/agent/activation:
+  /aep/v1/user/activation:
     post:
       tags:
         - Authentication
-      operationId: activateEnterpriseLicense
-      description: Exchanges a signed enterprise license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation.
+      operationId: activateDeploymentLicense
+      description: Exchanges a signed deployment license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation.
       security:
         - aepBearerAuth: []
       requestBody:
@@ -215,7 +208,7 @@ paths:
               $ref: '#/components/schemas/LicenseActivationRequest'
       responses:
         '200':
-          description: Enterprise entitlement token
+          description: Deployment entitlement token
           content:
             application/json:
               schema:
@@ -226,10 +219,10 @@ paths:
           $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
-  /aep/v1/agent/me:
+  /aep/v1/user/me:
     get:
       tags:
-        - Agent
+        - User Runtime
       operationId: getCurrentIdentity
       responses:
         '200':
@@ -240,13 +233,12 @@ paths:
                 $ref: '#/components/schemas/CurrentIdentity'
         '401':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/heartbeat:
+  /aep/v1/user/heartbeat:
     post:
       tags:
-        - Agent Control Events
-      operationId: reportAgentHeartbeat
+        - User Control Events
+      operationId: reportUserHeartbeat
       parameters:
-        - $ref: '#/components/parameters/AepAgentId'
         - $ref: '#/components/parameters/AepProtocolVersion'
         - $ref: '#/components/parameters/RequestId'
       requestBody:
@@ -266,14 +258,13 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '401':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/control-events:
+  /aep/v1/user/control-events:
     get:
       tags:
-        - Agent Control Events
-      operationId: listAgentControlEvents
+        - User Control Events
+      operationId: listUserControlEvents
       description: Reading does not consume an event. Unacknowledged deliveries may be returned again.
       parameters:
-        - $ref: '#/components/parameters/AepAgentId'
         - $ref: '#/components/parameters/AepProtocolVersion'
         - $ref: '#/components/parameters/RequestId'
         - name: afterCursor
@@ -292,15 +283,14 @@ paths:
                 $ref: '#/components/schemas/ControlEventPage'
         '401':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/control-events/{deliveryId}/acknowledge:
+  /aep/v1/user/control-events/{deliveryId}/acknowledge:
     post:
       tags:
-        - Agent Control Events
+        - User Control Events
       operationId: acknowledgeControlEvent
       description: Call only after the delivery is committed to the durable local inbox.
       parameters:
         - $ref: '#/components/parameters/DeliveryId'
-        - $ref: '#/components/parameters/AepAgentId'
         - $ref: '#/components/parameters/AepProtocolVersion'
         - $ref: '#/components/parameters/RequestId'
       requestBody:
@@ -316,14 +306,13 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '409':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/control-events/{deliveryId}/result:
+  /aep/v1/user/control-events/{deliveryId}/result:
     post:
       tags:
-        - Agent Control Events
+        - User Control Events
       operationId: reportControlEventResult
       parameters:
         - $ref: '#/components/parameters/DeliveryId'
-        - $ref: '#/components/parameters/AepAgentId'
         - $ref: '#/components/parameters/AepProtocolVersion'
         - $ref: '#/components/parameters/RequestId'
       requestBody:
@@ -339,10 +328,10 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '409':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/skills/manifest:
+  /aep/v1/user/skills/manifest:
     get:
       tags:
-        - Agent
+        - User Runtime
       operationId: getSkillManifest
       parameters:
         - name: If-None-Match
@@ -364,10 +353,10 @@ paths:
           description: Manifest unchanged
         '401':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/skills/{skillId}/versions/{version}/package:
+  /aep/v1/user/skills/{skillId}/versions/{version}/package:
     get:
       tags:
-        - Agent
+        - User Runtime
       operationId: downloadSkillPackage
       parameters:
         - $ref: '#/components/parameters/SkillId'
@@ -384,10 +373,10 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '404':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/skills/sync-results:
+  /aep/v1/user/skills/sync-results:
     post:
       tags:
-        - Agent
+        - User Runtime
       operationId: reportSkillSyncResult
       requestBody:
         required: true
@@ -400,10 +389,10 @@ paths:
           description: Result accepted
         '400':
           $ref: '#/components/responses/Problem-2'
-  /aep/v1/agent/events/batch:
+  /aep/v1/user/events/batch:
     post:
       tags:
-        - Agent
+        - User Runtime
       operationId: uploadEventBatch
       requestBody:
         required: true
@@ -791,61 +780,11 @@ paths:
             type: string
       responses:
         '200':
-          description: Per-Agent delivery states
+          description: Per-session delivery states
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryPage'
-        '404':
-          $ref: '#/components/responses/Problem-2'
-  /aep/v1/admin/agents:
-    get:
-      tags:
-        - Admin Agents
-      operationId: listAgents
-      parameters:
-        - name: cursor
-          in: query
-          schema:
-            type:
-              - string
-              - 'null'
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 50
-        - name: userId
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Registered Agent instances
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentPage'
-  /aep/v1/admin/agents/{agentId}:
-    get:
-      tags:
-        - Admin Agents
-      operationId: getAgent
-      parameters:
-        - name: agentId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Agent state and latest synchronization summary
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminAgent'
         '404':
           $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/licenses:
@@ -910,10 +849,6 @@ paths:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit-2'
         - name: userId
-          in: query
-          schema:
-            type: string
-        - name: agentId
           in: query
           schema:
             type: string
@@ -1018,65 +953,6 @@ components:
           minLength: 12
           maxLength: 1024
           writeOnly: true
-        agentId:
-          type: string
-          minLength: 1
-        sessionId:
-          type: string
-          minLength: 1
-    AdminAgent:
-      type: object
-      required:
-        - agentId
-        - enterpriseId
-        - userId
-        - agentVersion
-        - platform
-        - firstSeenAt
-        - lastSeenAt
-      properties:
-        agentId:
-          type: string
-        enterpriseId:
-          type: string
-        userId:
-          type: string
-        agentVersion:
-          type: string
-        platform:
-          type: string
-          enum:
-            - windows
-            - macos
-            - linux
-        firstSeenAt:
-          type: string
-          format: date-time
-        lastSeenAt:
-          type: string
-          format: date-time
-        appliedSkillRevision:
-          type:
-            - string
-            - 'null'
-        installedSkillIds:
-          type: array
-          items:
-            type: string
-    AgentPage:
-      type: object
-      required:
-        - items
-        - nextCursor
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/AdminAgent'
-        nextCursor:
-          type:
-            - string
-            - 'null'
     JsonWebKeySet:
       type: object
       required:
@@ -1110,16 +986,6 @@ components:
                 const: Ed25519
               x:
                 type: string
-    Enterprise:
-      type: object
-      required:
-        - id
-        - name
-      properties:
-        id:
-          type: string
-        name:
-          type: string
     Deployment:
       type: object
       required:
@@ -1157,14 +1023,11 @@ components:
           type: string
     AuthenticationMethods:
       type: object
-      description: Authentication methods enabled for the enterprise. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured.
+      description: Authentication methods enabled for the deployment. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured.
       required:
-        - enterprise
         - deployment
         - methods
       properties:
-        enterprise:
-          $ref: '#/components/schemas/Enterprise'
         deployment:
           $ref: '#/components/schemas/Deployment'
         deploymentId:
@@ -1209,35 +1072,16 @@ components:
     PasswordLoginRequest:
       type: object
       required:
+        - deploymentId
         - username
         - password
-      anyOf:
-        - required:
-            - deploymentId
-        - required:
-            - enterpriseId
       properties:
         deploymentId:
-          type: string
-          minLength: 1
-        enterpriseId:
           type: string
           minLength: 1
         sessionId:
           type: string
           minLength: 1
-        agentId:
-          type: string
-          minLength: 1
-        agentVersion:
-          type: string
-          minLength: 1
-        platform:
-          type: string
-          enum:
-            - windows
-            - macos
-            - linux
         username:
           type: string
           minLength: 1
@@ -1288,19 +1132,12 @@ components:
     FederatedLoginStartRequest:
       type: object
       required:
+        - deploymentId
         - methodId
         - redirectUri
         - codeChallenge
-      anyOf:
-        - required:
-            - deploymentId
-        - required:
-            - enterpriseId
       properties:
         deploymentId:
-          type: string
-          minLength: 1
-        enterpriseId:
           type: string
           minLength: 1
         sessionId:
@@ -1362,21 +1199,6 @@ components:
           minLength: 43
           maxLength: 128
           writeOnly: true
-        sessionId:
-          type: string
-          minLength: 1
-        agentId:
-          type: string
-          minLength: 1
-        agentVersion:
-          type: string
-          minLength: 1
-        platform:
-          type: string
-          enum:
-            - windows
-            - macos
-            - linux
     RefreshRequest:
       type: object
       required:
@@ -1390,10 +1212,6 @@ components:
           type: string
           minLength: 1
           description: User session identifier.
-        agentId:
-          type: string
-          minLength: 1
-          deprecated: true
     LogoutRequest:
       type: object
       required:
@@ -1448,7 +1266,7 @@ components:
       properties:
         entitlementToken:
           type: string
-          description: Short-lived service-signed token for enterprise runtime checks.
+          description: Short-lived service-signed token for deployment runtime checks.
         tokenType:
           type: string
           const: Bearer
@@ -1470,7 +1288,7 @@ components:
           items:
             type: string
         modelScopes:
-          description: Model identifiers authorized for this enterprise entitlement.
+          description: Model identifiers authorized for this deployment entitlement.
           type: array
           items:
             type: string
@@ -1493,7 +1311,6 @@ components:
       type: object
       required:
         - user
-        - enterprise
         - deployment
         - deploymentId
         - sessionId
@@ -1503,8 +1320,6 @@ components:
       properties:
         user:
           $ref: '#/components/schemas/User'
-        enterprise:
-          $ref: '#/components/schemas/Enterprise'
         deployment:
           $ref: '#/components/schemas/Deployment'
         deploymentId:
@@ -1547,18 +1362,8 @@ components:
     HeartbeatRequest:
       type: object
       required:
-        - agentVersion
-        - platform
         - status
       properties:
-        agentVersion:
-          type: string
-        platform:
-          type: string
-          enum:
-            - windows
-            - macos
-            - linux
         lastControlEventCursor:
           type:
             - string
@@ -1909,7 +1714,7 @@ components:
         - success
         - failure
         - info
-    AgentEvent:
+    UserEvent:
       type: object
       required:
         - eventId
@@ -1941,7 +1746,7 @@ components:
           minItems: 1
           maxItems: 100
           items:
-            $ref: '#/components/schemas/AgentEvent'
+            $ref: '#/components/schemas/UserEvent'
     RejectedEvent:
       type: object
       required:
@@ -1973,7 +1778,7 @@ components:
       type: object
       required:
         - id
-        - enterpriseId
+        - deploymentId
         - username
         - displayName
         - status
@@ -1982,7 +1787,7 @@ components:
       properties:
         id:
           type: string
-        enterpriseId:
+        deploymentId:
           type: string
         username:
           type: string
@@ -1998,7 +1803,7 @@ components:
           enum:
             - active
             - disabled
-        organizationIds:
+        teamIds:
           type: array
           items:
             type: string
@@ -2028,12 +1833,12 @@ components:
     CreatePlatformUserRequest:
       type: object
       required:
-        - enterpriseId
+        - deploymentId
         - username
         - displayName
         - temporaryPassword
       properties:
-        enterpriseId:
+        deploymentId:
           type: string
         username:
           type: string
@@ -2053,7 +1858,7 @@ components:
           minLength: 12
           maxLength: 1024
           writeOnly: true
-        organizationIds:
+        teamIds:
           type: array
           items:
             type: string
@@ -2094,7 +1899,7 @@ components:
           minLength: 12
           maxLength: 1024
           writeOnly: true
-        organizationIds:
+        teamIds:
           type: array
           items:
             type: string
@@ -2110,10 +1915,10 @@ components:
     ImportPlatformUsersRequest:
       type: object
       required:
-        - enterpriseId
+        - deploymentId
         - users
       properties:
-        enterpriseId:
+        deploymentId:
           type: string
         users:
           type: array
@@ -2166,7 +1971,7 @@ components:
           enum:
             - active
             - disabled
-        organizationIds:
+        teamIds:
           type: array
           items:
             type: string
@@ -2295,6 +2100,7 @@ components:
           enum:
             - user
             - role
+            - team
         id:
           type: string
     Assignment:
@@ -2465,10 +2271,6 @@ components:
           type: string
         eventId:
           type: string
-        agentId:
-          type:
-            - string
-            - 'null'
         sessionId:
           type:
             - string
@@ -2520,7 +2322,6 @@ components:
       type: object
       required:
         - licenseId
-        - enterpriseId
         - customerId
         - deploymentId
         - digest
@@ -2531,14 +2332,11 @@ components:
         - graceEndsAt
         - limits
         - features
-        - activeAgents
         - activeUsers
         - createdAt
         - updatedAt
       properties:
         licenseId:
-          type: string
-        enterpriseId:
           type: string
         customerId:
           type: string
@@ -2567,21 +2365,18 @@ components:
           type: object
           required:
             - users
-            - agents
+            - activations
           properties:
             users:
               type: integer
               minimum: 1
-            agents:
+            activations:
               type: integer
               minimum: 1
         features:
           type: array
           items:
             type: string
-        activeAgents:
-          type: integer
-          minimum: 0
         activeUsers:
           type: integer
           minimum: 0
@@ -2651,19 +2446,19 @@ components:
           const: revoked
     StoredEvent:
       allOf:
-        - $ref: '#/components/schemas/AgentEvent'
+        - $ref: '#/components/schemas/UserEvent'
         - type: object
           required:
             - receivedAt
             - userId
-            - agentId
+            - sessionId
           properties:
             receivedAt:
               type: string
               format: date-time
             userId:
               type: string
-            agentId:
+            sessionId:
               type: string
     EventSearchResult:
       type: object
@@ -2717,13 +2512,13 @@ components:
           schema:
             $ref: '#/components/schemas/Assignment'
     LicenseList:
-      description: Registered enterprise licenses
+      description: Registered deployment licenses
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/LicensePage'
     License:
-      description: Registered enterprise license metadata
+      description: Registered deployment license metadata
       content:
         application/json:
           schema:
@@ -2735,12 +2530,6 @@ components:
           schema:
             $ref: '#/components/schemas/LicenseRevocation'
   parameters:
-    AepAgentId:
-      name: X-AEP-Agent-ID
-      in: header
-      required: false
-      schema:
-        type: string
     AepProtocolVersion:
       name: X-AEP-Protocol-Version
       in: header

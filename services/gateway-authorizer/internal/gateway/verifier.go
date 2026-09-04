@@ -22,11 +22,10 @@ const maxJWKSBytes = 1 << 20
 var ErrEntitlementInactive = errors.New("enterprise entitlement is inactive")
 
 type ModelClaims struct {
-	Tenant        string   `json:"tenant"`
-	AgentID       string   `json:"agent_id"`
+	DeploymentID  string   `json:"deployment_id"`
+	SessionID     string   `json:"session_id,omitempty"`
 	LicenseID     string   `json:"license_id,omitempty"`
 	LicenseDigest string   `json:"license_digest,omitempty"`
-	DeploymentID  string   `json:"deployment_id,omitempty"`
 	Features      []string `json:"features,omitempty"`
 	ModelScopes   []string `json:"model_scopes"`
 	TokenUse      string   `json:"token_use"`
@@ -95,7 +94,7 @@ func (v *Verifier) CheckEntitlement(ctx context.Context, claims *ModelClaims) er
 		return err
 	}
 	request.Header.Set("X-AEP-Gateway-Token", v.licenseStatusToken)
-	request.Header.Set("X-AEP-Tenant-ID", claims.Tenant)
+	request.Header.Set("X-AEP-Deployment-ID", claims.DeploymentID)
 	response, err := v.client.Do(request)
 	if err != nil {
 		return err
@@ -143,7 +142,7 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (*ModelClaims, error)
 	if err != nil || !token.Valid {
 		return nil, errors.New("model token is invalid or expired")
 	}
-	if (claims.TokenUse != "model" && claims.TokenUse != "entitlement") || claims.Subject == "" || claims.Tenant == "" || claims.AgentID == "" {
+	if (claims.TokenUse != "model" && claims.TokenUse != "entitlement") || claims.Subject == "" || claims.DeploymentID == "" {
 		return nil, errors.New("model token has invalid AEP claims")
 	}
 	if claims.TokenUse == "entitlement" && (claims.LicenseID == "" || claims.LicenseDigest == "" || claims.DeploymentID == "" || claims.Audience == nil || !containsAudience(claims.Audience, "aep-entitlement")) {

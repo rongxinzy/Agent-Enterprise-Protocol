@@ -20,9 +20,9 @@ const formatV1 = "zhiyuan-license-v1"
 var timestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`)
 
 type Limits struct {
-	Users         int `json:"users"`
-	Agents        int `json:"agents"`
-	Organizations int `json:"organizations,omitempty"`
+	Users       int `json:"users"`
+	Activations int `json:"activations"`
+	Teams       int `json:"teams,omitempty"`
 }
 
 type Claims struct {
@@ -119,7 +119,7 @@ func (v Verifier) Verify(raw []byte) (Verified, error) {
 }
 
 func validClaims(c Claims) bool {
-	if c.LicenseID == "" || c.CustomerID == "" || c.DeploymentID == "" || c.Edition != "enterprise" || !validTimestamp(c.IssuedAt) || !validTimestamp(c.ExpiresAt) || c.GraceDays < 0 || c.Limits.Users <= 0 || c.Limits.Agents <= 0 || (c.Limits.Organizations < 0) {
+	if c.LicenseID == "" || c.CustomerID == "" || c.DeploymentID == "" || !validTimestamp(c.IssuedAt) || !validTimestamp(c.ExpiresAt) || c.GraceDays < 0 || c.Limits.Users <= 0 || c.Limits.Activations <= 0 || c.Limits.Teams < 0 {
 		return false
 	}
 	if c.NotBefore != "" && !validTimestamp(c.NotBefore) || c.MaintenanceUntil != "" && !validTimestamp(c.MaintenanceUntil) {

@@ -100,9 +100,6 @@ describe('desktop protected session', () => {
   function createClient(tokenStore: ProtectedRefreshTokenStore): AepClient {
     return new AepClient({
       baseUrl: server.baseUrl,
-      agentId: 'agent-1',
-      agentVersion: '0.1.0',
-      platform: 'windows',
       tokenStore,
       transport: new FetchTransport({defaultTimeoutMs: 2_000, maxRetries: 0}),
     });

@@ -12,7 +12,7 @@ func (s *Server) listUserSessions(response http.ResponseWriter, request *http.Re
 SELECT session_id,user_id,topic,created_at,last_seen_at,revoked_at
 FROM user_sessions
 WHERE deployment_id=$1 AND ($2='' OR user_id=$2)
-ORDER BY last_seen_at DESC LIMIT $3`, claimsFrom(request).Tenant, request.URL.Query().Get("userId"), limit(request))
+ORDER BY last_seen_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, request.URL.Query().Get("userId"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

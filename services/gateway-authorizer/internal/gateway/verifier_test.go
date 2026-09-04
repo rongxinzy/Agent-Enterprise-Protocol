@@ -32,7 +32,7 @@ func TestVerifierAcceptsAEPModelTokenAndCachesJWKS(t *testing.T) {
 
 	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
 	raw := signModelToken(t, private, "test-key", ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
+		DeploymentID: "deployment-a", SessionID: "session-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
 		RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway"),
 	})
 	for range 2 {
@@ -63,7 +63,7 @@ func TestVerifierAcceptsDeploymentEntitlementToken(t *testing.T) {
 	defer server.Close()
 	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
 	raw := signModelToken(t, private, "test-key", ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", LicenseID: "license-a", LicenseDigest: "sha256:abc", DeploymentID: "deployment-a",
+		DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:abc",
 		ModelScopes: []string{"model-a"}, TokenUse: "entitlement",
 		RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-entitlement"),
 	})
@@ -80,7 +80,7 @@ func TestVerifierChecksAndCachesDeploymentLicenseStatus(t *testing.T) {
 	var calls atomic.Int32
 	status := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
-		if request.Header.Get("X-AEP-Gateway-Token") != "gateway-secret" || request.Header.Get("X-AEP-Tenant-ID") != "enterprise-a" {
+		if request.Header.Get("X-AEP-Gateway-Token") != "gateway-secret" || request.Header.Get("X-AEP-Deployment-ID") != "deployment-a" {
 			t.Fatalf("missing internal status headers: %v", request.Header)
 		}
 		_ = json.NewEncoder(response).Encode(map[string]any{"active": true, "digest": "sha256:digest", "deploymentId": "deployment-a"})
@@ -88,7 +88,7 @@ func TestVerifierChecksAndCachesDeploymentLicenseStatus(t *testing.T) {
 	defer status.Close()
 	verifier := NewVerifier("http://unused.example/jwks", "issuer", time.Hour, time.Second)
 	verifier.ConfigureLicenseStatus(status.URL, "gateway-secret", time.Minute)
-	claims := &ModelClaims{Tenant: "enterprise-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", DeploymentID: "deployment-a"}
+	claims := &ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest"}
 	if err := verifier.CheckEntitlement(context.Background(), claims); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestVerifierRefreshesFreshJWKSForUnknownKID(t *testing.T) {
 
 	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
 	first := signModelToken(t, firstPrivate, "first-key", ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
+		DeploymentID: "deployment-a", SessionID: "session-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
 		RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway"),
 	})
 	if _, err := verifier.Verify(context.Background(), first); err != nil {
@@ -133,7 +133,7 @@ func TestVerifierRefreshesFreshJWKSForUnknownKID(t *testing.T) {
 	}
 
 	second := signModelToken(t, secondPrivate, "second-key", ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
+		DeploymentID: "deployment-a", SessionID: "session-a", ModelScopes: []string{"model-a"}, TokenUse: "model",
 		RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway"),
 	})
 	if _, err := verifier.Verify(context.Background(), second); err != nil {
@@ -174,7 +174,7 @@ func TestVerifierReadinessRefreshDoesNotBlockCachedVerification(t *testing.T) {
 
 	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
 	raw := signModelToken(t, private, "test-key", ModelClaims{
-		Tenant: "enterprise-a", AgentID: "agent-a", TokenUse: "model",
+		DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model",
 		RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway"),
 	})
 	if _, err := verifier.Verify(context.Background(), raw); err != nil {
@@ -221,11 +221,11 @@ func TestVerifierRejectsInvalidModelClaims(t *testing.T) {
 		name   string
 		claims ModelClaims
 	}{
-		{name: "wrong audience", claims: ModelClaims{Tenant: "enterprise-a", AgentID: "agent-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-control")}},
-		{name: "wrong token use", claims: ModelClaims{Tenant: "enterprise-a", AgentID: "agent-a", TokenUse: "aep", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
-		{name: "wrong issuer", claims: ModelClaims{Tenant: "enterprise-a", AgentID: "agent-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://other.example.test", "model-gateway")}},
+		{name: "wrong audience", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-control")}},
+		{name: "wrong token use", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "aep", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
+		{name: "wrong issuer", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://other.example.test", "model-gateway")}},
 		{name: "missing identity", claims: ModelClaims{TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
-		{name: "expired", claims: ModelClaims{Tenant: "enterprise-a", AgentID: "agent-a", TokenUse: "model", RegisteredClaims: jwt.RegisteredClaims{
+		{name: "expired", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: "https://control.example.test", Subject: "user-a", Audience: jwt.ClaimStrings{"model-gateway"},
 			IssuedAt: jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)), ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),
 		}}},

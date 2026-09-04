@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 
-import {type AepClient, type AgentModel, type ModelConnection} from '@aep/sdk-node';
+import {type AepClient, type UserModel, type ModelConnection} from '@aep/sdk-node';
 import OpenAI from 'openai';
 
 import {AgentState} from './state.js';
@@ -38,7 +38,7 @@ export class OpenAIModelClient {
 
   async chat(options: ModelChatOptions): Promise<ModelChatResult> {
     const startedAt = Date.now();
-    let model: AgentModel | undefined;
+    let model: UserModel | undefined;
     try {
       model = await this.#selectModel(options.modelId);
       const connection = await this.client.getModelConnection();
@@ -62,7 +62,7 @@ export class OpenAIModelClient {
     }
   }
 
-  async #selectModel(requestedId?: string): Promise<AgentModel> {
+  async #selectModel(requestedId?: string): Promise<UserModel> {
     const {models} = await this.client.listModels();
     const model = requestedId ? models.find(item => item.id === requestedId) : models.find(item => item.isDefault);
     if (!model) {
@@ -76,7 +76,7 @@ export class OpenAIModelClient {
 
   async #complete(
     connection: ModelConnection,
-    model: AgentModel,
+    model: UserModel,
     options: ModelChatOptions,
   ): Promise<{content: string; responseModel: string; usage?: Record<string, number>}> {
     if (connection.protocol !== 'openai-compatible') {

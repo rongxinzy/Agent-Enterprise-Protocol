@@ -1,6 +1,6 @@
 # AEP M2 Credential 运行手册
 
-M2 为管控服务增加加密 Credential 管理。管理员可以通过管理 API 或 `aepctl` 创建、轮换、禁用、授权和删除 Credential。Agent 只能发现并解析满足以下条件的条目：已启用、`deliveryMode` 为 `agent`，且企业、组织、用户或 Agent 任一作用域授权命中。
+M2 为管控服务增加加密 Credential 管理。管理员可以通过管理 API 或 `aepctl` 创建、轮换、禁用、授权和删除 Credential。已登录客户端会话只能发现并解析满足以下条件的条目：已启用、`deliveryMode` 为 `client`，且部署、用户、角色或团队任一授权命中。
 
 `server_only` Credential 仅供服务端使用，Agent 无法列出或解析。成功的解析响应始终包含 `Cache-Control: no-store`；每次解析的允许或拒绝结果都会写入 `credential_resolution_audit`，但不会记录明文密钥。
 

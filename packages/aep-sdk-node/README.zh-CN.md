@@ -26,7 +26,6 @@ import {AepClient, ProtectedRefreshTokenStore} from '@aep/sdk-node';
 const tokenStore = new ProtectedRefreshTokenStore(protectedStorage);
 const client = new AepClient({
   baseUrl,
-  agentId,
   agentVersion,
   platform: 'windows',
   tokenStore,

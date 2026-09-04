@@ -150,7 +150,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/activation": {
+    "/aep/v1/user/activation": {
         parameters: {
             query?: never;
             header?: never;
@@ -159,15 +159,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Exchanges a signed enterprise license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation. */
-        post: operations["activateEnterpriseLicense"];
+        /** @description Exchanges a signed deployment license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation. */
+        post: operations["activateDeploymentLicense"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/me": {
+    "/aep/v1/user/me": {
         parameters: {
             query?: never;
             header?: never;
@@ -183,7 +183,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/heartbeat": {
+    "/aep/v1/user/heartbeat": {
         parameters: {
             query?: never;
             header?: never;
@@ -192,14 +192,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["reportAgentHeartbeat"];
+        post: operations["reportUserHeartbeat"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/control-events": {
+    "/aep/v1/user/control-events": {
         parameters: {
             query?: never;
             header?: never;
@@ -207,7 +207,7 @@ export interface paths {
             cookie?: never;
         };
         /** @description Reading does not consume an event. Unacknowledged deliveries may be returned again. */
-        get: operations["listAgentControlEvents"];
+        get: operations["listUserControlEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -216,7 +216,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/control-events/{deliveryId}/acknowledge": {
+    "/aep/v1/user/control-events/{deliveryId}/acknowledge": {
         parameters: {
             query?: never;
             header?: never;
@@ -233,7 +233,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/control-events/{deliveryId}/result": {
+    "/aep/v1/user/control-events/{deliveryId}/result": {
         parameters: {
             query?: never;
             header?: never;
@@ -249,7 +249,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/skills/manifest": {
+    "/aep/v1/user/skills/manifest": {
         parameters: {
             query?: never;
             header?: never;
@@ -265,7 +265,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/skills/{skillId}/versions/{version}/package": {
+    "/aep/v1/user/skills/{skillId}/versions/{version}/package": {
         parameters: {
             query?: never;
             header?: never;
@@ -281,7 +281,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/skills/sync-results": {
+    "/aep/v1/user/skills/sync-results": {
         parameters: {
             query?: never;
             header?: never;
@@ -297,7 +297,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/events/batch": {
+    "/aep/v1/user/events/batch": {
         parameters: {
             query?: never;
             header?: never;
@@ -313,14 +313,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/credentials": {
+    "/aep/v1/user/credentials": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["listAgentCredentials"];
+        get: operations["listUserCredentials"];
         put?: never;
         post?: never;
         delete?: never;
@@ -329,7 +329,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/credentials/{credentialId}/resolve": {
+    "/aep/v1/user/credentials/{credentialId}/resolve": {
         parameters: {
             query?: never;
             header?: never;
@@ -338,21 +338,21 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["resolveAgentCredential"];
+        post: operations["resolveUserCredential"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/aep/v1/agent/models": {
+    "/aep/v1/user/models": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["listAgentModels"];
+        get: operations["listUserModels"];
         put?: never;
         post?: never;
         delete?: never;
@@ -597,38 +597,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["listControlEventDeliveries"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/aep/v1/admin/agents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["listAgents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/aep/v1/admin/agents/{agentId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["getAgent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -927,26 +895,6 @@ export interface components {
         PasswordChangeRequest: {
             currentPassword: string;
             newPassword: string;
-            agentId?: string;
-            sessionId?: string;
-        };
-        AdminAgent: {
-            agentId: string;
-            enterpriseId: string;
-            userId: string;
-            agentVersion: string;
-            /** @enum {string} */
-            platform: "windows" | "macos" | "linux";
-            /** Format: date-time */
-            firstSeenAt: string;
-            /** Format: date-time */
-            lastSeenAt: string;
-            appliedSkillRevision?: string | null;
-            installedSkillIds?: string[];
-        };
-        AgentPage: {
-            items: components["schemas"]["AdminAgent"][];
-            nextCursor: string | null;
         };
         DataPlaneSecretReference: {
             name: string;
@@ -973,7 +921,7 @@ export interface components {
             routes: components["schemas"]["DataPlaneRoute"][];
         };
         DataPlaneDesiredState: components["schemas"]["DataPlaneDesiredStateWrite"] & {
-            enterpriseId: string;
+            deploymentId: string;
             /** Format: date-time */
             publishedAt: string;
             contentHash: string;
@@ -1003,10 +951,6 @@ export interface components {
                 x: string;
             }[];
         };
-        Enterprise: {
-            id: string;
-            name: string;
-        };
         Deployment: {
             id: string;
             name: string;
@@ -1019,9 +963,8 @@ export interface components {
             protocol?: "oidc" | "saml" | "custom" | null;
             displayName: string;
         };
-        /** @description Authentication methods enabled for the enterprise. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured. */
+        /** @description Authentication methods enabled for the deployment. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured. */
         AuthenticationMethods: {
-            enterprise: components["schemas"]["Enterprise"];
             deployment: components["schemas"]["Deployment"];
             deploymentId?: string;
             /** @description The ID of the preferred enabled method. Defaults to zhiyuan-password for the password-only production profile. */
@@ -1040,16 +983,11 @@ export interface components {
             requestId?: string;
         };
         PasswordLoginRequest: {
-            deploymentId?: string;
-            enterpriseId?: string;
+            deploymentId: string;
             sessionId?: string;
-            agentId?: string;
-            agentVersion?: string;
-            /** @enum {string} */
-            platform?: "windows" | "macos" | "linux";
             username: string;
             password: string;
-        } | unknown | unknown;
+        };
         TokenResponse: {
             /** @description Bearer token for AEP management APIs. */
             accessToken: string;
@@ -1066,8 +1004,7 @@ export interface components {
             passwordChangeRequired: boolean;
         };
         FederatedLoginStartRequest: {
-            deploymentId?: string;
-            enterpriseId?: string;
+            deploymentId: string;
             sessionId?: string;
             methodId: string;
             /** Format: uri */
@@ -1078,7 +1015,7 @@ export interface components {
              * @constant
              */
             codeChallengeMethod: "S256";
-        } | unknown | unknown;
+        };
         FederatedLoginStartResponse: {
             transactionId: string;
             /** Format: uri */
@@ -1092,18 +1029,11 @@ export interface components {
             /** Format: uri */
             redirectUri: string;
             codeVerifier: string;
-            sessionId?: string;
-            agentId?: string;
-            agentVersion?: string;
-            /** @enum {string} */
-            platform?: "windows" | "macos" | "linux";
         };
         RefreshRequest: {
             refreshToken: string;
             /** @description User session identifier. */
             sessionId?: string;
-            /** @deprecated */
-            agentId?: string;
         };
         LogoutRequest: {
             refreshToken: string;
@@ -1119,7 +1049,7 @@ export interface components {
             };
         };
         EntitlementTokenResponse: {
-            /** @description Short-lived service-signed token for enterprise runtime checks. */
+            /** @description Short-lived service-signed token for deployment runtime checks. */
             entitlementToken: string;
             /** @constant */
             tokenType: "Bearer";
@@ -1130,7 +1060,7 @@ export interface components {
             licenseDigest: string;
             deploymentId: string;
             features: string[];
-            /** @description Model identifiers authorized for this enterprise entitlement. */
+            /** @description Model identifiers authorized for this deployment entitlement. */
             modelScopes: string[];
         };
         User: {
@@ -1141,7 +1071,6 @@ export interface components {
         };
         CurrentIdentity: {
             user: components["schemas"]["User"];
-            enterprise: components["schemas"]["Enterprise"];
             deployment: components["schemas"]["Deployment"];
             deploymentId: string;
             sessionId: string;
@@ -1160,9 +1089,6 @@ export interface components {
             requestId?: string;
         };
         HeartbeatRequest: {
-            agentVersion: string;
-            /** @enum {string} */
-            platform: "windows" | "macos" | "linux";
             lastControlEventCursor?: string | null;
             /** @enum {string} */
             status: "online" | "idle" | "busy";
@@ -1314,7 +1240,7 @@ export interface components {
         };
         /** @enum {string} */
         EventResult: "success" | "failure" | "info";
-        AgentEvent: {
+        UserEvent: {
             eventId: string;
             type: string;
             /** Format: date-time */
@@ -1326,7 +1252,7 @@ export interface components {
             };
         };
         EventBatchRequest: {
-            events: components["schemas"]["AgentEvent"][];
+            events: components["schemas"]["UserEvent"][];
         };
         RejectedEvent: {
             eventId: string;
@@ -1344,7 +1270,7 @@ export interface components {
             /** @enum {string} */
             type: "api_key";
             /** @enum {string} */
-            deliveryMode: "server_only" | "agent";
+            deliveryMode: "server_only" | "client";
             maskedValue: string;
             enabled: boolean;
             /** Format: date-time */
@@ -1378,7 +1304,7 @@ export interface components {
              */
             requiresReasoningContentOnAssistantMessages: true;
         };
-        AgentModel: {
+        UserModel: {
             id: string;
             displayName: string;
             sourceType: components["schemas"]["ModelSourceType"];
@@ -1394,19 +1320,19 @@ export interface components {
             isDefault: boolean;
             enabled: boolean;
         };
-        AgentModelList: {
-            models: components["schemas"]["AgentModel"][];
+        UserModelList: {
+            models: components["schemas"]["UserModel"][];
         };
         PlatformUser: {
             id: string;
-            enterpriseId: string;
+            deploymentId: string;
             username: string;
             displayName: string;
             /** Format: email */
             email?: string | null;
             /** @enum {string} */
             status: "active" | "disabled";
-            organizationIds?: string[];
+            teamIds?: string[];
             roleIds?: string[];
             /** Format: date-time */
             createdAt: string;
@@ -1418,13 +1344,13 @@ export interface components {
             nextCursor?: string | null;
         };
         CreatePlatformUserRequest: {
-            enterpriseId: string;
+            deploymentId: string;
             username: string;
             displayName: string;
             /** Format: email */
             email?: string | null;
             temporaryPassword: string;
-            organizationIds?: string[];
+            teamIds?: string[];
             roleIds?: string[];
             /** @default true */
             requirePasswordChange: boolean;
@@ -1436,13 +1362,13 @@ export interface components {
             /** Format: email */
             email?: string | null;
             temporaryPassword: string;
-            organizationIds?: string[];
+            teamIds?: string[];
             roleIds?: string[];
             /** @default true */
             requirePasswordChange: boolean;
         };
         ImportPlatformUsersRequest: {
-            enterpriseId: string;
+            deploymentId: string;
             users: components["schemas"]["ImportPlatformUser"][];
         };
         ImportPlatformUsersResponse: {
@@ -1460,7 +1386,7 @@ export interface components {
             email?: string | null;
             /** @enum {string} */
             status?: "active" | "disabled";
-            organizationIds?: string[];
+            teamIds?: string[];
             roleIds?: string[];
         };
         ResetPasswordRequest: {
@@ -1506,7 +1432,7 @@ export interface components {
         };
         Subject: {
             /** @enum {string} */
-            type: "user" | "role";
+            type: "user" | "role" | "team";
             id: string;
         };
         Assignment: {
@@ -1563,7 +1489,6 @@ export interface components {
         AdminDelivery: {
             deliveryId: string;
             eventId: string;
-            agentId?: string | null;
             sessionId?: string | null;
             state: components["schemas"]["DeliveryState"];
             attemptCount?: number;
@@ -1584,7 +1509,6 @@ export interface components {
         };
         License: {
             licenseId: string;
-            enterpriseId: string;
             customerId: string;
             deploymentId: string;
             digest: string;
@@ -1599,10 +1523,9 @@ export interface components {
             graceEndsAt: string;
             limits: {
                 users: number;
-                agents: number;
+                activations: number;
             };
             features: string[];
-            activeAgents: number;
             activeUsers: number;
             /** Format: date-time */
             revokedAt?: string | null;
@@ -1631,11 +1554,11 @@ export interface components {
             /** @constant */
             status: "revoked";
         };
-        StoredEvent: components["schemas"]["AgentEvent"] & {
+        StoredEvent: components["schemas"]["UserEvent"] & {
             /** Format: date-time */
             receivedAt: string;
             userId: string;
-            agentId: string;
+            sessionId: string;
         };
         EventSearchResult: {
             items: components["schemas"]["StoredEvent"][];
@@ -1647,7 +1570,7 @@ export interface components {
             /** @enum {string} */
             type: "api_key";
             /** @enum {string} */
-            deliveryMode: "server_only" | "agent";
+            deliveryMode: "server_only" | "client";
             value: string;
             enabled: boolean;
         };
@@ -1655,7 +1578,7 @@ export interface components {
             name?: string;
             service?: string;
             /** @enum {string} */
-            deliveryMode?: "server_only" | "agent";
+            deliveryMode?: "server_only" | "client";
             enabled?: boolean;
         };
         CredentialRotate: {
@@ -1663,7 +1586,7 @@ export interface components {
         };
         CredentialSubject: {
             /** @enum {string} */
-            type: "enterprise" | "organization" | "user" | "agent";
+            type: "user" | "role" | "team";
             id: string;
         };
         CredentialAssignment: {
@@ -1682,13 +1605,13 @@ export interface components {
             credentialId: string;
             subject: components["schemas"]["CredentialSubject"];
         };
-        AdminModel: components["schemas"]["AgentModel"] & {
+        AdminModel: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
         };
         AdminModelList: {
             models: components["schemas"]["AdminModel"][];
         };
-        AdminModelWrite: components["schemas"]["AgentModel"] & {
+        AdminModelWrite: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
         };
         AdminModelPatch: {
@@ -1706,7 +1629,7 @@ export interface components {
         };
         ModelSubject: {
             /** @enum {string} */
-            type: "enterprise" | "organization" | "user" | "agent";
+            type: "user" | "role" | "team";
             id: string;
         };
         ModelAssignment: {
@@ -1781,7 +1704,7 @@ export interface components {
                 "application/json": components["schemas"]["Assignment"];
             };
         };
-        /** @description Registered enterprise licenses */
+        /** @description Registered deployment licenses */
         LicenseList: {
             headers: {
                 [name: string]: unknown;
@@ -1790,7 +1713,7 @@ export interface components {
                 "application/json": components["schemas"]["LicensePage"];
             };
         };
-        /** @description Registered enterprise license metadata */
+        /** @description Registered deployment license metadata */
         License: {
             headers: {
                 [name: string]: unknown;
@@ -1864,7 +1787,6 @@ export interface components {
         };
     };
     parameters: {
-        AepAgentId: string;
         AepProtocolVersion: "1.0";
         RequestId: string;
         Limit: number;
@@ -1929,7 +1851,6 @@ export interface operations {
     getAuthenticationMethods: {
         parameters: {
             query?: {
-                enterpriseHint?: string;
                 deploymentHint?: string;
             };
             header?: never;
@@ -2079,7 +2000,7 @@ export interface operations {
             401: components["responses"]["Problem"];
         };
     };
-    activateEnterpriseLicense: {
+    activateDeploymentLicense: {
         parameters: {
             query?: never;
             header?: never;
@@ -2092,7 +2013,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Enterprise entitlement token */
+            /** @description Deployment entitlement token */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2127,11 +2048,10 @@ export interface operations {
             401: components["responses"]["Problem-2"];
         };
     };
-    reportAgentHeartbeat: {
+    reportUserHeartbeat: {
         parameters: {
             query?: never;
             header: {
-                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2157,14 +2077,13 @@ export interface operations {
             401: components["responses"]["Problem-2"];
         };
     };
-    listAgentControlEvents: {
+    listUserControlEvents: {
         parameters: {
             query?: {
                 afterCursor?: string | null;
                 limit?: components["parameters"]["Limit"];
             };
             header: {
-                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2189,7 +2108,6 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2219,7 +2137,6 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-AEP-Agent-ID"?: components["parameters"]["AepAgentId"];
                 "X-AEP-Protocol-Version": components["parameters"]["AepProtocolVersion"];
                 "X-Request-ID"?: components["parameters"]["RequestId"];
             };
@@ -2350,7 +2267,7 @@ export interface operations {
             413: components["responses"]["Problem-2"];
         };
     };
-    listAgentCredentials: {
+    listUserCredentials: {
         parameters: {
             query?: never;
             header?: never;
@@ -2370,7 +2287,7 @@ export interface operations {
             };
         };
     };
-    resolveAgentCredential: {
+    resolveUserCredential: {
         parameters: {
             query?: never;
             header?: never;
@@ -2399,7 +2316,7 @@ export interface operations {
             404: components["responses"]["Problem-2"];
         };
     };
-    listAgentModels: {
+    listUserModels: {
         parameters: {
             query?: never;
             header?: never;
@@ -2414,7 +2331,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentModelList"];
+                    "application/json": components["schemas"]["UserModelList"];
                 };
             };
         };
@@ -2899,60 +2816,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Per-Agent delivery states */
+            /** @description Per-session delivery states */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DeliveryPage"];
-                };
-            };
-            404: components["responses"]["Problem-2"];
-        };
-    };
-    listAgents: {
-        parameters: {
-            query?: {
-                cursor?: string | null;
-                limit?: number;
-                userId?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Registered Agent instances */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentPage"];
-                };
-            };
-        };
-    };
-    getAgent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agentId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent state and latest synchronization summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminAgent"];
                 };
             };
             404: components["responses"]["Problem-2"];
@@ -3027,7 +2897,6 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit-2"];
                 userId?: string;
-                agentId?: string;
                 type?: string;
                 resourceType?: string;
                 resourceId?: string;

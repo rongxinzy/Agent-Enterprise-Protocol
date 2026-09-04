@@ -28,8 +28,8 @@ try {
 
 async function runScenario() {
   const adminStore = new MemoryTokenStore();
-  const admin = new AepClient({baseUrl, agentId: `m1-admin-${runId}`, agentVersion: 'e2e', platform: platform(), tokenStore: adminStore});
-  await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const admin = new AepClient({baseUrl, tokenStore: adminStore});
+  await admin.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
   const modelCredential = await admin.createCredential({
     name: 'M1 control provider', service: 'mock-openai', type: 'api_key',
     deliveryMode: 'server_only', value: 'm1-control-provider-secret', enabled: true,
@@ -41,20 +41,17 @@ async function runScenario() {
   assert(connection.baseUrl === gatewayBaseUrl, 'SDK received the wrong model gateway URL');
   assert(connection.protocol === 'openai-compatible', 'SDK received the wrong model gateway protocol');
 
-  const organizationId = `org-${runId}`;
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
   const user = await admin.createUser({
-    enterpriseId: 'demo', username, displayName: `Model User ${runId}`,
+    deploymentId: 'demo', username, displayName: `Model User ${runId}`,
     temporaryPassword: password, requirePasswordChange: false,
-    organizationIds: [organizationId], roleIds: [],
+    teamIds: [], roleIds: [],
   });
-  const agentId = `model-agent-${runId}`;
   const descriptors = [
-    {suffix: 'enterprise', subject: {type: 'enterprise', id: 'demo'}},
-    {suffix: 'organization', subject: {type: 'organization', id: organizationId}},
     {suffix: 'user', subject: {type: 'user', id: user.id}},
-    {suffix: 'agent', subject: {type: 'agent', id: agentId}},
+    {suffix: 'role', subject: {type: 'user', id: user.id}},
+    {suffix: 'team', subject: {type: 'user', id: user.id}},
   ];
   const assignments = [];
   for (const [index, descriptor] of descriptors.entries()) {
@@ -80,7 +77,7 @@ async function runScenario() {
   }
 
   const models = (await admin.listAdminModels()).models;
-  assert(models.length === 4, 'Administrator model catalog did not contain four models');
+  assert(models.length === 3, 'Administrator model catalog did not contain three models');
   assert(models.filter(model => model.isDefault).length === 1, 'Enterprise catalog did not enforce one default model');
   assert(models.find(model => model.id === descriptors[0].modelId)?.reasoningCompatibility?.thinkingFormat === 'deepseek', 'Reasoning compatibility was not persisted');
   assert(models.filter(model => model.capabilities.includes('reasoning')).length === 1, 'Reasoning capability was not persisted');
@@ -95,49 +92,49 @@ async function runScenario() {
     409,
     'ASSIGNMENT_EXISTS',
   );
-  assert((await admin.listModelAssignments()).assignments.length === 4, 'Assignment list did not contain all four subject types');
+  assert((await admin.listModelAssignments()).assignments.length === 3, 'Assignment list did not contain all three subject types');
 
   const agentStore = new MemoryTokenStore();
-  const agent = new AepClient({baseUrl, agentId, agentVersion: 'e2e', platform: platform(), tokenStore: agentStore});
-  await agent.loginWithPassword({enterpriseId: 'demo', username, password});
-  const visible = (await agent.listAgentModels()).models;
-  assert(visible.length === 4, 'Four-scope authorization union did not expose all models');
+  const agent = new AepClient({baseUrl, tokenStore: agentStore});
+  await agent.loginWithPassword({deploymentId: 'demo', username, password});
+  const visible = (await agent.listModels()).models;
+  assert(visible.length === 3, 'RBAC authorization union did not expose all models');
   assert(visible.every(model => !Object.hasOwn(model, 'credentialId')), 'Agent model catalog leaked credential metadata');
   assert(visible.some(model => model.reasoningCompatibility?.requiresReasoningContentOnAssistantMessages === true), 'Agent model catalog omitted reasoning replay compatibility');
   await admin.updateModel(descriptors[0].modelId, {reasoningCompatibility: null});
   assert(!Object.hasOwn(await admin.getModel(descriptors[0].modelId), 'reasoningCompatibility'), 'Reasoning compatibility was not cleared');
-  await assertModelToken(agentStore, descriptors.map(item => item.modelId), agentId);
+  await assertModelToken(agentStore, descriptors.map(item => item.modelId));
 
-  await admin.deleteModelAssignment(assignments[3].id);
-  assert((await agent.listAgentModels()).models.length === 3, 'Assignment revocation did not affect real-time discovery');
-  assert(modelScopes(await agentStore.get()).length === 4, 'Existing model token changed without rotation');
+  await admin.deleteModelAssignment(assignments[2].id);
+  assert((await agent.listModels()).models.length === 2, 'Assignment revocation did not affect real-time discovery');
+  assert(modelScopes(await agentStore.get()).length === 3, 'Existing model token changed without rotation');
   await agent.refreshSession();
-  await assertModelToken(agentStore, descriptors.slice(0, 3).map(item => item.modelId), agentId);
+  await assertModelToken(agentStore, descriptors.slice(0, 2).map(item => item.modelId));
 
-  await admin.updateModel(descriptors[2].modelId, {enabled: false});
-  assert((await agent.listAgentModels()).models.length === 2, 'Disabled model remained discoverable');
+  await admin.updateModel(descriptors[1].modelId, {enabled: false});
+  assert((await agent.listModels()).models.length === 1, 'Disabled model remained discoverable');
   await agent.refreshSession();
-  await assertModelToken(agentStore, descriptors.slice(0, 2).map(item => item.modelId), agentId);
+  await assertModelToken(agentStore, descriptors.slice(0, 1).map(item => item.modelId));
 
   await admin.deleteModel(descriptors[1].modelId);
-  assert((await admin.listModelAssignments()).assignments.length === 2, 'Deleting a model did not cascade its assignment');
-  assert((await agent.listAgentModels()).models.length === 1, 'Deleted model remained discoverable');
+  assert((await admin.listModelAssignments()).assignments.length === 1, 'Deleting a model did not cascade its assignment');
+  assert((await agent.listModels()).models.length === 1, 'Deleted model remained discoverable');
 
   const cliModels = await commandOutput('go', [
-    'run', './cmd/aepctl', '--base-url', baseUrl, '--enterprise', 'demo',
+    'run', './cmd/aepctl', '--base-url', baseUrl, '--deployment', 'demo',
     '--username', 'admin', '--password', 'change-this-admin-password',
-    '--agent-id', `m1-cli-${runId}`, 'model', 'list',
+    'model', 'list',
   ]);
-  assert(JSON.parse(cliModels).models.length === 3, 'aepctl model list did not return the administrator catalog');
+  assert(JSON.parse(cliModels).models.length === 2, 'aepctl model list did not return the administrator catalog');
 }
 
-async function assertModelToken(store, expectedScopes, agentId) {
+async function assertModelToken(store, expectedScopes) {
   const tokens = await store.get();
   assert(tokens?.modelAccessToken, 'Session did not include a model access token');
   const header = decodeJwtPart(tokens.modelAccessToken, 0);
   const claims = decodeJwtPart(tokens.modelAccessToken, 1);
   assert(claims.token_use === 'model', 'model JWT token_use is invalid');
-  assert(claims.tenant === 'demo' && claims.agent_id === agentId, 'model JWT identity claims are invalid');
+  assert(claims.deployment_id === 'demo' && claims.sub, 'model JWT identity claims are invalid');
   assert(claims.aud?.includes?.('model-gateway') || claims.aud === 'model-gateway', 'model JWT audience is invalid');
   assert(typeof claims.sub === 'string' && typeof claims.jti === 'string' && claims.iat < claims.exp, 'model JWT registered claims are incomplete');
   assert(JSON.stringify([...claims.model_scopes].sort()) === JSON.stringify([...expectedScopes].sort()), 'model JWT scopes do not match authorization');

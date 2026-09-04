@@ -23,15 +23,11 @@ type options struct {
 	deploymentID string
 	username     string
 	password     string
-	// agentID is retained only so older scripts continue to parse. New CLI
-	// sessions never send an Agent identity to the control service.
-	agentID string
 }
 
 type client struct {
 	baseURL string
 	token   string
-	agentID string
 	http    *http.Client
 }
 
@@ -46,18 +42,16 @@ func newRootCommand() *cobra.Command {
 	opts := &options{}
 	root := &cobra.Command{Use: "aepctl", Short: "Manage an AEP deployment", SilenceUsage: true}
 	root.PersistentFlags().StringVar(&opts.baseURL, "base-url", env("AEPCTL_BASE_URL", "http://localhost:8080"), "AEP service origin")
-	root.PersistentFlags().StringVar(&opts.deploymentID, "deployment", env("AEPCTL_DEPLOYMENT", env("AEPCTL_ENTERPRISE", "demo")), "deployment identifier")
-	root.PersistentFlags().StringVar(&opts.deploymentID, "enterprise", env("AEPCTL_DEPLOYMENT", env("AEPCTL_ENTERPRISE", "demo")), "deprecated deployment alias")
+	root.PersistentFlags().StringVar(&opts.deploymentID, "deployment", env("AEPCTL_DEPLOYMENT", "demo"), "deployment identifier")
 	root.PersistentFlags().StringVar(&opts.username, "username", env("AEPCTL_USERNAME", "admin"), "administrator username")
 	root.PersistentFlags().StringVar(&opts.password, "password", os.Getenv("AEPCTL_PASSWORD"), "administrator password (prefer AEPCTL_PASSWORD)")
-	root.PersistentFlags().StringVar(&opts.agentID, "agent-id", env("AEPCTL_AGENT_ID", ""), "deprecated Agent identifier (ignored by new sessions)")
-	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), licenseCommand(opts), dataPlaneCommand(opts), eventCommand(opts), sessionCommand(opts), agentCommand(opts), auditCommand(opts), metadataCommand(opts))
+	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), licenseCommand(opts), dataPlaneCommand(opts), eventCommand(opts), sessionCommand(opts), auditCommand(opts), metadataCommand(opts))
 	return root
 }
 
 func metadataCommand(opts *options) *cobra.Command {
 	return &cobra.Command{Use: "metadata", Short: "Show server capabilities", RunE: func(_ *cobra.Command, _ []string) error {
-		api := &client{baseURL: opts.baseURL, agentID: opts.agentID, http: &http.Client{Timeout: 15 * time.Second}}
+		api := &client{baseURL: opts.baseURL, http: &http.Client{Timeout: 15 * time.Second}}
 		value, err := api.request(http.MethodGet, "/aep/v1/metadata", nil, false)
 		return output(value, err)
 	}}
@@ -233,23 +227,6 @@ func dataPlaneCommand(opts *options) *cobra.Command {
 	return command
 }
 
-func agentCommand(opts *options) *cobra.Command {
-	command := &cobra.Command{Use: "agent", Short: "Inspect registered Agents"}
-	command.AddCommand(&cobra.Command{Use: "list", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		value, err := api.request(http.MethodGet, "/aep/v1/admin/agents", nil, true)
-		return output(value, err)
-	})})
-	var id string
-	show := &cobra.Command{Use: "show", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		value, err := api.request(http.MethodGet, "/aep/v1/admin/agents/"+segment(id), nil, true)
-		return output(value, err)
-	})}
-	show.Flags().StringVar(&id, "agent-id", "", "Agent identifier")
-	_ = show.MarkFlagRequired("agent-id")
-	command.AddCommand(show)
-	return command
-}
-
 func sessionCommand(opts *options) *cobra.Command {
 	command := &cobra.Command{Use: "session", Short: "Inspect user terminal sessions"}
 	command.AddCommand(&cobra.Command{Use: "list", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
@@ -260,16 +237,10 @@ func sessionCommand(opts *options) *cobra.Command {
 }
 
 func auditCommand(opts *options) *cobra.Command {
-	var agentID string
 	command := &cobra.Command{Use: "audit", Short: "Query telemetry", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		path := "/aep/v1/admin/events"
-		if agentID != "" {
-			path += "?agentId=" + segment(agentID)
-		}
-		value, err := api.request(http.MethodGet, path, nil, true)
+		value, err := api.request(http.MethodGet, "/aep/v1/admin/events", nil, true)
 		return output(value, err)
 	})}
-	command.Flags().StringVar(&agentID, "agent-id", "", "filter by Agent")
 	return command
 }
 
@@ -278,7 +249,7 @@ func authenticated(opts *options, run func(*client, *cobra.Command, []string) er
 		if opts.password == "" {
 			return errors.New("administrator password is required through --password or AEPCTL_PASSWORD")
 		}
-		api := &client{baseURL: strings.TrimRight(opts.baseURL, "/"), agentID: opts.agentID, http: &http.Client{Timeout: 30 * time.Second}}
+		api := &client{baseURL: strings.TrimRight(opts.baseURL, "/"), http: &http.Client{Timeout: 30 * time.Second}}
 		if err := api.login(opts); err != nil {
 			return err
 		}

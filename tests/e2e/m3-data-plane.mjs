@@ -59,8 +59,8 @@ try {
   await compose('up', '-d', '--build');
   await waitFor(async () => assert((await fetch(`${baseUrl}/readyz`)).ok, 'control service is not ready'));
   await command('go', ['build', '-o', reconcilerBinary, './services/gateway-reconciler/cmd/server']);
-  const admin = new AepClient({baseUrl, agentId: 'm3-data-plane-admin', agentVersion: 'e2e', platform: platform(), tokenStore: new MemoryTokenStore()});
-  await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const admin = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  await admin.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
   startReconciler();
 
   const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});

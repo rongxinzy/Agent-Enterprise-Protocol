@@ -203,12 +203,12 @@ func validReasoningCompatibility(value *modelReasoningCompatibility) bool {
 
 func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	scopes, err := s.app.ModelScopes(request.Context(), claims.Tenant, claims.Subject, claims.AgentID)
+	scopes, err := s.app.ModelScopes(request.Context(), claims.DeploymentID, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.Tenant, scopes)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND enabled=true AND id=ANY($2::text[]) ORDER BY is_default DESC,id", claims.DeploymentID, scopes)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -231,7 +231,7 @@ func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) listModels(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -269,7 +269,7 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	tenant := claimsFrom(request).Tenant
+	tenant := claimsFrom(request).DeploymentID
 	if exists, err := validateCredentialReference(request.Context(), tx, tenant, input.CredentialID); err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -302,7 +302,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+modelColumns
 }
 
 func (s *Server) getModel(response http.ResponseWriter, request *http.Request) {
-	model, err := scanModel(s.app.Pool.QueryRow(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "modelId")))
+	model, err := scanModel(s.app.Pool.QueryRow(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId")))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
 		return
@@ -332,7 +332,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "At least one valid model field is required.")
 		return
 	}
-	tenant, modelID := claimsFrom(request).Tenant, chi.URLParam(request, "modelId")
+	tenant, modelID := claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId")
 	tx, err := s.app.Pool.Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
@@ -404,7 +404,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "modelId"))
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM models WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId"))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -417,11 +417,11 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 }
 
 func validModelSubject(subjectType string) bool {
-	return subjectType == "enterprise" || subjectType == "organization" || subjectType == "user" || subjectType == "agent" || subjectType == "role" || subjectType == "team"
+	return subjectType == "user" || subjectType == "role" || subjectType == "team"
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,model_id,subject_type,subject_id,created_at FROM model_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,model_id,subject_type,subject_id,created_at FROM model_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -462,7 +462,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The model and a valid assignment subject are required.")
 		return
 	}
-	tenant := claimsFrom(request).Tenant
+	tenant := claimsFrom(request).DeploymentID
 	var exists bool
 	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM models WHERE deployment_id=$1 AND id=$2)", tenant, input.ModelID).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)
@@ -490,7 +490,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 }
 
 func (s *Server) deleteModelAssignment(response http.ResponseWriter, request *http.Request) {
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM model_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM model_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

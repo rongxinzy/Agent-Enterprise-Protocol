@@ -43,7 +43,6 @@ type Route struct {
 
 type DesiredState struct {
 	DeploymentID string  `json:"deploymentId"`
-	EnterpriseID string  `json:"enterpriseId"` // Deprecated v1 alias.
 	Revision     string  `json:"revision"`
 	PublishedAt  string  `json:"publishedAt"`
 	ContentHash  string  `json:"contentHash"`
@@ -51,10 +50,7 @@ type DesiredState struct {
 }
 
 func (d DesiredState) TenantID() string {
-	if strings.TrimSpace(d.DeploymentID) != "" {
-		return d.DeploymentID
-	}
-	return d.EnterpriseID
+	return d.DeploymentID
 }
 
 type Status struct {
@@ -170,7 +166,7 @@ func (r *Reconciler) writeFailure(ctx context.Context, tenant, code string, caus
 
 func (r *Reconciler) addHeaders(request *http.Request, tenant string) {
 	request.Header.Set("X-AEP-Data-Plane-Token", r.config.Token)
-	request.Header.Set("X-AEP-Tenant-ID", tenant)
+	request.Header.Set("X-AEP-Deployment-ID", tenant)
 	request.Header.Set("X-AEP-Protocol-Version", "1.0")
 }
 
@@ -181,7 +177,7 @@ func Render(desired DesiredState) (string, string, error) {
 		return "", "", errors.New("desired revision is required")
 	}
 	if strings.TrimSpace(desired.TenantID()) == "" {
-		return "", "", errors.New("enterprise ID is required")
+		return "", "", errors.New("deployment ID is required")
 	}
 	suffix := resourceSuffix(desired.TenantID())
 	enabled := make([]Route, 0, len(routes))

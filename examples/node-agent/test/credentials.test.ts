@@ -107,7 +107,7 @@ function metadata(updatedAt: string): CredentialMetadata {
     name: 'Example',
     service: 'example-service',
     type: 'api_key',
-    deliveryMode: 'agent',
+    deliveryMode: 'client',
     maskedValue: '***cret',
     enabled: true,
     updatedAt,

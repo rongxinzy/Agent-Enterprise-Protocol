@@ -79,7 +79,7 @@ export class MockAepServer {
     }
     if (path === '/aep/v1/auth/methods') {
       return json(response, 200, {
-        enterprise: {id: 'ent-1', name: 'Demo'},
+        deployment: {id: 'ent-1', name: 'Demo'},
         preferredMethodId: 'zhiyuan-password',
         methods: [{id: 'zhiyuan-password', type: 'password', displayName: 'ZhiYuan account'}],
       });
@@ -116,7 +116,7 @@ export class MockAepServer {
         passwordChangeRequired: false,
       });
     }
-    if (path === '/aep/v1/agent/activation') {
+    if (path === '/aep/v1/user/activation') {
       return json(response, 200, {
         entitlementToken: 'entitlement-1',
         tokenType: 'Bearer',
@@ -128,20 +128,20 @@ export class MockAepServer {
         features: ['enterprise.models'],
       });
     }
-    if (path === '/aep/v1/agent/credentials') {
-      return json(response, 200, {credentials: [credential('agent')]});
+    if (path === '/aep/v1/user/credentials') {
+      return json(response, 200, {credentials: [credential('client')]});
     }
-    if (path === '/aep/v1/agent/credentials/credential-1/resolve') {
+    if (path === '/aep/v1/user/credentials/credential-1/resolve') {
       if (this.#credentialNoStore) response.setHeader('Cache-Control', 'no-store');
       return json(response, 200, {credentialId: 'credential-1', type: 'api_key', value: 'resolved-secret', expiresAt: null});
     }
-    if (path === '/aep/v1/agent/credentials/server-only/resolve') {
+    if (path === '/aep/v1/user/credentials/server-only/resolve') {
       return json(response, 403, problem(403, 'CREDENTIAL_NOT_DELIVERABLE'));
     }
-    if (path === '/aep/v1/agent/models' || path === '/aep/v1/user/models') {
+    if (path === '/aep/v1/user/models') {
       return json(response, 200, {models: [model(false)]});
     }
-    if (path === '/aep/v1/agent/skills/manifest') {
+    if (path === '/aep/v1/user/skills/manifest') {
       response.setHeader('ETag', '"skills-1"');
       if (request.headers['if-none-match'] === '"skills-1"') return empty(response, 304);
       return json(response, 200, {
@@ -155,23 +155,21 @@ export class MockAepServer {
       response.setHeader('Content-Type', 'application/zip');
       return void response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
     }
-    if (path === '/aep/v1/agent/heartbeat') {
+    if (path === '/aep/v1/user/heartbeat') {
       return json(response, 200, {serverTime: '2026-08-20T00:00:00Z', hasPendingControlEvents: true, controlEventWatermark: '1', nextHeartbeatAfterSeconds: 30});
     }
-    if (path === '/aep/v1/agent/control-events') return json(response, 200, {items: [], nextCursor: null});
+    if (path === '/aep/v1/user/control-events') return json(response, 200, {items: [], nextCursor: null});
     if (path.endsWith('/acknowledge') || path.endsWith('/result')) return empty(response, 204);
-    if (path === '/aep/v1/agent/skills/sync-results') return empty(response, 202);
-    if (path === '/aep/v1/agent/events/batch') return json(response, 200, {accepted: ['event-1'], rejected: []});
-    if (path === '/aep/v1/admin/agents') return json(response, 200, {items: [], nextCursor: null});
-    if (path === '/aep/v1/admin/agents/missing') return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
+    if (path === '/aep/v1/user/skills/sync-results') return empty(response, 202);
+    if (path === '/aep/v1/user/events/batch') return json(response, 200, {accepted: ['event-1'], rejected: []});
     if (path === '/aep/v1/admin/credentials') {
-      if (request.method === 'GET') return json(response, 200, {credentials: [credential('agent'), credential('server_only')]});
-      return json(response, 201, credential('agent'));
+      if (request.method === 'GET') return json(response, 200, {credentials: [credential('client'), credential('server_only')]});
+      return json(response, 201, credential('client'));
     }
-    if (path === '/aep/v1/admin/credentials/credential-1/rotate') return json(response, 200, credential('agent'));
+    if (path === '/aep/v1/admin/credentials/credential-1/rotate') return json(response, 200, credential('client'));
     if (path === '/aep/v1/admin/credentials/credential-1') {
       if (request.method === 'DELETE') return empty(response, 204);
-      return json(response, 200, credential('agent'));
+      return json(response, 200, credential('client'));
     }
     if (path === '/aep/v1/admin/credentials/credential-in-use' && request.method === 'DELETE') {
       return json(response, 409, problem(409, 'CREDENTIAL_IN_USE'));
@@ -190,6 +188,7 @@ export class MockAepServer {
       if (request.method === 'DELETE') return empty(response, 204);
       return json(response, 200, model(true));
     }
+    if (path === '/aep/v1/admin/models/missing') return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
     if (path === '/aep/v1/admin/model-assignments') {
       const assignment = modelAssignment();
       if (request.method === 'GET') return json(response, 200, {assignments: [assignment]});
@@ -220,10 +219,10 @@ function tokens(accessToken: string, refreshToken: string): object {
   return {accessToken, refreshToken, modelAccessToken: 'model-1', tokenType: 'Bearer', expiresIn: 300, modelAccessExpiresIn: 300, deploymentId: 'ent-1', sessionId: 'session-1', passwordChangeRequired: false};
 }
 
-function credential(deliveryMode: 'agent' | 'server_only'): object {
+function credential(deliveryMode: 'client' | 'server_only'): object {
   return {
-    id: deliveryMode === 'agent' ? 'credential-1' : 'server-only',
-    name: deliveryMode === 'agent' ? 'Agent API key' : 'Gateway API key',
+    id: deliveryMode === 'client' ? 'credential-1' : 'Gateway API key',
+    name: deliveryMode === 'client' ? 'Client API key' : 'Gateway API key',
     service: 'example-service',
     type: 'api_key',
     deliveryMode,
@@ -276,7 +275,7 @@ function modelAssignment(): object {
 
 function dataPlaneDesiredState(revision: string): object {
   return {
-    enterpriseId: 'ent-1',
+    deploymentId: 'ent-1',
     revision,
     publishedAt: '2026-08-24T00:00:00Z',
     contentHash: 'a'.repeat(64),

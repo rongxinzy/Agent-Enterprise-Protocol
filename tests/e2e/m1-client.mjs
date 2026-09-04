@@ -44,13 +44,10 @@ try {
 async function runScenario() {
   const admin = new AepClient({
     baseUrl: controlBaseUrl,
-    agentId: 'client-admin-' + runId,
-    agentVersion: 'e2e',
-    platform: platform(),
     tokenStore: new MemoryTokenStore(),
   });
   await admin.loginWithPassword({
-    enterpriseId: 'demo',
+    deploymentId: 'demo',
     username: 'admin',
     password: 'change-this-admin-password',
   });
@@ -62,14 +59,13 @@ async function runScenario() {
 
   const username = 'client-user-' + runId;
   const password = 'temporary-password-123';
-  const agentId = 'real-client-agent-' + runId;
   const user = await admin.createUser({
-    enterpriseId: 'demo',
+    deploymentId: 'demo',
     username,
     displayName: 'Real Client User ' + runId,
     temporaryPassword: password,
     requirePasswordChange: false,
-    organizationIds: [],
+    teamIds: [],
     roleIds: [],
   });
   await admin.createModel({
@@ -92,10 +88,9 @@ async function runScenario() {
 
   const sharedEnv = {
     AEP_BASE_URL: controlBaseUrl,
-    AEP_ENTERPRISE_ID: 'demo',
+    AEP_DEPLOYMENT_ID: 'demo',
     AEP_USERNAME: username,
     AEP_PASSWORD: password,
-    AEP_AGENT_ID: agentId,
     AEP_AGENT_DATA_DIR: dataDirectory,
     AEP_MODEL_TIMEOUT_MS: '10000',
   };
@@ -129,7 +124,7 @@ async function runScenario() {
   assert(failure.code !== 0, 'Failed upstream request unexpectedly succeeded');
   assert(!containsSecret(failure), 'Provider credential was exposed in the failed Agent process');
 
-  const telemetry = await admin.searchEvents({agentId});
+  const telemetry = await admin.searchEvents({userId: user.id});
   const items = Array.isArray(telemetry.items) ? telemetry.items : [];
   const completed = items.filter(item => item.type === 'model.request.completed');
   const failed = items.filter(item => item.type === 'model.request.failed');

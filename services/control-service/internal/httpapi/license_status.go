@@ -12,14 +12,14 @@ func (s *Server) internalLicenseStatus(response http.ResponseWriter, request *ht
 		writeProblem(response, request, http.StatusUnauthorized, "INTERNAL_AUTH_REQUIRED", "A valid gateway service token is required.")
 		return
 	}
-	enterpriseID := request.Header.Get("X-AEP-Tenant-ID")
-	if enterpriseID == "" {
-		writeProblem(response, request, http.StatusBadRequest, "TENANT_REQUIRED", "The tenant header is required.")
+	deploymentID := request.Header.Get("X-AEP-Deployment-ID")
+	if deploymentID == "" {
+		writeProblem(response, request, http.StatusBadRequest, "DEPLOYMENT_REQUIRED", "The deployment header is required.")
 		return
 	}
 	var status string
-	var digest, deploymentID string
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT status,digest,deployment_id FROM licenses WHERE deployment_id=$1 AND license_id=$2 AND now() <= grace_ends_at`, enterpriseID, chi.URLParam(request, "licenseId")).Scan(&status, &digest, &deploymentID)
+	var digest, storedDeploymentID string
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT status,digest,deployment_id FROM licenses WHERE deployment_id=$1 AND license_id=$2 AND now() <= grace_ends_at`, deploymentID, chi.URLParam(request, "licenseId")).Scan(&status, &digest, &storedDeploymentID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeJSON(response, http.StatusOK, map[string]any{"active": false})
@@ -28,5 +28,5 @@ func (s *Server) internalLicenseStatus(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"active": status == "active", "digest": digest, "deploymentId": deploymentID})
+	writeJSON(response, http.StatusOK, map[string]any{"active": status == "active", "digest": digest, "deploymentId": storedDeploymentID})
 }

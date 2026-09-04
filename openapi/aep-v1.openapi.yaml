@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Agent Enterprise Protocol
   version: 1.0.0-draft
-  description: AEP v1 Agent and administration API contract.
+  description: AEP v1 user-session and administration API contract.
   license: {name: Apache 2.0, identifier: Apache-2.0}
 servers:
   - url: https://enterprise.example.com/aep/v1
@@ -16,7 +16,7 @@ security:
 tags:
   - {name: Service}
   - {name: Authentication}
-  - {name: Agent}
+  - {name: User Runtime}
   - {name: Admin Skills}
   - {name: Admin Credentials}
   - {name: Admin Models}
@@ -73,9 +73,9 @@ paths:
       responses:
         '204': {description: Session revoked}
         '401': {$ref: '#/components/responses/Problem'}
-  /agent/me:
+  /user/me:
     get:
-      tags: [Agent]
+      tags: [User Runtime]
       operationId: getCurrentIdentity
       responses:
         '200':
@@ -84,9 +84,9 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CurrentIdentity'}
         '401': {$ref: '#/components/responses/Problem'}
-  /agent/skills/manifest:
+  /user/skills/manifest:
     get:
-      tags: [Agent]
+      tags: [User Runtime]
       operationId: getSkillManifest
       parameters:
         - {name: If-None-Match, in: header, schema: {type: string}}
@@ -100,9 +100,9 @@ paths:
               schema: {$ref: '#/components/schemas/SkillManifest'}
         '304': {description: Manifest unchanged}
         '401': {$ref: '#/components/responses/Problem'}
-  /agent/skills/{skillId}/versions/{version}/package:
+  /user/skills/{skillId}/versions/{version}/package:
     get:
-      tags: [Agent]
+      tags: [User Runtime]
       operationId: downloadSkillPackage
       parameters:
         - {$ref: '#/components/parameters/SkillId'}
@@ -115,9 +115,9 @@ paths:
               schema: {type: string, format: binary}
         '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
-  /agent/skills/sync-results:
+  /user/skills/sync-results:
     post:
-      tags: [Agent]
+      tags: [User Runtime]
       operationId: reportSkillSyncResult
       requestBody:
         required: true
@@ -127,9 +127,9 @@ paths:
       responses:
         '202': {description: Result accepted}
         '400': {$ref: '#/components/responses/Problem'}
-  /agent/events/batch:
+  /user/events/batch:
     post:
-      tags: [Agent]
+      tags: [User Runtime]
       operationId: uploadEventBatch
       requestBody:
         required: true
@@ -144,20 +144,20 @@ paths:
               schema: {$ref: '#/components/schemas/EventBatchResponse'}
         '400': {$ref: '#/components/responses/Problem'}
         '413': {$ref: '#/components/responses/Problem'}
-  /agent/credentials:
+  /user/credentials:
     get:
-      tags: [Agent]
-      operationId: listAgentCredentials
+      tags: [User Runtime]
+      operationId: listUserCredentials
       responses:
         '200':
           description: Assigned credential metadata
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CredentialList'}
-  /agent/credentials/{credentialId}/resolve:
+  /user/credentials/{credentialId}/resolve:
     post:
-      tags: [Agent]
-      operationId: resolveAgentCredential
+      tags: [User Runtime]
+      operationId: resolveUserCredential
       parameters:
         - {$ref: '#/components/parameters/CredentialId'}
       requestBody:
@@ -175,16 +175,16 @@ paths:
               schema: {$ref: '#/components/schemas/ResolvedCredential'}
         '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
-  /agent/models:
+  /user/models:
     get:
-      tags: [Agent]
-      operationId: listAgentModels
+      tags: [User Runtime]
+      operationId: listUserModels
       responses:
         '200':
           description: Visible model catalog
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/AgentModelList'}
+              schema: {$ref: '#/components/schemas/UserModelList'}
   /admin/skills:
     get:
       tags: [Admin Skills]
@@ -497,7 +497,6 @@ paths:
         - {$ref: '#/components/parameters/Cursor'}
         - {$ref: '#/components/parameters/Limit'}
         - {name: userId, in: query, schema: {type: string}}
-        - {name: agentId, in: query, schema: {type: string}}
         - {name: type, in: query, schema: {type: string}}
         - {name: resourceType, in: query, schema: {type: string}}
         - {name: resourceId, in: query, schema: {type: string}}
@@ -529,7 +528,7 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
     TokenResponse:
-      description: Agent session tokens
+      description: User session tokens
       content:
         application/json:
           schema: {$ref: '#/components/schemas/TokenResponse'}
@@ -579,12 +578,12 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/ModelAssignmentList'}
     License:
-      description: Registered enterprise license metadata
+      description: Registered deployment license metadata
       content:
         application/json:
           schema: {$ref: '#/components/schemas/License'}
     LicenseList:
-      description: Registered enterprise licenses
+      description: Registered deployment licenses
       content:
         application/json:
           schema: {$ref: '#/components/schemas/LicensePage'}
@@ -612,24 +611,17 @@ components:
         features: {type: array, items: {type: string}}
     AuthExchangeRequest:
       type: object
-      required: [transactionId, authorizationCode, redirectUri, codeVerifier, agentId, agentVersion, platform]
+      required: [transactionId, authorizationCode, redirectUri, codeVerifier]
       properties:
         transactionId: {type: string, minLength: 1}
         authorizationCode: {type: string, minLength: 1}
         redirectUri: {type: string, format: uri}
         codeVerifier: {type: string, minLength: 43, maxLength: 128}
-        agentId: {type: string}
-        agentVersion: {type: string}
-        platform: {type: string, enum: [windows, macos, linux]}
     RefreshRequest:
       type: object
       required: [refreshToken]
-      anyOf:
-        - required: [agentId]
-        - required: [sessionId]
       properties:
         refreshToken: {type: string, minLength: 1}
-        agentId: {type: string}
         sessionId: {type: string, minLength: 1}
     LogoutRequest:
       type: object
@@ -651,10 +643,9 @@ components:
         passwordChangeRequired: {type: boolean}
     CurrentIdentity:
       type: object
-      required: [user, enterprise, deployment, deploymentId, sessionId, roles, sessionExpiresAt, passwordChangeRequired]
+      required: [user, deployment, deploymentId, sessionId, roles, sessionExpiresAt, passwordChangeRequired]
       properties:
         user: {$ref: '#/components/schemas/User'}
-        enterprise: {$ref: '#/components/schemas/Enterprise'}
         deployment: {$ref: '#/components/schemas/Deployment'}
         deploymentId: {type: string, minLength: 1}
         sessionId: {type: string}
@@ -668,12 +659,6 @@ components:
         id: {type: string}
         displayName: {type: string}
         email: {type: [string, 'null'], format: email}
-    Enterprise:
-      type: object
-      required: [id, name]
-      properties:
-        id: {type: string}
-        name: {type: string}
     Deployment:
       type: object
       required: [id, name]
@@ -727,8 +712,8 @@ components:
       type: object
       required: [events]
       properties:
-        events: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/AgentEvent'}}
-    AgentEvent:
+        events: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/UserEvent'}}
+    UserEvent:
       type: object
       required: [eventId, type, occurredAt, result]
       properties:
@@ -766,7 +751,7 @@ components:
         name: {type: string}
         service: {type: string}
         type: {type: string, enum: [api_key]}
-        deliveryMode: {type: string, enum: [server_only, agent]}
+        deliveryMode: {type: string, enum: [server_only, client]}
         maskedValue: {type: string}
         enabled: {type: boolean}
         updatedAt: {type: string, format: date-time}
@@ -788,7 +773,7 @@ components:
         type: {type: string, enum: [api_key]}
         value: {type: string}
         expiresAt: {type: [string, 'null'], format: date-time}
-    AgentModel:
+    UserModel:
       type: object
       required: [id, displayName, sourceType, protocol, capabilities, isDefault, enabled]
       properties:
@@ -805,11 +790,11 @@ components:
         contextWindow: {type: integer, minimum: 1}
         isDefault: {type: boolean}
         enabled: {type: boolean}
-    AgentModelList:
+    UserModelList:
       type: object
       required: [models]
       properties:
-        models: {type: array, items: {$ref: '#/components/schemas/AgentModel'}}
+        models: {type: array, items: {$ref: '#/components/schemas/UserModel'}}
     ModelSourceType: {type: string, enum: [gateway, enterprise_open_source, local]}
     ModelReasoningCompatibility:
       description: Wire-level reasoning behavior a client must preserve through an OpenAI-compatible endpoint.
@@ -869,7 +854,7 @@ components:
       type: object
       required: [type, id]
       properties:
-        type: {type: string, enum: [user, role]}
+        type: {type: string, enum: [user, role, team]}
         id: {type: string}
     Assignment:
       type: object
@@ -889,7 +874,7 @@ components:
       type: object
       required: [type, id]
       properties:
-        type: {type: string, enum: [enterprise, organization, user, agent]}
+        type: {type: string, enum: [user, role, team]}
         id: {type: string}
     ModelAssignment:
       type: object
@@ -909,7 +894,7 @@ components:
       type: object
       required: [type, id]
       properties:
-        type: {type: string, enum: [enterprise, organization, user, agent]}
+        type: {type: string, enum: [user, role, team]}
         id: {type: string, minLength: 1}
     CredentialAssignment:
       type: object
@@ -950,7 +935,7 @@ components:
         name: {type: string}
         service: {type: string}
         type: {type: string, enum: [api_key]}
-        deliveryMode: {type: string, enum: [server_only, agent]}
+        deliveryMode: {type: string, enum: [server_only, client]}
         value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
         enabled: {type: boolean}
     CredentialPatch:
@@ -959,7 +944,7 @@ components:
       properties:
         name: {type: string}
         service: {type: string}
-        deliveryMode: {type: string, enum: [server_only, agent]}
+        deliveryMode: {type: string, enum: [server_only, client]}
         enabled: {type: boolean}
     CredentialRotate:
       type: object
@@ -968,7 +953,7 @@ components:
         value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
     AdminModelWrite:
       allOf:
-        - {$ref: '#/components/schemas/AgentModel'}
+        - {$ref: '#/components/schemas/UserModel'}
         - type: object
           properties:
             credentialId: {type: [string, 'null']}
@@ -991,7 +976,7 @@ components:
         enabled: {type: boolean}
     AdminModel:
       allOf:
-        - {$ref: '#/components/schemas/AgentModel'}
+        - {$ref: '#/components/schemas/UserModel'}
         - type: object
           properties:
             credentialId: {type: [string, 'null']}
@@ -1017,10 +1002,9 @@ components:
             signature: {type: string}
     License:
       type: object
-      required: [licenseId, enterpriseId, customerId, deploymentId, digest, keyId, status, issuedAt, expiresAt, graceEndsAt, limits, features, activeAgents, activeUsers, createdAt, updatedAt]
+      required: [licenseId, customerId, deploymentId, digest, keyId, status, issuedAt, expiresAt, graceEndsAt, limits, features, activeUsers, createdAt, updatedAt]
       properties:
         licenseId: {type: string}
-        enterpriseId: {type: string}
         customerId: {type: string}
         deploymentId: {type: string}
         digest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
@@ -1031,12 +1015,11 @@ components:
         graceEndsAt: {type: string, format: date-time}
         limits:
           type: object
-          required: [users, agents]
+          required: [users, activations]
           properties:
             users: {type: integer, minimum: 1}
-            agents: {type: integer, minimum: 1}
+            activations: {type: integer, minimum: 1}
         features: {type: array, items: {type: string}}
-        activeAgents: {type: integer, minimum: 0}
         activeUsers: {type: integer, minimum: 0}
         revokedAt: {type: [string, 'null'], format: date-time}
         createdAt: {type: string, format: date-time}
@@ -1056,13 +1039,13 @@ components:
         status: {type: string, const: revoked}
     StoredEvent:
       allOf:
-        - {$ref: '#/components/schemas/AgentEvent'}
+        - {$ref: '#/components/schemas/UserEvent'}
         - type: object
-          required: [receivedAt, userId, agentId]
+          required: [receivedAt, userId, sessionId]
           properties:
             receivedAt: {type: string, format: date-time}
             userId: {type: string}
-            agentId: {type: string}
+            sessionId: {type: string}
     EventSearchResult:
       type: object
       required: [items, nextCursor]

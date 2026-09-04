@@ -23,7 +23,9 @@ const composeEnv = {
 const runId = Date.now().toString(36);
 
 try {
-  await compose('up', '-d', '--build');
+  // Compose can report a transient dependency failure while the control service
+  // restarts; the health checks below are the authoritative readiness gate.
+  await compose('up', '-d', '--build', true);
   await Promise.all([
     waitForHealth(controlBaseUrl + '/healthz', 180_000),
     waitForHealth('http://localhost:' + gatewayPort + '/healthz', 180_000),
@@ -39,10 +41,9 @@ try {
 
 async function runScenario() {
   const admin = new AepClient({
-    baseUrl: controlBaseUrl, agentId: 'gateway-admin-' + runId, agentVersion: 'e2e',
-    platform: platform(), tokenStore: new MemoryTokenStore(),
+    baseUrl: controlBaseUrl, tokenStore: new MemoryTokenStore(),
   });
-  await admin.loginWithPassword({enterpriseId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  await admin.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
   const modelCredential = await admin.createCredential({
     name: 'M1 gateway provider', service: 'mock-openai', type: 'api_key',
     deliveryMode: 'server_only', value: 'm1-e2e-provider-secret', enabled: true,
@@ -53,8 +54,8 @@ async function runScenario() {
   const username = 'gateway-user-' + runId;
   const password = 'temporary-password-123';
   const user = await admin.createUser({
-    enterpriseId: 'demo', username, displayName: 'Gateway User ' + runId,
-    temporaryPassword: password, requirePasswordChange: false, organizationIds: [], roleIds: [],
+    deploymentId: 'demo', username, displayName: 'Gateway User ' + runId,
+    temporaryPassword: password, requirePasswordChange: false, teamIds: [], roleIds: [],
   });
   await admin.createModel({
     id: 'enterprise-chat', displayName: 'Enterprise Chat', sourceType: 'gateway',
@@ -77,10 +78,9 @@ async function runScenario() {
 
   const store = new MemoryTokenStore();
   const agent = new AepClient({
-    baseUrl: controlBaseUrl, agentId: 'gateway-agent-' + runId, agentVersion: 'e2e',
-    platform: platform(), tokenStore: store,
+    baseUrl: controlBaseUrl, tokenStore: store,
   });
-  await agent.loginWithPassword({enterpriseId: 'demo', username, password});
+  await agent.loginWithPassword({deploymentId: 'demo', username, password});
   const tokens = await store.get();
   const modelToken = tokens?.modelAccessToken;
   assert(modelToken, 'Agent login did not return a model access token');
@@ -122,7 +122,7 @@ async function runScenario() {
 }
 
 async function inference(token, body) {
-  const headers = {'Content-Type': 'application/json', 'X-AEP-Tenant-ID': 'spoofed'};
+  const headers = {'Content-Type': 'application/json', 'X-AEP-Deployment-ID': 'spoofed'};
   if (token) headers.Authorization = 'Bearer ' + token;
   const response = await fetch(gatewayBaseUrl + '/chat/completions', {method: 'POST', headers, body: JSON.stringify(body)});
   return {response, text: await response.text()};
