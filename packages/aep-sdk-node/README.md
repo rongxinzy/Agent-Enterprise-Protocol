@@ -11,10 +11,10 @@ The SDK owns protocol headers, RFC 9457 errors, bounded retries, token refresh r
 Install a fixed release version. Do not depend on a moving Git branch or a local workspace path in a product build.
 
 ```sh
-npm install @aep/sdk-node@0.2.0
+npm install @aep/sdk-node@0.2.9
 ```
 
-Until the package is published to the public npm registry, use the tarball and SHA-256 file attached to the matching `sdk-node-v0.2.0` GitHub release.
+For air-gapped or tarball installs, use the tarball and SHA-256 file attached to the matching `sdk-node-v0.2.9` GitHub release.
 
 ## Desktop Sessions
 

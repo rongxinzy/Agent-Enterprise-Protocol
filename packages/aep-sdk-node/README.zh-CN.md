@@ -11,10 +11,10 @@ SDK 负责协议请求头、RFC 9457 错误、有界重试、Token 刷新轮换�
 产品构建必须安装固定发布版本，不能依赖浮动 Git 分支或本地 workspace 路径。
 
 ```sh
-npm install @aep/sdk-node@0.2.0
+npm install @aep/sdk-node@0.2.9
 ```
 
-在包发布到公共 npm registry 前，请使用对应 `sdk-node-v0.2.0` GitHub Release 附带的 tarball 和 SHA-256 文件。
+内网或离线安装时，请使用对应 `sdk-node-v0.2.9` GitHub Release 附带的 tarball 和 SHA-256 文件。
 
 ## 桌面会话
 
