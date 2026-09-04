@@ -46,7 +46,7 @@ async function runScenario() {
 
   const username = `user-${runId}`;
   const password = 'temporary-password-123';
-  const user = await runCli(['user', 'create', '--user', username, '--display-name', `E2E User ${runId}`, '--temporary-password', password, '--require-password-change=false']);
+  const user = await runCli(['user', 'create', '--user', username, '--display-name', `E2E User ${runId}`, '--temporary-password', password, '--require-password-change=false', '--role-id', 'admin', '--team-id', 'all-users']);
   const skillId = `review-${runId}`;
   const archivePath = path.join(tempDirectory, `${skillId}.zip`);
   fs.writeFileSync(archivePath, await createSkillArchive());
@@ -165,7 +165,7 @@ async function assertPasswordSecurity() {
   const username = `forced-change-${runId}`;
   const temporaryPassword = 'temporary-password-123';
   const changedPassword = 'changed-password-456';
-  await runCli(['user', 'create', '--user', username, '--display-name', `Forced Change ${runId}`, '--temporary-password', temporaryPassword]);
+  await runCli(['user', 'create', '--user', username, '--display-name', `Forced Change ${runId}`, '--temporary-password', temporaryPassword, '--role-id', 'admin', '--team-id', 'all-users']);
 
   const store = new MemoryTokenStore();
   const client = new AepClient({baseUrl, tokenStore: store});
