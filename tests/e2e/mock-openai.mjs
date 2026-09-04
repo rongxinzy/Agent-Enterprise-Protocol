@@ -22,7 +22,7 @@ const server = http.createServer(async (request, response) => {
     sendJSON(response, 400, {error: {message: `expected rewritten model ${expectedModel}`}});
     return;
   }
-  if (request.headers['x-aep-tenant-id'] !== 'demo' || !request.headers['x-aep-user-id'] || !request.headers['x-aep-agent-id'] || request.headers['x-aep-model-id'] !== 'enterprise-chat') {
+  if (request.headers['x-aep-deployment-id'] !== 'demo' || !request.headers['x-aep-user-id'] || !request.headers['x-aep-session-id'] || request.headers['x-aep-model-id'] !== 'enterprise-chat') {
     sendJSON(response, 400, {error: {message: 'trusted AEP identity headers are missing'}});
     return;
   }
