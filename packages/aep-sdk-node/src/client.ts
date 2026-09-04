@@ -6,6 +6,8 @@ import type {
   AdminModelList,
   AdminModelPatch,
   AdminModelWrite,
+  AdminControlEvent,
+  AdminControlEventPage,
   AepClientOptions,
   AepRequest,
   AepResponse,
@@ -32,6 +34,10 @@ import type {
   JsonObject,
   JsonValue,
   LicenseActivationRequest,
+  License,
+  LicenseImportRequest,
+  LicensePage,
+  LicenseRevocation,
   ModelAssignment,
   ModelAssignmentList,
   ModelAssignmentWrite,
@@ -39,6 +45,17 @@ import type {
   PlatformUser,
   Page,
   Query,
+  PermissionPage,
+  Role,
+  RolePage,
+  CreateRoleRequest,
+  UpdateRoleRequest,
+  Team,
+  TeamPage,
+  CreateTeamRequest,
+  UpdateTeamRequest,
+  ReplaceUserRBACRequest,
+  UserRBAC,
   ResolvedCredential,
   ServiceMetadata,
   SkillManifest,
@@ -369,6 +386,10 @@ export class AepClient {
     return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/users', body: input});
   }
 
+  importAdminUsers(input: JsonObject): Promise<JsonObject> {
+    return this.importUsers(input);
+  }
+
   importUsers(input: JsonObject): Promise<JsonObject> {
     return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/users/import', body: input});
   }
@@ -388,6 +409,54 @@ export class AepClient {
       body: input,
       responseType: 'empty',
     });
+  }
+
+  listPermissions(): Promise<PermissionPage> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/permissions'});
+  }
+
+  listRoles(): Promise<RolePage> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/roles'});
+  }
+
+  createRole(input: CreateRoleRequest): Promise<Role> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/roles', body: asJson(input)});
+  }
+
+  getRole(roleId: string): Promise<Role> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/roles/${segment(roleId)}`});
+  }
+
+  updateRole(roleId: string, input: UpdateRoleRequest): Promise<Role> {
+    return this.#send({method: HttpMethod.Patch, path: `/aep/v1/admin/roles/${segment(roleId)}`, body: asJson(input)});
+  }
+
+  deleteRole(roleId: string): Promise<void> {
+    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/roles/${segment(roleId)}`, responseType: 'empty'});
+  }
+
+  listTeams(): Promise<TeamPage> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/teams'});
+  }
+
+  createTeam(input: CreateTeamRequest): Promise<Team> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/teams', body: asJson(input)});
+  }
+
+  getTeam(teamId: string): Promise<Team> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/teams/${segment(teamId)}`});
+  }
+
+  updateTeam(teamId: string, input: UpdateTeamRequest): Promise<Team> {
+    return this.#send({method: HttpMethod.Patch, path: `/aep/v1/admin/teams/${segment(teamId)}`, body: asJson(input)});
+  }
+
+  deleteTeam(teamId: string): Promise<void> {
+    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/teams/${segment(teamId)}`, responseType: 'empty'});
+  }
+
+  replaceUserRBAC(userId: string, input: ReplaceUserRBACRequest): Promise<UserRBAC> {
+    return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/users/${segment(userId)}/rbac`, body: asJson(input)});
   }
 
   listSkills(): Promise<JsonObject> {
@@ -581,6 +650,18 @@ export class AepClient {
     return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/control-events', body: input});
   }
 
+  listAdminControlEvents(filters: Query = {}): Promise<AdminControlEventPage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/control-events?${query(filters)}`});
+  }
+
+  getAdminControlEvent(eventId: string): Promise<AdminControlEvent> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/control-events/${segment(eventId)}`});
+  }
+
+  cancelControlEvent(eventId: string): Promise<AdminControlEvent> {
+    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/control-events/${segment(eventId)}/cancel`});
+  }
+
   listControlEventDeliveries(eventId: string, filters: Query = {}): Promise<JsonObject> {
     return this.#send({
       method: HttpMethod.Get,
@@ -590,6 +671,22 @@ export class AepClient {
 
   searchEvents(filters: Query = {}): Promise<JsonObject> {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/events?${query(filters)}`});
+  }
+
+  listLicenses(filters: Query = {}): Promise<LicensePage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/licenses?${query(filters)}`});
+  }
+
+  getLicense(licenseId: string): Promise<License> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/licenses/${segment(licenseId)}`});
+  }
+
+  importLicense(input: LicenseImportRequest): Promise<License> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/licenses/import', body: asJson(input), retry: false});
+  }
+
+  revokeLicense(licenseId: string): Promise<LicenseRevocation> {
+    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/licenses/${segment(licenseId)}/revoke`, retry: false});
   }
 
   async #send<T>(request: AepRequest, authenticated = true): Promise<T> {

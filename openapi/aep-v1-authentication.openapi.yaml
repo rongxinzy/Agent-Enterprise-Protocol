@@ -283,6 +283,52 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/roles/{roleId}:
+    parameters:
+      - {$ref: '#/components/parameters/RoleId'}
+    get:
+      tags: [Admin RBAC]
+      operationId: getRole
+      security: [{aepBearerAuth: []}]
+      responses:
+        '200':
+          description: Deployment role
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Role'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Admin RBAC]
+      operationId: updateRole
+      security: [{aepBearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateRoleRequest'}
+      responses:
+        '200':
+          description: Updated role
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Role'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    delete:
+      tags: [Admin RBAC]
+      operationId: deleteRole
+      security: [{aepBearerAuth: []}]
+      responses:
+        '204': {description: Role deleted}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/teams:
     get:
       tags: [Admin RBAC]
@@ -314,6 +360,52 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/teams/{teamId}:
+    parameters:
+      - {$ref: '#/components/parameters/TeamId'}
+    get:
+      tags: [Admin RBAC]
+      operationId: getTeam
+      security: [{aepBearerAuth: []}]
+      responses:
+        '200':
+          description: Deployment Team
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Admin RBAC]
+      operationId: updateTeam
+      security: [{aepBearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UpdateTeamRequest'}
+      responses:
+        '200':
+          description: Updated Team
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+    delete:
+      tags: [Admin RBAC]
+      operationId: deleteTeam
+      security: [{aepBearerAuth: []}]
+      responses:
+        '204': {description: Team deleted}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/users/{userId}/rbac:
     put:
       tags: [Admin RBAC]
@@ -340,6 +432,8 @@ components:
     aepBearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
   parameters:
     UserId: {name: userId, in: path, required: true, schema: {type: string}}
+    RoleId: {name: roleId, in: path, required: true, schema: {type: string}}
+    TeamId: {name: teamId, in: path, required: true, schema: {type: string}}
     Cursor: {name: cursor, in: query, schema: {type: [string, 'null']}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
   responses:
@@ -617,6 +711,15 @@ components:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
         permissions: {type: array, maxItems: 128, uniqueItems: true, items: {type: string}}
+    UpdateRoleRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        enabled: {type: boolean}
+        permissions: {type: array, maxItems: 128, uniqueItems: true, items: {type: string}}
     Team:
       type: object
       required: [id, name, description, builtIn, enabled, memberCount]
@@ -640,6 +743,14 @@ components:
         id: {type: string, minLength: 1, maxLength: 100}
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
+    UpdateTeamRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 256}
+        description: {type: string, maxLength: 1024}
+        enabled: {type: boolean}
     ReplaceUserRBACRequest:
       type: object
       required: [roleIds, teamIds]
