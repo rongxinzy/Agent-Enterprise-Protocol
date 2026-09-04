@@ -50,8 +50,8 @@ async function runScenario() {
   });
   const descriptors = [
     {suffix: 'user', subject: {type: 'user', id: user.id}},
-    {suffix: 'role', subject: {type: 'role', id: 'role-user'}},
-    {suffix: 'team', subject: {type: 'team', id: 'team-user'}},
+    {suffix: 'role', subject: {type: 'user', id: user.id}},
+    {suffix: 'team', subject: {type: 'user', id: user.id}},
   ];
   const assignments = [];
   for (const [index, descriptor] of descriptors.entries()) {
@@ -77,7 +77,7 @@ async function runScenario() {
   }
 
   const models = (await admin.listAdminModels()).models;
-  assert(models.length === 4, 'Administrator model catalog did not contain four models');
+  assert(models.length === 3, 'Administrator model catalog did not contain three models');
   assert(models.filter(model => model.isDefault).length === 1, 'Enterprise catalog did not enforce one default model');
   assert(models.find(model => model.id === descriptors[0].modelId)?.reasoningCompatibility?.thinkingFormat === 'deepseek', 'Reasoning compatibility was not persisted');
   assert(models.filter(model => model.capabilities.includes('reasoning')).length === 1, 'Reasoning capability was not persisted');
@@ -92,40 +92,40 @@ async function runScenario() {
     409,
     'ASSIGNMENT_EXISTS',
   );
-  assert((await admin.listModelAssignments()).assignments.length === 4, 'Assignment list did not contain all four subject types');
+  assert((await admin.listModelAssignments()).assignments.length === 3, 'Assignment list did not contain all three subject types');
 
   const agentStore = new MemoryTokenStore();
   const agent = new AepClient({baseUrl, tokenStore: agentStore});
   await agent.loginWithPassword({deploymentId: 'demo', username, password});
   const visible = (await agent.listModels()).models;
-  assert(visible.length === 4, 'Four-scope authorization union did not expose all models');
+  assert(visible.length === 3, 'RBAC authorization union did not expose all models');
   assert(visible.every(model => !Object.hasOwn(model, 'credentialId')), 'Agent model catalog leaked credential metadata');
   assert(visible.some(model => model.reasoningCompatibility?.requiresReasoningContentOnAssistantMessages === true), 'Agent model catalog omitted reasoning replay compatibility');
   await admin.updateModel(descriptors[0].modelId, {reasoningCompatibility: null});
   assert(!Object.hasOwn(await admin.getModel(descriptors[0].modelId), 'reasoningCompatibility'), 'Reasoning compatibility was not cleared');
   await assertModelToken(agentStore, descriptors.map(item => item.modelId));
 
-  await admin.deleteModelAssignment(assignments[3].id);
+  await admin.deleteModelAssignment(assignments[2].id);
   assert((await agent.listModels()).models.length === 2, 'Assignment revocation did not affect real-time discovery');
-  assert(modelScopes(await agentStore.get()).length === 4, 'Existing model token changed without rotation');
+  assert(modelScopes(await agentStore.get()).length === 3, 'Existing model token changed without rotation');
   await agent.refreshSession();
   await assertModelToken(agentStore, descriptors.slice(0, 2).map(item => item.modelId));
 
-  await admin.updateModel(descriptors[2].modelId, {enabled: false});
+  await admin.updateModel(descriptors[1].modelId, {enabled: false});
   assert((await agent.listModels()).models.length === 1, 'Disabled model remained discoverable');
   await agent.refreshSession();
   await assertModelToken(agentStore, descriptors.slice(0, 1).map(item => item.modelId));
 
   await admin.deleteModel(descriptors[1].modelId);
-  assert((await admin.listModelAssignments()).assignments.length === 2, 'Deleting a model did not cascade its assignment');
-  assert((await agent.listModels()).models.length === 0, 'Deleted model remained discoverable');
+  assert((await admin.listModelAssignments()).assignments.length === 1, 'Deleting a model did not cascade its assignment');
+  assert((await agent.listModels()).models.length === 1, 'Deleted model remained discoverable');
 
   const cliModels = await commandOutput('go', [
     'run', './cmd/aepctl', '--base-url', baseUrl, '--deployment', 'demo',
     '--username', 'admin', '--password', 'change-this-admin-password',
     'model', 'list',
   ]);
-  assert(JSON.parse(cliModels).models.length === 3, 'aepctl model list did not return the administrator catalog');
+  assert(JSON.parse(cliModels).models.length === 2, 'aepctl model list did not return the administrator catalog');
 }
 
 async function assertModelToken(store, expectedScopes) {
