@@ -305,4 +305,22 @@ describe('AepClient SDK gate', () => {
       'POST /aep/v1/admin/licenses/lic-1/revoke',
     ]));
   });
+
+  test('encodes pagination filters for admin resource lists', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await client.listRoles({cursor: 'role-2', limit: 25});
+    await client.listTeams({cursor: 'team-2', limit: 25});
+    await client.listSkills({cursor: 'skill-2', limit: 25});
+    await client.listCredentials({cursor: 'credential-2', limit: 25});
+    await client.listAdminModels({cursor: 'model-2', limit: 25});
+
+    const requests = server.requests.filter(request => request.search !== '');
+    expect(requests.slice(-5).map(request => request.search)).toEqual([
+      '?cursor=role-2&limit=25',
+      '?cursor=team-2&limit=25',
+      '?cursor=skill-2&limit=25',
+      '?cursor=credential-2&limit=25',
+      '?cursor=model-2&limit=25',
+    ]);
+  });
 });

@@ -12,7 +12,7 @@ export class MockAepServer {
   #modelGatewayEnabled = true;
   #credentialNoStore = true;
   #dataPlaneRevision = 'rev-1';
-  readonly requests: Array<{method: string; path: string; headers: IncomingMessage['headers']}> = [];
+  readonly requests: Array<{method: string; path: string; search: string; headers: IncomingMessage['headers']}> = [];
   refreshCount = 0;
   baseUrl = '';
 
@@ -59,7 +59,8 @@ export class MockAepServer {
 
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const path = new URL(request.url ?? '/', this.baseUrl).pathname;
-    this.requests.push({method: request.method ?? 'GET', path, headers: request.headers});
+    const parsedURL = new URL(request.url ?? '/', this.baseUrl);
+    this.requests.push({method: request.method ?? 'GET', path, search: parsedURL.search, headers: request.headers});
 
     if (path === '/aep/v1/metadata') {
       if (this.#metadataFailures > 0) {
