@@ -8,11 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
-	db "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db/generated"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 type passwordLoginRequest struct {
@@ -33,8 +32,8 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 		}
 	}
 	deploymentID = s.storageTenantID()
-	deployment, err := s.app.DB.GetDeployment(request.Context(), deploymentID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	deployment, err := s.app.Store.GetDeployment(request.Context(), deploymentID)
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
@@ -86,8 +85,8 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	user, lookupErr := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{DeploymentID: deploymentID, Username: input.Username})
-	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+	user, lookupErr := s.app.Store.Deployment(deploymentID).GetUserByUsername(request.Context(), input.Username)
+	if lookupErr != nil && !errors.Is(lookupErr, repository.ErrNotFound) {
 		databaseFailure(response, request, lookupErr)
 		return
 	}
@@ -149,7 +148,7 @@ func (s *Server) federatedStart(response http.ResponseWriter, request *http.Requ
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
-	if _, err := s.app.DB.GetDeployment(request.Context(), deploymentID); err != nil {
+	if _, err := s.app.Store.GetDeployment(request.Context(), deploymentID); err != nil {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The deployment was not found.")
 		return
 	}
@@ -208,7 +207,8 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		writeProblem(response, request, http.StatusUnauthorized, "AUTHORIZATION_CODE_INVALID", "The authorization code is invalid or expired.")
 		return
 	}
-	user, err := s.app.DB.GetUserByUsername(request.Context(), db.GetUserByUsernameParams{DeploymentID: transaction.DeploymentID, Username: s.app.Config.BootstrapAdminUsername})
+	user, err := s.app.Store.Deployment(transaction.DeploymentID).
+		GetUserByUsername(request.Context(), s.app.Config.BootstrapAdminUsername)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -269,7 +269,12 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	claims := claimsFrom(request)
-	user, err := s.app.DB.GetUser(request.Context(), claims.Subject)
+	deploymentID, validDeployment := s.resolveTenant(claims.DeploymentID)
+	if !validDeployment {
+		writeProblem(response, request, http.StatusUnauthorized, "INVALID_TOKEN", "The authenticated deployment is invalid.")
+		return
+	}
+	user, err := s.app.Store.Deployment(deploymentID).GetUser(request.Context(), claims.Subject)
 	if err != nil || !auth.VerifyPassword(user.PasswordHash, input.CurrentPassword) {
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The current password is invalid.")
 		return
@@ -279,7 +284,8 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
-	if err := s.app.DB.UpdatePassword(request.Context(), db.UpdatePasswordParams{ID: user.ID, PasswordHash: hash, RequirePasswordChange: false}); err != nil {
+	if err := s.app.Store.Deployment(user.DeploymentID).
+		UpdatePassword(request.Context(), user.ID, hash, false); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -301,7 +307,12 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 
 func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	user, err := s.app.DB.GetUser(request.Context(), claims.Subject)
+	deploymentID, validDeployment := s.resolveTenant(claims.DeploymentID)
+	if !validDeployment {
+		writeProblem(response, request, http.StatusUnauthorized, "INVALID_TOKEN", "The authenticated deployment is invalid.")
+		return
+	}
+	user, err := s.app.Store.Deployment(deploymentID).GetUser(request.Context(), claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -312,7 +323,7 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": nullablePGText(user.Email)},
+		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": user.Email},
 		"deployment":             map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 		"deploymentId":           s.app.DeploymentID(),
 		"sessionId":              claims.SessionID,
