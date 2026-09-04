@@ -1270,7 +1270,7 @@ export interface components {
             /** @enum {string} */
             type: "api_key";
             /** @enum {string} */
-            deliveryMode: "server_only" | "agent";
+            deliveryMode: "server_only" | "client";
             maskedValue: string;
             enabled: boolean;
             /** Format: date-time */
@@ -1570,7 +1570,7 @@ export interface components {
             /** @enum {string} */
             type: "api_key";
             /** @enum {string} */
-            deliveryMode: "server_only" | "agent";
+            deliveryMode: "server_only" | "client";
             value: string;
             enabled: boolean;
         };
@@ -1578,7 +1578,7 @@ export interface components {
             name?: string;
             service?: string;
             /** @enum {string} */
-            deliveryMode?: "server_only" | "agent";
+            deliveryMode?: "server_only" | "client";
             enabled?: boolean;
         };
         CredentialRotate: {
