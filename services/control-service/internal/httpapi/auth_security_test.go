@@ -64,3 +64,26 @@ func TestRetryAfterRoundsUp(t *testing.T) {
 		t.Fatal("Retry-After did not round up to whole seconds")
 	}
 }
+
+func TestRequiredAdminPermissionCoversAssignmentResources(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/aep/v1/admin/model-assignments", "models.assign"},
+		{http.MethodPost, "/aep/v1/admin/model-assignments", "models.assign"},
+		{http.MethodDelete, "/aep/v1/admin/model-assignments/a1", "models.assign"},
+		{http.MethodGet, "/aep/v1/admin/skill-assignments", "skills.assign"},
+		{http.MethodPost, "/aep/v1/admin/skill-assignments", "skills.assign"},
+		{http.MethodDelete, "/aep/v1/admin/skill-assignments/a1", "skills.assign"},
+		{http.MethodGet, "/aep/v1/admin/credential-assignments", "credentials.assign"},
+		{http.MethodPost, "/aep/v1/admin/credential-assignments", "credentials.assign"},
+		{http.MethodDelete, "/aep/v1/admin/credential-assignments/a1", "credentials.assign"},
+	}
+	for _, test := range tests {
+		if got := requiredAdminPermission(test.method, test.path); got != test.want {
+			t.Errorf("requiredAdminPermission(%q, %q) = %q, want %q", test.method, test.path, got, test.want)
+		}
+	}
+}

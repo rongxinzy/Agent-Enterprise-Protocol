@@ -11,6 +11,30 @@ func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
 	return items, err
 }
 
+// UserPermissions returns the effective permissions from enabled roles. The
+// deployment and user predicates keep the result scoped to one installation.
+func (s *DeploymentStore) UserPermissions(ctx context.Context, userID string) ([]string, error) {
+	var rows []struct {
+		PermissionID string `gorm:"column:permission_id"`
+	}
+	err := s.db.WithContext(ctx).
+		Table("role_permissions AS rp").
+		Select("DISTINCT rp.permission_id").
+		Joins("JOIN user_role_bindings AS urb ON urb.deployment_id = rp.deployment_id AND urb.role_id = rp.role_id").
+		Joins("JOIN roles AS r ON r.deployment_id = rp.deployment_id AND r.id = rp.role_id").
+		Where("rp.deployment_id = ? AND urb.user_id = ? AND r.enabled = ?", s.deploymentID, userID, true).
+		Order("rp.permission_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	permissions := make([]string, 0, len(rows))
+	for _, row := range rows {
+		permissions = append(permissions, row.PermissionID)
+	}
+	return permissions, nil
+}
+
 func (s *DeploymentStore) ListRoles(ctx context.Context) ([]RoleRecord, error) {
 	roles := make([]Role, 0)
 	if err := s.db.WithContext(ctx).
