@@ -106,6 +106,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Delete("/aep/v1/admin/skills/{skillId}", server.deleteSkill)
 			admin.Post("/aep/v1/admin/skills/{skillId}/versions", server.uploadSkillVersion)
 			admin.Post("/aep/v1/admin/skills/{skillId}/versions/{version}/publish", server.publishSkillVersion)
+			admin.Delete("/aep/v1/admin/skills/{skillId}/versions/{version}", server.deleteSkillVersion)
 			admin.Get("/aep/v1/admin/skill-assignments", server.listSkillAssignments)
 			admin.Post("/aep/v1/admin/skill-assignments", server.createSkillAssignment)
 			admin.Delete("/aep/v1/admin/skill-assignments/{assignmentId}", server.deleteSkillAssignment)

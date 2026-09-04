@@ -1029,6 +1029,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SkillVersion'
+  /aep/v1/admin/skills/{skillId}/versions/{version}:
+    delete:
+      tags:
+        - Admin Skills
+      operationId: deleteSkillVersion
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Version'
+      responses:
+        '204':
+          description: Version withdrawn
   /aep/v1/admin/skill-assignments:
     get:
       tags:

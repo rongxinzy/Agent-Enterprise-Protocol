@@ -608,6 +608,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/skills/{skillId}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteSkillVersion"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skill-assignments": {
         parameters: {
             query?: never;
@@ -3120,6 +3136,27 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SkillVersion"];
                 };
+            };
+        };
+    };
+    deleteSkillVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skillId: components["parameters"]["SkillId"];
+                version: components["parameters"]["Version"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Version withdrawn */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

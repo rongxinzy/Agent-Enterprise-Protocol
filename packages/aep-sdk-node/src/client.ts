@@ -515,6 +515,14 @@ export class AepClient {
     });
   }
 
+  deleteSkillVersion(skillId: string, version: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: `/aep/v1/admin/skills/${segment(skillId)}/versions/${segment(version)}`,
+      responseType: 'empty',
+    });
+  }
+
   listSkillAssignments(): Promise<JsonObject> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/skill-assignments'});
   }

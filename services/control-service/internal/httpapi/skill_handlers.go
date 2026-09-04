@@ -200,6 +200,24 @@ func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http
 	writeJSON(response, http.StatusOK, map[string]any{"skillId": skillID, "version": version, "published": true})
 }
 
+func (s *Server) deleteSkillVersion(response http.ResponseWriter, request *http.Request) {
+	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
+	objectKey, err := s.app.Store.DeleteSkillVersion(request.Context(), skillID, version)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := s.app.Blobs.Delete(request.Context(), objectKey); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
 	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListSkillAssignments(request.Context())
 	if err != nil {
