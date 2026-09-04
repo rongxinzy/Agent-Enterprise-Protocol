@@ -24,11 +24,13 @@ func (s *Server) listPermissions(response http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) listRoles(response http.ResponseWriter, request *http.Request) {
-	roles, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListRoles(request.Context())
+	pageSize := limit(request)
+	roles, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListRolesPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	roles, nextCursor := page(roles, pageSize, func(item repository.RoleRecord) string { return item.ID })
 	items := make([]map[string]any, 0, len(roles))
 	for _, role := range roles {
 		items = append(items, map[string]any{
@@ -36,7 +38,7 @@ func (s *Server) listRoles(response http.ResponseWriter, request *http.Request) 
 			"builtIn": role.BuiltIn, "enabled": role.Enabled, "permissions": role.Permissions,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"roles": items})
+	writeJSON(response, http.StatusOK, map[string]any{"roles": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createRole(response http.ResponseWriter, request *http.Request) {
@@ -134,11 +136,13 @@ func (s *Server) deleteRole(response http.ResponseWriter, request *http.Request)
 }
 
 func (s *Server) listTeams(response http.ResponseWriter, request *http.Request) {
-	teams, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListTeams(request.Context())
+	pageSize := limit(request)
+	teams, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListTeamsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	teams, nextCursor := page(teams, pageSize, func(item repository.TeamRecord) string { return item.ID })
 	items := make([]map[string]any, 0, len(teams))
 	for _, team := range teams {
 		items = append(items, map[string]any{
@@ -146,7 +150,7 @@ func (s *Server) listTeams(response http.ResponseWriter, request *http.Request) 
 			"builtIn": team.BuiltIn, "enabled": team.Enabled, "memberCount": team.MemberCount,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"teams": items})
+	writeJSON(response, http.StatusOK, map[string]any{"teams": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createTeam(response http.ResponseWriter, request *http.Request) {

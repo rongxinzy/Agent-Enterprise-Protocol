@@ -616,6 +616,9 @@ paths:
       operationId: listRoles
       security:
         - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Deployment roles
@@ -727,6 +730,9 @@ paths:
       operationId: listTeams
       security:
         - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Deployment teams
@@ -929,6 +935,9 @@ paths:
       tags:
         - Admin Skills
       operationId: listSkills
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Skill list
@@ -1291,6 +1300,9 @@ paths:
       tags:
         - Admin Credentials
       operationId: listCredentials
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Masked credential metadata
@@ -1397,6 +1409,9 @@ paths:
       tags:
         - Admin Models
       operationId: listModels
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Model descriptors
@@ -2597,11 +2612,16 @@ components:
       type: object
       required:
         - credentials
+        - nextCursor
       properties:
         credentials:
           type: array
           items:
             $ref: '#/components/schemas/CredentialMetadata'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     ResolveCredentialRequest:
       type: object
       required:
@@ -2987,11 +3007,16 @@ components:
       type: object
       required:
         - roles
+        - nextCursor
       properties:
         roles:
           type: array
           items:
             $ref: '#/components/schemas/Role'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CreateRoleRequest:
       type: object
       required:
@@ -3063,11 +3088,16 @@ components:
       type: object
       required:
         - teams
+        - nextCursor
       properties:
         teams:
           type: array
           items:
             $ref: '#/components/schemas/Team'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CreateTeamRequest:
       type: object
       required:
@@ -3202,11 +3232,16 @@ components:
       type: object
       required:
         - skills
+        - nextCursor
       properties:
         skills:
           type: array
           items:
             $ref: '#/components/schemas/AdminSkill'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillWrite:
       type: object
       required:
@@ -3741,11 +3776,16 @@ components:
       type: object
       required:
         - models
+        - nextCursor
       properties:
         models:
           type: array
           items:
             $ref: '#/components/schemas/AdminModel'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     AdminModelWrite:
       allOf:
         - $ref: '#/components/schemas/UserModel'

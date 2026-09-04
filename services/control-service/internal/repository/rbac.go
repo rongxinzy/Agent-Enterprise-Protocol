@@ -12,10 +12,23 @@ func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
 }
 
 func (s *DeploymentStore) ListRoles(ctx context.Context) ([]RoleRecord, error) {
+	return s.ListRolesPage(ctx, "", 0)
+}
+
+// ListRolesPage returns roles in stable ID order. fetchLimit is normally one
+// larger than the requested page size so the handler can determine whether a
+// next cursor exists without a count query.
+func (s *DeploymentStore) ListRolesPage(ctx context.Context, cursor string, fetchLimit int32) ([]RoleRecord, error) {
 	roles := make([]Role, 0)
-	if err := s.db.WithContext(ctx).
-		Where("deployment_id = ?", s.deploymentID).
-		Order("id").Find(&roles).Error; err != nil {
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	if err := query.Find(&roles).Error; err != nil {
 		return nil, err
 	}
 	roleIDs := make([]string, 0, len(roles))
@@ -152,16 +165,27 @@ func (s *DeploymentStore) DeleteRole(ctx context.Context, id string) error {
 }
 
 func (s *DeploymentStore) ListTeams(ctx context.Context) ([]TeamRecord, error) {
+	return s.ListTeamsPage(ctx, "", 0)
+}
+
+func (s *DeploymentStore) ListTeamsPage(ctx context.Context, cursor string, fetchLimit int32) ([]TeamRecord, error) {
 	type row struct {
 		Team
 		MemberCount int64 `gorm:"column:member_count"`
 	}
 	rows := make([]row, 0)
-	err := s.db.WithContext(ctx).Model(&Team{}).
+	query := s.db.WithContext(ctx).Model(&Team{}).
 		Select("teams.*, COUNT(user_team_bindings.user_id) AS member_count").
 		Joins("LEFT JOIN user_team_bindings ON user_team_bindings.deployment_id = teams.deployment_id AND user_team_bindings.team_id = teams.id").
-		Where("teams.deployment_id = ?", s.deploymentID).
-		Group("teams.deployment_id, teams.id").Order("teams.id").Scan(&rows).Error
+		Where("teams.deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("teams.id > ?", cursor)
+	}
+	query = query.Group("teams.deployment_id, teams.id").Order("teams.id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

@@ -189,6 +189,9 @@ paths:
     get:
       tags: [Admin Skills]
       operationId: listSkills
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
           description: Skill list
@@ -303,6 +306,9 @@ paths:
     get:
       tags: [Admin Credentials]
       operationId: listCredentials
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
           description: Masked credential metadata
@@ -385,6 +391,9 @@ paths:
     get:
       tags: [Admin Models]
       operationId: listModels
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200':
           description: Model descriptors
@@ -758,9 +767,10 @@ components:
         updatedAt: {type: string, format: date-time}
     CredentialList:
       type: object
-      required: [credentials]
+      required: [credentials, nextCursor]
       properties:
         credentials: {type: array, items: {$ref: '#/components/schemas/CredentialMetadata'}}
+        nextCursor: {type: [string, 'null']}
     ResolveCredentialRequest:
       type: object
       required: [purpose]
@@ -824,9 +834,10 @@ components:
         updatedAt: {type: string, format: date-time}
     AdminSkillList:
       type: object
-      required: [skills]
+      required: [skills, nextCursor]
       properties:
         skills: {type: array, items: {$ref: '#/components/schemas/AdminSkill'}}
+        nextCursor: {type: [string, 'null']}
     SkillWrite:
       type: object
       required: [id, name, description]
@@ -983,9 +994,10 @@ components:
             credentialId: {type: [string, 'null']}
     AdminModelList:
       type: object
-      required: [models]
+      required: [models, nextCursor]
       properties:
         models: {type: array, items: {$ref: '#/components/schemas/AdminModel'}}
+        nextCursor: {type: [string, 'null']}
     LicenseImportRequest:
       type: object
       additionalProperties: false

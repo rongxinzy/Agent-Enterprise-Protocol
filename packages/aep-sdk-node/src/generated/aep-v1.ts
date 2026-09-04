@@ -1395,6 +1395,7 @@ export interface components {
         };
         CredentialList: {
             credentials: components["schemas"]["CredentialMetadata"][];
+            nextCursor: string | null;
         };
         ResolveCredentialRequest: {
             purpose: string;
@@ -1528,6 +1529,7 @@ export interface components {
         };
         RolePage: {
             roles: components["schemas"]["Role"][];
+            nextCursor: string | null;
         };
         CreateRoleRequest: {
             id: string;
@@ -1551,6 +1553,7 @@ export interface components {
         };
         TeamPage: {
             teams: components["schemas"]["Team"][];
+            nextCursor: string | null;
         };
         CreateTeamRequest: {
             id: string;
@@ -1595,6 +1598,7 @@ export interface components {
         };
         AdminSkillList: {
             skills: components["schemas"]["AdminSkill"][];
+            nextCursor: string | null;
         };
         SkillWrite: {
             id: string;
@@ -1787,6 +1791,7 @@ export interface components {
         };
         AdminModelList: {
             models: components["schemas"]["AdminModel"][];
+            nextCursor: string | null;
         };
         AdminModelWrite: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
@@ -2673,7 +2678,10 @@ export interface operations {
     };
     listRoles: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2802,7 +2810,10 @@ export interface operations {
     };
     listTeams: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2998,7 +3009,10 @@ export interface operations {
     };
     listSkills: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3432,7 +3446,10 @@ export interface operations {
     };
     listCredentials: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3588,7 +3605,10 @@ export interface operations {
     };
     listModels: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
