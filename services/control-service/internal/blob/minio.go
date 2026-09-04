@@ -13,6 +13,7 @@ import (
 type Store interface {
 	Put(ctx context.Context, key string, content []byte) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, key string) error
 	Ready(ctx context.Context) error
 }
 
@@ -67,4 +68,8 @@ func (s *MinioStore) Get(ctx context.Context, key string) (io.ReadCloser, error)
 		return nil, err
 	}
 	return object, nil
+}
+
+func (s *MinioStore) Delete(ctx context.Context, key string) error {
+	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
 }

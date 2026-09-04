@@ -163,6 +163,7 @@ export class MockAepServer {
     if (path.endsWith('/acknowledge') || path.endsWith('/result')) return empty(response, 204);
     if (path === '/aep/v1/user/skills/sync-results') return empty(response, 202);
     if (path === '/aep/v1/user/events/batch') return json(response, 200, {accepted: ['event-1'], rejected: []});
+    if (path === '/aep/v1/admin/skills/review/versions/1.0.0' && request.method === 'DELETE') return empty(response, 204);
     if (path === '/aep/v1/admin/credentials') {
       if (request.method === 'GET') return json(response, 200, {credentials: [credential('client'), credential('server_only')]});
       return json(response, 201, credential('client'));

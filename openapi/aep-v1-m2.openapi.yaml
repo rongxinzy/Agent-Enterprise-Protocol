@@ -169,6 +169,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions'
   /aep/v1/admin/skills/{skillId}/versions/{version}/publish:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions~1{version}~1publish'
+  /aep/v1/admin/skills/{skillId}/versions/{version}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions~1{version}'
   /aep/v1/admin/skill-assignments:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skill-assignments'
   /aep/v1/admin/skill-assignments/{assignmentId}:

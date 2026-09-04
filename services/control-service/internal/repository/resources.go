@@ -219,6 +219,18 @@ func (s *Store) PublishSkillVersion(ctx context.Context, skillID, version string
 	return resultError(result)
 }
 
+func (s *Store) DeleteSkillVersion(ctx context.Context, skillID, version string) (string, error) {
+	var item SkillVersion
+	if err := s.db.WithContext(ctx).Where("skill_id = ? AND version = ?", skillID, version).Take(&item).Error; err != nil {
+		return "", err
+	}
+	result := s.db.WithContext(ctx).Where("skill_id = ? AND version = ?", skillID, version).Delete(&SkillVersion{})
+	if err := resultError(result); err != nil {
+		return "", err
+	}
+	return item.ObjectKey, nil
+}
+
 func (s *DeploymentStore) ListSkillAssignments(ctx context.Context) ([]SkillAssignment, error) {
 	items := make([]SkillAssignment, 0)
 	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("id").Find(&items).Error

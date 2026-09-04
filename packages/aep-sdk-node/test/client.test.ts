@@ -156,6 +156,13 @@ describe('AepClient SDK gate', () => {
     await client.deleteModelAssignment('assignment-1');
   });
 
+  test('withdraws a Skill version through the admin API', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await expect(client.deleteSkillVersion('review', '1.0.0')).resolves.toBeUndefined();
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/admin/skills/review/versions/1.0.0');
+    expect(server.requests.at(-1)?.method).toBe('DELETE');
+  });
+
   test('publishes and observes data-plane desired state without secret values', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     const desired = await client.getDataPlaneDesiredState();

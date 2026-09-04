@@ -36,6 +36,14 @@ async function runScenario() {
   const metadata = await admin.getMetadata();
   assert(metadata.capabilities.includes('credentials'), 'Configured Credential capability was not advertised');
 
+  const skillId = 'm2-withdraw-' + runId;
+  await admin.createSkill({id: skillId, name: 'M2 withdraw test', description: 'Skill version withdrawal test'});
+  await admin.uploadSkillVersion(skillId, '1.0.0', new Uint8Array(Buffer.from('skill-version-package')));
+  await admin.publishSkillVersion(skillId, '1.0.0');
+  await admin.deleteSkillVersion(skillId, '1.0.0');
+  assert((await postgres(`SELECT count(*) FROM skill_versions WHERE skill_id='${skillId}' AND version='1.0.0'`)) === '0', 'Withdrawn Skill version remained in PostgreSQL');
+  await expectProblem(admin.deleteSkillVersion(skillId, '1.0.0'), 404, 'RESOURCE_NOT_FOUND');
+
   const roleId = 'm2-role-' + runId;
   const teamId = 'm2-team-' + runId;
   await adminRequest('/aep/v1/admin/roles', {
