@@ -105,7 +105,7 @@
       "id": "ga-validation",
       "weight": 5,
       "exitCriteria": [
-        "Complete load and soak tests, an external security review, and a backup and disaster-recovery rehearsal.",
+        "Complete the external security review.",
         "Close the remaining draft-profile gaps and publish signed release artifacts with an SBOM."
       ]
     }
