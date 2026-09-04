@@ -39,7 +39,7 @@ try {
   await archiveVolume(`${sourceProject}_minio-data`, minioArchivePath);
 
   await compose(restoreProject, restoreEnv, ['up', '-d', 'postgres']);
-  await waitForCommand(() => composeOutput(restoreProject, restoreEnv, ['exec', '-T', 'postgres', 'pg_isready', '-U', 'aep', '-d', 'aep']));
+  await waitForPostgres();
   await restoreDatabase();
   await compose(restoreProject, restoreEnv, ['up', '-d', 'minio']);
   await compose(restoreProject, restoreEnv, ['stop', 'minio']);
@@ -171,6 +171,31 @@ async function waitForHttp(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   });
+}
+
+// pg_isready can briefly report success while Postgres is still completing
+// startup or transitioning out of a shutdown. Require a real query to work
+// across multiple consecutive probes before feeding the server to pg_restore.
+async function waitForPostgres() {
+  const deadline = Date.now() + 120_000;
+  let consecutive = 0;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      await composeOutput(restoreProject, restoreEnv, ['exec', '-T', 'postgres', 'pg_isready', '-U', 'aep', '-d', 'aep']);
+      const result = await composeOutput(restoreProject, restoreEnv, [
+        'exec', '-T', 'postgres', 'psql', '-U', 'aep', '-d', 'aep', '-Atqc', 'SELECT 1',
+      ]);
+      if (result.toString('utf8').trim() !== '1') throw new Error('Postgres readiness query returned an unexpected result');
+      consecutive += 1;
+      if (consecutive >= 3) return;
+    } catch (error) {
+      lastError = error;
+      consecutive = 0;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Postgres readiness timed out: ${lastError?.message ?? 'unknown error'}`);
 }
 
 async function waitForCommand(readiness) {
