@@ -113,6 +113,7 @@ export class MockAepServer {
         deployment: {id: 'ent-1', name: 'Demo'},
         deploymentId: 'ent-1',
         roles: ['user'],
+        permissions: [],
         sessionExpiresAt: '2026-08-20T01:00:00Z',
         passwordChangeRequired: false,
       });
