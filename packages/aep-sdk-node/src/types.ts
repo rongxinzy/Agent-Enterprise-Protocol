@@ -142,8 +142,8 @@ export interface AuthenticationMethod {
 }
 
 export interface AuthenticationMethods {
-  deployment: {id: string; name: string};
-  deploymentId: string;
+  deployment?: {id: string; name: string};
+  deploymentId?: string;
   preferredMethodId?: string | null;
   methods: AuthenticationMethod[];
 }
