@@ -34,7 +34,7 @@ func (s *Server) listSkills(response http.ResponseWriter, request *http.Request)
 		}
 		items = append(items, skillJSON(skill, versions))
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	writeJSON(response, http.StatusOK, map[string]any{"skills": items})
 }
 
 func (s *Server) createSkill(response http.ResponseWriter, request *http.Request) {
@@ -88,12 +88,18 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 		Enabled     *bool   `json:"enabled"`
+		State       *string `json:"state"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	enabled, err := skillEnabledFromPatch(input.State, input.Enabled)
+	if err != nil {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_STATE", err.Error())
+		return
+	}
 	skill, err := s.app.Store.UpdateSkill(request.Context(), chi.URLParam(request, "skillId"), repository.UpdateSkillParams{
-		Name: input.Name, Description: input.Description, Enabled: input.Enabled,
+		Name: input.Name, Description: input.Description, Enabled: enabled,
 	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
@@ -125,11 +131,34 @@ func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request
 }
 
 func skillJSON(skill repository.Skill, versions []repository.SkillVersion) map[string]any {
+	state := "withdrawn"
+	if skill.Enabled {
+		state = "active"
+	}
 	return map[string]any{
 		"id": skill.ID, "name": skill.Name, "description": skill.Description,
-		"enabled": skill.Enabled, "createdAt": skill.CreatedAt, "updatedAt": skill.UpdatedAt,
+		"state": state, "enabled": skill.Enabled, "createdAt": skill.CreatedAt, "updatedAt": skill.UpdatedAt,
 		"versions": skillVersionsJSON(versions),
 	}
+}
+
+func skillEnabledFromPatch(state *string, enabled *bool) (*bool, error) {
+	if state == nil {
+		return enabled, nil
+	}
+	var value bool
+	switch *state {
+	case "active":
+		value = true
+	case "withdrawn":
+		value = false
+	default:
+		return nil, errors.New("Skill state must be active or withdrawn.")
+	}
+	if enabled != nil && *enabled != value {
+		return nil, errors.New("Skill state and enabled fields conflict.")
+	}
+	return &value, nil
 }
 
 func skillVersionsJSON(versions []repository.SkillVersion) []map[string]any {

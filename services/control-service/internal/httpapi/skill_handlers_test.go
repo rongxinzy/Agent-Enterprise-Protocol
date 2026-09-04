@@ -23,3 +23,35 @@ func TestSkillVersionsJSONIncludesAdminStateAndDigest(t *testing.T) {
 		t.Fatalf("published version = %#v", items[1])
 	}
 }
+
+func TestSkillJSONUsesCanonicalStateAndLegacyEnabled(t *testing.T) {
+	active := skillJSON(repository.Skill{ID: "writing", Name: "写作", Enabled: true}, nil)
+	if active["state"] != "active" || active["enabled"] != true {
+		t.Fatalf("active Skill = %#v", active)
+	}
+	withdrawn := skillJSON(repository.Skill{ID: "writing", Name: "写作", Enabled: false}, nil)
+	if withdrawn["state"] != "withdrawn" || withdrawn["enabled"] != false {
+		t.Fatalf("withdrawn Skill = %#v", withdrawn)
+	}
+}
+
+func TestSkillEnabledFromPatchMapsStateAndRejectsConflict(t *testing.T) {
+	active, err := skillEnabledFromPatch(stringPointer("active"), nil)
+	if err != nil || active == nil || !*active {
+		t.Fatalf("active state = %v, %v", active, err)
+	}
+	withdrawn, err := skillEnabledFromPatch(stringPointer("withdrawn"), nil)
+	if err != nil || withdrawn == nil || *withdrawn {
+		t.Fatalf("withdrawn state = %v, %v", withdrawn, err)
+	}
+	if _, err := skillEnabledFromPatch(stringPointer("invalid"), nil); err == nil {
+		t.Fatal("invalid state was accepted")
+	}
+	if _, err := skillEnabledFromPatch(stringPointer("active"), boolPointer(false)); err == nil {
+		t.Fatal("conflicting state and enabled fields were accepted")
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
+func boolPointer(value bool) *bool { return &value }
