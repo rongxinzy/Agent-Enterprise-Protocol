@@ -73,6 +73,36 @@ WHERE a.license_id=duplicate.license_id
 ALTER TABLE license_activations
   ADD CONSTRAINT license_activations_license_deployment_key UNIQUE (license_id, deployment_id);
 
+-- Convert legacy control-event scopes before restricting the vocabulary. An
+-- organization was migrated to a Team with the same ID by migration 010, and
+-- an Agent scope can be represented by its owning User. Keep unresolvable
+-- historical events for audit, but cancel them instead of accidentally
+-- broadening their delivery to every current session.
+UPDATE control_events event
+SET scope_type = 'team'
+FROM teams team
+WHERE event.scope_type = 'organization'
+  AND event.scope_id = team.id
+  AND event.deployment_id = team.deployment_id;
+
+UPDATE control_events event
+SET scope_type = 'user', scope_id = agent.user_id
+FROM agents agent
+WHERE event.scope_type = 'agent'
+  AND event.scope_id = agent.agent_id
+  AND event.deployment_id = agent.deployment_id
+  AND EXISTS (
+    SELECT 1
+    FROM users user_record
+    WHERE user_record.id = agent.user_id
+      AND user_record.deployment_id = agent.deployment_id
+  );
+
+UPDATE control_events
+SET scope_type = 'global', scope_id = NULL,
+    state = CASE WHEN state = 'active' THEN 'cancelled' ELSE state END
+WHERE scope_type IN ('organization', 'agent');
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='control_events_scope_type_check') THEN
