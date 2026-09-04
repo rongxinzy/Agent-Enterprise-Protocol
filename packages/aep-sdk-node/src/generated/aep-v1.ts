@@ -1466,8 +1466,8 @@ export interface components {
             /** Format: email */
             email?: string | null;
             temporaryPassword: string;
-            teamIds?: string[];
-            roleIds?: string[];
+            teamIds: string[];
+            roleIds: string[];
             /** @default true */
             requirePasswordChange: boolean;
         };
@@ -1478,8 +1478,8 @@ export interface components {
             /** Format: email */
             email?: string | null;
             temporaryPassword: string;
-            teamIds?: string[];
-            roleIds?: string[];
+            teamIds: string[];
+            roleIds: string[];
             /** @default true */
             requirePasswordChange: boolean;
         };

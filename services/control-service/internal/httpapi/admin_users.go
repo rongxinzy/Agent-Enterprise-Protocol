@@ -51,6 +51,10 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "Administrators can only create users in their enterprise.")
 		return
 	}
+	if code, detail := userMembershipProblem(input.RoleIDs, input.TeamIDs); code != "" {
+		writeProblem(response, request, http.StatusBadRequest, code, detail)
+		return
+	}
 	user, err := s.insertUser(request, input)
 	if err != nil {
 		if errors.Is(err, auth.ErrPasswordPolicy) {
@@ -91,6 +95,10 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 	created := 0
 	errorsResult := make([]map[string]string, 0)
 	for _, item := range input.Users {
+		if code, detail := userMembershipProblem(item.RoleIDs, item.TeamIDs); code != "" {
+			errorsResult = append(errorsResult, map[string]string{"externalRowId": item.ExternalRowID, "code": code, "detail": detail})
+			continue
+		}
 		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: item.TeamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
 		if err != nil {
 			code := "USER_IMPORT_FAILED"
@@ -105,6 +113,29 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 		created++
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"created": created, "rejected": len(errorsResult), "errors": errorsResult})
+}
+
+func userMembershipProblem(roleIDs, teamIDs []string) (string, string) {
+	if len(roleIDs) == 0 || len(teamIDs) == 0 {
+		return "USER_RBAC_REQUIRED", "A user must have at least one role and one team."
+	}
+	if len(roleIDs) > 64 {
+		return "INVALID_ROLE", "A user cannot have more than 64 roles."
+	}
+	if len(teamIDs) > 64 {
+		return "INVALID_TEAM", "A user cannot have more than 64 teams."
+	}
+	for _, roleID := range roleIDs {
+		if !validRBACID(roleID) {
+			return "INVALID_ROLE", "The user contains an invalid role."
+		}
+	}
+	for _, teamID := range teamIDs {
+		if !validRBACID(teamID) {
+			return "INVALID_TEAM", "The user contains an invalid team."
+		}
+	}
+	return "", ""
 }
 
 func (s *Server) insertUser(request *http.Request, input createUserRequest) (repository.UserRecord, error) {

@@ -594,15 +594,15 @@ components:
           items: {type: string}
     CreatePlatformUserRequest:
       type: object
-      required: [deploymentId, username, displayName, temporaryPassword]
+      required: [deploymentId, username, displayName, temporaryPassword, teamIds, roleIds]
       properties:
         deploymentId: {type: string}
         username: {type: string, minLength: 1, maxLength: 256}
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
         temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
-        teamIds: {type: array, items: {type: string}, uniqueItems: true}
-        roleIds: {type: array, items: {type: string}, uniqueItems: true}
+        teamIds: {type: array, minItems: 1, maxItems: 64, items: {type: string}, uniqueItems: true}
+        roleIds: {type: array, minItems: 1, maxItems: 64, items: {type: string}, uniqueItems: true}
         requirePasswordChange: {type: boolean, default: true}
     ImportPlatformUsersRequest:
       type: object
@@ -616,15 +616,15 @@ components:
           items: {$ref: '#/components/schemas/ImportPlatformUser'}
     ImportPlatformUser:
       type: object
-      required: [externalRowId, username, displayName, temporaryPassword]
+      required: [externalRowId, username, displayName, temporaryPassword, teamIds, roleIds]
       properties:
         externalRowId: {type: string}
         username: {type: string, minLength: 1, maxLength: 256}
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
         temporaryPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
-        teamIds: {type: array, items: {type: string}, uniqueItems: true}
-        roleIds: {type: array, items: {type: string}, uniqueItems: true}
+        teamIds: {type: array, minItems: 1, maxItems: 64, items: {type: string}, uniqueItems: true}
+        roleIds: {type: array, minItems: 1, maxItems: 64, items: {type: string}, uniqueItems: true}
         requirePasswordChange: {type: boolean, default: true}
     ImportPlatformUsersResponse:
       type: object
