@@ -23,7 +23,9 @@ const composeEnv = {
 const runId = Date.now().toString(36);
 
 try {
-  await compose('up', '-d', '--build');
+  // Compose can report a transient dependency failure while the control service
+  // restarts; the health checks below are the authoritative readiness gate.
+  await compose('up', '-d', '--build', true);
   await Promise.all([
     waitForHealth(controlBaseUrl + '/healthz', 180_000),
     waitForHealth('http://localhost:' + gatewayPort + '/healthz', 180_000),
