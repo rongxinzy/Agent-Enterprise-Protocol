@@ -36,7 +36,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The license is not registered for this enterprise deployment.")
 		return
 	}
-	if s.app.Config.LicenseDeploymentID != "" && claimsFrom(request).Tenant != s.app.Config.LicenseDeploymentID {
+	if s.app.Config.LicenseDeploymentID != "" && claimsFrom(request).DeploymentID != s.app.Config.LicenseDeploymentID {
 		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The authenticated enterprise is not licensed for this deployment.")
 		return
 	}

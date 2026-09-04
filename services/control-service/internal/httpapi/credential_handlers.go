@@ -254,7 +254,7 @@ func (s *Server) listCredentials(response http.ResponseWriter, request *http.Req
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 ORDER BY id", claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -289,7 +289,7 @@ func (s *Server) createCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL", "The credential descriptor is invalid or incomplete.")
 		return
 	}
-	id, tenant := uuid.NewString(), claimsFrom(request).Tenant
+	id, tenant := uuid.NewString(), claimsFrom(request).DeploymentID
 	envelope, err := s.app.Credentials.Seal(request.Context(), []byte(input.Value), credential.AssociatedData(tenant, id))
 	if err != nil {
 		writeProblem(response, request, http.StatusInternalServerError, "CREDENTIAL_ENCRYPT_FAILED", "The credential could not be encrypted.")
@@ -310,7 +310,7 @@ func (s *Server) getCredential(response http.ResponseWriter, request *http.Reque
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "credentialId")))
+	record, err := scanCredential(s.app.Pool.QueryRow(request.Context(), "SELECT "+credentialColumns+" FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId")))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
@@ -344,7 +344,7 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 		return
 	}
 	sets := []string{"updated_at=now()"}
-	arguments := []any{claimsFrom(request).Tenant, chi.URLParam(request, "credentialId")}
+	arguments := []any{claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId")}
 	if input.Name != nil {
 		appendCredentialUpdate(&sets, &arguments, "name", strings.TrimSpace(*input.Name))
 	}
@@ -383,7 +383,7 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL", "A credential value between 1 and 32768 characters is required.")
 		return
 	}
-	tenant, id := claimsFrom(request).Tenant, chi.URLParam(request, "credentialId")
+	tenant, id := claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId")
 	var exists bool
 	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, id).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)
@@ -411,7 +411,7 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).Tenant, chi.URLParam(request, "credentialId"))
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credentials WHERE deployment_id=$1 AND id=$2", claimsFrom(request).DeploymentID, chi.URLParam(request, "credentialId"))
 	if isForeignKeyViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "CREDENTIAL_IN_USE", "The credential is referenced by a model and cannot be deleted.")
 		return
@@ -436,7 +436,7 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,credential_id,subject_type,subject_id,created_at FROM credential_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), "SELECT id,credential_id,subject_type,subject_id,created_at FROM credential_assignments WHERE deployment_id=$1 ORDER BY created_at,id", claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -474,7 +474,7 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The credential and a valid assignment subject are required.")
 		return
 	}
-	tenant := claimsFrom(request).Tenant
+	tenant := claimsFrom(request).DeploymentID
 	var exists bool
 	if err := s.app.Pool.QueryRow(request.Context(), "SELECT EXISTS (SELECT 1 FROM credentials WHERE deployment_id=$1 AND id=$2)", tenant, input.CredentialID).Scan(&exists); err != nil {
 		databaseFailure(response, request, err)
@@ -505,7 +505,7 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credential_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), "DELETE FROM credential_assignments WHERE id=$1 AND deployment_id=$2", chi.URLParam(request, "assignmentId"), claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

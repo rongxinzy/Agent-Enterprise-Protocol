@@ -14,10 +14,7 @@ import (
 )
 
 type Claims struct {
-	DeploymentID string `json:"deployment_id"`
-	// Tenant is a source-compatibility alias for handlers being migrated. It is
-	// never serialized into tokens and always mirrors DeploymentID on parse.
-	Tenant                 string   `json:"-"`
+	DeploymentID           string   `json:"deployment_id"`
 	SessionID              string   `json:"session_id,omitempty"`
 	LicenseID              string   `json:"license_id,omitempty"`
 	LicenseDigest          string   `json:"license_digest,omitempty"`
@@ -124,7 +121,6 @@ func (s *Service) parse(raw, audience, tokenUse string) (*Claims, error) {
 	if !ok || !token.Valid || claims.TokenUse != tokenUse {
 		return nil, errors.New("invalid token use")
 	}
-	claims.Tenant = claims.DeploymentID
 	return claims, nil
 }
 

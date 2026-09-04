@@ -167,7 +167,7 @@ func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http
 }
 
 func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT id,skill_id,subject_type,subject_id,created_at FROM skill_assignments WHERE deployment_id=$1 ORDER BY id`, claimsFrom(request).Tenant)
+	rows, err := s.app.Pool.Query(request.Context(), `SELECT id,skill_id,subject_type,subject_id,created_at FROM skill_assignments WHERE deployment_id=$1 ORDER BY id`, claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

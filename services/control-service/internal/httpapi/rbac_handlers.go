@@ -33,7 +33,7 @@ func (s *Server) listPermissions(response http.ResponseWriter, request *http.Req
 func (s *Server) listRoles(response http.ResponseWriter, request *http.Request) {
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT r.id,r.name,r.description,r.built_in,r.enabled,COALESCE(array_agg(rp.permission_id ORDER BY rp.permission_id) FILTER (WHERE rp.permission_id IS NOT NULL),'{}')
 FROM roles r LEFT JOIN role_permissions rp ON rp.deployment_id=r.deployment_id AND rp.role_id=r.id
-WHERE r.deployment_id=$1 GROUP BY r.id,r.name,r.description,r.built_in,r.enabled ORDER BY r.id`, claimsFrom(request).Tenant)
+WHERE r.deployment_id=$1 GROUP BY r.id,r.name,r.description,r.built_in,r.enabled ORDER BY r.id`, claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -75,7 +75,7 @@ func (s *Server) createRole(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `INSERT INTO roles (deployment_id,id,name,description) VALUES ($1,$2,$3,$4)`, claimsFrom(request).Tenant, input.ID, strings.TrimSpace(input.Name), input.Description); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO roles (deployment_id,id,name,description) VALUES ($1,$2,$3,$4)`, claimsFrom(request).DeploymentID, input.ID, strings.TrimSpace(input.Name), input.Description); err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "ROLE_EXISTS", "The role already exists.")
 			return
@@ -88,7 +88,7 @@ func (s *Server) createRole(response http.ResponseWriter, request *http.Request)
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_PERMISSION", "The role contains an invalid permission.")
 			return
 		}
-		result, execErr := tx.Exec(ctx, `INSERT INTO role_permissions (deployment_id,role_id,permission_id) SELECT $1,$2,id FROM permissions WHERE id=$3`, claimsFrom(request).Tenant, input.ID, permission)
+		result, execErr := tx.Exec(ctx, `INSERT INTO role_permissions (deployment_id,role_id,permission_id) SELECT $1,$2,id FROM permissions WHERE id=$3`, claimsFrom(request).DeploymentID, input.ID, permission)
 		if execErr != nil {
 			err = execErr
 			databaseFailure(response, request, err)
@@ -109,7 +109,7 @@ func (s *Server) createRole(response http.ResponseWriter, request *http.Request)
 func (s *Server) listTeams(response http.ResponseWriter, request *http.Request) {
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT t.id,t.name,t.description,t.built_in,t.enabled,COUNT(utb.user_id)
 FROM teams t LEFT JOIN user_team_bindings utb ON utb.deployment_id=t.deployment_id AND utb.team_id=t.id
-WHERE t.deployment_id=$1 GROUP BY t.id,t.name,t.description,t.built_in,t.enabled ORDER BY t.id`, claimsFrom(request).Tenant)
+WHERE t.deployment_id=$1 GROUP BY t.id,t.name,t.description,t.built_in,t.enabled ORDER BY t.id`, claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -143,7 +143,7 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The team id and name are invalid.")
 		return
 	}
-	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO teams (deployment_id,id,name,description) VALUES ($1,$2,$3,$4)`, claimsFrom(request).Tenant, input.ID, strings.TrimSpace(input.Name), input.Description)
+	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO teams (deployment_id,id,name,description) VALUES ($1,$2,$3,$4)`, claimsFrom(request).DeploymentID, input.ID, strings.TrimSpace(input.Name), input.Description)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "TEAM_EXISTS", "The team already exists.")
@@ -173,7 +173,7 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 	defer func() { _ = tx.Rollback(ctx) }()
 	userID := chi.URLParam(request, "userId")
 	var exists bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id=$1 AND deployment_id=$2)`, userID, claimsFrom(request).Tenant).Scan(&exists); err != nil || !exists {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id=$1 AND deployment_id=$2)`, userID, claimsFrom(request).DeploymentID).Scan(&exists); err != nil || !exists {
 		if err != nil {
 			databaseFailure(response, request, err)
 		} else {
@@ -181,11 +181,11 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 		}
 		return
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM user_role_bindings WHERE deployment_id=$1 AND user_id=$2`, claimsFrom(request).Tenant, userID); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM user_role_bindings WHERE deployment_id=$1 AND user_id=$2`, claimsFrom(request).DeploymentID, userID); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM user_team_bindings WHERE deployment_id=$1 AND user_id=$2`, claimsFrom(request).Tenant, userID); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM user_team_bindings WHERE deployment_id=$1 AND user_id=$2`, claimsFrom(request).DeploymentID, userID); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -194,7 +194,7 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The user contains an invalid role.")
 			return
 		}
-		result, execErr := tx.Exec(ctx, `INSERT INTO user_role_bindings (deployment_id,user_id,role_id,is_primary) SELECT $1,$2,id,$3 FROM roles WHERE deployment_id=$1 AND id=$4`, claimsFrom(request).Tenant, userID, index == 0, roleID)
+		result, execErr := tx.Exec(ctx, `INSERT INTO user_role_bindings (deployment_id,user_id,role_id,is_primary) SELECT $1,$2,id,$3 FROM roles WHERE deployment_id=$1 AND id=$4`, claimsFrom(request).DeploymentID, userID, index == 0, roleID)
 		if execErr != nil {
 			err = execErr
 			databaseFailure(response, request, err)
@@ -210,7 +210,7 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The user contains an invalid team.")
 			return
 		}
-		result, execErr := tx.Exec(ctx, `INSERT INTO user_team_bindings (deployment_id,user_id,team_id,is_primary) SELECT $1,$2,id,$3 FROM teams WHERE deployment_id=$1 AND id=$4`, claimsFrom(request).Tenant, userID, index == 0, teamID)
+		result, execErr := tx.Exec(ctx, `INSERT INTO user_team_bindings (deployment_id,user_id,team_id,is_primary) SELECT $1,$2,id,$3 FROM teams WHERE deployment_id=$1 AND id=$4`, claimsFrom(request).DeploymentID, userID, index == 0, teamID)
 		if execErr != nil {
 			err = execErr
 			databaseFailure(response, request, err)

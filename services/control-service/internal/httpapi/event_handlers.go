@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-
 )
 
 func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) {
@@ -278,7 +277,7 @@ func (s *Server) getAdminControlEvent(response http.ResponseWriter, request *htt
 func (s *Server) adminEvents(response http.ResponseWriter, request *http.Request, eventID string) {
 	rows, err := s.app.Pool.Query(request.Context(), `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
 count(*) FILTER(WHERE d.state='pending'),count(*) FILTER(WHERE d.state='received'),count(*) FILTER(WHERE d.state='running'),count(*) FILTER(WHERE d.state='succeeded'),count(*) FILTER(WHERE d.state='failed'),count(*) FILTER(WHERE d.state='expired'),count(*) FILTER(WHERE d.state='superseded')
-FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).Tenant, eventID, limit(request))
+FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, eventID, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -310,7 +309,7 @@ FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.eve
 
 func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active'`, eventID, claimsFrom(request).Tenant)
+	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active'`, eventID, claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -325,7 +324,7 @@ func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.
 
 func (s *Server) listControlEventDeliveries(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
-	tenant := claimsFrom(request).Tenant
+	tenant := claimsFrom(request).DeploymentID
 	_, err := s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
@@ -400,7 +399,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE deployment_id=$1 AND ($2='' OR user_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).Tenant, request.URL.Query().Get("userId"), limit(request))
+	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE deployment_id=$1 AND ($2='' OR user_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, request.URL.Query().Get("userId"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

@@ -162,6 +162,23 @@ func TestInternalDataPlaneEndpointRequiresServiceToken(t *testing.T) {
 	}
 }
 
+func TestInternalDataPlaneUsesDeploymentHeader(t *testing.T) {
+	server := &Server{app: &app.App{Config: config.Config{DataPlaneReconcilerToken: "service-token"}}}
+	var observed string
+	handler := server.internalDataPlane(func(response http.ResponseWriter, request *http.Request) {
+		observed = claimsFrom(request).DeploymentID
+		response.WriteHeader(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodPut, "/internal/data-plane/status", nil)
+	request.Header.Set("X-AEP-Data-Plane-Token", "service-token")
+	request.Header.Set("X-AEP-Deployment-ID", "deployment-42")
+	response := httptest.NewRecorder()
+	handler(response, request)
+	if response.Code != http.StatusNoContent || observed != "deployment-42" {
+		t.Fatalf("internal deployment status = %d, deployment = %q", response.Code, observed)
+	}
+}
+
 func TestProtocolVersionGate(t *testing.T) {
 	observedResponses := 0
 	observe := func(next http.Handler) http.Handler {

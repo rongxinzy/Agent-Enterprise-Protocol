@@ -48,7 +48,7 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.DeploymentID != claimsFrom(request).Tenant {
+	if input.DeploymentID != claimsFrom(request).DeploymentID {
 		writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "Administrators can only create users in their enterprise.")
 		return
 	}
@@ -85,7 +85,7 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.DeploymentID != claimsFrom(request).Tenant || len(input.Users) == 0 || len(input.Users) > 1000 {
+	if input.DeploymentID != claimsFrom(request).DeploymentID || len(input.Users) == 0 || len(input.Users) > 1000 {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The import must contain 1 to 1000 users for the current enterprise.")
 		return
 	}
@@ -153,11 +153,11 @@ func (s *Server) insertUser(request *http.Request, input createUserRequest) (db.
 
 func (s *Server) updateUser(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		DisplayName     *string   `json:"displayName"`
-		Email           *string   `json:"email"`
-		Status          *string   `json:"status"`
-		TeamIDs         *[]string `json:"teamIds"`
-		RoleIDs         *[]string `json:"roleIds"`
+		DisplayName *string   `json:"displayName"`
+		Email       *string   `json:"email"`
+		Status      *string   `json:"status"`
+		TeamIDs     *[]string `json:"teamIds"`
+		RoleIDs     *[]string `json:"roleIds"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return

@@ -19,24 +19,24 @@ type licenseImportRequest struct {
 }
 
 type licenseRecord struct {
-	LicenseID    string
-	DeploymentID string
-	CustomerID   string
-	Digest       string
-	KeyID        string
-	Status       string
-	IssuedAt     time.Time
-	ExpiresAt    time.Time
-	GraceEndsAt  time.Time
-	UserLimit    int
-	ActivationLimit int
-	Features     []string
-	Payload      []byte
-	RevokedAt    *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	LicenseID         string
+	DeploymentID      string
+	CustomerID        string
+	Digest            string
+	KeyID             string
+	Status            string
+	IssuedAt          time.Time
+	ExpiresAt         time.Time
+	GraceEndsAt       time.Time
+	UserLimit         int
+	ActivationLimit   int
+	Features          []string
+	Payload           []byte
+	RevokedAt         *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 	ActiveActivations int
-	ActiveUsers  int
+	ActiveUsers       int
 }
 
 func scanLicense(row interface{ Scan(...any) error }) (licenseRecord, error) {
@@ -122,7 +122,7 @@ func (s *Server) getLicense(response http.ResponseWriter, request *http.Request)
 }
 
 func (s *Server) findLicense(request *http.Request, id string) (licenseRecord, error) {
-	return scanLicense(s.app.Pool.QueryRow(request.Context(), `SELECT `+licenseColumns+` FROM licenses l WHERE l.deployment_id=$1 AND l.license_id=$2`, claimsFrom(request).Tenant, id))
+	return scanLicense(s.app.Pool.QueryRow(request.Context(), `SELECT `+licenseColumns+` FROM licenses l WHERE l.deployment_id=$1 AND l.license_id=$2`, claimsFrom(request).DeploymentID, id))
 }
 
 func (s *Server) importLicense(response http.ResponseWriter, request *http.Request) {
@@ -173,7 +173,7 @@ func (s *Server) revokeLicense(response http.ResponseWriter, request *http.Reque
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
 	var status string
-	err = tx.QueryRow(request.Context(), `SELECT status FROM licenses WHERE deployment_id=$1 AND license_id=$2 FOR UPDATE`, claimsFrom(request).Tenant, id).Scan(&status)
+	err = tx.QueryRow(request.Context(), `SELECT status FROM licenses WHERE deployment_id=$1 AND license_id=$2 FOR UPDATE`, claimsFrom(request).DeploymentID, id).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The license was not found.")
 		return
@@ -183,16 +183,16 @@ func (s *Server) revokeLicense(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	if status == "active" {
-		if _, err = tx.Exec(request.Context(), `UPDATE licenses SET status='revoked',revoked_at=now(),updated_at=now() WHERE deployment_id=$1 AND license_id=$2`, claimsFrom(request).Tenant, id); err != nil {
+		if _, err = tx.Exec(request.Context(), `UPDATE licenses SET status='revoked',revoked_at=now(),updated_at=now() WHERE deployment_id=$1 AND license_id=$2`, claimsFrom(request).DeploymentID, id); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
-		if _, err = tx.Exec(request.Context(), `UPDATE license_activations SET revoked_at=COALESCE(revoked_at,now()) WHERE deployment_id=$1 AND license_id=$2`, claimsFrom(request).Tenant, id); err != nil {
+		if _, err = tx.Exec(request.Context(), `UPDATE license_activations SET revoked_at=COALESCE(revoked_at,now()) WHERE deployment_id=$1 AND license_id=$2`, claimsFrom(request).DeploymentID, id); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
-	if _, err = tx.Exec(request.Context(), `INSERT INTO license_audit_events (id,deployment_id,license_id,actor_user_id,action,outcome) VALUES ($1,$2,$3,$4,'revoke','success')`, uuid.NewString(), claimsFrom(request).Tenant, id, claimsFrom(request).Subject); err != nil {
+	if _, err = tx.Exec(request.Context(), `INSERT INTO license_audit_events (id,deployment_id,license_id,actor_user_id,action,outcome) VALUES ($1,$2,$3,$4,'revoke','success')`, uuid.NewString(), claimsFrom(request).DeploymentID, id, claimsFrom(request).Subject); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
@@ -204,6 +204,6 @@ func (s *Server) revokeLicense(response http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) recordLicenseAudit(request *http.Request, licenseID, action, outcome string, reason *string) error {
-	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO license_audit_events (id,deployment_id,license_id,actor_user_id,action,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7)`, uuid.NewString(), claimsFrom(request).Tenant, licenseID, claimsFrom(request).Subject, action, outcome, reason)
+	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO license_audit_events (id,deployment_id,license_id,actor_user_id,action,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7)`, uuid.NewString(), claimsFrom(request).DeploymentID, licenseID, claimsFrom(request).Subject, action, outcome, reason)
 	return err
 }
