@@ -165,6 +165,15 @@ func (s *Store) ListSkills(ctx context.Context) ([]Skill, error) {
 	return items, err
 }
 
+func (s *Store) ListSkillVersions(ctx context.Context, skillID string) ([]SkillVersion, error) {
+	items := make([]SkillVersion, 0)
+	err := s.db.WithContext(ctx).
+		Where("skill_id = ?", skillID).
+		Order("created_at DESC, version DESC").
+		Find(&items).Error
+	return items, err
+}
+
 func (s *Store) CreateSkill(ctx context.Context, skill Skill) (Skill, error) {
 	err := s.db.WithContext(ctx).Create(&skill).Error
 	return skill, err
