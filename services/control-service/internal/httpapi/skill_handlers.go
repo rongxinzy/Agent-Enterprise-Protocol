@@ -353,7 +353,7 @@ func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, cr
 SELECT gen_random_uuid()::text,$1,s.session_id
 FROM user_sessions s JOIN users u ON u.id=s.user_id
 WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
-  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)))
+  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)) OR ($3='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4)))
 ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
 	if err != nil {
 		return err

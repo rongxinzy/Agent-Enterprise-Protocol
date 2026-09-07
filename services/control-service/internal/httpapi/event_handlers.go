@@ -198,8 +198,8 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The event expiry must be in the future.")
 		return
 	}
-	if input.Scope.Type != "global" && input.Scope.Type != "team" && input.Scope.Type != "user" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE", "Control event scope must be global, team, or user.")
+	if input.Scope.Type != "global" && input.Scope.Type != "team" && input.Scope.Type != "role" && input.Scope.Type != "user" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE", "Control event scope must be global, team, role, or user.")
 		return
 	}
 	claims := claimsFrom(request)
@@ -238,6 +238,10 @@ WHERE s.deployment_id=$1 AND s.revoked_at IS NULL
   AND ($2='global' OR ($2='user' AND s.user_id=$3) OR ($2='team' AND EXISTS (
     SELECT 1 FROM user_team_bindings utb
     WHERE utb.deployment_id=$1 AND utb.user_id=s.user_id AND utb.team_id=$3
+  )) OR ($2='role' AND EXISTS (
+    SELECT 1 FROM user_role_bindings urb
+    JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
+    WHERE urb.deployment_id=$1 AND urb.user_id=s.user_id AND urb.role_id=$3
   )))`, claims.DeploymentID, input.Scope.Type, input.Scope.ID)
 	if err != nil {
 		databaseFailure(response, request, err)

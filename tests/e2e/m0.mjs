@@ -47,6 +47,18 @@ async function runScenario() {
   const username = `user-${runId}`;
   const password = 'temporary-password-123';
   const user = await runCli(['user', 'create', '--user', username, '--display-name', `E2E User ${runId}`, '--temporary-password', password, '--require-password-change=false']);
+  const role = await admin.createRole({
+    id: `skill-role-${runId}`,
+    name: `Skill Role ${runId}`,
+    description: 'M0 Skill authorization role',
+    permissions: [],
+  });
+  const team = await admin.createTeam({
+    id: `skill-team-${runId}`,
+    name: `Skill Team ${runId}`,
+    description: 'M0 Skill authorization team',
+  });
+  await admin.replaceUserRBAC(user.id, {roleIds: [role.id], teamIds: [team.id]});
   const skillId = `review-${runId}`;
   const archivePath = path.join(tempDirectory, `${skillId}.zip`);
   fs.writeFileSync(archivePath, await createSkillArchive());
@@ -54,6 +66,8 @@ async function runScenario() {
   await runCli(['skill', 'upload', '--skill-id', skillId, '--version', '1.0.0', '--file', archivePath]);
   await runCli(['skill', 'publish', '--skill-id', skillId, '--version', '1.0.0']);
   const assignment = await runCli(['skill', 'assign', '--skill-id', skillId, '--subject-type', 'user', '--subject-id', String(user.id)]);
+  const roleAssignment = await admin.createSkillAssignment({skillId, subject: {type: 'role', id: role.id}});
+  const teamAssignment = await admin.createSkillAssignment({skillId, subject: {type: 'team', id: team.id}});
 
   const agentData = path.join(tempDirectory, 'agent');
   const installEventId = await automaticSkillEventId(skillId, 'assigned:');
@@ -80,6 +94,12 @@ async function runScenario() {
   await waitForHealth();
 
   await runCli(['skill', 'revoke', '--assignment-id', String(assignment.id)]);
+  await runAgent(username, password, agentData);
+  assert(fs.existsSync(installedSkill), 'Skill was removed while Role and Team assignments remained');
+  await admin.deleteSkillAssignment(roleAssignment.id);
+  await runAgent(username, password, agentData);
+  assert(fs.existsSync(installedSkill), 'Skill was removed while Team assignment remained');
+  await admin.deleteSkillAssignment(teamAssignment.id);
   const removeEventId = await automaticSkillEventId(skillId, 'revoked:');
   await runAgent(username, password, agentData);
   assert(!fs.existsSync(path.join(agentData, 'managed-skills', skillId)), 'Revoked managed Skill still exists');
