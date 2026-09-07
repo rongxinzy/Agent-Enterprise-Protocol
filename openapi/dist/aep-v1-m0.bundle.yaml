@@ -559,6 +559,9 @@ paths:
       operationId: listRoles
       security:
         - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Deployment roles
@@ -670,6 +673,9 @@ paths:
       operationId: listTeams
       security:
         - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Deployment teams
@@ -807,6 +813,9 @@ paths:
       tags:
         - Admin Skills
       operationId: listSkills
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Skill list
@@ -1583,6 +1592,7 @@ components:
         - deploymentId
         - sessionId
         - roles
+        - permissions
         - sessionExpiresAt
         - passwordChangeRequired
       properties:
@@ -1597,6 +1607,11 @@ components:
           type: string
         roles:
           type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          uniqueItems: true
           items:
             type: string
         sessionExpiresAt:
@@ -2118,6 +2133,8 @@ components:
         - username
         - displayName
         - temporaryPassword
+        - teamIds
+        - roleIds
       properties:
         deploymentId:
           type: string
@@ -2141,11 +2158,15 @@ components:
           writeOnly: true
         teamIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
         roleIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
@@ -2159,6 +2180,8 @@ components:
         - username
         - displayName
         - temporaryPassword
+        - teamIds
+        - roleIds
       properties:
         externalRowId:
           type: string
@@ -2182,11 +2205,15 @@ components:
           writeOnly: true
         teamIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
         roleIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
@@ -2322,11 +2349,16 @@ components:
       type: object
       required:
         - roles
+        - nextCursor
       properties:
         roles:
           type: array
           items:
             $ref: '#/components/schemas/Role'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CreateRoleRequest:
       type: object
       required:
@@ -2398,11 +2430,16 @@ components:
       type: object
       required:
         - teams
+        - nextCursor
       properties:
         teams:
           type: array
           items:
             $ref: '#/components/schemas/Team'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CreateTeamRequest:
       type: object
       required:
@@ -2537,11 +2574,16 @@ components:
       type: object
       required:
         - skills
+        - nextCursor
       properties:
         skills:
           type: array
           items:
             $ref: '#/components/schemas/AdminSkill'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillWrite:
       type: object
       required:

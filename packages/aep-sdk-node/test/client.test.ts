@@ -288,6 +288,7 @@ describe('AepClient SDK gate', () => {
     expect((await client.updateTeam('support', {enabled: false})).id).toBe('support');
     await client.deleteTeam('support');
     expect((await client.replaceUserRBAC('user-1', {roleIds: ['operator'], teamIds: ['support']})).userId).toBe('user-1');
+    await client.revokeUserSession('session-1');
     expect((await client.listAdminControlEvents()).items).toEqual([]);
     expect((await client.getAdminControlEvent('event-1')).eventId).toBe('event-1');
     expect((await client.cancelControlEvent('event-1')).eventId).toBe('event-1');
@@ -300,9 +301,28 @@ describe('AepClient SDK gate', () => {
       'GET /aep/v1/admin/permissions', 'POST /aep/v1/admin/roles', 'PATCH /aep/v1/admin/roles/operator',
       'DELETE /aep/v1/admin/roles/operator', 'POST /aep/v1/admin/teams', 'PATCH /aep/v1/admin/teams/support',
       'DELETE /aep/v1/admin/teams/support', 'PUT /aep/v1/admin/users/user-1/rbac',
+      'POST /aep/v1/admin/sessions/session-1/revoke',
       'GET /aep/v1/admin/control-events', 'GET /aep/v1/admin/control-events/event-1',
       'POST /aep/v1/admin/control-events/event-1/cancel', 'POST /aep/v1/admin/licenses/import',
       'POST /aep/v1/admin/licenses/lic-1/revoke',
     ]));
+  });
+
+  test('encodes pagination filters for admin resource lists', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await client.listRoles({cursor: 'role-2', limit: 25});
+    await client.listTeams({cursor: 'team-2', limit: 25});
+    await client.listSkills({cursor: 'skill-2', limit: 25});
+    await client.listCredentials({cursor: 'credential-2', limit: 25});
+    await client.listAdminModels({cursor: 'model-2', limit: 25});
+
+    const requests = server.requests.filter(request => request.search !== '');
+    expect(requests.slice(-5).map(request => request.search)).toEqual([
+      '?cursor=role-2&limit=25',
+      '?cursor=team-2&limit=25',
+      '?cursor=skill-2&limit=25',
+      '?cursor=credential-2&limit=25',
+      '?cursor=model-2&limit=25',
+    ]);
   });
 });

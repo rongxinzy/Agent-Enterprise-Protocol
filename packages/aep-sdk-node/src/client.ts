@@ -253,6 +253,15 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/sessions?${query(filters)}`});
   }
 
+  revokeUserSession(sessionId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: `/aep/v1/admin/sessions/${segment(sessionId)}/revoke`,
+      responseType: 'empty',
+      retry: false,
+    });
+  }
+
   async getModelConnection(): Promise<ModelConnection> {
     const [metadata, tokens] = await Promise.all([this.getMetadata(), this.#loadOrRestoreTokens()]);
     if (!metadata.capabilities.includes(AepCapability.ModelGateway) || !metadata.modelGateway) {
@@ -425,8 +434,8 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/permissions'});
   }
 
-  listRoles(): Promise<RolePage> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/roles'});
+  listRoles(filters: Query = {}): Promise<RolePage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/roles?${query(filters)}`});
   }
 
   createRole(input: CreateRoleRequest): Promise<Role> {
@@ -445,8 +454,8 @@ export class AepClient {
     return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/roles/${segment(roleId)}`, responseType: 'empty'});
   }
 
-  listTeams(): Promise<TeamPage> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/teams'});
+  listTeams(filters: Query = {}): Promise<TeamPage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/teams?${query(filters)}`});
   }
 
   createTeam(input: CreateTeamRequest): Promise<Team> {
@@ -469,8 +478,8 @@ export class AepClient {
     return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/users/${segment(userId)}/rbac`, body: asJson(input)});
   }
 
-  listSkills(): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/skills'});
+  listSkills(filters: Query = {}): Promise<JsonObject> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/skills?${query(filters)}`});
   }
 
   createSkill(input: JsonObject): Promise<JsonObject> {
@@ -543,8 +552,8 @@ export class AepClient {
     });
   }
 
-  listCredentials(): Promise<CredentialList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/credentials'});
+  listCredentials(filters: Query = {}): Promise<CredentialList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/credentials?${query(filters)}`});
   }
 
   createCredential(input: CredentialCreate): Promise<CredentialMetadata> {
@@ -600,8 +609,8 @@ export class AepClient {
     });
   }
 
-  listAdminModels(): Promise<AdminModelList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/models'});
+  listAdminModels(filters: Query = {}): Promise<AdminModelList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/models?${query(filters)}`});
   }
 
   createModel(input: AdminModelWrite): Promise<AdminModel> {

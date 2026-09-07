@@ -616,6 +616,9 @@ paths:
       operationId: listRoles
       security:
         - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Deployment roles
@@ -727,6 +730,9 @@ paths:
       operationId: listTeams
       security:
         - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Deployment teams
@@ -924,11 +930,38 @@ paths:
           $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
+  /aep/v1/admin/sessions/{sessionId}/revoke:
+    post:
+      tags:
+        - Admin Users
+      operationId: revokeUserSession
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        '204':
+          description: Session revoked
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
   /aep/v1/admin/skills:
     get:
       tags:
         - Admin Skills
       operationId: listSkills
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Skill list
@@ -1291,6 +1324,9 @@ paths:
       tags:
         - Admin Credentials
       operationId: listCredentials
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Masked credential metadata
@@ -1397,6 +1433,9 @@ paths:
       tags:
         - Admin Models
       operationId: listModels
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           description: Model descriptors
@@ -2094,6 +2133,7 @@ components:
         - deploymentId
         - sessionId
         - roles
+        - permissions
         - sessionExpiresAt
         - passwordChangeRequired
       properties:
@@ -2108,6 +2148,11 @@ components:
           type: string
         roles:
           type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          uniqueItems: true
           items:
             type: string
         sessionExpiresAt:
@@ -2604,11 +2649,16 @@ components:
       type: object
       required:
         - credentials
+        - nextCursor
       properties:
         credentials:
           type: array
           items:
             $ref: '#/components/schemas/CredentialMetadata'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     ResolveCredentialRequest:
       type: object
       required:
@@ -2778,6 +2828,8 @@ components:
         - username
         - displayName
         - temporaryPassword
+        - teamIds
+        - roleIds
       properties:
         deploymentId:
           type: string
@@ -2801,11 +2853,15 @@ components:
           writeOnly: true
         teamIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
         roleIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
@@ -2819,6 +2875,8 @@ components:
         - username
         - displayName
         - temporaryPassword
+        - teamIds
+        - roleIds
       properties:
         externalRowId:
           type: string
@@ -2842,11 +2900,15 @@ components:
           writeOnly: true
         teamIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
         roleIds:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: string
           uniqueItems: true
@@ -2982,11 +3044,16 @@ components:
       type: object
       required:
         - roles
+        - nextCursor
       properties:
         roles:
           type: array
           items:
             $ref: '#/components/schemas/Role'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CreateRoleRequest:
       type: object
       required:
@@ -3058,11 +3125,16 @@ components:
       type: object
       required:
         - teams
+        - nextCursor
       properties:
         teams:
           type: array
           items:
             $ref: '#/components/schemas/Team'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CreateTeamRequest:
       type: object
       required:
@@ -3197,11 +3269,16 @@ components:
       type: object
       required:
         - skills
+        - nextCursor
       properties:
         skills:
           type: array
           items:
             $ref: '#/components/schemas/AdminSkill'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillWrite:
       type: object
       required:
@@ -3737,11 +3814,16 @@ components:
       type: object
       required:
         - models
+        - nextCursor
       properties:
         models:
           type: array
           items:
             $ref: '#/components/schemas/AdminModel'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     AdminModelWrite:
       allOf:
         - $ref: '#/components/schemas/UserModel'

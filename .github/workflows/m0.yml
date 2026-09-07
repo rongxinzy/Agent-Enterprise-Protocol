@@ -105,6 +105,26 @@ jobs:
       - run: npm ci
       - run: npm run test:e2e:m3-kubernetes
 
+  backup-restore:
+    needs:
+      - control-service
+      - example-agent
+    runs-on: ubuntu-latest
+    env:
+      GOPROXY: https://proxy.golang.org,direct
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.x
+          cache: true
+      - run: npm ci
+      - run: npm run test:e2e:backup-restore
+
   release-gate:
     needs:
       - sdk-gate
@@ -112,6 +132,7 @@ jobs:
       - example-agent
       - compose-e2e
       - data-plane-kubernetes
+      - backup-restore
     runs-on: ubuntu-latest
     steps:
       - run: echo "AEP 95% release gate passed."

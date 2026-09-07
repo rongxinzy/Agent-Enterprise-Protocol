@@ -37,7 +37,7 @@ const packageDocument = await readJSON("package.json");
 assert(packageDocument.version === release.packageVersion, "package version does not match release manifest");
 assert(packageDocument.scripts?.["release:audit"] === "node scripts/release-audit.mjs", "release:audit script is not wired");
 assert(packageDocument.scripts?.["sdk:package:check"]?.includes("scripts/sdk-package-check.mjs"), "SDK package check is not wired");
-for (const command of ["npm run check", "npm run release:audit", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e"]) {
+for (const command of ["npm run check", "npm run release:audit", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e", "npm run test:e2e:backup-restore"]) {
   assert(packageDocument.scripts?.["release:check"]?.includes(command), "release:check omits " + command);
 }
 
@@ -112,6 +112,7 @@ assert(workflow.includes("npm run sdk:package:check"), "CI does not test the ins
 assert(workflow.includes("go test -race ./..."), "CI does not run the Go race detector");
 assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
 assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
+assert(workflow.includes("backup-restore:"), "CI does not run the backup and restore rehearsal");
 assert(sdkReleaseWorkflow.includes("sdk-node-v*"), "SDK release workflow does not use versioned tags");
 assert(sdkReleaseWorkflow.includes("git merge-base --is-ancestor"), "SDK release tags are not constrained to main history");
 assert(sdkReleaseWorkflow.includes("npm run sdk:package:check"), "SDK release workflow bypasses the package check");

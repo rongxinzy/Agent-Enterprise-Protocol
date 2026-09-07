@@ -62,7 +62,7 @@ async function runScenario() {
     id: roleId,
     name: 'M2 Role',
     description: 'M2 credential control test role',
-    permissions: ['credentials.read'],
+    permissions: ['credentials.read', 'licenses.read'],
   }, adminStore);
   await adminRequest('/aep/v1/admin/teams', {
     id: teamId,
@@ -83,13 +83,26 @@ async function runScenario() {
   assert(listedUser?.teamIds?.includes(teamId), 'User list omitted the assigned Team');
   const roles = await adminGet('/aep/v1/admin/roles', adminStore);
   const listedRole = roles.roles.find(item => item.id === roleId);
-  assert(listedRole?.permissions?.includes('credentials.read'), 'Role list omitted the assigned permission');
+  assert(listedRole?.permissions?.includes('credentials.read') && listedRole.permissions.includes('licenses.read'), 'Role list omitted the assigned permissions');
   const teams = await adminGet('/aep/v1/admin/teams', adminStore);
   const listedTeam = teams.teams.find(item => item.id === teamId);
   assert(listedTeam?.memberCount === 1, 'Team list returned the wrong member count');
   const userStore = new MemoryTokenStore();
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
   await userClient.loginWithPassword({deploymentId: 'demo', username, password});
+
+  const readOnlyTokens = await userStore.get();
+  const deniedLicenseImport = await fetch(baseUrl + '/aep/v1/admin/licenses/import', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + readOnlyTokens.accessToken,
+      'Content-Type': 'application/json',
+      'X-AEP-Protocol-Version': '1.0',
+    },
+    body: JSON.stringify({license: {}}),
+  });
+  const deniedLicenseImportBody = await deniedLicenseImport.json();
+  assert(deniedLicenseImport.status === 403 && deniedLicenseImportBody.code === 'ACCESS_DENIED', 'licenses.read unexpectedly permitted License import');
 
   const subjects = [
     {type: 'user', id: user.id},

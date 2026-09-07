@@ -160,8 +160,20 @@ type UpdateCredentialParams struct {
 }
 
 func (s *Store) ListSkills(ctx context.Context) ([]Skill, error) {
+	return s.ListSkillsPage(ctx, "", 0)
+}
+
+func (s *Store) ListSkillsPage(ctx context.Context, cursor string, fetchLimit int32) ([]Skill, error) {
 	items := make([]Skill, 0)
-	err := s.db.WithContext(ctx).Order("id").Find(&items).Error
+	query := s.db.WithContext(ctx)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Find(&items).Error
 	return items, err
 }
 
@@ -247,8 +259,20 @@ func (s *DeploymentStore) ListSkillAssignments(ctx context.Context) ([]SkillAssi
 }
 
 func (s *DeploymentStore) ListCredentials(ctx context.Context) ([]Credential, error) {
+	return s.ListCredentialsPage(ctx, "", 0)
+}
+
+func (s *DeploymentStore) ListCredentialsPage(ctx context.Context, cursor string, fetchLimit int32) ([]Credential, error) {
 	items := make([]Credential, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("id").Find(&items).Error
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Find(&items).Error
 	return items, err
 }
 
@@ -336,8 +360,20 @@ func (s *DeploymentStore) DeleteCredentialAssignment(ctx context.Context, id str
 }
 
 func (s *DeploymentStore) ListModels(ctx context.Context) ([]Model, error) {
+	return s.ListModelsPage(ctx, "", 0)
+}
+
+func (s *DeploymentStore) ListModelsPage(ctx context.Context, cursor string, fetchLimit int32) ([]Model, error) {
 	items := make([]Model, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("id").Find(&items).Error
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Find(&items).Error
 	return items, err
 }
 

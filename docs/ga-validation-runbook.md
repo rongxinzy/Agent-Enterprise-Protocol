@@ -18,6 +18,12 @@ read-only authenticated endpoint only when the test environment explicitly
 provides the required headers through an approved test wrapper. A run is
 successful only when the error rate stays below the configured threshold.
 
+The same check is available as a manually triggered `AEP GA load validation`
+workflow. It starts a disposable Compose control service, waits for readiness,
+stores the JSON result as `artifacts/load-summary.json`, and uploads that file
+as a workflow artifact. Set the workflow inputs to the approved test window;
+the default is 300 seconds with 16 workers and a 1% error-rate threshold.
+
 Record the output, deployment image digests, database/object-store versions,
 and the test window as release evidence. This harness is one input to the GA
 gate; it does not replace an external security review or a backup and disaster

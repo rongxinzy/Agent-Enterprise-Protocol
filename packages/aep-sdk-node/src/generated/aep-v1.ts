@@ -542,6 +542,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/sessions/{sessionId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["revokeUserSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skills": {
         parameters: {
             query?: never;
@@ -1191,6 +1207,7 @@ export interface components {
             deploymentId: string;
             sessionId: string;
             roles: string[];
+            permissions: string[];
             /** Format: date-time */
             sessionExpiresAt: string;
             passwordChangeRequired: boolean;
@@ -1402,6 +1419,7 @@ export interface components {
         };
         CredentialList: {
             credentials: components["schemas"]["CredentialMetadata"][];
+            nextCursor: string | null;
         };
         ResolveCredentialRequest: {
             purpose: string;
@@ -1474,8 +1492,8 @@ export interface components {
             /** Format: email */
             email?: string | null;
             temporaryPassword: string;
-            teamIds?: string[];
-            roleIds?: string[];
+            teamIds: string[];
+            roleIds: string[];
             /** @default true */
             requirePasswordChange: boolean;
         };
@@ -1486,8 +1504,8 @@ export interface components {
             /** Format: email */
             email?: string | null;
             temporaryPassword: string;
-            teamIds?: string[];
-            roleIds?: string[];
+            teamIds: string[];
+            roleIds: string[];
             /** @default true */
             requirePasswordChange: boolean;
         };
@@ -1535,6 +1553,7 @@ export interface components {
         };
         RolePage: {
             roles: components["schemas"]["Role"][];
+            nextCursor: string | null;
         };
         CreateRoleRequest: {
             id: string;
@@ -1558,6 +1577,7 @@ export interface components {
         };
         TeamPage: {
             teams: components["schemas"]["Team"][];
+            nextCursor: string | null;
         };
         CreateTeamRequest: {
             id: string;
@@ -1602,6 +1622,7 @@ export interface components {
         };
         AdminSkillList: {
             skills: components["schemas"]["AdminSkill"][];
+            nextCursor: string | null;
         };
         SkillWrite: {
             id: string;
@@ -1794,6 +1815,7 @@ export interface components {
         };
         AdminModelList: {
             models: components["schemas"]["AdminModel"][];
+            nextCursor: string | null;
         };
         AdminModelWrite: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
@@ -2680,7 +2702,10 @@ export interface operations {
     };
     listRoles: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2809,7 +2834,10 @@ export interface operations {
     };
     listTeams: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3003,9 +3031,35 @@ export interface operations {
             403: components["responses"]["Problem"];
         };
     };
-    listSkills: {
+    revokeUserSession: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listSkills: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3439,7 +3493,10 @@ export interface operations {
     };
     listCredentials: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3595,7 +3652,10 @@ export interface operations {
     };
     listModels: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;

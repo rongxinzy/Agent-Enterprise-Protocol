@@ -20,11 +20,13 @@ import (
 )
 
 func (s *Server) listSkills(response http.ResponseWriter, request *http.Request) {
-	skills, err := s.app.Store.ListSkills(request.Context())
+	pageSize := limit(request)
+	skills, err := s.app.Store.ListSkillsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	skills, nextCursor := page(skills, pageSize, func(item repository.Skill) string { return item.ID })
 	items := make([]map[string]any, 0, len(skills))
 	for _, skill := range skills {
 		versions, versionErr := s.app.Store.ListSkillVersions(request.Context(), skill.ID)
@@ -34,7 +36,7 @@ func (s *Server) listSkills(response http.ResponseWriter, request *http.Request)
 		}
 		items = append(items, skillJSON(skill, versions))
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"skills": items})
+	writeJSON(response, http.StatusOK, map[string]any{"skills": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createSkill(response http.ResponseWriter, request *http.Request) {

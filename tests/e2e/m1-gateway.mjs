@@ -55,7 +55,7 @@ async function runScenario() {
   const password = 'temporary-password-123';
   const user = await admin.createUser({
     deploymentId: 'demo', username, displayName: 'Gateway User ' + runId,
-    temporaryPassword: password, requirePasswordChange: false, teamIds: [], roleIds: [],
+    temporaryPassword: password, requirePasswordChange: false, teamIds: ['all-users'], roleIds: ['admin'],
   });
   await admin.createModel({
     id: 'enterprise-chat', displayName: 'Enterprise Chat', sourceType: 'gateway',

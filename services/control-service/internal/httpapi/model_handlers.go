@@ -205,16 +205,18 @@ func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) listModels(response http.ResponseWriter, request *http.Request) {
-	models, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListModels(request.Context())
+	pageSize := limit(request)
+	models, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListModelsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	models, nextCursor := page(models, pageSize, func(item repository.Model) string { return item.ID })
 	items := make([]map[string]any, 0, len(models))
 	for _, model := range models {
 		items = append(items, modelJSON(model, true))
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"models": items})
+	writeJSON(response, http.StatusOK, map[string]any{"models": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createModel(response http.ResponseWriter, request *http.Request) {

@@ -1,0 +1,65 @@
+name: AEP GA load validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Load duration in seconds
+        required: false
+        default: '300'
+      concurrency:
+        description: Number of concurrent workers
+        required: false
+        default: '16'
+      max_error_rate:
+        description: Maximum accepted error rate
+        required: false
+        default: '0.01'
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Start disposable control service
+        run: npm run compose:up
+      - name: Wait for readiness
+        shell: bash
+        run: |
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f deploy/compose/compose.yaml logs control-service
+          exit 1
+      - name: Run load validation
+        env:
+          AEP_LOAD_BASE_URL: http://127.0.0.1:8080
+          AEP_LOAD_DURATION_SECONDS: ${{ inputs.duration_seconds }}
+          AEP_LOAD_CONCURRENCY: ${{ inputs.concurrency }}
+          AEP_LOAD_MAX_ERROR_RATE: ${{ inputs.max_error_rate }}
+          AEP_LOAD_OUTPUT_FILE: artifacts/load-summary.json
+        run: |
+          mkdir -p artifacts
+          npm run test:e2e:load
+      - name: Upload load evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aep-ga-load-${{ github.run_id }}
+          path: artifacts/load-summary.json
+          if-no-files-found: warn
+      - name: Stop disposable control service
+        if: always()
+        run: npm run compose:down

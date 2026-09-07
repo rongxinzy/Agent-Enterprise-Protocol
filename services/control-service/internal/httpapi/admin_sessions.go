@@ -1,8 +1,13 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 )
 
 // listUserSessions exposes terminal sessions as the canonical operational
@@ -37,4 +42,15 @@ ORDER BY last_seen_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, request.
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nil})
+}
+
+func (s *Server) revokeUserSession(response http.ResponseWriter, request *http.Request) {
+	if err := s.app.RevokeUserSessionByID(request.Context(), claimsFrom(request).DeploymentID, chi.URLParam(request, "sessionId")); errors.Is(err, app.ErrSessionNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user session was not found.")
+		return
+	} else if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }

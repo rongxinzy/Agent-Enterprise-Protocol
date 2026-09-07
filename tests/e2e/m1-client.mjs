@@ -65,8 +65,8 @@ async function runScenario() {
     displayName: 'Real Client User ' + runId,
     temporaryPassword: password,
     requirePasswordChange: false,
-    teamIds: [],
-    roleIds: [],
+    teamIds: ['all-users'],
+    roleIds: ['admin'],
   });
   await admin.createModel({
     id: 'enterprise-chat',
