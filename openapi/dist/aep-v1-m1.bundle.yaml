@@ -1819,6 +1819,18 @@ components:
         id:
           type: string
       additionalProperties: false
+    RoleScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: role
+        id:
+          type: string
+      additionalProperties: false
     UserScope:
       type: object
       required:
@@ -1835,6 +1847,7 @@ components:
       oneOf:
         - $ref: '#/components/schemas/GlobalScope'
         - $ref: '#/components/schemas/TeamScope'
+        - $ref: '#/components/schemas/RoleScope'
         - $ref: '#/components/schemas/UserScope'
       discriminator:
         propertyName: type
@@ -2845,6 +2858,7 @@ components:
       enum:
         - global
         - team
+        - role
         - user
     CreateControlEventRequest:
       type: object

@@ -1252,6 +1252,14 @@ export interface components {
             type: "TeamScope";
             id: string;
         };
+        RoleScope: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "RoleScope";
+            id: string;
+        };
         UserScope: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -1260,7 +1268,7 @@ export interface components {
             type: "UserScope";
             id: string;
         };
-        ControlEventScope: components["schemas"]["GlobalScope"] | components["schemas"]["TeamScope"] | components["schemas"]["UserScope"];
+        ControlEventScope: components["schemas"]["GlobalScope"] | components["schemas"]["TeamScope"] | components["schemas"]["RoleScope"] | components["schemas"]["UserScope"];
         ControlEventResource: {
             /** @enum {string} */
             type: "skill" | "plugin" | "credential" | "model";
@@ -1649,7 +1657,7 @@ export interface components {
             subject: components["schemas"]["Subject"];
         };
         /** @enum {string} */
-        ControlEventScopeType: "global" | "team" | "user";
+        ControlEventScopeType: "global" | "team" | "role" | "user";
         CreateControlEventRequest: {
             type: components["schemas"]["ControlEventType"];
             scope: components["schemas"]["ControlEventScope"];

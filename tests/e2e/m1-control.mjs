@@ -43,15 +43,26 @@ async function runScenario() {
 
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
+  const role = await admin.createRole({
+    id: `model-role-${runId}`,
+    name: `Model Role ${runId}`,
+    description: 'M1 model authorization role',
+    permissions: [],
+  });
+  const team = await admin.createTeam({
+    id: `model-team-${runId}`,
+    name: `Model Team ${runId}`,
+    description: 'M1 model authorization team',
+  });
   const user = await admin.createUser({
     deploymentId: 'demo', username, displayName: `Model User ${runId}`,
     temporaryPassword: password, requirePasswordChange: false,
-    teamIds: ['all-users'], roleIds: ['admin'],
+    teamIds: [team.id], roleIds: [role.id],
   });
   const descriptors = [
     {suffix: 'user', subject: {type: 'user', id: user.id}},
-    {suffix: 'role', subject: {type: 'user', id: user.id}},
-    {suffix: 'team', subject: {type: 'user', id: user.id}},
+    {suffix: 'role', subject: {type: 'role', id: role.id}},
+    {suffix: 'team', subject: {type: 'team', id: team.id}},
   ];
   const assignments = [];
   for (const [index, descriptor] of descriptors.entries()) {
@@ -106,10 +117,15 @@ async function runScenario() {
   await assertModelToken(agentStore, descriptors.map(item => item.modelId));
 
   await admin.deleteModelAssignment(assignments[2].id);
-  assert((await agent.listModels()).models.length === 2, 'Assignment revocation did not affect real-time discovery');
+  assert((await agent.listModels()).models.length === 2, 'Team assignment revocation did not affect real-time discovery');
   assert(modelScopes(await agentStore.get()).length === 3, 'Existing model token changed without rotation');
   await agent.refreshSession();
   await assertModelToken(agentStore, descriptors.slice(0, 2).map(item => item.modelId));
+
+  await admin.updateRole(role.id, {enabled: false});
+  assert((await agent.listModels()).models.length === 1, 'Disabled role assignment remained discoverable');
+  await admin.updateRole(role.id, {enabled: true});
+  assert((await agent.listModels()).models.length === 2, 'Re-enabled role assignment was not restored');
 
   await admin.updateModel(descriptors[1].modelId, {enabled: false});
   assert((await agent.listModels()).models.length === 1, 'Disabled model remained discoverable');
@@ -119,6 +135,9 @@ async function runScenario() {
   await admin.deleteModel(descriptors[1].modelId);
   assert((await admin.listModelAssignments()).assignments.length === 1, 'Deleting a model did not cascade its assignment');
   assert((await agent.listModels()).models.length === 1, 'Deleted model remained discoverable');
+
+  await admin.deleteTeam(team.id);
+  await admin.deleteRole(role.id);
 
   const cliModels = await commandOutput('go', [
     'run', './cmd/aepctl', '--base-url', baseUrl, '--deployment', 'demo',
