@@ -202,12 +202,26 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "The access token is invalid or expired.")
 			return
 		}
-		if claims.PasswordChangeRequired && !passwordChangeRouteAllowed(request) {
+		// The access token carries the state at the time it was issued. Consult
+		// the account record before rejecting a stale token: an administrator can
+		// have the temporary-password flag cleared by an approved recovery or
+		// migration while that short-lived token is still in use. A database
+		// failure is deliberately treated as still restricted.
+		if claims.PasswordChangeRequired && !passwordChangeRouteAllowed(request) && s.passwordChangeStillRequired(request, claims) {
 			writeProblem(response, request, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "The temporary password must be changed before using this operation.")
 			return
 		}
 		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims)))
 	})
+}
+
+func (s *Server) passwordChangeStillRequired(request *http.Request, claims *auth.Claims) bool {
+	if s.app.Pool == nil {
+		return true
+	}
+	var required bool
+	err := s.app.Pool.QueryRow(request.Context(), `SELECT require_password_change FROM users WHERE deployment_id=$1 AND id=$2`, claims.DeploymentID, claims.Subject).Scan(&required)
+	return err != nil || required
 }
 
 func passwordChangeRouteAllowed(request *http.Request) bool {
