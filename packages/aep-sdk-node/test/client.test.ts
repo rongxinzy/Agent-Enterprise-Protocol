@@ -259,7 +259,7 @@ describe('AepClient SDK gate', () => {
 
   test('covers control, telemetry, and administration APIs', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
-    expect((await client.heartbeatUser({clientVersion: '0.1.0', platform: 'windows'})).hasPendingControlEvents).toBe(true);
+    expect((await client.heartbeatUser({status: 'online'}).then(result => result.controlEvents.pending))).toBe(true);
     expect((await client.listControlEvents()).items).toEqual([]);
     await client.acknowledgeControlEvent('delivery-1', '2026-08-20T00:00:00Z');
     await client.reportControlEventResult('delivery-1', {status: 'succeeded', completedAt: '2026-08-20T00:00:01Z'});
