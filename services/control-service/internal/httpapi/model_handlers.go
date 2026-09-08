@@ -19,9 +19,10 @@ import (
 const modelColumns = `id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled,created_at,updated_at`
 
 type modelReasoningCompatibility struct {
-	ThinkingFormat                              string `json:"thinkingFormat"`
-	SupportsReasoningEffort                     bool   `json:"supportsReasoningEffort"`
-	RequiresReasoningContentOnAssistantMessages bool   `json:"requiresReasoningContentOnAssistantMessages"`
+	ThinkingFormat                              string             `json:"thinkingFormat"`
+	SupportsReasoningEffort                     bool               `json:"supportsReasoningEffort"`
+	RequiresReasoningContentOnAssistantMessages bool               `json:"requiresReasoningContentOnAssistantMessages"`
+	ThinkingLevelMap                            map[string]*string `json:"thinkingLevelMap,omitempty"`
 }
 
 type modelRecord = repository.Model
@@ -182,7 +183,23 @@ func validModelWrite(input modelWrite) bool {
 }
 
 func validReasoningCompatibility(value *modelReasoningCompatibility) bool {
-	return value == nil || value.ThinkingFormat == "deepseek" && value.SupportsReasoningEffort && value.RequiresReasoningContentOnAssistantMessages
+	if value == nil {
+		return true
+	}
+	if (value.ThinkingFormat != "deepseek" && value.ThinkingFormat != "zai") || !value.SupportsReasoningEffort || !value.RequiresReasoningContentOnAssistantMessages {
+		return false
+	}
+	for level, mapped := range value.ThinkingLevelMap {
+		switch level {
+		case "off", "minimal", "low", "medium", "high", "xhigh", "max":
+		default:
+			return false
+		}
+		if mapped != nil && strings.TrimSpace(*mapped) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) listAgentModels(response http.ResponseWriter, request *http.Request) {

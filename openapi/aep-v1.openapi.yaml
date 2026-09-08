@@ -815,12 +815,24 @@ components:
       properties:
         thinkingFormat:
           type: string
-          enum: [deepseek]
+          enum: [deepseek, zai]
         supportsReasoningEffort: {type: boolean, const: true}
         requiresReasoningContentOnAssistantMessages:
           description: Prior assistant reasoning_content must be replayed when a tool-call conversation continues.
           type: boolean
           const: true
+        thinkingLevelMap:
+          description: Provider-specific values for Pi thinking levels. Null hides an unsupported level.
+          type: object
+          additionalProperties: false
+          properties:
+            off: {type: [string, 'null']}
+            minimal: {type: [string, 'null']}
+            low: {type: [string, 'null']}
+            medium: {type: [string, 'null']}
+            high: {type: [string, 'null']}
+            xhigh: {type: [string, 'null']}
+            max: {type: [string, 'null']}
     AdminSkill:
       type: object
       required: [id, name, description, state, versions, createdAt, updatedAt]
