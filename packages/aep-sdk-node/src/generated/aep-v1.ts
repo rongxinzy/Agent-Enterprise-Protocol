@@ -1429,7 +1429,7 @@ export interface components {
         /** @description Wire-level reasoning behavior a client must preserve through an OpenAI-compatible endpoint. */
         ModelReasoningCompatibility: {
             /** @enum {string} */
-            thinkingFormat: "deepseek";
+            thinkingFormat: "deepseek" | "zai";
             /** @constant */
             supportsReasoningEffort: true;
             /**
@@ -1437,6 +1437,16 @@ export interface components {
              * @constant
              */
             requiresReasoningContentOnAssistantMessages: true;
+            /** @description Provider-specific values for Pi thinking levels. Null hides an unsupported level. */
+            thinkingLevelMap?: {
+                off?: string | null;
+                minimal?: string | null;
+                low?: string | null;
+                medium?: string | null;
+                high?: string | null;
+                xhigh?: string | null;
+                max?: string | null;
+            };
         };
         UserModel: {
             id: string;
