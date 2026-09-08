@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -10,32 +9,21 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 )
 
-type licenseActivationRequest struct {
-	License json.RawMessage `json:"license"`
-}
+type licenseActivationRequest struct{}
 
-// activateLicense verifies the complete vendor-signed envelope against the
-// deployment License and issues a short-lived entitlement. The service never
-// receives a license private key or performs License signing.
+// activateLicense uses the server-registered License and issues a short-lived
+// entitlement. The client never uploads License material or signing keys.
 func (s *Server) activateLicense(response http.ResponseWriter, request *http.Request) {
 	var input licenseActivationRequest
 	if !decodeJSON(response, request, &input) {
 		return
 	}
 	currentLicense := s.app.CurrentLicense()
-	if len(input.License) == 0 || s.app.LicenseVerifier == nil || currentLicense == nil {
+	if s.app.LicenseVerifier == nil || currentLicense == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_LICENSE_ACTIVATION", "The license activation evidence is invalid.")
 		return
 	}
-	verified, err := s.app.LicenseVerifier.Verify(input.License)
-	if err != nil {
-		writeProblem(response, request, http.StatusForbidden, "INVALID_LICENSE", "The enterprise license could not be verified.")
-		return
-	}
-	if verified.Digest != currentLicense.Digest || verified.Claims.LicenseID != currentLicense.Claims.LicenseID || verified.Claims.CustomerID != currentLicense.Claims.CustomerID {
-		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The license is not registered for this enterprise deployment.")
-		return
-	}
+	verified := *currentLicense
 	if s.app.Config.LicenseDeploymentID != "" && claimsFrom(request).DeploymentID != s.app.Config.LicenseDeploymentID {
 		writeProblem(response, request, http.StatusForbidden, "LICENSE_MISMATCH", "The authenticated enterprise is not licensed for this deployment.")
 		return
@@ -44,23 +32,23 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, http.StatusForbidden, "LICENSE_EXPIRED", "The enterprise license is expired.")
 		return
 	}
-	expiresAt, err := time.Parse(time.RFC3339Nano, verified.Claims.ExpiresAt)
-	if err != nil {
-		writeProblem(response, request, http.StatusForbidden, "INVALID_LICENSE", "The enterprise license expiry is invalid.")
-		return
-	}
-	if verified.Status == "enterprise-grace" {
-		expiresAt = verified.GraceEndsAt
+	var expiresAt *time.Time
+	if verified.Claims.ExpiresAt != nil {
+		value, parseErr := time.Parse(time.RFC3339Nano, *verified.Claims.ExpiresAt)
+		if parseErr != nil {
+			writeProblem(response, request, http.StatusForbidden, "INVALID_LICENSE", "The enterprise license expiry is invalid.")
+			return
+		}
+		expiresAt = &value
+		if verified.Status == "enterprise-grace" {
+			expiresAt = verified.GraceEndsAt
+		}
 	}
 	claims := claimsFrom(request)
 	if err := s.app.ActivateLicense(request.Context(), verified.Claims.LicenseID, claims.DeploymentID, claims.Subject); err != nil {
 		code := "LICENSE_ACTIVATION_FAILED"
 		status := http.StatusForbidden
 		switch {
-		case errors.Is(err, app.ErrLicenseAgentLimit):
-			code = "LICENSE_AGENT_LIMIT"
-		case errors.Is(err, app.ErrLicenseUserLimit):
-			code = "LICENSE_USER_LIMIT"
 		case errors.Is(err, app.ErrLicenseRevoked):
 			code = "LICENSE_REVOKED"
 		case errors.Is(err, app.ErrLicenseNotRegistered):
@@ -73,6 +61,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 	}
 	features := normalizeActivationFeatures(verified.Claims.Features)
 	var modelScopes []string
+	var err error
 	if s.app.Pool != nil {
 		modelScopes, err = s.app.ModelScopes(request.Context(), claims.DeploymentID, claims.Subject)
 		if err != nil {

@@ -209,7 +209,7 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/me'});
   }
 
-  activateEnterpriseLicense(input: LicenseActivationRequest): Promise<EntitlementTokenResponse> {
+  activateEnterpriseLicense(input: LicenseActivationRequest = {}): Promise<EntitlementTokenResponse> {
     return this.#send({
       method: HttpMethod.Post,
       path: '/aep/v1/user/activation',

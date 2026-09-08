@@ -998,11 +998,11 @@ components:
           properties:
             format: {type: string, const: zhiyuan-license-v1}
             keyId: {type: string}
-            payload: {type: object}
+            payload: {$ref: '#/components/schemas/LicenseClaims'}
             signature: {type: string}
     License:
       type: object
-      required: [licenseId, customerId, deploymentId, digest, keyId, status, issuedAt, expiresAt, graceEndsAt, limits, features, activeUsers, createdAt, updatedAt]
+      required: [licenseId, customerId, deploymentId, digest, keyId, status, issuedAt, expiresAt, graceEndsAt, features, activeUsers, createdAt, updatedAt]
       properties:
         licenseId: {type: string}
         customerId: {type: string}
@@ -1011,20 +1011,29 @@ components:
         keyId: {type: string}
         status: {type: string, enum: [active, revoked]}
         issuedAt: {type: string, format: date-time}
-        expiresAt: {type: string, format: date-time}
-        graceEndsAt: {type: string, format: date-time}
-        limits:
-          type: object
-          required: [users, activations]
-          properties:
-            users: {type: integer, minimum: 1}
-            activations: {type: integer, minimum: 1}
+        expiresAt: {type: [string, 'null'], format: date-time, description: Null means perpetual authorization.}
+        graceEndsAt: {type: [string, 'null'], format: date-time, description: Null for perpetual authorization.}
         features: {type: array, items: {type: string}}
         activeUsers: {type: integer, minimum: 0}
         revokedAt: {type: [string, 'null'], format: date-time}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         payload: {type: object, readOnly: true}
+    LicenseClaims:
+      type: object
+      additionalProperties: false
+      required: [licenseId, customerId, deploymentId, edition, issuedAt, expiresAt, graceDays, features]
+      properties:
+        licenseId: {type: string, minLength: 1, maxLength: 256}
+        customerId: {type: string, minLength: 1, maxLength: 256}
+        deploymentId: {type: string, minLength: 1, maxLength: 256}
+        edition: {type: string, const: enterprise}
+        issuedAt: {type: string, format: date-time}
+        notBefore: {type: [string, 'null'], format: date-time}
+        expiresAt: {type: [string, 'null'], format: date-time, description: Null means perpetual authorization.}
+        maintenanceUntil: {type: [string, 'null'], format: date-time}
+        graceDays: {type: integer, minimum: 0}
+        features: {type: array, maxItems: 256, items: {type: string, minLength: 1}}
     LicensePage:
       type: object
       required: [items, nextCursor]

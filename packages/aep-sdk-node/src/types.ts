@@ -159,16 +159,8 @@ export interface CurrentIdentity {
   passwordChangeRequired: boolean;
 }
 
-export interface LicenseActivationRequest {
-  license: LicenseEnvelope;
-}
-
-export interface LicenseEnvelope {
-  format: 'zhiyuan-license-v1';
-  keyId: string;
-  payload: Record<string, unknown>;
-  signature: string;
-}
+/** Empty request; the Control Service uses its registered deployment License. */
+export type LicenseActivationRequest = Record<string, never>;
 
 export interface EntitlementTokenResponse {
   entitlementToken: string;

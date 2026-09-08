@@ -19,12 +19,6 @@ const formatV1 = "zhiyuan-license-v1"
 
 var timestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`)
 
-type Limits struct {
-	Users       int `json:"users"`
-	Activations int `json:"activations"`
-	Teams       int `json:"teams,omitempty"`
-}
-
 type Claims struct {
 	LicenseID        string   `json:"licenseId"`
 	CustomerID       string   `json:"customerId"`
@@ -32,10 +26,9 @@ type Claims struct {
 	Edition          string   `json:"edition"`
 	IssuedAt         string   `json:"issuedAt"`
 	NotBefore        string   `json:"notBefore,omitempty"`
-	ExpiresAt        string   `json:"expiresAt"`
+	ExpiresAt        *string  `json:"expiresAt"`
 	MaintenanceUntil string   `json:"maintenanceUntil,omitempty"`
 	GraceDays        int      `json:"graceDays"`
-	Limits           Limits   `json:"limits"`
 	Features         []string `json:"features"`
 }
 
@@ -51,7 +44,7 @@ type Verified struct {
 	Claims      Claims
 	Digest      string
 	Status      string
-	GraceEndsAt time.Time
+	GraceEndsAt *time.Time
 }
 
 type Verifier struct {
@@ -100,15 +93,20 @@ func (v Verifier) Verify(raw []byte) (Verified, error) {
 	if claims.NotBefore != "" {
 		notBefore, _ = time.Parse(time.RFC3339Nano, claims.NotBefore)
 	}
-	expiresAt, _ := time.Parse(time.RFC3339Nano, claims.ExpiresAt)
-	graceEnds := expiresAt.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
+	var expiresAt time.Time
+	var graceEnds *time.Time
+	if claims.ExpiresAt != nil {
+		expiresAt, _ = time.Parse(time.RFC3339Nano, *claims.ExpiresAt)
+		value := expiresAt.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
+		graceEnds = &value
+	}
 	if now.Before(notBefore) {
 		return Verified{}, errors.New("license is not yet valid")
 	}
 	status := "enterprise-expired"
-	if !now.After(expiresAt) {
+	if claims.ExpiresAt == nil || !now.After(expiresAt) {
 		status = "enterprise-active"
-	} else if !now.After(graceEnds) {
+	} else if !now.After(*graceEnds) {
 		status = "enterprise-grace"
 	}
 	digest, err := envelopeDigest(envelope, claims)
@@ -119,15 +117,23 @@ func (v Verifier) Verify(raw []byte) (Verified, error) {
 }
 
 func validClaims(c Claims) bool {
-	if c.LicenseID == "" || c.CustomerID == "" || c.DeploymentID == "" || !validTimestamp(c.IssuedAt) || !validTimestamp(c.ExpiresAt) || c.GraceDays < 0 || c.Limits.Users <= 0 || c.Limits.Activations <= 0 || c.Limits.Teams < 0 {
+	if c.LicenseID == "" || c.CustomerID == "" || c.DeploymentID == "" || c.Edition != "enterprise" || !validTimestamp(c.IssuedAt) || c.GraceDays < 0 {
 		return false
 	}
 	if c.NotBefore != "" && !validTimestamp(c.NotBefore) || c.MaintenanceUntil != "" && !validTimestamp(c.MaintenanceUntil) {
 		return false
 	}
 	issued, _ := time.Parse(time.RFC3339Nano, c.IssuedAt)
-	expires, _ := time.Parse(time.RFC3339Nano, c.ExpiresAt)
-	if expires.Before(issued) || len(c.Features) > 256 {
+	if c.ExpiresAt != nil {
+		if !validTimestamp(*c.ExpiresAt) {
+			return false
+		}
+		expires, _ := time.Parse(time.RFC3339Nano, *c.ExpiresAt)
+		if expires.Before(issued) {
+			return false
+		}
+	}
+	if len(c.Features) > 256 {
 		return false
 	}
 	for _, feature := range c.Features {

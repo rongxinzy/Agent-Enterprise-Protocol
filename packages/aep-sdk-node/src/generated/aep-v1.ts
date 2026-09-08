@@ -159,7 +159,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Exchanges a signed deployment license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation. */
+        /** @description Exchanges the authenticated deployment session for a short-lived entitlement token. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client. */
         post: operations["activateDeploymentLicense"];
         delete?: never;
         options?: never;
@@ -1154,16 +1154,8 @@ export interface components {
         LogoutRequest: {
             refreshToken: string;
         };
-        LicenseActivationRequest: {
-            /** @description Complete vendor-signed License envelope. */
-            license: {
-                /** @constant */
-                format: "zhiyuan-license-v1";
-                keyId: string;
-                payload: Record<string, never>;
-                signature: string;
-            };
-        };
+        /** @description Empty activation request. The server-side registered License is used. */
+        LicenseActivationRequest: Record<string, never>;
         EntitlementTokenResponse: {
             /** @description Short-lived service-signed token for deployment runtime checks. */
             entitlementToken: string;
@@ -1701,14 +1693,16 @@ export interface components {
             status: "active" | "revoked";
             /** Format: date-time */
             issuedAt: string;
-            /** Format: date-time */
-            expiresAt: string;
-            /** Format: date-time */
-            graceEndsAt: string;
-            limits: {
-                users: number;
-                activations: number;
-            };
+            /**
+             * Format: date-time
+             * @description Null means perpetual authorization.
+             */
+            expiresAt: string | null;
+            /**
+             * Format: date-time
+             * @description Null for perpetual authorization.
+             */
+            graceEndsAt: string | null;
             features: string[];
             activeUsers: number;
             /** Format: date-time */
@@ -1723,13 +1717,33 @@ export interface components {
             items: components["schemas"]["License"][];
             nextCursor: string | null;
         };
+        LicenseClaims: {
+            licenseId: string;
+            customerId: string;
+            deploymentId: string;
+            /** @constant */
+            edition: "enterprise";
+            /** Format: date-time */
+            issuedAt: string;
+            /** Format: date-time */
+            notBefore?: string | null;
+            /**
+             * Format: date-time
+             * @description Null means perpetual authorization.
+             */
+            expiresAt: string | null;
+            /** Format: date-time */
+            maintenanceUntil?: string | null;
+            graceDays: number;
+            features: string[];
+        };
         LicenseImportRequest: {
             /** @description Complete vendor-signed license envelope. Private keys are never accepted. */
             license: {
                 /** @constant */
                 format: "zhiyuan-license-v1";
                 keyId: string;
-                payload: Record<string, never>;
+                payload: components["schemas"]["LicenseClaims"];
                 signature: string;
             };
         };
@@ -2193,7 +2207,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["LicenseActivationRequest"];
             };
