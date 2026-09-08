@@ -22,12 +22,11 @@ export class ExampleAgent {
     if (!restored) await this.options.client.loginWithPassword(this.options.credentials);
     await this.flushTelemetry();
     await this.resumeInbox();
-    const skills = this.options.state.managedSkills();
     const heartbeat = await this.options.client.heartbeatUser({
-      appliedSkillRevision: this.options.state.getValue('skill_revision'),
-      installedSkillIds: skills.map(skill => skill.skillId),
+      status: 'online',
+      lastControlEventCursor: this.options.state.getValue('control_cursor'),
     });
-    if (heartbeat.hasPendingControlEvents) await this.receiveControlEvents();
+    if (heartbeat.controlEvents.pending) await this.receiveControlEvents();
     await this.resumeInbox();
     await this.flushTelemetry();
   }

@@ -15,6 +15,11 @@ import (
 
 func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) {
 	var input struct {
+		Status                 string  `json:"status"`
+		LastControlEventCursor *string `json:"lastControlEventCursor"`
+		// Legacy fields are accepted during the SDK/RBAC identity cutover.
+		AgentVersion         string   `json:"agentVersion"`
+		Platform             string   `json:"platform"`
 		AppliedSkillRevision *string  `json:"appliedSkillRevision"`
 		InstalledSkillIDs    []string `json:"installedSkillIds"`
 	}
@@ -26,10 +31,10 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
 		return
 	}
-	s.heartbeatUserSession(response, request, claims.SessionID, input.AppliedSkillRevision, input.InstalledSkillIDs)
+	s.heartbeatUserSession(response, request, claims.SessionID, input.LastControlEventCursor)
 }
 
-func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *http.Request, sessionID string, _ *string, _ []string) {
+func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *http.Request, sessionID string, _ *string) {
 	var pending bool
 	var watermark *string
 	err := s.app.Pool.QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`, sessionID).Scan(&pending, &watermark)
@@ -38,7 +43,21 @@ func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *htt
 		return
 	}
 	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.session_id=$1 AND d.state='pending' AND e.expires_at<=now()`, sessionID)
-	writeJSON(response, http.StatusOK, map[string]any{"serverTime": time.Now().UTC(), "hasPendingControlEvents": pending, "controlEventWatermark": watermark, "nextHeartbeatAfterSeconds": 30})
+	writeJSON(response, http.StatusOK, map[string]any{
+		"serverTime":    time.Now().UTC(),
+		"controlEvents": map[string]any{"pending": pending, "watermark": stringValue(watermark)},
+		// Kept until all clients consume the canonical controlEvents object.
+		"hasPendingControlEvents":   pending,
+		"controlEventWatermark":     watermark,
+		"nextHeartbeatAfterSeconds": 30,
+	})
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (s *Server) listAgentControlEvents(response http.ResponseWriter, request *http.Request) {

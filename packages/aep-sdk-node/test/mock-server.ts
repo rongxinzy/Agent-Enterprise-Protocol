@@ -158,7 +158,7 @@ export class MockAepServer {
       return void response.end(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
     }
     if (path === '/aep/v1/user/heartbeat') {
-      return json(response, 200, {serverTime: '2026-08-20T00:00:00Z', hasPendingControlEvents: true, controlEventWatermark: '1', nextHeartbeatAfterSeconds: 30});
+      return json(response, 200, {serverTime: '2026-08-20T00:00:00Z', controlEvents: {pending: true, watermark: '1'}, nextHeartbeatAfterSeconds: 30});
     }
     if (path === '/aep/v1/user/control-events') return json(response, 200, {items: [], nextCursor: null});
     if (path.endsWith('/acknowledge') || path.endsWith('/result')) return empty(response, 204);

@@ -194,8 +194,7 @@ export type SkillManifestResult =
 
 export interface HeartbeatResponse {
   serverTime: string;
-  hasPendingControlEvents: boolean;
-  controlEventWatermark: string | null;
+  controlEvents: {pending: boolean; watermark: string};
   nextHeartbeatAfterSeconds: number;
 }
 
