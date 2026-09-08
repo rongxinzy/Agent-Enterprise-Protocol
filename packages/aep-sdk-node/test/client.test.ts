@@ -83,16 +83,9 @@ describe('AepClient SDK gate', () => {
     expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/models');
   });
 
-  test('activates a locally verified enterprise license', async () => {
+  test('activates against the server-registered enterprise license', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
-    await expect(client.activateEnterpriseLicense({
-      license: {
-        format: 'zhiyuan-license-v1',
-        keyId: 'license-prod-1',
-        payload: {licenseId: 'lic-1', deploymentId: 'deployment-1'},
-        signature: 'signed-license',
-      },
-    })).resolves.toMatchObject({entitlementToken: 'entitlement-1', tokenType: 'Bearer'});
+    await expect(client.activateEnterpriseLicense()).resolves.toMatchObject({entitlementToken: 'entitlement-1', tokenType: 'Bearer'});
     expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/activation');
   });
 
@@ -266,7 +259,7 @@ describe('AepClient SDK gate', () => {
 
   test('covers control, telemetry, and administration APIs', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
-    expect((await client.heartbeatUser({clientVersion: '0.1.0', platform: 'windows'})).hasPendingControlEvents).toBe(true);
+    expect((await client.heartbeatUser({status: 'online'}).then(result => result.controlEvents.pending))).toBe(true);
     expect((await client.listControlEvents()).items).toEqual([]);
     await client.acknowledgeControlEvent('delivery-1', '2026-08-20T00:00:00Z');
     await client.reportControlEventResult('delivery-1', {status: 'succeeded', completedAt: '2026-08-20T00:00:01Z'});

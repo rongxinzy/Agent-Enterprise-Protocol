@@ -181,20 +181,20 @@ the previous token.
 
 Request: `{"refreshToken":"refresh-token"}`. Success returns `204 No Content`.
 
-### `POST /agent/activation`
+### `POST /user/activation`
 
-After locally verifying a signed enterprise license, the Agent submits the
-complete envelope. The Control Service verifies it again with configured vendor
-public keys before issuing a short-lived service-signed entitlement token:
+The authenticated client submits an empty request. The Control Service uses
+the License verified and registered for its deployment before issuing a
+short-lived service-signed entitlement token:
 
 ```json
-{"license":{"format":"zhiyuan-license-v1","keyId":"license-prod-1","payload":{"licenseId":"lic_123","customerId":"customer_001","deploymentId":"deployment_001","edition":"enterprise","issuedAt":"2026-01-01T00:00:00.000Z","expiresAt":"2027-01-01T00:00:00.000Z","graceDays":7,"limits":{"users":100,"agents":100},"features":["enterprise.models","enterprise.skills"]},"signature":"base64url-ed25519-signature"}}
+{}
 ```
 
 The response includes `entitlementToken`, `expiresAt`, and the normalized
-feature list. The token is bound to the authenticated enterprise, user, and
-Agent. The Control Service does not sign licenses and must never receive a
-license private key.
+feature list. The token is bound to the authenticated deployment and user.
+The Control Service does not sign licenses and must never receive a license
+private key.
 
 ## 4. Current Identity
 

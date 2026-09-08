@@ -8,8 +8,8 @@ Control Service 镜像、Admin Console 或任何云端构建任务。
 - 签名器只在企业受控的签发环境中持有生产 License 私钥并运行。
 - 发布人员在本地生成已签名 License，通过企业批准的分发渠道只传递
   License 结果和公钥验签材料。
-- Zhiyuan 企业客户端先在本地验签，再调用
-  `POST /aep/v1/agent/activation` 交换 License 证据。
+- Zhiyuan 企业客户端只用已认证会话调用
+  `POST /aep/v1/user/activation` 换取 entitlement，不接收 License。
 - Control Service 使用部署配置中的厂商公钥重新验证完整 License envelope，
   校验部署和授权状态后签发短期 entitlement JWT，绝不接收 License 私钥，
   也不执行 License 签名。
@@ -17,8 +17,8 @@ Control Service 镜像、Admin Console 或任何云端构建任务。
   宽限期结束或被管理员撤销后，Control Service 和网关均拒绝新的 entitlement。
 - `deploymentId`、License digest 和客户企业 ID 必须同时匹配；复制到另一部署的
   License 会在客户端或服务端验签阶段失败。
-- 内网部署时，License 文件和公钥分别挂载到 Control Service，并复制到企业版
-  客户端资源目录；激活请求只在企业内网完成，不依赖厂商在线服务。
+- 内网部署时，License 文件和公钥只挂载到 Control Service；客户端只配置 AEP
+  服务地址，激活请求在企业内网完成，不依赖厂商在线服务。
 
 ## 仓库边界
 

@@ -174,17 +174,17 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 请求：`{"refreshToken":"refresh-token"}`。成功返回 `204 No Content`。
 
-### `POST /agent/activation`
+### `POST /user/activation`
 
-Agent 在本地验签企业 License 后，将完整签名 envelope 提交给 Control Service。
-服务端使用配置的厂商公钥重新验签，再交换为短期服务端签发的 entitlement token：
+客户端提交空的激活请求。Control Service 使用部署端已验签并注册的 License，
+交换为短期服务端签发的 entitlement token：
 
 ```json
-{"license":{"format":"zhiyuan-license-v1","keyId":"license-prod-1","payload":{"licenseId":"lic_123","customerId":"customer_001","deploymentId":"deployment_001","edition":"enterprise","issuedAt":"2026-01-01T00:00:00.000Z","expiresAt":"2027-01-01T00:00:00.000Z","graceDays":7,"limits":{"users":100,"agents":100},"features":["enterprise.models","enterprise.skills"]},"signature":"base64url-ed25519-signature"}}
+{}
 ```
 
 响应包含 `entitlementToken`、`expiresAt` 和规范化后的功能列表。Token 绑定当前
-认证企业、用户和 Agent。Control Service 不签发 License，且绝不能接收 License 私钥。
+认证部署和用户。Control Service 不签发 License，且绝不能接收 License 私钥。
 
 ## 4. 当前身份
 

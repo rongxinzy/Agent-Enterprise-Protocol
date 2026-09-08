@@ -322,8 +322,9 @@ UQ：`(event_id, session_id)`。
 
 ## License
 
-License 用于离线验证并激活客户购买的企业版客户端和服务端。数据库保存验签后的摘要、
-额度与激活状态，不保存签发私钥。
+License 用于离线验证并激活客户购买的企业版服务端。数据库保存验签后的摘要、
+功能、有效期与激活状态，不保存签发私钥。用户、Team 和客户端会话属于部署数据，
+不作为 License 配额。
 
 ### `licenses`
 
@@ -336,10 +337,8 @@ License 用于离线验证并激活客户购买的企业版客户端和服务端
 | `key_id` | `text` | NN；可信公钥 ID |
 | `status` | `text` | NN, DF `active`, CK `active`/`revoked` |
 | `issued_at` | `timestamptz` | NN |
-| `expires_at` | `timestamptz` | NN |
-| `grace_ends_at` | `timestamptz` | NN |
-| `user_limit` | `integer` | NN, CK `> 0` |
-| `activation_limit` | `integer` | NN, CK `> 0` |
+| `expires_at` | `timestamptz` | 可空；NULL 表示永久授权 |
+| `grace_ends_at` | `timestamptz` | 可空；永久授权为 NULL |
 | `features` | `text[]` | NN, DF `'{}'` |
 | `payload` | `jsonb` | NN；已验签 claims |
 | `revoked_at` | `timestamptz` | 可空 |

@@ -11,8 +11,8 @@ Admin Console, or any cloud build job.
 - A release operator creates a signed License envelope locally and transfers
   only the resulting License and its public verification key through the
   organization's approved distribution channel.
-- The Zhiyuan enterprise client verifies the License locally, then exchanges
-  License evidence with `POST /aep/v1/agent/activation`.
+- The Zhiyuan enterprise client exchanges its authenticated session with
+  `POST /aep/v1/user/activation`; it never receives the License.
 - Control Service re-verifies the complete License envelope with its configured
   vendor public keys, checks deployment and entitlement state, and issues a
   short-lived entitlement JWT. It never receives a License private key and
@@ -24,8 +24,8 @@ Admin Console, or any cloud build job.
   match. Copying a License to another deployment fails client or server
   verification.
 - In an air-gapped deployment, mount the License and trusted public-key file into
-  Control Service and place the same License in the enterprise client resources.
-  Activation then completes entirely inside the customer network.
+  Control Service. Activation then completes entirely inside the customer network;
+  the client only needs the AEP service URL.
 
 ## Repository boundary
 

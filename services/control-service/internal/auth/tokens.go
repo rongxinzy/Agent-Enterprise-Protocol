@@ -78,14 +78,20 @@ func (s *Service) ParseModel(raw string) (*Claims, error) {
 	return s.parse(raw, "model-gateway", "model")
 }
 
-func (s *Service) IssueEntitlement(userID, deploymentID, licenseID, licenseDigest string, features, modelScopes []string, licenseExpiresAt time.Time) (string, time.Time, error) {
+func (s *Service) IssueEntitlement(userID, deploymentID, licenseID, licenseDigest string, features, modelScopes []string, licenseExpiresAt *time.Time) (string, time.Time, error) {
 	now := time.Now().UTC()
-	if !licenseExpiresAt.After(now) || deploymentID == "" || licenseID == "" || licenseDigest == "" {
+	if deploymentID == "" || licenseID == "" || licenseDigest == "" {
 		return "", time.Time{}, errors.New("invalid enterprise license activation")
 	}
 	// Entitlements are deliberately short-lived. The license expiry remains the
 	// upper bound, while refresh requires another locally verified activation.
-	expiresAt := licenseExpiresAt.UTC()
+	expiresAt := now.Add(24 * time.Hour)
+	if licenseExpiresAt != nil {
+		if !licenseExpiresAt.After(now) {
+			return "", time.Time{}, errors.New("invalid enterprise license activation")
+		}
+		expiresAt = licenseExpiresAt.UTC()
+	}
 	if maximum := now.Add(24 * time.Hour); expiresAt.After(maximum) {
 		expiresAt = maximum
 	}

@@ -31,8 +31,6 @@ var (
 	ErrLicenseNotRegistered = errors.New("license is not registered for this enterprise")
 	ErrLicenseRevoked       = errors.New("license has been revoked")
 	ErrLicenseConflict      = errors.New("license ID is already registered with a different digest")
-	ErrLicenseAgentLimit    = errors.New("license agent limit exceeded")
-	ErrLicenseUserLimit     = errors.New("license user limit exceeded")
 	ErrSessionNotFound      = errors.New("user session not found")
 )
 
@@ -205,9 +203,15 @@ func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) er
 		return err
 	}
 	issuedAt, _ := time.Parse(time.RFC3339Nano, claims.IssuedAt)
-	expiresAt, _ := time.Parse(time.RFC3339Nano, claims.ExpiresAt)
-	graceEndsAt := expiresAt.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
-	_, err = a.Pool.Exec(ctx, `INSERT INTO licenses (license_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,user_limit,activation_limit,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, claims.LicenseID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Limits.Users, claims.Limits.Activations, claims.Features, verified.Envelope.Payload)
+	var expiresAt *time.Time
+	var graceEndsAt *time.Time
+	if claims.ExpiresAt != nil {
+		value, _ := time.Parse(time.RFC3339Nano, *claims.ExpiresAt)
+		expiresAt = &value
+		grace := value.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
+		graceEndsAt = &grace
+	}
+	_, err = a.Pool.Exec(ctx, `INSERT INTO licenses (license_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, claims.LicenseID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Features, verified.Envelope.Payload)
 	return err
 }
 
@@ -222,8 +226,7 @@ func (a *App) ActivateLicense(ctx context.Context, licenseID, deploymentID, user
 	defer func() { _ = tx.Rollback(ctx) }()
 	var status string
 	var revokedAt *time.Time
-	var activationLimit, userLimit int
-	err = tx.QueryRow(ctx, `SELECT status, revoked_at, activation_limit, user_limit FROM licenses WHERE license_id=$1 AND deployment_id=$2 FOR UPDATE`, licenseID, deploymentID).Scan(&status, &revokedAt, &activationLimit, &userLimit)
+	err = tx.QueryRow(ctx, `SELECT status, revoked_at FROM licenses WHERE license_id=$1 AND deployment_id=$2 FOR UPDATE`, licenseID, deploymentID).Scan(&status, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrLicenseNotRegistered
 	}
@@ -243,23 +246,6 @@ func (a *App) ActivateLicense(ctx context.Context, licenseID, deploymentID, user
 			return err
 		}
 		return tx.Commit(ctx)
-	}
-	var activationCount, userCount int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM license_activations WHERE license_id=$1 AND revoked_at IS NULL`, licenseID).Scan(&activationCount); err != nil {
-		return err
-	}
-	if activationCount >= activationLimit {
-		return ErrLicenseAgentLimit
-	}
-	if err := tx.QueryRow(ctx, `SELECT COUNT(DISTINCT user_id) FROM license_activations WHERE license_id=$1 AND revoked_at IS NULL`, licenseID).Scan(&userCount); err != nil {
-		return err
-	}
-	var userAlreadyActive bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM license_activations WHERE license_id=$1 AND user_id=$2 AND revoked_at IS NULL)`, licenseID, userID).Scan(&userAlreadyActive); err != nil {
-		return err
-	}
-	if !userAlreadyActive && userCount >= userLimit {
-		return ErrLicenseUserLimit
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO license_activations (id,license_id,deployment_id,user_id) VALUES ($1,$2,$3,$4)`, uuid.NewString(), licenseID, deploymentID, userID)
 	if err != nil {

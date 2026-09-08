@@ -26,10 +26,8 @@ type licenseRecord struct {
 	KeyID             string
 	Status            string
 	IssuedAt          time.Time
-	ExpiresAt         time.Time
-	GraceEndsAt       time.Time
-	UserLimit         int
-	ActivationLimit   int
+	ExpiresAt         *time.Time
+	GraceEndsAt       *time.Time
 	Features          []string
 	Payload           []byte
 	RevokedAt         *time.Time
@@ -43,13 +41,13 @@ func scanLicense(row interface{ Scan(...any) error }) (licenseRecord, error) {
 	var value licenseRecord
 	err := row.Scan(&value.LicenseID, &value.DeploymentID, &value.CustomerID,
 		&value.Digest, &value.KeyID, &value.Status, &value.IssuedAt, &value.ExpiresAt, &value.GraceEndsAt,
-		&value.UserLimit, &value.ActivationLimit, &value.Features, &value.Payload, &value.RevokedAt,
+		&value.Features, &value.Payload, &value.RevokedAt,
 		&value.CreatedAt, &value.UpdatedAt, &value.ActiveActivations, &value.ActiveUsers)
 	return value, err
 }
 
 const licenseColumns = `l.license_id,l.deployment_id,l.customer_id,l.digest,l.key_id,l.status,
- l.issued_at,l.expires_at,l.grace_ends_at,l.user_limit,l.activation_limit,l.features,l.payload,l.revoked_at,
+ l.issued_at,l.expires_at,l.grace_ends_at,l.features,l.payload,l.revoked_at,
  l.created_at,l.updated_at,
  (SELECT count(*) FROM license_activations a WHERE a.license_id=l.license_id AND a.revoked_at IS NULL),
  (SELECT count(DISTINCT a.user_id) FROM license_activations a WHERE a.license_id=l.license_id AND a.revoked_at IS NULL)`
@@ -59,7 +57,6 @@ func licenseJSON(value licenseRecord, includePayload bool) map[string]any {
 		"licenseId": value.LicenseID, "deploymentId": value.DeploymentID, "customerId": value.CustomerID,
 		"digest": value.Digest, "keyId": value.KeyID, "status": value.Status,
 		"issuedAt": value.IssuedAt, "expiresAt": value.ExpiresAt, "graceEndsAt": value.GraceEndsAt,
-		"limits":   map[string]int{"users": value.UserLimit, "activations": value.ActivationLimit},
 		"features": value.Features, "activeActivations": value.ActiveActivations, "activeUsers": value.ActiveUsers,
 		"revokedAt": value.RevokedAt, "createdAt": value.CreatedAt, "updatedAt": value.UpdatedAt,
 	}
