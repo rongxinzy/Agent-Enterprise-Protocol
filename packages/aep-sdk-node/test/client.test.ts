@@ -83,16 +83,9 @@ describe('AepClient SDK gate', () => {
     expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/models');
   });
 
-  test('activates a locally verified enterprise license', async () => {
+  test('activates against the server-registered enterprise license', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
-    await expect(client.activateEnterpriseLicense({
-      license: {
-        format: 'zhiyuan-license-v1',
-        keyId: 'license-prod-1',
-        payload: {licenseId: 'lic-1', deploymentId: 'deployment-1'},
-        signature: 'signed-license',
-      },
-    })).resolves.toMatchObject({entitlementToken: 'entitlement-1', tokenType: 'Bearer'});
+    await expect(client.activateEnterpriseLicense()).resolves.toMatchObject({entitlementToken: 'entitlement-1', tokenType: 'Bearer'});
     expect(server.requests.at(-1)?.path).toBe('/aep/v1/user/activation');
   });
 

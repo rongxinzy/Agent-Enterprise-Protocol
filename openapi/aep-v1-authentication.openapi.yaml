@@ -122,15 +122,14 @@ paths:
       tags: [Authentication]
       operationId: activateDeploymentLicense
       description: >-
-        Exchanges a signed deployment license for a short-lived Control Service
-        entitlement token. The service verifies the complete signed envelope
-        with its configured vendor public keys and never receives license
-        signing private keys. Clients MUST verify the envelope locally before
-        calling this operation.
+        Exchanges the authenticated deployment session for a short-lived
+        entitlement token. The Control Service verifies its own registered
+        vendor-signed License at startup and never receives License material
+        from the client.
       security:
         - aepBearerAuth: []
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema: {$ref: '#/components/schemas/LicenseActivationRequest'}
@@ -567,19 +566,8 @@ components:
             model scopes until the password is changed.
     LicenseActivationRequest:
       type: object
-      required: [license]
       additionalProperties: false
-      properties:
-        license:
-          type: object
-          additionalProperties: false
-          required: [format, keyId, payload, signature]
-          description: Complete vendor-signed License envelope.
-          properties:
-            format: {type: string, const: zhiyuan-license-v1}
-            keyId: {type: string, minLength: 1, maxLength: 128}
-            payload: {type: object, additionalProperties: false}
-            signature: {type: string, minLength: 1, maxLength: 256}
+      description: Empty activation request. The server-side registered License is used.
     EntitlementTokenResponse:
       type: object
       required: [entitlementToken, tokenType, expiresAt, expiresIn, licenseId, licenseDigest, deploymentId, features, modelScopes]

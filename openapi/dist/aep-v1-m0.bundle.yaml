@@ -197,11 +197,11 @@ paths:
       tags:
         - Authentication
       operationId: activateDeploymentLicense
-      description: Exchanges a signed deployment license for a short-lived Control Service entitlement token. The service verifies the complete signed envelope with its configured vendor public keys and never receives license signing private keys. Clients MUST verify the envelope locally before calling this operation.
+      description: Exchanges the authenticated deployment session for a short-lived entitlement token. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client.
       security:
         - aepBearerAuth: []
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
@@ -1500,34 +1500,8 @@ components:
           writeOnly: true
     LicenseActivationRequest:
       type: object
-      required:
-        - license
       additionalProperties: false
-      properties:
-        license:
-          type: object
-          additionalProperties: false
-          required:
-            - format
-            - keyId
-            - payload
-            - signature
-          description: Complete vendor-signed License envelope.
-          properties:
-            format:
-              type: string
-              const: zhiyuan-license-v1
-            keyId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            payload:
-              type: object
-              additionalProperties: false
-            signature:
-              type: string
-              minLength: 1
-              maxLength: 256
+      description: Empty activation request. The server-side registered License is used.
     EntitlementTokenResponse:
       type: object
       required:
@@ -2852,7 +2826,6 @@ components:
         - issuedAt
         - expiresAt
         - graceEndsAt
-        - limits
         - features
         - activeUsers
         - createdAt
@@ -2878,23 +2851,17 @@ components:
           type: string
           format: date-time
         expiresAt:
-          type: string
+          type:
+            - string
+            - 'null'
           format: date-time
+          description: Null means perpetual authorization.
         graceEndsAt:
-          type: string
+          type:
+            - string
+            - 'null'
           format: date-time
-        limits:
-          type: object
-          required:
-            - users
-            - activations
-          properties:
-            users:
-              type: integer
-              minimum: 1
-            activations:
-              type: integer
-              minimum: 1
+          description: Null for perpetual authorization.
         features:
           type: array
           items:
@@ -2930,6 +2897,62 @@ components:
           type:
             - string
             - 'null'
+    LicenseClaims:
+      type: object
+      additionalProperties: false
+      required:
+        - licenseId
+        - customerId
+        - deploymentId
+        - edition
+        - issuedAt
+        - expiresAt
+        - graceDays
+        - features
+      properties:
+        licenseId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        customerId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        deploymentId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        edition:
+          type: string
+          const: enterprise
+        issuedAt:
+          type: string
+          format: date-time
+        notBefore:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Null means perpetual authorization.
+        maintenanceUntil:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        graceDays:
+          type: integer
+          minimum: 0
+        features:
+          type: array
+          maxItems: 256
+          items:
+            type: string
+            minLength: 1
     LicenseImportRequest:
       type: object
       additionalProperties: false
@@ -2952,7 +2975,7 @@ components:
             keyId:
               type: string
             payload:
-              type: object
+              $ref: '#/components/schemas/LicenseClaims'
             signature:
               type: string
     LicenseRevocation:
