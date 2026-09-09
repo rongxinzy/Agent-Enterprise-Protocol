@@ -36,8 +36,9 @@ for (const gate of remaining) {
 const packageDocument = await readJSON("package.json");
 assert(packageDocument.version === release.packageVersion, "package version does not match release manifest");
 assert(packageDocument.scripts?.["release:audit"] === "node scripts/release-audit.mjs", "release:audit script is not wired");
+assert(packageDocument.scripts?.["license:boundary:check"] === "node scripts/license-boundary-audit.mjs", "license boundary audit is not wired");
 assert(packageDocument.scripts?.["sdk:package:check"]?.includes("scripts/sdk-package-check.mjs"), "SDK package check is not wired");
-for (const command of ["npm run check", "npm run release:audit", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e", "npm run test:e2e:backup-restore"]) {
+for (const command of ["npm run check", "npm run release:audit", "npm run license:boundary:check", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e", "npm run test:e2e:backup-restore"]) {
   assert(packageDocument.scripts?.["release:check"]?.includes(command), "release:check omits " + command);
 }
 
@@ -108,6 +109,8 @@ const workflow = await readText(".github/workflows/m0.yml");
 const sdkReleaseWorkflow = await readText(".github/workflows/sdk-release.yml");
 const foundationReleaseWorkflow = await readText(".github/workflows/aep-release.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
+assert(workflow.includes("npm run license:boundary:check"), "CI does not run the License boundary audit");
+assert(!workflow.includes("test:e2e:offline-license"), "CI must not run the local-only offline License E2E");
 assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
 assert(workflow.includes("go test -race ./..."), "CI does not run the Go race detector");
 assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
