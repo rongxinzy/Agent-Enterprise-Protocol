@@ -25,3 +25,13 @@ func TestNormalizeDataPlaneStateDefaultsAndValidatesProviderType(t *testing.T) {
 		t.Fatal("unsupported provider type was accepted")
 	}
 }
+
+func TestNormalizeDataPlaneStateKeepsEmptyRoutesAsJsonArray(t *testing.T) {
+	normalized, ok := normalizeDataPlaneState(dataPlaneDesiredStateWrite{Revision: "empty", Routes: []dataPlaneRoute{}})
+	if !ok {
+		t.Fatal("empty route state was rejected")
+	}
+	if normalized.Routes == nil {
+		t.Fatal("empty routes must remain a non-nil slice so JSON encodes []")
+	}
+}
