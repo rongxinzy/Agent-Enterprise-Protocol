@@ -215,6 +215,37 @@ export interface ControlEventPage {
   nextCursor: string | null;
 }
 
+export interface TelemetrySearchFilters extends Query {
+  cursor?: string | null;
+  limit?: number;
+  userId?: string;
+  sessionId?: string;
+  type?: string;
+  resourceType?: string;
+  resourceId?: string;
+  result?: 'success' | 'failure' | 'info';
+  occurredAfter?: string;
+  occurredBefore?: string;
+}
+
+export interface StoredTelemetryEvent {
+  eventId: string;
+  userId: string;
+  sessionId: string;
+  type: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  result: 'success' | 'failure' | 'info' | null;
+  data: JsonValue;
+  occurredAt: string;
+  receivedAt: string;
+}
+
+export interface TelemetryEventPage {
+  items: StoredTelemetryEvent[];
+  nextCursor: string | null;
+}
+
 export interface Page<T> {
   items: T[];
   nextCursor?: string | null;

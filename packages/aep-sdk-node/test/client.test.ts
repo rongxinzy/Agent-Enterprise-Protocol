@@ -308,14 +308,16 @@ describe('AepClient SDK gate', () => {
     await client.listSkills({cursor: 'skill-2', limit: 25});
     await client.listCredentials({cursor: 'credential-2', limit: 25});
     await client.listAdminModels({cursor: 'model-2', limit: 25});
+    await client.searchEvents({sessionId: 'session-2', type: 'model.request.completed', result: 'success', limit: 25});
 
     const requests = server.requests.filter(request => request.search !== '');
-    expect(requests.slice(-5).map(request => request.search)).toEqual([
+    expect(requests.slice(-6).map(request => request.search)).toEqual([
       '?cursor=role-2&limit=25',
       '?cursor=team-2&limit=25',
       '?cursor=skill-2&limit=25',
       '?cursor=credential-2&limit=25',
       '?cursor=model-2&limit=25',
+      '?sessionId=session-2&type=model.request.completed&result=success&limit=25',
     ]);
   });
 });
