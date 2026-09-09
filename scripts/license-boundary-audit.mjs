@@ -11,7 +11,8 @@ const {stdout} = await run('git', ['ls-files', '-z'], {cwd: root, maxBuffer: 8 *
 const trackedFiles = stdout.split('\0').filter(Boolean);
 const forbiddenPath = /(^|\/)(license-signer-local|\.license-signer)(\/|$)|\.license\.(private|signing)\./i;
 const privateKeyMaterial = /-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----/;
-const forbiddenSecretField = /(?:license|signer)[_-]?(?:private|secret)[_-]?(?:key|seed)|privateKeyPem/i;
+const privateKeyField = `private${'Key'}Pem`;
+const forbiddenSecretField = new RegExp(`(?:license|signer)[_-]?(?:private|secret)[_-]?(?:key|seed)|${privateKeyField}`, 'i');
 
 for (const file of trackedFiles) {
   assert(!forbiddenPath.test(file), `tracked signer or private License path: ${file}`);
