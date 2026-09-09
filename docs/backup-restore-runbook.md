@@ -27,3 +27,32 @@ existing production database or object store.
 This rehearsal is evidence for the GA gate, not a substitute for the
 deployment's scheduled PostgreSQL/MinIO backups, secret-provider backups, or
 an organization-approved recovery-time and recovery-point objective.
+
+## Operational tools
+
+The repository also includes operational scripts for a coordinated backup. The
+backup briefly stops `control-service` and MinIO, writes a PostgreSQL custom dump
+and a MinIO data-volume archive to one directory, and restarts the services:
+
+```sh
+npm run ops:backup -- --project aep-m0 --output-dir backups/20260909
+```
+
+The directory contains `postgres.dump`, `minio-data.tgz`, and a
+`manifest.json` with byte counts and SHA-256 values. MinIO volume archiving uses
+`alpine:3.20` by default; preload an organization-approved equivalent and pass
+`--helper-image` when required. The scripts never back up database passwords,
+deployment Secrets, License material, or provider credentials.
+
+Restore replaces the target project's database and MinIO volume and therefore
+requires an explicit confirmation:
+
+```sh
+npm run ops:restore -- --project aep-m0 --input-dir backups/20260909 --confirm yes
+```
+
+Stop all writes before restoring and rehearse in an isolated project first. The
+restore command rechecks every SHA-256, starts Compose with `--no-build --pull
+never`, and waits for `/readyz`. It does not delete or roll back existing data;
+on failure, keep the target stopped and follow the organization's recovery
+procedure.
