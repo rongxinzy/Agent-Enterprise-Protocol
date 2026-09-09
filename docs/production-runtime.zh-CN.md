@@ -60,8 +60,9 @@ Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并
 
 ```sh
 npm run test:e2e:runtime
+npm run test:e2e:upgrade
 ```
 
-该场景验证首次并发启动、依赖感知 readiness、独立 liveness、Prometheus 指标、结构化日志、容器权限收敛和 SIGTERM 零退出。完整发布门仍为 `npm run test:e2e`。
+运行基线场景验证首次并发启动、依赖感知 readiness、独立 liveness、Prometheus 指标、结构化日志、容器权限收敛和 SIGTERM 零退出。升级场景从迁移 009 的旧 schema 启动，验证 forward-only migration、旧数据转换与保留、多个副本并发迁移、服务重启和升级后的 API 可用性。完整发布门仍为 `npm run test:e2e`。
 
 Kubernetes、Higress Helm、TLS、RBAC、External Secrets 与在线数据面收敛基线见 [production-data-plane.zh-CN.md](production-data-plane.zh-CN.md)。
