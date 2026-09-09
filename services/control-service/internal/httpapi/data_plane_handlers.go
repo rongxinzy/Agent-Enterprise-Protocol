@@ -70,7 +70,9 @@ func normalizeDataPlaneState(input dataPlaneDesiredStateWrite) (dataPlaneDesired
 			return dataPlaneDesiredStateWrite{}, false
 		}
 	}
-	copyState := dataPlaneDesiredStateWrite{Revision: input.Revision, Routes: append([]dataPlaneRoute(nil), input.Routes...)}
+	routes := make([]dataPlaneRoute, len(input.Routes))
+	copy(routes, input.Routes)
+	copyState := dataPlaneDesiredStateWrite{Revision: input.Revision, Routes: routes}
 	sort.Slice(copyState.Routes, func(i, j int) bool { return copyState.Routes[i].ModelID < copyState.Routes[j].ModelID })
 	for i := 1; i < len(copyState.Routes); i++ {
 		if copyState.Routes[i-1].ModelID == copyState.Routes[i].ModelID {
