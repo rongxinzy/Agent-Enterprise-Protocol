@@ -27,6 +27,7 @@ AEP 是管理协议，不重新定义模型推理、MCP 或 Agent-to-Agent 协�
 - [AEP M1 Node Agent 模型运行手册](docs/m1-client-runbook.zh-CN.md)
 - [AEP M2 Credential 运行手册](docs/m2-credential-runbook.zh-CN.md)
 - [AEP 生产运行基线](docs/production-runtime.zh-CN.md)
+- [离线部署 Bundle](docs/offline-deployment.zh-CN.md)
 - [GA 验证手册](docs/ga-validation-runbook.zh-CN.md)
 - [备份与灾备恢复手册](docs/backup-restore-runbook.zh-CN.md)
 - [桌面端主进程会话接入](docs/desktop-session.zh-CN.md)
