@@ -21,6 +21,7 @@ if (images.length === 0) throw new Error('Compose did not declare any images.');
 const imageDir = path.join(outputDir, 'images');
 await mkdir(imageDir, {recursive: true});
 await cp(path.join(root, 'deploy', 'compose'), path.join(outputDir, 'deploy', 'compose'), {recursive: true});
+await cp(path.join(root, 'scripts', 'install-offline-bundle.mjs'), path.join(outputDir, 'install-offline-bundle.mjs'));
 if (profile === 'gateway') {
   await mkdir(path.join(outputDir, 'tests', 'e2e'), {recursive: true});
   await cp(path.join(root, 'tests', 'e2e', 'mock-openai.mjs'), path.join(outputDir, 'tests', 'e2e', 'mock-openai.mjs'));
@@ -91,7 +92,7 @@ function offlineCompose(manifestImages) {
 function offlineReadme(manifest) {
   const files = manifest.composeFiles.map(file => `- \`${file}\``).join('\n');
   const compose = manifest.composeFiles.map(file => `-f ${file}`).join(' ');
-  return `# AEP Offline Bundle\n\nThis bundle was generated for the **${manifest.profile}** profile. It contains the exact image archives and SHA-256 values recorded in \`manifest.json\`.\n\n## Transfer and verify\n\nCopy the complete bundle directory to the air-gapped host. Verify \`SHA256SUMS\` with a trusted local checksum tool before loading any image.\n\nPowerShell:\n\n\`\`\`powershell\nGet-FileHash .\\images\\*.tar -Algorithm SHA256\n\`\`\`\n\n## Load and start\n\n\`\`\`sh\nfor archive in images/*.tar; do docker load --input "$archive"; done\ndocker compose -p aep-offline ${compose} up -d\n\`\`\`\n\nThe generated \`offline.yaml\` disables build contexts and pins the locally loaded AEP service images. Do not use \`--build\` on the air-gapped host.\n\nCompose inputs:\n\n${files}\n\nThe bundle contains no provider API keys, License private keys, signing seeds, database data, MinIO data, or customer configuration. Supply those through the deployment Secret mechanism.\n`;
+  return `# AEP Offline Bundle\n\nThis bundle was generated for the **${manifest.profile}** profile. It contains the exact image archives and SHA-256 values recorded in \`manifest.json\`.\n\n## Transfer and verify\n\nCopy the complete bundle directory to the air-gapped host. Verify \`SHA256SUMS\` with a trusted local checksum tool before installation.\n\n## One-command install\n\nRun the bundled dependency-free installer from the Bundle directory:\n\n\`\`\`sh\nnode install-offline-bundle.mjs --project aep-offline --port 8080\n\`\`\`\n\nThe installer verifies every archive against both \`SHA256SUMS\` and \`manifest.json\`, loads the images, starts Compose with \`--pull never --no-build\`, and waits for the control service readiness endpoint. Use \`--dry-run\` to inspect actions without changing Docker state.\n\nThe generated \`offline.yaml\` disables build contexts and pins the locally loaded AEP service images. Do not use \`--build\` on the air-gapped host.\n\nCompose inputs:\n\n${files}\n\nThe bundle contains no provider API keys, License private keys, signing seeds, database data, MinIO data, or customer configuration. Supply those through the deployment Secret mechanism.\n`;
 }
 
 function parseArgs(args) {

@@ -20,19 +20,16 @@ npm run offline:bundle -- --output-dir release/offline-gateway --profile gateway
 
 ## 隔离网安装
 
-目标机先用组织批准的本地工具校验 SHA-256，然后加载镜像并启动 Compose；
-不要使用 `--build`：
+目标机可以直接运行 Bundle 自带的无依赖安装器。安装器会校验每个镜像归档的
+SHA-256、执行离线 `docker load`、启动 Compose，并等待 control-service 就绪：
 
 ```sh
-for archive in images/*.tar; do docker load --input "$archive"; done
-docker compose -p aep-offline \
-  -f deploy/compose/compose.yaml \
-  -f deploy/compose/gateway.yaml \
-  -f deploy/compose/offline.yaml up -d
+node install-offline-bundle.mjs --project aep-offline --port 8080
 ```
 
-仅使用 base Bundle 时省略 `gateway.yaml`。生成的 `offline.yaml` 会移除构建
-上下文，并固定使用 Bundle 中已加载的 AEP 服务镜像。PostgreSQL、MinIO、部署
+可先使用 `node install-offline-bundle.mjs --dry-run` 查看计划而不修改 Docker
+状态。仅使用 base Bundle 时安装器会自动省略 gateway 配置。生成的
+`offline.yaml` 会移除构建上下文，并固定使用 Bundle 中已加载的 AEP 服务镜像。PostgreSQL、MinIO、部署
 Secret、License 和供应商凭据仍由部署方通过离线 Secret 流程单独提供。
 
 该 Bundle 解决镜像/安装介质传输，不等同于升级机制。升级前应按
