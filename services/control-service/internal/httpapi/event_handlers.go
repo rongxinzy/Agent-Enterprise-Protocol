@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -422,13 +425,74 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT event_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE deployment_id=$1 AND ($2='' OR user_id=$2) ORDER BY occurred_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, request.URL.Query().Get("userId"), limit(request))
+	filters := request.URL.Query()
+	conditions := []string{"deployment_id=$1"}
+	args := []any{claimsFrom(request).DeploymentID}
+	addTextFilter := func(name, column string) {
+		if value := strings.TrimSpace(filters.Get(name)); value != "" {
+			args = append(args, value)
+			conditions = append(conditions, fmt.Sprintf("%s=$%d", column, len(args)))
+		}
+	}
+	addTextFilter("userId", "user_id")
+	addTextFilter("sessionId", "session_id")
+	addTextFilter("type", "type")
+	addTextFilter("resourceType", "resource_type")
+	addTextFilter("resourceId", "resource_id")
+	if result := strings.TrimSpace(filters.Get("result")); result != "" {
+		if result != "success" && result != "failure" && result != "info" {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The telemetry result filter is invalid.")
+			return
+		}
+		args = append(args, result)
+		conditions = append(conditions, fmt.Sprintf("result=$%d", len(args)))
+	}
+	var occurredAfter, occurredBefore *time.Time
+	for name, target := range map[string]**time.Time{"occurredAfter": &occurredAfter, "occurredBefore": &occurredBefore} {
+		value := strings.TrimSpace(filters.Get(name))
+		if value == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", fmt.Sprintf("The %s filter must be RFC3339.", name))
+			return
+		}
+		*target = &parsed
+	}
+	if occurredAfter != nil {
+		args = append(args, *occurredAfter)
+		conditions = append(conditions, fmt.Sprintf("occurred_at >= $%d", len(args)))
+	}
+	if occurredBefore != nil {
+		args = append(args, *occurredBefore)
+		conditions = append(conditions, fmt.Sprintf("occurred_at <= $%d", len(args)))
+	}
+	if occurredAfter != nil && occurredBefore != nil && occurredAfter.After(*occurredBefore) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "occurredAfter must not be later than occurredBefore.")
+		return
+	}
+	if rawCursor := strings.TrimSpace(filters.Get("cursor")); rawCursor != "" {
+		cursor, err := decodeTelemetryCursor(rawCursor)
+		if err != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The telemetry cursor is invalid.")
+			return
+		}
+		args = append(args, cursor.OccurredAt, cursor.EventID)
+		conditions = append(conditions, fmt.Sprintf("(occurred_at,event_id) < ($%d,$%d)", len(args)-1, len(args)))
+	}
+	pageLimit := int(limit(request))
+	args = append(args, pageLimit+1)
+	query := `SELECT event_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE ` + strings.Join(conditions, " AND ") + fmt.Sprintf(" ORDER BY occurred_at DESC,event_id DESC LIMIT $%d", len(args))
+	rows, err := s.app.Pool.Query(request.Context(), query, args...)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	defer rows.Close()
 	items := make([]map[string]any, 0)
+	var nextCursor *string
+	var lastCursor telemetryCursor
 	for rows.Next() {
 		var eventID, userID, eventType string
 		var sessionID pgtype.Text
@@ -439,11 +503,47 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 			databaseFailure(response, request, err)
 			return
 		}
+		if len(items) == pageLimit {
+			value := encodeTelemetryCursor(lastCursor)
+			nextCursor = &value
+			break
+		}
 		var data any
 		_ = json.Unmarshal(payload, &data)
 		items = append(items, map[string]any{"eventId": eventID, "userId": userID, "sessionId": nullablePGText(sessionID), "type": eventType, "resourceType": nullablePGText(resourceType), "resourceId": nullablePGText(resourceID), "result": nullablePGText(result), "data": data, "occurredAt": occurredAt, "receivedAt": receivedAt})
+		lastCursor = telemetryCursor{OccurredAt: occurredAt, EventID: eventID}
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nil})
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
+}
+
+type telemetryCursor struct {
+	OccurredAt time.Time
+	EventID    string
+}
+
+func encodeTelemetryCursor(cursor telemetryCursor) string {
+	value := cursor.OccurredAt.UTC().Format(time.RFC3339Nano) + "\x00" + cursor.EventID
+	return base64.RawURLEncoding.EncodeToString([]byte(value))
+}
+
+func decodeTelemetryCursor(raw string) (telemetryCursor, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return telemetryCursor{}, err
+	}
+	parts := strings.SplitN(string(decoded), "\x00", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return telemetryCursor{}, errors.New("invalid telemetry cursor")
+	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return telemetryCursor{}, err
+	}
+	return telemetryCursor{OccurredAt: occurredAt, EventID: parts[1]}, nil
 }
 
 func nullablePGText(value pgtype.Text) any {
