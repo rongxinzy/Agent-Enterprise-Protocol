@@ -1,0 +1,81 @@
+services:
+  postgres:
+    networks:
+      - offline
+
+  minio:
+    environment:
+      MINIO_ROOT_USER: offline-minio-access
+      MINIO_ROOT_PASSWORD: offline-minio-secret
+    networks:
+      - offline
+
+  control-service:
+    restart: "no"
+    networks:
+      - offline
+    environment:
+      AEP_ENVIRONMENT: production
+      AEP_LOG_FORMAT: json
+      AEP_LOG_LEVEL: info
+      AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
+      AEP_MINIO_ENDPOINT: minio:9000
+      AEP_MINIO_ACCESS_KEY: offline-minio-access
+      AEP_MINIO_SECRET_KEY: offline-minio-secret
+      AEP_ISSUER: http://localhost:${AEP_OFFLINE_PORT:-18089}
+      AEP_DEPLOYMENT_ID: offline-e2e-deployment
+      AEP_DEPLOYMENT_NAME: Offline E2E Deployment
+      AEP_BOOTSTRAP_DEPLOYMENT_ID: offline-e2e-deployment
+      AEP_BOOTSTRAP_DEPLOYMENT_NAME: Offline E2E Deployment
+      AEP_BOOTSTRAP_ADMIN_USERNAME: admin
+      AEP_BOOTSTRAP_ADMIN_PASSWORD: ${AEP_OFFLINE_ADMIN_PASSWORD:?AEP_OFFLINE_ADMIN_PASSWORD is required}
+      AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"
+      AEP_SIGNING_KEY_BASE64: ${AEP_OFFLINE_SIGNING_KEY_BASE64:?AEP_OFFLINE_SIGNING_KEY_BASE64 is required}
+      AEP_LICENSE_TRUSTED_KEYS_FILE: /run/aep-license/offline-license-trusted-keys.json
+      AEP_LICENSE_FILE: /run/aep-license/offline-license.json
+      AEP_LICENSE_DEPLOYMENT_ID: ${AEP_OFFLINE_LICENSE_DEPLOYMENT_ID:-offline-e2e-deployment}
+      AEP_LICENSE_CUSTOMER_ID: ${AEP_OFFLINE_LICENSE_CUSTOMER_ID:-offline-e2e-customer}
+    volumes:
+      - type: bind
+        source: ${AEP_OFFLINE_FIXTURE_DIR:?AEP_OFFLINE_FIXTURE_DIR is required}
+        target: /run/aep-license
+        read_only: true
+    ports: !reset []
+
+  offline-access-proxy:
+    image: node:24-alpine
+    depends_on:
+      control-service:
+        condition: service_healthy
+    environment:
+      PROXY_PORT: "8080"
+      CONTROL_HOST: control-service
+      CONTROL_PORT: "8080"
+    command: [node, /app/offline-access-proxy.mjs]
+    volumes:
+      - type: bind
+        source: ${AEP_OFFLINE_PROXY_FILE:?AEP_OFFLINE_PROXY_FILE is required}
+        target: /app/offline-access-proxy.mjs
+        read_only: true
+    ports:
+      - ${AEP_OFFLINE_PORT:-18089}:8080
+    networks:
+      - offline
+      - access
+
+  offline-egress-probe:
+    image: node:24-alpine
+    profiles: [offline-probe]
+    command:
+      - node
+      - -e
+      - >-
+        fetch('https://example.com', {signal: AbortSignal.timeout(3000)})
+        .then(() => process.exit(1)).catch(() => process.exit(0));
+    networks:
+      - offline
+
+networks:
+  offline:
+    internal: true
+  access: {}

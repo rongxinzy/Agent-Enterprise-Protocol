@@ -1,0 +1,15 @@
+{
+  "format": "zhiyuan-license-v1",
+  "keyId": "offline-e2e-test-key",
+  "payload": {
+    "customerId": "offline-e2e-customer",
+    "deploymentId": "offline-e2e-deployment",
+    "edition": "enterprise",
+    "expiresAt": "2027-01-01T00:00:00.000Z",
+    "features": ["enterprise.models"],
+    "graceDays": 7,
+    "issuedAt": "2026-01-01T00:00:00.000Z",
+    "licenseId": "lic-offline-e2e-v1"
+  },
+  "signature": "MVnN97qYvjUvJ4OwJb7fUBQD2lEwgLjDg_3S7udjw8FDUATg1x3CR0FtoRmMMm5pOzFWikRwWueoHLOeH1zwDg"
+}

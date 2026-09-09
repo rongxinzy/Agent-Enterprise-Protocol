@@ -24,6 +24,7 @@
     "test": "npm run openapi:bundle && npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e:m0 && npm run test:e2e:m1-control && npm run test:e2e:m1-gateway && npm run test:e2e:m1-client && npm run test:e2e:m2-control && npm run test:e2e:m2-agent && npm run test:e2e:runtime && npm run test:e2e:m3-data-plane",
     "test:e2e:m0": "node tests/e2e/m0.mjs",
+    "test:e2e:offline-license": "npm run build --workspace @aep/sdk-node && node tests/e2e/offline-license.mjs",
     "test:e2e:m1-control": "node tests/e2e/m1-control.mjs",
     "test:e2e:m1-gateway": "node tests/e2e/m1-gateway.mjs",
     "test:e2e:m1-client": "npm run build --workspace @aep/sdk-node && npm run build --workspace @aep/example-node-agent && node tests/e2e/m1-client.mjs",
@@ -39,8 +40,9 @@
     "compose:gateway:up": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build",
     "compose:gateway:down": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml down",
     "release:audit": "node scripts/release-audit.mjs",
+    "license:boundary:check": "node scripts/license-boundary-audit.mjs",
     "sdk:package:check": "npm run build --workspace @aep/sdk-node && node scripts/sdk-package-check.mjs",
-    "release:check": "npm run check && npm run release:audit && npm run sdk:package:check && go test ./... && go test -race ./... && go vet ./... && go build ./... && npm run test:e2e && npm run test:e2e:backup-restore",
+    "release:check": "npm run check && npm run release:audit && npm run license:boundary:check && npm run sdk:package:check && go test ./... && go test -race ./... && go vet ./... && go build ./... && npm run test:e2e && npm run test:e2e:backup-restore",
     "check": "npm run openapi:lint && npm run build && npm test"
   },
   "devDependencies": {
