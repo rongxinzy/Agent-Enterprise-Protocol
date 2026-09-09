@@ -61,6 +61,8 @@ import type {
   ServiceMetadata,
   SkillManifest,
   SkillManifestResult,
+  TelemetrySearchFilters,
+  TelemetryEventPage,
 } from './types.js';
 
 export class AepClient {
@@ -696,7 +698,7 @@ export class AepClient {
     });
   }
 
-  searchEvents(filters: Query = {}): Promise<JsonObject> {
+  searchEvents(filters: TelemetrySearchFilters = {}): Promise<TelemetryEventPage> {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/events?${query(filters)}`});
   }
 
