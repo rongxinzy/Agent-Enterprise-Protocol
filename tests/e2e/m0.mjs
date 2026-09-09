@@ -115,15 +115,22 @@ async function runScenario() {
   await assertDelivery(admin, String(expiredEvent.eventId), 'expired');
 
   const telemetryClient = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
-  await telemetryClient.loginWithPassword({deploymentId: 'demo', username, password});
+  const telemetryTokens = await telemetryClient.loginWithPassword({deploymentId: 'demo', username, password});
   const duplicateEventId = `duplicate-${runId}`;
   const duplicateTelemetry = {eventId: duplicateEventId, type: 'e2e.duplicate', occurredAt: new Date().toISOString(), result: 'succeeded', data: {}};
   await telemetryClient.uploadEventBatch([duplicateTelemetry, duplicateTelemetry]);
   await telemetryClient.uploadEventBatch([duplicateTelemetry]);
+  await telemetryClient.uploadEventBatch([{eventId: `filter-${runId}`, type: 'e2e.filter', occurredAt: new Date().toISOString(), result: 'success', resource: {type: 'skill', id: skillId}, data: {}}]);
 
   const audit = await admin.searchEvents({userId: String(user.id)});
   assert(Array.isArray(audit.items) && audit.items.length >= 3, 'Expected Skill telemetry was not recorded');
   assert(audit.items.filter(item => item.eventId === duplicateEventId).length === 1, 'Telemetry eventId was not deduplicated');
+  const filtered = await admin.searchEvents({sessionId: telemetryTokens.sessionId, type: 'e2e.filter', result: 'success', limit: 10});
+  assert(filtered.items.length === 1 && filtered.items[0].eventId === `filter-${runId}`, 'Telemetry filters did not isolate the terminal event');
+  const firstTelemetryPage = await admin.searchEvents({sessionId: telemetryTokens.sessionId, limit: 1});
+  assert(firstTelemetryPage.items.length === 1 && firstTelemetryPage.nextCursor, 'Telemetry cursor pagination did not return a continuation');
+  const secondTelemetryPage = await admin.searchEvents({sessionId: telemetryTokens.sessionId, cursor: firstTelemetryPage.nextCursor, limit: 1});
+  assert(secondTelemetryPage.items.length === 1 && secondTelemetryPage.items[0].eventId !== firstTelemetryPage.items[0].eventId, 'Telemetry cursor pagination repeated an event');
   await runCli(['metadata']);
 }
 
