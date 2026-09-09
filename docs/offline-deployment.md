@@ -23,19 +23,17 @@ together during transfer.
 
 ## Air-gapped install
 
-On the target host, verify the checksums with the organization's trusted local
-tool, load every archive, and start Compose without `--build`:
+On the target host, run the dependency-free installer bundled with the release.
+It verifies every archive against both checksum sources, loads the images, starts
+Compose without pulling or building, and waits for control-service readiness:
 
 ```sh
-for archive in images/*.tar; do docker load --input "$archive"; done
-docker compose -p aep-offline \
-  -f deploy/compose/compose.yaml \
-  -f deploy/compose/gateway.yaml \
-  -f deploy/compose/offline.yaml up -d
+node install-offline-bundle.mjs --project aep-offline --port 8080
 ```
 
-For a base-only bundle omit `gateway.yaml`. The generated `offline.yaml`
-removes build contexts and pins the loaded AEP service images. PostgreSQL,
+Use `node install-offline-bundle.mjs --dry-run` to inspect the actions without
+changing Docker state. For a base-only bundle the installer automatically omits
+`gateway.yaml`. The generated `offline.yaml` removes build contexts and pins the loaded AEP service images. PostgreSQL,
 MinIO, deployment Secrets, License material, and provider credentials remain
 deployment inputs and must be provisioned separately through the approved
 offline Secret process.
