@@ -502,10 +502,12 @@ paths:
     get:
       tags: [Admin Events]
       operationId: searchEvents
+      description: Returns persisted client telemetry for audit and operational analysis. This endpoint is not a live event stream; clients should use cursor pagination and poll at an appropriate interval for updates.
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
         - {$ref: '#/components/parameters/Limit'}
         - {name: userId, in: query, schema: {type: string}}
+        - {name: sessionId, in: query, schema: {type: string}}
         - {name: type, in: query, schema: {type: string}}
         - {name: resourceType, in: query, schema: {type: string}}
         - {name: resourceId, in: query, schema: {type: string}}

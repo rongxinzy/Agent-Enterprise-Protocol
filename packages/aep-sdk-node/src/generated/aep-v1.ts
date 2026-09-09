@@ -810,6 +810,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description Returns persisted client telemetry for audit and operational analysis. This endpoint is not a live event stream; clients should use cursor pagination and poll at an appropriate interval for updates. */
         get: operations["searchEvents"];
         put?: never;
         post?: never;
@@ -3491,6 +3492,7 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit-2"];
                 userId?: string;
+                sessionId?: string;
                 type?: string;
                 resourceType?: string;
                 resourceId?: string;
