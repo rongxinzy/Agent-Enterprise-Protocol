@@ -499,13 +499,13 @@ func (a *App) bootstrap(ctx context.Context) error {
 	if _, err := a.Store.UpsertDeployment(ctx, repository.Deployment{ID: a.Config.BootstrapDeploymentID, Name: a.Config.BootstrapDeploymentName}); err != nil {
 		return err
 	}
-	if _, err := connection.Exec(ctx, `INSERT INTO roles (deployment_id, id, name, built_in) VALUES ($1, 'admin', 'Administrator', true) ON CONFLICT (deployment_id, id) DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
+	if _, err := connection.Exec(ctx, `INSERT INTO roles (deployment_id, id, name, built_in) VALUES ($1, 'admin', 'Administrator', true) ON CONFLICT (deployment_id, id) DO UPDATE SET name=EXCLUDED.name, built_in=true, enabled=true, updated_at=now() WHERE roles.built_in OR roles.id='admin'`, a.Config.BootstrapDeploymentID); err != nil {
 		return fmt.Errorf("bootstrap administrator role definition: %w", err)
 	}
 	if _, err := connection.Exec(ctx, `INSERT INTO role_permissions (deployment_id, role_id, permission_id) SELECT $1, 'admin', id FROM permissions ON CONFLICT DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
 		return fmt.Errorf("bootstrap administrator permissions: %w", err)
 	}
-	if _, err := connection.Exec(ctx, `INSERT INTO teams (deployment_id, id, name, description, built_in) VALUES ($1, 'all-users', 'All users', 'Default team for every deployment user', true) ON CONFLICT (deployment_id, id) DO NOTHING`, a.Config.BootstrapDeploymentID); err != nil {
+	if _, err := connection.Exec(ctx, `INSERT INTO teams (deployment_id, id, name, description, built_in) VALUES ($1, 'all-users', 'All users', 'Default team for every deployment user', true) ON CONFLICT (deployment_id, id) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, built_in=true, enabled=true, updated_at=now() WHERE teams.built_in OR teams.id='all-users'`, a.Config.BootstrapDeploymentID); err != nil {
 		return fmt.Errorf("bootstrap default team: %w", err)
 	}
 	deploymentStore := a.Store.Deployment(a.Config.BootstrapDeploymentID)

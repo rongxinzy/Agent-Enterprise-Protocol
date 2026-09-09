@@ -84,9 +84,14 @@ async function runScenario() {
   const roles = await adminGet('/aep/v1/admin/roles', adminStore);
   const listedRole = roles.roles.find(item => item.id === roleId);
   assert(listedRole?.permissions?.includes('credentials.read') && listedRole.permissions.includes('licenses.read'), 'Role list omitted the assigned permissions');
+  const administratorRole = roles.roles.find(item => item.id === 'admin');
+  assert(administratorRole?.name === 'Administrator' && administratorRole.builtIn === true, 'Built-in administrator Role label was not normalized');
   const teams = await adminGet('/aep/v1/admin/teams', adminStore);
   const listedTeam = teams.teams.find(item => item.id === teamId);
   assert(listedTeam?.memberCount === 1, 'Team list returned the wrong member count');
+  const allUsersTeam = teams.teams.find(item => item.id === 'all-users');
+  assert(allUsersTeam?.name === 'All users' && allUsersTeam.builtIn === true, 'Built-in All users Team label was not normalized');
+  await assertBuiltinRbacLabelsSurviveUpgrade(adminStore);
   const userStore = new MemoryTokenStore();
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
   await userClient.loginWithPassword({deploymentId: 'demo', username, password});
@@ -245,6 +250,26 @@ async function runScenario() {
   await admin.deleteModel('m2-model-' + runId);
   await admin.deleteCredential(serverOnly.id);
   await expectProblem(admin.getCredential(serverOnly.id), 404, 'RESOURCE_NOT_FOUND');
+}
+
+async function assertBuiltinRbacLabelsSurviveUpgrade(adminStore) {
+  // Exercise both defenses: runtime bootstrap repairs an already-applied
+  // deployment, while the forward migration repairs an upgraded database.
+  await postgres("UPDATE roles SET name='admin', built_in=true WHERE deployment_id='demo' AND id='admin'; UPDATE teams SET name='all-users', built_in=true WHERE deployment_id='demo' AND id='all-users';");
+  await compose('restart', 'control-service');
+  await waitForHealth();
+  let roles = await adminGet('/aep/v1/admin/roles', adminStore);
+  let teams = await adminGet('/aep/v1/admin/teams', adminStore);
+  assert(roles.roles.find(item => item.id === 'admin')?.name === 'Administrator', 'Runtime bootstrap did not restore the administrator Role label');
+  assert(teams.teams.find(item => item.id === 'all-users')?.name === 'All users', 'Runtime bootstrap did not restore the All users Team label');
+
+  await postgres("UPDATE roles SET name='admin' WHERE deployment_id='demo' AND id='admin'; UPDATE teams SET name='all-users' WHERE deployment_id='demo' AND id='all-users'; DELETE FROM schema_migrations WHERE version='023_normalize_builtin_rbac_labels.sql';");
+  await compose('restart', 'control-service');
+  await waitForHealth();
+  roles = await adminGet('/aep/v1/admin/roles', adminStore);
+  teams = await adminGet('/aep/v1/admin/teams', adminStore);
+  assert(roles.roles.find(item => item.id === 'admin')?.name === 'Administrator', 'RBAC label migration did not restore the administrator Role label');
+  assert(teams.teams.find(item => item.id === 'all-users')?.name === 'All users', 'RBAC label migration did not restore the All users Team label');
 }
 
 async function adminRequest(path, body, tokenStore) {
