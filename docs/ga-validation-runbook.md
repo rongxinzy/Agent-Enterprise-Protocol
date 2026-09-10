@@ -28,3 +28,15 @@ Record the output, deployment image digests, database/object-store versions,
 and the test window as release evidence. This harness is one input to the GA
 gate; it does not replace an external security review or a backup and disaster
 recovery rehearsal.
+
+Run the automated security baseline on the frozen candidate commit and retain
+the workflow URL with the release evidence:
+
+```sh
+npm run security:check
+```
+
+The repository security workflow runs the same production dependency and
+reachable Go vulnerability checks, plus CodeQL for Go and TypeScript. The
+independent assessment scope and exit criteria are defined in the
+[external security review runbook](security-review-runbook.md).

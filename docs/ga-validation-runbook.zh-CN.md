@@ -23,3 +23,12 @@ Compose 控制服务，等待就绪，将 JSON 结果写入
 将输出、部署镜像 digest、数据库和对象存储版本以及测试时间窗口记录为
 发布证据。该脚本只是 GA 门禁的一部分，不能替代外部安全评审或备份与灾备
 演练。
+
+在冻结的候选提交上运行自动化安全基线，并把工作流 URL 纳入发布证据：
+
+```sh
+npm run security:check
+```
+
+仓库安全工作流执行相同的生产 Node 依赖与 Go 可达漏洞扫描，并对 Go 和
+TypeScript 运行 CodeQL。独立评审范围和退出标准见[外部安全评审手册](security-review-runbook.zh-CN.md)。

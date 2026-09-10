@@ -45,6 +45,7 @@
     "compose:gateway:up": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build",
     "compose:gateway:down": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml down",
     "release:audit": "node scripts/release-audit.mjs",
+    "security:check": "npm audit --omit=dev --audit-level=high && go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...",
     "release:artifacts:manifest": "node scripts/release-artifact-manifest.mjs",
     "test:release-artifacts": "node tests/release-artifacts.mjs",
     "license:boundary:check": "node scripts/license-boundary-audit.mjs",

@@ -1,4 +1,4 @@
-FROM mirror.gcr.io/library/golang:1.26-alpine AS build
+FROM mirror.gcr.io/library/golang:1.26.6-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 ARG GOPROXY=https://proxy.golang.org,direct
