@@ -91,6 +91,7 @@ async function runScenario() {
   assert(listedTeam?.memberCount === 1, 'Team list returned the wrong member count');
   const allUsersTeam = teams.teams.find(item => item.id === 'all-users');
   assert(allUsersTeam?.name === 'All users' && allUsersTeam.builtIn === true, 'Built-in All users Team label was not normalized');
+  await assertDelegatedRoleBoundaries(admin, runId);
   await assertBuiltinRbacLabelsSurviveUpgrade(adminStore);
   const userStore = new MemoryTokenStore();
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
@@ -250,6 +251,67 @@ async function runScenario() {
   await admin.deleteModel('m2-model-' + runId);
   await admin.deleteCredential(serverOnly.id);
   await expectProblem(admin.getCredential(serverOnly.id), 404, 'RESOURCE_NOT_FOUND');
+}
+
+async function assertDelegatedRoleBoundaries(admin, suffix) {
+  const delegatedRoleId = 'delegated-user-admin-' + suffix;
+  await admin.createRole({
+    id: delegatedRoleId,
+    name: 'Delegated user administrator',
+    description: 'Security regression fixture',
+    permissions: ['users.read', 'users.write', 'roles.read', 'roles.write'],
+  });
+  const delegatedUsername = 'delegated-admin-' + suffix;
+  const delegatedPassword = 'delegated-password-123';
+  const delegatedUser = await admin.createUser({
+    deploymentId: 'demo',
+    username: delegatedUsername,
+    displayName: 'Delegated administrator',
+    temporaryPassword: delegatedPassword,
+    requirePasswordChange: false,
+    teamIds: ['all-users'],
+    roleIds: [delegatedRoleId],
+  });
+  const delegated = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  await delegated.loginWithPassword({deploymentId: 'demo', username: delegatedUsername, password: delegatedPassword});
+
+  await expectProblem(delegated.createUser({
+    deploymentId: 'demo', username: 'escalated-user-' + suffix, displayName: 'Escalated user',
+    temporaryPassword: 'escalated-password-123', requirePasswordChange: false,
+    teamIds: ['all-users'], roleIds: ['admin'],
+  }), 403, 'ROLE_GRANT_FORBIDDEN');
+  await expectProblem(delegated.importUsers({
+    deploymentId: 'demo',
+    users: [{
+      externalRowId: 'escalated-import', username: 'escalated-import-' + suffix,
+      displayName: 'Escalated import', temporaryPassword: 'escalated-password-123',
+      requirePasswordChange: false, teamIds: ['all-users'], roleIds: ['admin'],
+    }],
+  }), 403, 'ROLE_GRANT_FORBIDDEN');
+  await expectProblem(
+    delegated.replaceUserRBAC(delegatedUser.id, {roleIds: ['admin'], teamIds: ['all-users']}),
+    403,
+    'ROLE_GRANT_FORBIDDEN',
+  );
+  await expectProblem(delegated.createRole({
+    id: 'escalated-role-' + suffix,
+    name: 'Escalated role',
+    description: 'Must be rejected',
+    permissions: ['data_plane.write'],
+  }), 403, 'ROLE_PERMISSION_ESCALATION');
+  await expectProblem(
+    delegated.updateRole('admin', {name: 'Compromised administrator'}),
+    409,
+    'BUILT_IN_RESOURCE',
+  );
+
+  const permittedRole = await delegated.createRole({
+    id: 'delegated-reader-' + suffix,
+    name: 'Delegated reader',
+    description: 'Permission subset fixture',
+    permissions: ['users.read'],
+  });
+  assert(permittedRole.id === 'delegated-reader-' + suffix, 'Delegated administrator could not create a permission subset role');
 }
 
 async function assertBuiltinRbacLabelsSurviveUpgrade(adminStore) {
