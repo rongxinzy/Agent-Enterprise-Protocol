@@ -8,7 +8,7 @@
 
 Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并拒绝 AEP_ENABLE_MOCK_FEDERATED_AUTH=true。在真实企业身份适配器接入前，不得公布或暴露 federated_auth。
 
-部署输入参考 [control-service.env.example](../deploy/production/control-service.env.example) 与 [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example)。敏感变量支持 `VARIABLE_FILE` 文件路径，直接值与 `_FILE` 形式不能同时设置。Credential keyring 继续使用 `AEP_CREDENTIAL_MASTER_KEY_FILE`，以便受控轮换期间保留旧解密密钥。数据面 reconciler token 也支持文件形式。
+部署输入参考 [control-service.env.example](../deploy/production/control-service.env.example) 与 [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example)。敏感变量支持 `VARIABLE_FILE` 文件路径，直接值与 `_FILE` 形式不能同时设置。Credential keyring 继续使用 `AEP_CREDENTIAL_MASTER_KEY_FILE`，以便受控轮换期间保留旧解密密钥。数据面 reconciler token 与网关 License 状态令牌也支持文件形式。Kubernetes 基线通过 External Secret 挂载 License 可信公钥集、签名 License 和两个服务共享的状态令牌；清单中的客户 ID 与部署 ID 必须由交付 overlay 替换为 License 对应值。
 
 签名 seed、Credential keyring、数据库凭据、对象存储凭据和初始管理员密码必须由编排平台的 Secret Provider 提供，不得写入镜像、ConfigMap、Git、Helm values 或 shell 历史。
 

@@ -224,6 +224,8 @@ func (cfg Config) Validate() error {
 			return errors.New("AEP_LICENSE_CUSTOMER_ID is required in production")
 		case strings.TrimSpace(cfg.LicenseFile) == "":
 			return errors.New("AEP_LICENSE_FILE is required in production")
+		case strings.TrimSpace(cfg.GatewayLicenseStatusToken) == "":
+			return errors.New("AEP_GATEWAY_LICENSE_STATUS_TOKEN or AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE is required in production")
 		}
 	}
 	return nil

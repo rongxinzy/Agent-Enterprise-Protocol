@@ -12,8 +12,9 @@ import (
 )
 
 type verifierStub struct {
-	claims *ModelClaims
-	err    error
+	claims         *ModelClaims
+	err            error
+	entitlementErr error
 }
 
 func (v verifierStub) Verify(context.Context, string) (*ModelClaims, error) {
@@ -22,6 +23,10 @@ func (v verifierStub) Verify(context.Context, string) (*ModelClaims, error) {
 
 func (v verifierStub) Ready(context.Context) error {
 	return v.err
+}
+
+func (v verifierStub) CheckEntitlement(context.Context, *ModelClaims) error {
+	return v.entitlementErr
 }
 
 func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
@@ -110,6 +115,38 @@ func TestHandlerRequiresEntitlementWhenConfigured(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"ENTITLEMENT_REQUIRED"`) {
 		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHandlerFailsClosedForInactiveOrUnavailableEntitlement(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "revoked License", err: ErrEntitlementInactive, status: http.StatusForbidden, code: "LICENSE_REVOKED"},
+		{name: "status service unavailable", err: context.DeadlineExceeded, status: http.StatusServiceUnavailable, code: "ENTITLEMENT_CHECK_UNAVAILABLE"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler, err := NewHandler(Config{UpstreamURL: "http://example.test", RequestLimit: 1024, RequireEntitlement: true}, verifierStub{
+				claims: &ModelClaims{
+					DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest",
+					ModelScopes: []string{"model-a"}, TokenUse: "entitlement",
+				},
+				entitlementErr: test.err,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a"}`))
+			request.Header.Set("Authorization", "Bearer entitlement-token")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.status || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

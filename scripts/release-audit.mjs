@@ -103,7 +103,10 @@ const productionControl = await readText("deploy/production/control-service.env.
 const productionGateway = await readText("deploy/production/gateway-authorizer.env.example");
 assert(productionControl.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH=false"), "production sample must explicitly disable mock federated auth");
 assert(productionControl.includes("AEP_DATA_PLANE_RECONCILER_TOKEN_FILE="), "production sample must mount the data-plane reconciler token");
+assert(productionControl.includes("AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE="), "production control-service sample must mount the gateway License status token");
 assert(productionGateway.includes("AEP_GATEWAY_UPSTREAM_HEADER_TIMEOUT="), "production gateway sample must configure upstream header timeout");
+assert(productionGateway.includes("AEP_GATEWAY_REQUIRE_ENTITLEMENT=true"), "production gateway sample must require License entitlement");
+assert(productionGateway.includes("AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE="), "production gateway sample must mount the License status token");
 
 const productionKustomization = await readText("deploy/kubernetes/production/kustomization.yaml");
 const productionReconciler = await readText("deploy/kubernetes/production/gateway-reconciler.yaml");
@@ -115,6 +118,9 @@ assert(productionReconciler.includes("replicas: 2"), "production reconciler must
 assert(productionReconciler.includes("readOnlyRootFilesystem: true"), "production reconciler must use a read-only root filesystem");
 assert(productionRBAC.includes("namespace: higress-system"), "reconciler RBAC must be scoped to Higress");
 assert(productionSecrets.includes("kind: ExternalSecret"), "production Secret manager integration is missing");
+assert(productionSecrets.includes("license-trusted-keys.json"), "production Secret manager integration omits the License trust store");
+assert(productionSecrets.includes("license.zylic"), "production Secret manager integration omits the signed License");
+assert(productionSecrets.includes("gateway-license-status-token"), "production Secret manager integration omits the gateway License status token");
 assert(!/\nkind: Secret\n/.test(productionSecrets), "production manifests must not commit Kubernetes Secret values");
 assert(productionNetworkPolicy.includes("aep-default-deny"), "production default-deny NetworkPolicy is missing");
 assert(productionNetworkPolicy.includes("kubernetes.io/metadata.name: higress-system"), "control-service ingress must allow the Higress namespace");
@@ -125,6 +131,12 @@ const productionReconcilerDeployment = await readText("deploy/kubernetes/product
 for (const [name, content] of [["control-service", productionControlDeployment], ["gateway-authorizer", productionGatewayDeployment], ["gateway-reconciler", productionReconcilerDeployment]]) {
   assert(content.includes("startupProbe:"), name + " must define a startup probe");
 }
+assert(productionControlDeployment.includes("AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE"), "production control-service does not consume the gateway License status token");
+assert(productionControlDeployment.includes("AEP_LICENSE_TRUSTED_KEYS_FILE"), "production control-service does not mount the License trust store");
+assert(productionControlDeployment.includes("AEP_LICENSE_FILE"), "production control-service does not mount the signed License");
+assert(productionControlDeployment.includes("AEP_LICENSE_CUSTOMER_ID"), "production control-service does not bind the License customer");
+assert(productionGatewayDeployment.includes('AEP_GATEWAY_REQUIRE_ENTITLEMENT: "true"'), "production gateway does not enforce License entitlement");
+assert(productionGatewayDeployment.includes("secretKeyRef:"), "production gateway License status token must come from a Secret");
 
 const kubernetesApplier = await readText("services/gateway-reconciler/internal/reconciler/kubernetes.go");
 assert(kubernetesApplier.includes("application/apply-patch+yaml"), "Kubernetes server-side apply is missing");

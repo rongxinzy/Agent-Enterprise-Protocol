@@ -17,6 +17,7 @@ var environmentKeys = []string{
 	"AEP_LICENSE_TRUSTED_KEYS_FILE", "AEP_LICENSE_FILE", "AEP_LICENSE_DEPLOYMENT_ID", "AEP_LICENSE_CUSTOMER_ID", "AEP_LICENSE_ENTERPRISE_ID",
 	"AEP_BOOTSTRAP_ADMIN_PASSWORD", "AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE",
 	"AEP_DATA_PLANE_RECONCILER_TOKEN", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE",
+	"AEP_GATEWAY_LICENSE_STATUS_TOKEN", "AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE",
 	"AEP_DEPLOYMENT_ID", "AEP_DEPLOYMENT_NAME",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
 	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
@@ -87,6 +88,7 @@ func TestLoadProductionGuardrails(t *testing.T) {
 		{name: "development database", mutate: func(t *testing.T) { t.Setenv("AEP_DATABASE_URL", defaultDatabaseURL) }, match: "DATABASE_URL"},
 		{name: "development object credentials", mutate: func(t *testing.T) { t.Setenv("AEP_MINIO_SECRET_KEY", "minioadmin") }, match: "MinIO"},
 		{name: "development administrator password", mutate: func(t *testing.T) { t.Setenv("AEP_BOOTSTRAP_ADMIN_PASSWORD", defaultAdminPassword) }, match: "administrator password"},
+		{name: "missing gateway License status token", mutate: func(t *testing.T) { t.Setenv("AEP_GATEWAY_LICENSE_STATUS_TOKEN", "") }, match: "GATEWAY_LICENSE_STATUS_TOKEN"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -168,4 +170,5 @@ func validProductionEnvironment(t *testing.T) {
 	t.Setenv("AEP_LICENSE_CUSTOMER_ID", "customer-enterprise-001")
 	t.Setenv("AEP_LICENSE_ENTERPRISE_ID", "enterprise")
 	t.Setenv("AEP_LICENSE_FILE", filepath.Join(t.TempDir(), "license.zylic"))
+	t.Setenv("AEP_GATEWAY_LICENSE_STATUS_TOKEN", "production-gateway-license-status-token")
 }

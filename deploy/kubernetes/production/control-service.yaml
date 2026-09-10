@@ -28,9 +28,14 @@ data:
   AEP_MINIO_ACCESS_KEY_FILE: /var/run/aep-secrets/minio-access-key
   AEP_MINIO_SECRET_KEY_FILE: /var/run/aep-secrets/minio-secret-key
   AEP_SIGNING_KEY_BASE64_FILE: /var/run/aep-secrets/ed25519-seed
+  AEP_LICENSE_TRUSTED_KEYS_FILE: /var/run/aep-secrets/license-trusted-keys.json
+  AEP_LICENSE_FILE: /var/run/aep-secrets/license.zylic
+  AEP_LICENSE_DEPLOYMENT_ID: deployment-enterprise-001
+  AEP_LICENSE_CUSTOMER_ID: customer-enterprise-001
   AEP_CREDENTIAL_MASTER_KEY_FILE: /var/run/aep-secrets/credential-keyring
   AEP_BOOTSTRAP_ADMIN_PASSWORD_FILE: /var/run/aep-secrets/bootstrap-admin-password
   AEP_DATA_PLANE_RECONCILER_TOKEN_FILE: /var/run/aep-secrets/reconciler-token
+  AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE: /var/run/aep-secrets/gateway-license-status-token
   AEP_BOOTSTRAP_ENTERPRISE_ID: enterprise
   AEP_BOOTSTRAP_ENTERPRISE_NAME: Enterprise
   AEP_BOOTSTRAP_ADMIN_USERNAME: admin
