@@ -27,6 +27,7 @@ services:
       - minio-data:/data
 
   control-service:
+    image: ${AEP_CONTROL_SERVICE_IMAGE:-aep-m0-control-service}
     build:
       context: ../..
       dockerfile: services/control-service/Dockerfile
