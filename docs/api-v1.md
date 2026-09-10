@@ -2,6 +2,8 @@
 
 [简体中文](api-v1.zh-CN.md) | English
 
+Protocol profile: `1.0.0-rc.1`
+
 This guide documents the AEP v1 HTTP(S) REST API. The machine-readable
 contracts are the [core OpenAPI document](../openapi/aep-v1.openapi.yaml), the
 [Control Events OpenAPI document](../openapi/aep-v1-control-events.openapi.yaml),
@@ -13,11 +15,10 @@ HTTPS deployment example: `https://enterprise.example.com/aep/v1`
 HTTP deployment example: `http://enterprise.example.com/aep/v1`
 Local example: `http://localhost:8080/aep/v1`
 
-Agent request headers:
+Authenticated request headers:
 
 ```http
 Authorization: Bearer <access-token>
-X-AEP-Agent-ID: <stable-agent-instance-id>
 X-AEP-Protocol-Version: 1.0
 X-Request-ID: <request-id>
 ```
@@ -34,31 +35,37 @@ Service metadata may be queried without a protocol-version header so a client ca
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/.well-known/jwks.json` | Public keys for AEP and model-token verification |
 | GET | `/metadata` | Supported AEP versions and features |
-| GET | `/auth/methods` | Discover login methods for an enterprise |
+| GET | `/auth/methods` | Discover login methods for a deployment |
 | POST | `/auth/password/login` | Sign in with an administrator-provisioned ZhiYuan account |
+| POST | `/auth/password/change` | Replace the current account password |
 | POST | `/auth/federated/start` | Start customer federated login |
 | POST | `/auth/exchange` | Exchange a federated one-time authorization code |
 | POST | `/auth/refresh` | Refresh a session |
 | POST | `/auth/logout` | Revoke the current refresh session |
-| POST | `/agent/activation` | Exchange locally verified License evidence for an entitlement token |
+| POST | `/user/activation` | Exchange the authenticated deployment session for an entitlement token |
 
-### Agent API
+Federated endpoints are reserved for a configured identity adapter. The built-in
+mock is development-only and is not advertised by the password-only production
+profile.
+
+### User runtime API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/agent/me` | Current user and enterprise |
-| GET | `/agent/skills/manifest` | Complete desired Skill manifest |
-| GET | `/agent/skills/{skillId}/versions/{version}/package` | Download Skill ZIP |
-| POST | `/agent/skills/sync-results` | Report Skill synchronization |
-| POST | `/agent/events/batch` | Upload an idempotent event batch |
-| POST | `/agent/heartbeat` | Report liveness and discover pending control events |
-| GET | `/agent/control-events` | Retrieve applicable unacknowledged control events |
-| POST | `/agent/control-events/{deliveryId}/acknowledge` | Confirm durable receipt |
-| POST | `/agent/control-events/{deliveryId}/result` | Report task execution state |
-| GET | `/agent/credentials` | List assigned credential metadata |
-| POST | `/agent/credentials/{credentialId}/resolve` | Retrieve an Agent-deliverable secret |
-| GET | `/agent/models` | List visible models |
+| GET | `/user/me` | Current user, deployment, session, roles, and permissions |
+| GET | `/user/skills/manifest` | Complete desired Skill manifest |
+| GET | `/user/skills/{skillId}/versions/{version}/package` | Download Skill ZIP |
+| POST | `/user/skills/sync-results` | Report Skill synchronization |
+| POST | `/user/events/batch` | Upload an idempotent event batch |
+| POST | `/user/heartbeat` | Report session liveness and discover pending control events |
+| GET | `/user/control-events` | Retrieve applicable unacknowledged control events |
+| POST | `/user/control-events/{deliveryId}/acknowledge` | Confirm durable receipt |
+| POST | `/user/control-events/{deliveryId}/result` | Report task execution state |
+| GET | `/user/credentials` | List assigned credential metadata |
+| POST | `/user/credentials/{credentialId}/resolve` | Retrieve a client-deliverable secret |
+| GET | `/user/models` | List visible models |
 
 ## 3. Metadata and Authentication
 
@@ -66,24 +73,26 @@ Service metadata may be queried without a protocol-version header so a client ca
 
 ```json
 {
-  "service": "zhiyuan-enterprise",
-  "protocol": "aep",
-  "minimumVersion": "1.0",
-  "maximumVersion": "1.0",
-  "features": ["skill-management", "event-upload", "credential-delivery", "model-catalog"]
+  "service": "aep-control-service",
+  "supportedProtocolVersions": ["1.0"],
+  "capabilities": ["password_auth", "skills", "telemetry", "control_events", "model_gateway", "credentials"],
+  "jwksUri": "/.well-known/jwks.json",
+  "deploymentId": "deployment_001",
+  "deployment": {"id": "deployment_001", "name": "Example Deployment"},
+  "modelGateway": {"baseUrl": "https://gateway.example.com/v1", "protocol": "openai-compatible", "apiVersion": "v1"}
 }
 ```
 
 ### `GET /auth/methods`
 
-Example: `GET /auth/methods?enterpriseHint=example`
+Example: `GET /auth/methods?deploymentHint=deployment_001`
 
 ```json
 {
-  "enterprise": {"id": "enterprise_001", "name": "Example Enterprise"},
-  "preferredMethodId": "enterprise-sso",
+  "deployment": {"id": "deployment_001", "name": "Example Deployment"},
+  "deploymentId": "deployment_001",
+  "preferredMethodId": "zhiyuan-password",
   "methods": [
-    {"id": "enterprise-sso", "type": "federated", "protocol": "oidc", "displayName": "Enterprise SSO"},
     {"id": "zhiyuan-password", "type": "password", "displayName": "ZhiYuan account"}
   ]
 }
@@ -93,12 +102,10 @@ Example: `GET /auth/methods?enterpriseHint=example`
 
 ```json
 {
-  "enterpriseId": "enterprise_001",
+  "deploymentId": "deployment_001",
+  "sessionId": "terminal_01",
   "username": "liming",
-  "password": "user-entered-password",
-  "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
-  "agentVersion": "1.8.0",
-  "platform": "windows"
+  "password": "user-entered-password"
 }
 ```
 
@@ -107,12 +114,20 @@ registration is not implied. Password login may use HTTP or HTTPS in every
 deployment stage. HTTPS is strongly recommended outside a trusted private
 network because plain HTTP exposes credentials and bearer tokens in transit.
 
+### `POST /auth/password/change`
+
+Request: `{"currentPassword":"old-password","newPassword":"new-long-password"}`.
+The authenticated account password is replaced, its other refresh sessions are
+revoked, and the response returns a fresh token structure with
+`passwordChangeRequired` set to false.
+
 ### `POST /auth/federated/start`
 
 ```json
 {
-  "enterpriseId": "enterprise_001",
-  "methodId": "enterprise-sso",
+  "deploymentId": "deployment_001",
+  "sessionId": "terminal_01",
+  "methodId": "customer-sso",
   "redirectUri": "zhiyuan://auth/callback",
   "codeChallenge": "base64url-sha256-challenge"
 }
@@ -137,10 +152,7 @@ on callback. Customer credentials never pass through the Agent.
   "transactionId": "login_tx_123",
   "authorizationCode": "one-time-code",
   "redirectUri": "zhiyuan://auth/callback",
-  "codeVerifier": "pkce-verifier",
-  "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0",
-  "agentVersion": "1.8.0",
-  "platform": "windows"
+  "codeVerifier": "pkce-verifier"
 }
 ```
 
@@ -152,6 +164,8 @@ on callback. Customer credentials never pass through the Agent.
   "tokenType": "Bearer",
   "expiresIn": 7200,
   "modelAccessExpiresIn": 7200,
+  "deploymentId": "deployment_001",
+  "sessionId": "terminal_01",
   "passwordChangeRequired": false
 }
 ```
@@ -171,7 +185,7 @@ backoff is active.
 Request:
 
 ```json
-{"refreshToken": "refresh-token", "agentId": "0198a910-5235-7b24-9b63-4b7dd46782e0"}
+{"refreshToken": "refresh-token", "sessionId": "terminal_01"}
 ```
 
 The response uses the token schema above. A returned refresh token replaces
@@ -198,13 +212,16 @@ private key.
 
 ## 4. Current Identity
 
-### `GET /agent/me`
+### `GET /user/me`
 
 ```json
 {
   "user": {"id": "user_123", "displayName": "Li Ming", "email": "liming@example.com"},
-  "enterprise": {"id": "enterprise_001", "name": "Example Enterprise"},
+  "deployment": {"id": "deployment_001", "name": "Example Deployment"},
+  "deploymentId": "deployment_001",
+  "sessionId": "terminal_01",
   "roles": ["employee"],
+  "permissions": ["models.read", "skills.read"],
   "sessionExpiresAt": "2026-08-19T10:00:00Z",
   "passwordChangeRequired": false
 }
@@ -212,7 +229,7 @@ private key.
 
 ## 5. Skill Synchronization
 
-### `GET /agent/skills/manifest`
+### `GET /user/skills/manifest`
 
 The client SHOULD send the previous `ETag` in `If-None-Match`. The server
 returns `304 Not Modified` when unchanged.
@@ -228,7 +245,7 @@ returns `304 Not Modified` when unchanged.
     "version": "1.3.0",
     "enabled": true,
     "package": {
-      "url": "/aep/v1/agent/skills/docx/versions/1.3.0/package",
+      "url": "/aep/v1/user/skills/docx/versions/1.3.0/package",
       "sha256": "8be72b3f1f47e36014fc8e1af54b250098201b1e2ea9a260153d69f7e64f1930",
       "size": 18342
     }
@@ -238,12 +255,12 @@ returns `304 Not Modified` when unchanged.
 
 The response is complete. Managed Skills absent from it are removed.
 
-### `GET /agent/skills/{skillId}/versions/{version}/package`
+### `GET /user/skills/{skillId}/versions/{version}/package`
 
 Returns `application/zip`. The server rechecks assignment, and the client
 verifies the manifest SHA-256 before extraction.
 
-### `POST /agent/skills/sync-results`
+### `POST /user/skills/sync-results`
 
 ```json
 {
@@ -267,7 +284,7 @@ verifies the manifest SHA-256 before extraction.
 
 ## 6. Telemetry Event Upload
 
-### `POST /agent/events/batch`
+### `POST /user/events/batch`
 
 ```json
 {
@@ -291,14 +308,12 @@ accepted, allowing safe retry.
 
 ## 7. Control Events
 
-### `POST /agent/heartbeat`
+### `POST /user/heartbeat`
 
 The heartbeat reports liveness and returns only control-event discovery metadata.
 
 ```json
 {
-  "agentVersion": "1.8.0",
-  "platform": "windows",
   "lastControlEventCursor": "142",
   "status": "online"
 }
@@ -319,10 +334,11 @@ The pending flag is an optimization, not a correctness boundary. The Agent
 still performs periodic control-event queries so that a stale flag cannot
 permanently hide an event.
 
-### `GET /agent/control-events`
+### `GET /user/control-events`
 
 Query parameters are `afterCursor` and `limit`. The server derives applicable
-global, organization, user, and Agent scopes from the authenticated session.
+`global`, `team`, `role`, and `user` scopes from the authenticated user and its
+role/team bindings.
 
 ```json
 {
@@ -331,7 +347,7 @@ global, organization, user, and Agent scopes from the authenticated session.
     "eventId": "event_001",
     "cursor": "143",
     "type": "skill.manifest.changed",
-    "scope": {"type": "organization", "id": "org_001"},
+    "scope": {"type": "team", "id": "team_001"},
     "resource": {"type": "skill", "id": "docx", "revision": "18"},
     "task": {"type": "skill.reconcile"},
     "createdAt": "2026-08-19T07:59:00Z",
@@ -346,7 +362,7 @@ Reading this response does not consume an event. Until receipt is
 acknowledged, the server may return the delivery again. The Agent deduplicates
 by `deliveryId` and `eventId`.
 
-### `POST /agent/control-events/{deliveryId}/acknowledge`
+### `POST /user/control-events/{deliveryId}/acknowledge`
 
 The Agent calls this endpoint only after committing the event to its durable
 local inbox. The operation is idempotent.
@@ -361,7 +377,7 @@ local inbox. The operation is idempotent.
 A successful acknowledgement returns `204 No Content`. Receipt acknowledgement
 ends network redelivery but does not mean the Task succeeded.
 
-### `POST /agent/control-events/{deliveryId}/result`
+### `POST /user/control-events/{deliveryId}/result`
 
 The Agent reports `running`, `succeeded`, or `failed`. Repeating the same state
 and result is idempotent.
@@ -386,13 +402,15 @@ Failure example:
 }
 ```
 
-The server keeps receipt and execution states separately. Each applicable
-Agent has its own delivery record even when the source event has global,
-organization, or user scope.
+The server keeps receipt and execution states separately. Each applicable user
+session has its own delivery record even when the source event has global,
+team, role, or user scope. Active unexpired events are attached to a matching
+session when that session is established, so the user need not be online when
+the event is published.
 
 ## 8. Credentials
 
-### `GET /agent/credentials`
+### `GET /user/credentials`
 
 ```json
 {
@@ -400,14 +418,17 @@ organization, or user scope.
     "id": "credential_123",
     "name": "Internal Search API",
     "service": "internal-search",
-    "deliveryMode": "agent",
+    "type": "api_key",
+    "deliveryMode": "client",
     "maskedValue": "sk-****9f2a",
+    "enabled": true,
     "updatedAt": "2026-08-19T07:00:00Z"
-  }]
+  }],
+  "nextCursor": null
 }
 ```
 
-### `POST /agent/credentials/{credentialId}/resolve`
+### `POST /user/credentials/{credentialId}/resolve`
 
 Request: `{"purpose":"Connect to the internal search service"}`.
 
@@ -425,7 +446,7 @@ return `CREDENTIAL_NOT_DELIVERABLE`.
 
 ## 9. Models
 
-### `GET /agent/models`
+### `GET /user/models`
 
 ```json
 {
@@ -465,6 +486,21 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
+Every user must have at least one role and one team when created or imported.
+
+### RBAC and sessions
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/permissions` | Read the stable permission catalog |
+| GET, POST | `/admin/roles` | List or create deployment roles |
+| GET, PATCH, DELETE | `/admin/roles/{roleId}` | Read, update, or delete a non-system role |
+| GET, POST | `/admin/teams` | List or create deployment teams |
+| GET, PATCH, DELETE | `/admin/teams/{teamId}` | Read, update, or delete a team |
+| PUT | `/admin/users/{userId}/rbac` | Replace a user's role and team bindings |
+| GET | `/admin/sessions` | List user sessions and heartbeat state |
+| POST | `/admin/sessions/{sessionId}/revoke` | Revoke one user session |
+
 ### Skills
 
 | Method | Path | Purpose |
@@ -483,6 +519,10 @@ Assignment example:
 {"skillId": "docx", "subject": {"type": "role", "id": "employee"}}
 ```
 
+Skill, credential, and model assignments accept `user`, `role`, or `team`
+subjects. Effective access is the union of the current user's direct, role,
+and team assignments.
+
 ### Credentials
 
 | Method | Path | Purpose |
@@ -500,7 +540,7 @@ Create example:
   "name": "Internal Search API",
   "service": "internal-search",
   "type": "api_key",
-  "deliveryMode": "agent",
+  "deliveryMode": "client",
   "value": "sk-live-value",
   "enabled": true
 }
@@ -519,6 +559,29 @@ Read responses never return `value`. Rotation accepts a new `value`.
 
 Administrative `credentialId` MUST NOT appear in the Agent model catalog.
 
+### Licenses
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/licenses` | List registered deployment License metadata |
+| GET | `/admin/licenses/{licenseId}` | Read License metadata and activation state |
+| POST | `/admin/licenses/import` | Register a vendor-signed offline License |
+| POST | `/admin/licenses/{licenseId}/revoke` | Revoke a registered License |
+
+The Control Service verifies the vendor signature with configured public-key
+material. License private keys and signer code are outside this repository and
+must never be sent to the service.
+
+### Data plane
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET, PUT | `/admin/data-plane/desired-state` | Read or publish model-gateway desired state |
+| GET | `/admin/data-plane/status` | Read the latest reconciliation observation |
+
+Desired state refers to external Secret names and keys only; it never includes
+provider secret values.
+
 ### Control Events
 
 | Method | Path | Purpose |
@@ -526,29 +589,29 @@ Administrative `credentialId` MUST NOT appear in the Agent model catalog.
 | GET, POST | `/admin/control-events` | Search or publish control events |
 | GET | `/admin/control-events/{eventId}` | Read one event and aggregate status |
 | POST | `/admin/control-events/{eventId}/cancel` | Cancel pending deliveries |
-| GET | `/admin/control-events/{eventId}/deliveries` | Inspect per-Agent delivery status |
+| GET | `/admin/control-events/{eventId}/deliveries` | Inspect per-session delivery status |
 
 Publish example:
 
 ```json
 {
   "type": "skill.manifest.changed",
-  "scope": {"type": "organization", "id": "org_001", "includeDescendants": true},
+  "scope": {"type": "team", "id": "team_001"},
   "resource": {"type": "skill", "id": "docx", "revision": "18"},
   "task": {"type": "skill.reconcile"},
   "expiresAt": "2026-08-20T07:59:00Z",
-  "supersedesKey": "skill:docx:org_001"
+  "supersedesKey": "skill:docx:team_001"
 }
 ```
 
-The server resolves recipients. Cancellation affects only deliveries that have
-not reached `received`; it does not undo work already accepted by an Agent.
+The server resolves matching user sessions. Cancellation affects only deliveries
+that have not reached `received`; it does not undo work already accepted by a client.
 Publishing a newer event with the same `supersedesKey` marks older pending
 deliveries as `superseded`.
 
 ### Telemetry Events
 
-`GET /admin/events` supports `cursor`, `limit`, `userId`, `agentId`, `type`,
+`GET /admin/events` supports `cursor`, `limit`, `userId`, `sessionId`, `type`,
 `resourceType`, `resourceId`, `result`, `occurredAfter`, and `occurredBefore`.
 
 ## 11. Errors and Retry
