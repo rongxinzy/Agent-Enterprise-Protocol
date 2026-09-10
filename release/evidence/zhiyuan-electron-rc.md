@@ -29,8 +29,9 @@ session secret is part of this record.
 
 The repeatable load/soak workflow and PostgreSQL/MinIO backup and disaster-recovery
 rehearsal are now automated and have passed in isolated Compose environments. The
-remaining GA work is an external security review, formal customer artifact signing
-and SBOM publication, and cleanup of the remaining draft-profile gaps.
+release pipeline also publishes source and image SBOMs. The remaining GA work is an
+external security review and formal customer artifact signing in the local signing
+environment.
 
 Operational procedures are documented in the [GA validation runbook](../../docs/ga-validation-runbook.md)
 and [backup and disaster-recovery runbook](../../docs/backup-restore-runbook.md).
