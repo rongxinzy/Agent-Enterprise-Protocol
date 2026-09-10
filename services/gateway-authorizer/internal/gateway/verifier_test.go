@@ -222,9 +222,12 @@ func TestVerifierRejectsInvalidModelClaims(t *testing.T) {
 		claims ModelClaims
 	}{
 		{name: "wrong audience", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-control")}},
+		{name: "model with entitlement audience", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-entitlement")}},
+		{name: "entitlement with model audience", claims: ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", TokenUse: "entitlement", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
 		{name: "wrong token use", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "aep", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
 		{name: "wrong issuer", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://other.example.test", "model-gateway")}},
 		{name: "missing identity", claims: ModelClaims{TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
+		{name: "missing model session", claims: ModelClaims{DeploymentID: "deployment-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
 		{name: "expired", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: "https://control.example.test", Subject: "user-a", Audience: jwt.ClaimStrings{"model-gateway"},
 			IssuedAt: jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)), ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),

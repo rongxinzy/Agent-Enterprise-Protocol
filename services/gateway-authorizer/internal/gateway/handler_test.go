@@ -32,6 +32,11 @@ func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 		if request.Header.Get("X-AEP-Deployment-ID") != "deployment-a" || request.Header.Get("X-AEP-Session-ID") != "session-a" || request.Header.Get("X-AEP-User-ID") != "user-a" || request.Header.Get("X-AEP-Model-ID") != "model-a" {
 			t.Errorf("unexpected trusted headers: %#v", request.Header)
 		}
+		for _, name := range []string{"X-AEP-License-ID", "X-AEP-Credential-ID", "X-AEP-Internal-Role"} {
+			if request.Header.Get(name) != "" {
+				t.Errorf("untrusted AEP header %s reached the upstream", name)
+			}
+		}
 		body, _ := io.ReadAll(request.Body)
 		if string(body) != "{\"model\":\"model-a\",\"stream\":true}" {
 			t.Errorf("request body changed: %s", body)
@@ -50,6 +55,9 @@ func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{\"model\":\"model-a\",\"stream\":true}"))
 	request.Header.Set("Authorization", "Bearer model-token")
 	request.Header.Set("X-AEP-Deployment-ID", "attacker")
+	request.Header.Set("X-AEP-License-ID", "attacker-license")
+	request.Header.Set("X-AEP-Credential-ID", "attacker-credential")
+	request.Header.Set("X-AEP-Internal-Role", "admin")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || response.Body.String() != "data: ok\n\n" {

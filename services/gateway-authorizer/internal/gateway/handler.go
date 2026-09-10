@@ -128,6 +128,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	request.ContentLength = int64(len(body))
 	request.Header.Del("Authorization")
+	removeUntrustedAEPHeaders(request.Header)
 	setTrustedHeader(request.Header, "X-AEP-Deployment-ID", claims.DeploymentID)
 	setTrustedHeader(request.Header, "X-AEP-User-ID", claims.Subject)
 	setTrustedHeader(request.Header, "X-AEP-Session-ID", claims.SessionID)
@@ -176,6 +177,14 @@ func contains(values []string, expected string) bool {
 func setTrustedHeader(header http.Header, name, value string) {
 	header.Del(name)
 	header.Set(name, value)
+}
+
+func removeUntrustedAEPHeaders(header http.Header) {
+	for name := range header {
+		if strings.HasPrefix(strings.ToLower(name), "x-aep-") {
+			delete(header, name)
+		}
+	}
 }
 
 func withRequestID(response http.ResponseWriter, request *http.Request) *http.Request {
