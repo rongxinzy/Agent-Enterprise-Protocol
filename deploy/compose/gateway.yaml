@@ -7,6 +7,7 @@ services:
       AEP_GATEWAY_LICENSE_STATUS_TOKEN: ${AEP_GATEWAY_LICENSE_STATUS_TOKEN:-m1-local-license-status-token}
 
   gateway-reconciler:
+    image: ${AEP_GATEWAY_RECONCILER_IMAGE:-aep-m0-gateway-reconciler}
     build:
       context: ../..
       dockerfile: services/gateway-reconciler/Dockerfile
@@ -81,6 +82,7 @@ services:
       retries: 60
 
   gateway-authorizer:
+    image: ${AEP_GATEWAY_AUTHORIZER_IMAGE:-aep-m0-gateway-authorizer}
     build:
       context: ../..
       dockerfile: services/gateway-authorizer/Dockerfile

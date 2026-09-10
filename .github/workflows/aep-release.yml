@@ -30,22 +30,61 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
           version="$(node -p "require('./package.json').version")"
           test "$GITHUB_REF_NAME" = "aep-v$version"
+          echo "AEP_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "AEP_CONTROL_SERVICE_IMAGE=aep-control-service:$version" >> "$GITHUB_ENV"
+          echo "AEP_GATEWAY_AUTHORIZER_IMAGE=aep-gateway-authorizer:$version" >> "$GITHUB_ENV"
+          echo "AEP_GATEWAY_RECONCILER_IMAGE=aep-gateway-reconciler:$version" >> "$GITHUB_ENV"
       - run: npm run release:check
+      - name: Prepare release artifact directory
+        run: mkdir -p release/artifacts
       - name: Generate source SBOM
         uses: anchore/sbom-action@v0
         with:
           path: .
           format: cyclonedx-json
-          output-file: release/aep-foundation.sbom.cdx.json
-      - name: Generate artifact checksums
-        run: sha256sum release/aep-foundation.sbom.cdx.json > release/aep-foundation.sbom.cdx.json.sha256
-      - name: Publish release evidence
+          output-file: release/artifacts/aep-foundation.source.sbom.cdx.json
+          upload-artifact: false
+      - name: Build versioned service images
+        run: |
+          docker compose \
+            -f deploy/compose/compose.yaml \
+            -f deploy/compose/gateway.yaml \
+            build control-service gateway-authorizer gateway-reconciler
+      - name: Generate offline bundles
+        run: |
+          npm run offline:bundle -- --output-dir release/offline-base --profile base
+          npm run offline:bundle -- --output-dir release/offline-gateway --profile gateway
+          tar -C release/offline-base -czf "release/artifacts/aep-offline-base-v${AEP_RELEASE_VERSION}.tar.gz" .
+          tar -C release/offline-gateway -czf "release/artifacts/aep-offline-gateway-v${AEP_RELEASE_VERSION}.tar.gz" .
+      - name: Generate control-service image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.AEP_CONTROL_SERVICE_IMAGE }}
+          format: cyclonedx-json
+          output-file: release/artifacts/aep-control-service.image.sbom.cdx.json
+          upload-artifact: false
+      - name: Generate gateway-authorizer image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.AEP_GATEWAY_AUTHORIZER_IMAGE }}
+          format: cyclonedx-json
+          output-file: release/artifacts/aep-gateway-authorizer.image.sbom.cdx.json
+          upload-artifact: false
+      - name: Generate gateway-reconciler image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.AEP_GATEWAY_RECONCILER_IMAGE }}
+          format: cyclonedx-json
+          output-file: release/artifacts/aep-gateway-reconciler.image.sbom.cdx.json
+          upload-artifact: false
+      - name: Generate release manifest and checksums
+        run: npm run release:artifacts:manifest -- --version "$AEP_RELEASE_VERSION" --commit "$GITHUB_SHA"
+      - name: Publish foundation release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            release/aep-foundation.sbom.cdx.json \
-            release/aep-foundation.sbom.cdx.json.sha256 \
+            release/artifacts/* \
             --verify-tag \
             --title "AEP foundation ${GITHUB_REF_NAME#aep-v}" \
             --generate-notes

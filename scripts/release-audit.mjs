@@ -36,6 +36,8 @@ for (const gate of remaining) {
 const packageDocument = await readJSON("package.json");
 assert(packageDocument.version === release.packageVersion, "package version does not match release manifest");
 assert(packageDocument.scripts?.["release:audit"] === "node scripts/release-audit.mjs", "release:audit script is not wired");
+assert(packageDocument.scripts?.["release:artifacts:manifest"] === "node scripts/release-artifact-manifest.mjs", "release artifact manifest script is not wired");
+assert(packageDocument.scripts?.["test:release-artifacts"] === "node tests/release-artifacts.mjs", "release artifact manifest tests are not wired");
 assert(packageDocument.scripts?.["license:boundary:check"] === "node scripts/license-boundary-audit.mjs", "license boundary audit is not wired");
 assert(packageDocument.scripts?.["sdk:package:check"]?.includes("scripts/sdk-package-check.mjs"), "SDK package check is not wired");
 for (const command of ["npm run check", "npm run release:audit", "npm run license:boundary:check", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e", "npm run test:e2e:backup-restore"]) {
@@ -109,6 +111,7 @@ const workflow = await readText(".github/workflows/m0.yml");
 const sdkReleaseWorkflow = await readText(".github/workflows/sdk-release.yml");
 const foundationReleaseWorkflow = await readText(".github/workflows/aep-release.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
+assert(workflow.includes("npm run test:release-artifacts"), "CI does not test release artifact manifests");
 assert(workflow.includes("npm run license:boundary:check"), "CI does not run the License boundary audit");
 assert(!workflow.includes("test:e2e:offline-license"), "CI must not run the local-only offline License E2E");
 assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
@@ -120,8 +123,15 @@ assert(sdkReleaseWorkflow.includes("sdk-node-v*"), "SDK release workflow does no
 assert(sdkReleaseWorkflow.includes("git merge-base --is-ancestor"), "SDK release tags are not constrained to main history");
 assert(sdkReleaseWorkflow.includes("npm run sdk:package:check"), "SDK release workflow bypasses the package check");
 assert(foundationReleaseWorkflow.includes("anchore/sbom-action@v0"), "foundation release workflow does not generate an SBOM");
-assert(foundationReleaseWorkflow.includes("sha256sum release/aep-foundation.sbom.cdx.json"), "foundation release workflow does not publish an SBOM checksum");
+assert(foundationReleaseWorkflow.includes("npm run offline:bundle"), "foundation release workflow does not build offline bundles");
+assert(foundationReleaseWorkflow.includes("aep-control-service.image.sbom.cdx.json"), "foundation release workflow omits the control-service image SBOM");
+assert(foundationReleaseWorkflow.includes("aep-gateway-authorizer.image.sbom.cdx.json"), "foundation release workflow omits the gateway-authorizer image SBOM");
+assert(foundationReleaseWorkflow.includes("aep-gateway-reconciler.image.sbom.cdx.json"), "foundation release workflow omits the gateway-reconciler image SBOM");
+assert(foundationReleaseWorkflow.includes("release:artifacts:manifest"), "foundation release workflow does not publish a release manifest and checksums");
 assert(!foundationReleaseWorkflow.toLowerCase().includes("private.key"), "foundation release workflow must not reference a private signing key");
+const offlineBundle = await readText("scripts/offline-bundle.mjs");
+assert(offlineBundle.includes("config', '--format', 'json'"), "offline Bundle generation does not resolve final Compose service images");
+assert(offlineBundle.includes("serviceImage('gateway-authorizer')"), "offline Bundle does not pin the resolved gateway-authorizer image");
 
 for (const readme of ["README.md", "README.zh-CN.md"]) {
   const content = await readText(readme);
