@@ -103,8 +103,27 @@ func (s *DeploymentStore) GetRoleRecord(ctx context.Context, id string) (RoleRec
 	return RoleRecord{Role: role, Permissions: []string{}}, nil
 }
 
+func (s *DeploymentStore) UserPermissionIDs(ctx context.Context, userID string) ([]string, error) {
+	permissions := make([]string, 0)
+	err := s.db.WithContext(ctx).Table("role_permissions AS rp").
+		Select("DISTINCT rp.permission_id").
+		Joins("JOIN user_role_bindings AS urb ON urb.deployment_id = rp.deployment_id AND urb.role_id = rp.role_id").
+		Joins("JOIN roles AS r ON r.deployment_id = urb.deployment_id AND r.id = urb.role_id AND r.enabled = true").
+		Where("urb.deployment_id = ? AND urb.user_id = ?", s.deploymentID, userID).
+		Order("rp.permission_id").
+		Scan(&permissions).Error
+	return permissions, err
+}
+
 func (s *DeploymentStore) UpdateRole(ctx context.Context, id string, name, description *string, enabled *bool, permissions *[]string) (RoleRecord, error) {
 	err := s.transaction(ctx, func(tx *DeploymentStore) error {
+		var role Role
+		if err := tx.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", tx.deploymentID, id).Take(&role).Error; err != nil {
+			return err
+		}
+		if role.BuiltIn {
+			return ErrBuiltInResource
+		}
 		updates := map[string]any{"updated_at": time.Now().UTC()}
 		if name != nil {
 			updates["name"] = *name
@@ -118,9 +137,6 @@ func (s *DeploymentStore) UpdateRole(ctx context.Context, id string, name, descr
 		result := tx.db.WithContext(ctx).Model(&Role{}).Where("deployment_id = ? AND id = ?", tx.deploymentID, id).Updates(updates)
 		if result.Error != nil {
 			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return ErrNotFound
 		}
 		if permissions == nil {
 			return nil

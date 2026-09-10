@@ -55,6 +55,9 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, code, detail)
 		return
 	}
+	if !s.authorizeRoleGrant(response, request, input.RoleIDs) {
+		return
+	}
 	user, err := s.insertUser(request, input)
 	if err != nil {
 		if errors.Is(err, auth.ErrPasswordPolicy) {
@@ -90,6 +93,15 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 	}
 	if input.DeploymentID != claimsFrom(request).DeploymentID || len(input.Users) == 0 || len(input.Users) > 1000 {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The import must contain 1 to 1000 users for the current enterprise.")
+		return
+	}
+	roleIDs := make([]string, 0)
+	for _, item := range input.Users {
+		if code, _ := userMembershipProblem(item.RoleIDs, item.TeamIDs); code == "" {
+			roleIDs = append(roleIDs, item.RoleIDs...)
+		}
+	}
+	if !s.authorizeRoleGrant(response, request, roleIDs) {
 		return
 	}
 	created := 0

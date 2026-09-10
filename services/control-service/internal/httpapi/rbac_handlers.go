@@ -52,6 +52,9 @@ func (s *Server) createRole(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The role id, name, and permissions are invalid.")
 		return
 	}
+	if !s.authorizeDelegatedPermissions(response, request, input.Permissions) {
+		return
+	}
 	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateRole(
 		request.Context(), repository.Role{ID: input.ID, Name: strings.TrimSpace(input.Name), Description: input.Description}, input.Permissions,
 	)
@@ -102,6 +105,9 @@ func (s *Server) updateRole(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The role contains too many permissions.")
 		return
 	}
+	if input.Permissions != nil && !s.authorizeDelegatedPermissions(response, request, *input.Permissions) {
+		return
+	}
 	role, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateRole(request.Context(), chi.URLParam(request, "roleId"), input.Name, input.Description, input.Enabled, input.Permissions)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The role was not found.")
@@ -109,6 +115,10 @@ func (s *Server) updateRole(response http.ResponseWriter, request *http.Request)
 	}
 	if errors.Is(err, repository.ErrUnknownPermission) {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_PERMISSION", "The role contains an unknown permission.")
+		return
+	}
+	if errors.Is(err, repository.ErrBuiltInResource) {
+		writeProblem(response, request, http.StatusConflict, "BUILT_IN_RESOURCE", "Built-in roles cannot be modified.")
 		return
 	}
 	if err != nil {
@@ -262,6 +272,9 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 			return
 		}
 	}
+	if !s.authorizeRoleGrant(response, request, input.RoleIDs) {
+		return
+	}
 	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
 		ReplaceUserRBAC(request.Context(), userID, input.RoleIDs, input.TeamIDs)
 	if errors.Is(err, repository.ErrNotFound) {
@@ -281,6 +294,80 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"userId": userID, "roleIds": input.RoleIDs, "teamIds": input.TeamIDs})
+}
+
+func (s *Server) authorizeRoleGrant(response http.ResponseWriter, request *http.Request, roleIDs []string) bool {
+	claims := claimsFrom(request)
+	if claims.Admin {
+		return true
+	}
+	store := s.app.Store.Deployment(claims.DeploymentID)
+	roles := make([]repository.RoleRecord, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		role, err := store.GetRoleRecord(request.Context(), roleID)
+		if errors.Is(err, repository.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			databaseFailure(response, request, err)
+			return false
+		}
+		roles = append(roles, role)
+	}
+	permissions, err := store.UserPermissionIDs(request.Context(), claims.Subject)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return false
+	}
+	if !roleGrantAllowed(false, permissions, roles) {
+		writeProblem(response, request, http.StatusForbidden, "ROLE_GRANT_FORBIDDEN", "Administrators cannot grant built-in roles or permissions they do not hold.")
+		return false
+	}
+	return true
+}
+
+func (s *Server) authorizeDelegatedPermissions(response http.ResponseWriter, request *http.Request, requested []string) bool {
+	claims := claimsFrom(request)
+	if claims.Admin {
+		return true
+	}
+	permissions, err := s.app.Store.Deployment(claims.DeploymentID).UserPermissionIDs(request.Context(), claims.Subject)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return false
+	}
+	if !permissionSubset(permissions, requested) {
+		writeProblem(response, request, http.StatusForbidden, "ROLE_PERMISSION_ESCALATION", "Administrators cannot delegate permissions they do not hold.")
+		return false
+	}
+	return true
+}
+
+func roleGrantAllowed(admin bool, grantorPermissions []string, roles []repository.RoleRecord) bool {
+	if admin {
+		return true
+	}
+	requested := make([]string, 0)
+	for _, role := range roles {
+		if role.BuiltIn {
+			return false
+		}
+		requested = append(requested, role.Permissions...)
+	}
+	return permissionSubset(grantorPermissions, requested)
+}
+
+func permissionSubset(grantorPermissions, requested []string) bool {
+	allowed := make(map[string]struct{}, len(grantorPermissions))
+	for _, permission := range grantorPermissions {
+		allowed[permission] = struct{}{}
+	}
+	for _, permission := range requested {
+		if _, ok := allowed[permission]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func validRBACID(value string) bool {
