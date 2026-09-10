@@ -64,6 +64,17 @@ for (const content of [protocolOverview, protocolOverviewZh]) {
   assert(!content.includes("X-AEP-Agent-ID"), "protocol overview still documents the removed Agent identity header");
   assert(content.includes("`global`") && content.includes("`team`") && content.includes("`role`") && content.includes("`user`"), "protocol overview omits a control-event scope");
 }
+for (const guide of ["docs/api-v1.md", "docs/api-v1.zh-CN.md"]) {
+  const content = await readText(guide);
+  assert(content.includes("`1.0.0-rc.1`"), guide + " does not identify the release-candidate contract");
+  for (const removed of ["X-AEP-Agent-ID", "/agent/", '"agentId"', '"enterpriseId"', '"organization"']) {
+    assert(!content.includes(removed), guide + " still documents removed identity or scope syntax: " + removed);
+  }
+  for (const required of ["/user/me", "/admin/roles", "/admin/teams", "/admin/sessions", "/admin/licenses", "/admin/data-plane/desired-state"]) {
+    assert(content.includes(required), guide + " omits the current endpoint: " + required);
+  }
+  assert(content.includes("`global`") && content.includes("`team`") && content.includes("`role`") && content.includes("`user`"), guide + " omits a control-event scope");
+}
 assert(!JSON.stringify(remaining).includes("draft-profile"), "remaining GA gates still list release-candidate metadata cleanup");
 const tokenStore = await readText("packages/aep-sdk-node/src/token-store.ts");
 assert(tokenStore.includes("ProtectedRefreshTokenStore"), "SDK protected refresh-token store is missing");
