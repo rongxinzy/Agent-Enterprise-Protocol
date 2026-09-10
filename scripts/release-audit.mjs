@@ -38,6 +38,7 @@ assert(packageDocument.version === release.packageVersion, "package version does
 assert(packageDocument.scripts?.["release:audit"] === "node scripts/release-audit.mjs", "release:audit script is not wired");
 assert(packageDocument.scripts?.["release:artifacts:manifest"] === "node scripts/release-artifact-manifest.mjs", "release artifact manifest script is not wired");
 assert(packageDocument.scripts?.["test:release-artifacts"] === "node tests/release-artifacts.mjs", "release artifact manifest tests are not wired");
+assert(packageDocument.scripts?.["security:check"]?.includes("govulncheck@v1.8.0"), "reachable Go vulnerability scan is not wired");
 assert(packageDocument.scripts?.["license:boundary:check"] === "node scripts/license-boundary-audit.mjs", "license boundary audit is not wired");
 assert(packageDocument.scripts?.["sdk:package:check"]?.includes("scripts/sdk-package-check.mjs"), "SDK package check is not wired");
 for (const command of ["npm run check", "npm run release:audit", "npm run license:boundary:check", "npm run sdk:package:check", "go test ./...", "go test -race ./...", "go vet ./...", "go build ./...", "npm run test:e2e", "npm run test:e2e:backup-restore"]) {
@@ -58,7 +59,7 @@ const sdkClient = await readText("packages/aep-sdk-node/src/client.ts");
 assert(sdkClient.includes("restoreSession()"), "SDK cold-start session restoration is missing");
 
 const goModule = await readText("go.mod");
-assert(/^go\s+1\.26(?:\.\d+)?$/m.test(goModule), "Go 1.26 baseline is not pinned");
+assert(/^go\s+1\.26\.6$/m.test(goModule), "patched Go 1.26.6 baseline is not pinned");
 
 const controlConfig = await readText("services/control-service/internal/config/config.go");
 assert(controlConfig.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH must be false in production"), "production mock federated-auth guard is missing");
@@ -110,8 +111,11 @@ assert(packageDocument.scripts?.["test:e2e:m3-kubernetes"] === "node tests/e2e/m
 const workflow = await readText(".github/workflows/m0.yml");
 const sdkReleaseWorkflow = await readText(".github/workflows/sdk-release.yml");
 const foundationReleaseWorkflow = await readText(".github/workflows/aep-release.yml");
+const securityWorkflow = await readText(".github/workflows/security.yml");
 assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
 assert(workflow.includes("npm run test:release-artifacts"), "CI does not test release artifact manifests");
+assert(securityWorkflow.includes("npm run security:check"), "security workflow does not run dependency vulnerability checks");
+assert(securityWorkflow.includes("github/codeql-action/analyze@v3"), "security workflow does not run CodeQL analysis");
 assert(workflow.includes("npm run license:boundary:check"), "CI does not run the License boundary audit");
 assert(!workflow.includes("test:e2e:offline-license"), "CI must not run the local-only offline License E2E");
 assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
@@ -146,6 +150,9 @@ const signerBoundaryZh = await readText("docs/license-signing-local.zh-CN.md");
 for (const content of [signerBoundary, signerBoundaryZh]) {
   assert(content.includes("never receives a License private key") || (content.includes("绝不接收") && content.includes("License 私钥")), "signer boundary must keep private keys out of Control Service");
 }
+const securityReviewRunbook = await readText("docs/security-review-runbook.md");
+assert(securityReviewRunbook.includes("No open critical or high findings"), "external security review exit criteria are missing");
+assert(securityReviewRunbook.includes("must remain `release-candidate` and 95%"), "external review must not be marked complete before evidence exists");
 
 assert(!manifest.productionCapabilities.includes("federated_auth"), "mock federated auth cannot be a production capability");
 assert(manifest.developmentOnlyCapabilities.includes("federated_auth"), "mock federated auth must be marked development-only");
