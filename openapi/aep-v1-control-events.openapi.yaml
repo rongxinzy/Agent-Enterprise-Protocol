@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Agent Enterprise Protocol - Control Events
-  version: 1.0.0-draft
+  version: 1.0.0-rc.1
   description: REST heartbeat discovery and reliable scoped control-event delivery for AEP v1.
   license: {name: Apache 2.0, identifier: Apache-2.0}
 servers:

@@ -2,9 +2,10 @@
 
 [简体中文](aep-v1.zh-CN.md) | English
 
-Status: Initial Draft
+Status: Release Candidate
 Protocol version: `1.0`
-Last updated: 2026-08-19
+Contract metadata: `1.0.0-rc.1`
+Last updated: 2026-09-10
 
 ## 1. Purpose
 
@@ -94,46 +95,45 @@ Authenticated Agent requests include:
 
 ```http
 Authorization: Bearer <access-token>
-X-AEP-Agent-ID: <stable-agent-instance-id>
 X-AEP-Protocol-Version: 1.0
 X-Request-ID: <request-id>
 ```
 
-`X-AEP-Agent-ID` identifies an installation but is not a credential. The
-server derives the user and enterprise from the access token. Servers SHOULD
-echo `X-Request-ID` or create one when absent.
+The server derives the user, deployment, and session from access-token claims.
+Clients MUST NOT send identity headers as a substitute for those claims.
+Servers SHOULD echo `X-Request-ID` or create one when absent.
 
 Conditional requests use standard HTTP headers such as `ETag` and
 `If-None-Match`.
 
 ## 7. Authentication
 
-The server exposes available login methods for an enterprise. AEP v1 supports:
+The server exposes the login methods enabled for the deployment. The AEP v1
+production profile supports:
 
 | Method | Behavior |
 | --- | --- |
 | `password` | The Agent submits a ZhiYuan platform account and password to the Identity Service |
-| `federated` | The Agent opens a system browser for a customer OIDC or server-side custom adapter and exchanges the resulting one-time code |
 
 ZhiYuan platform accounts are provisioned by an administrator, either
 individually or through a batch import. Public self-registration is outside
 AEP v1. Passwords MUST be stored using an adaptive password hash and MUST NOT
 be retrievable by administrators.
 
-Federated login uses Authorization Code with PKCE when the upstream supports
-OIDC. Customer credentials are entered only on the customer identity page;
-they MUST NOT pass through the Agent or AEP password-login endpoint. Other
-customer login systems MAY be integrated by a server-side adapter that
-produces the same short-lived, single-use exchange code.
+The `federated` contract is reserved for a future customer identity adapter.
+Its mock implementation is a development fixture and production servers MUST
+NOT advertise it unless a real adapter is configured. A future OIDC adapter
+MUST use Authorization Code with PKCE and produce the same short-lived,
+single-use exchange code without passing customer passwords through AEP.
 
-Both login methods create the same AEP session and return:
+Every enabled login method creates the same AEP session and returns:
 
 - an AEP access token for management APIs;
 - a refresh token for session renewal; and
 - a model access token for the Model Gateway.
 
 The model access token is issued at login and refresh time with an explicit
-Model Gateway audience, expiry, enterprise identity, user identity, and model
+Model Gateway audience, expiry, deployment identity, user identity, and model
 grant claims. During its validity period, the Agent presents it directly to
 the Model Gateway. The gateway validates the token locally using trusted
 signing keys and MUST NOT call the Control Service for a new authorization
@@ -149,7 +149,8 @@ Access tokens authenticate normal requests. Refresh tokens are used only at
 the refresh endpoint. Refresh rotates the model token as well as the AEP token.
 Logout or account disablement revokes the refresh session, while already
 issued short-lived tokens remain bounded by their expiry. The current-identity
-endpoint is the canonical source for displayed user and enterprise data.
+endpoint is the canonical source for displayed user, deployment, and session
+data.
 
 ## 8. Skill Synchronization
 
@@ -218,12 +219,14 @@ prompts and responses unless a separate enterprise policy explicitly enables it.
 
 ### 9.2 Control Event Scope
 
-Control events use one of three scopes: `global`, `team`, or `user`. The server derives applicable scopes from the authenticated identity
-and its role/team bindings. A client MUST NOT select its own team
-or user scope.
+Control events use one of four scopes: `global`, `team`, `role`, or `user`.
+The server derives applicable scopes from the authenticated identity and its
+role/team bindings. A client MUST NOT select its own role, team, or user scope.
 
-A global, team, or user event has an independent delivery state for
-every applicable user session. There is no shared `consumed` flag on the event itself.
+A global, team, role, or user event has an independent delivery state for
+every applicable user session. There is no shared `consumed` flag on the event
+itself. An active, unexpired event remains available while a user is offline;
+the server creates the applicable delivery when a later session is established.
 
 ### 9.3 Discovery and Delivery
 
@@ -301,7 +304,7 @@ SDK which model client to use.
 
 ## 12. Administration
 
-Administration APIs manage Skills and versions, user or role assignments,
+Administration APIs manage Skills and versions, user, role, or team assignments,
 credentials and rotation, model descriptors and assignments, and event
 search. They require an administrator identity distinct from ordinary Agent
 authorization.
@@ -328,9 +331,10 @@ Standard codes include `INVALID_REQUEST`, `TOKEN_INVALID`, `ACCESS_DENIED`,
 
 ## 14. Compatibility
 
-The major version appears in the base path. Additive fields and endpoints do
-not change the major version. Clients MUST ignore unknown JSON properties.
-Breaking changes require a new path such as `/aep/v2`.
+The major version appears in the base path. During and after the release-
+candidate cycle, additive optional fields and endpoints do not change the
+major version. Clients MUST ignore unknown JSON properties. Breaking changes
+require a new path such as `/aep/v2`.
 
 The metadata endpoint advertises the supported version range. Unsupported
 clients receive `426 Upgrade Required` with AEP Problem Details.

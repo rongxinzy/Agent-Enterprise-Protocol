@@ -52,6 +52,19 @@ assert(sdkPackage.publishConfig?.access === "public", "SDK package must remain p
 assert(sdkPackage.publishConfig?.provenance === true, "SDK package publication must request provenance");
 const protocolMatch = constants.match(/AEP_PROTOCOL_VERSION\s*=\s*'([^']+)'/);
 assert(protocolMatch?.[1] === release.protocolVersion, "SDK protocol version does not match release manifest");
+for (const specification of ["openapi/aep-v1.openapi.yaml", "openapi/aep-v1-authentication.openapi.yaml", "openapi/aep-v1-control-events.openapi.yaml"]) {
+  const content = await readText(specification);
+  assert(/^\s*version:\s+1\.0\.0-rc\.1$/m.test(content), specification + " is not release-candidate metadata");
+}
+const protocolOverview = await readText("docs/aep-v1.md");
+const protocolOverviewZh = await readText("docs/aep-v1.zh-CN.md");
+assert(protocolOverview.includes("Status: Release Candidate"), "English protocol overview is not release candidate");
+assert(protocolOverviewZh.includes("状态：发布候选"), "Chinese protocol overview is not release candidate");
+for (const content of [protocolOverview, protocolOverviewZh]) {
+  assert(!content.includes("X-AEP-Agent-ID"), "protocol overview still documents the removed Agent identity header");
+  assert(content.includes("`global`") && content.includes("`team`") && content.includes("`role`") && content.includes("`user`"), "protocol overview omits a control-event scope");
+}
+assert(!JSON.stringify(remaining).includes("draft-profile"), "remaining GA gates still list release-candidate metadata cleanup");
 const tokenStore = await readText("packages/aep-sdk-node/src/token-store.ts");
 assert(tokenStore.includes("ProtectedRefreshTokenStore"), "SDK protected refresh-token store is missing");
 assert(!tokenStore.includes("tokens.accessToken") && !tokenStore.includes("tokens.modelAccessToken"), "protected token store may not persist short-lived tokens");
