@@ -21,6 +21,11 @@ authorizer 接受带 JSON `model` 字段的 `POST /v1/*` 推理请求。它用�
 `token_use=model`、AEP 身份字段，以及请求模型是否属于 `model_scopes`。JWKS
 刷新不是逐请求授权决策，数据面也不持有签名私钥。
 
+生产环境强制启用 `AEP_GATEWAY_REQUIRE_ENTITLEMENT=true`，只接受激活接口签发的
+短期 `token_use=entitlement` JWT，并通过带内部认证的 Control Service 接口复核
+License 当前状态。状态接口不可用时拒绝推理请求；生产缓存最长 15 秒，确保撤销
+在该窗口内生效。开发环境默认仍可使用登录签发的模型 JWT。
+
 Higress v2.2.4 原生 JWT 插件不能完整强制执行 AEP 专用 claim，也不能把数组
 claim 与 OpenAI 请求体中的模型动态比较，因此需要这个职责单一的 authorizer。
 
@@ -68,6 +73,10 @@ authorizer 的主要环境变量：
 | `AEP_GATEWAY_ISSUER` | `http://localhost:8080` | 令牌签发者约束 |
 | `AEP_GATEWAY_JWKS_TTL` | `5m` | 公钥缓存时间 |
 | `AEP_GATEWAY_REQUEST_LIMIT` | `2097152` | 推理请求体字节上限 |
+| `AEP_GATEWAY_REQUIRE_ENTITLEMENT` | 生产为 `true`，其他环境为 `false` | 强制使用已激活的企业 entitlement JWT |
+| `AEP_GATEWAY_LICENSE_STATUS_URL` | 未设置 | Control Service 内部 License 状态接口 |
+| `AEP_GATEWAY_LICENSE_STATUS_TOKEN` / `_FILE` | 未设置 | 两个服务共享的内部认证令牌，生产环境应由 Secret 文件注入 |
+| `AEP_GATEWAY_LICENSE_STATUS_TTL` | `15s` | License 状态缓存时间，生产不得超过 15 秒 |
 
 ## 生产部署
 
@@ -76,6 +85,9 @@ authorizer 的主要环境变量：
 入口并启用 TLS。生产自动化还必须根据审核后的模型目录和供应商 Secret 渲染
 模型路由及 AI Proxy 映射；Compose 中的静态映射只是 M1 开发夹具，不是模型目录
 到 Higress 的持续同步控制器。
+
+Control Service 与 authorizer 必须从部署 Secret 管理器获得同一个高熵 License
+状态令牌。生产环境未启用 entitlement、未配置状态接口或令牌时，服务拒绝启动。
 
 Higress 与 higress-standalone 均采用 Apache-2.0，可免费商用。M1 开发配置按摘要
 固定官方 all-in-one 镜像，保证本地与 CI 验收可重复。

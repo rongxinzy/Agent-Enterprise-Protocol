@@ -26,11 +26,14 @@ and membership of the requested model in `model_scopes`. JWKS refresh is not a
 per-request authorization decision and the signing private key is never shared
 with the data plane.
 
-Enterprise deployments can set `AEP_GATEWAY_REQUIRE_ENTITLEMENT=true`. In that
-mode the authorizer accepts the short-lived `token_use=entitlement` JWT returned
-by `/aep/v1/agent/activation`; it requires License ID, digest, deployment ID,
-and model scopes in the signed claims. Development mode remains compatible with
-the login-issued model JWT by default.
+Production deployments always require `AEP_GATEWAY_REQUIRE_ENTITLEMENT=true`.
+The authorizer accepts the short-lived `token_use=entitlement` JWT returned
+by `/aep/v1/user/activation`; it requires License ID, digest, deployment ID,
+and model scopes in the signed claims. It also checks the current License status
+through an authenticated internal endpoint and fails closed when that endpoint
+is unavailable. Status decisions are cached for no more than 15 seconds in
+production. Development mode remains compatible with the login-issued model JWT
+by default.
 
 Higress native JWT plugins do not, in v2.2.4, enforce all of the AEP-specific
 claims or compare an array claim with the model in an OpenAI request body. That
@@ -85,9 +88,9 @@ Relevant authorizer environment variables are:
 | `AEP_GATEWAY_ISSUER` | `http://localhost:8080` | Required token issuer |
 | `AEP_GATEWAY_JWKS_TTL` | `5m` | Public-key cache TTL |
 | `AEP_GATEWAY_REQUEST_LIMIT` | `2097152` | Maximum inference body bytes |
-| `AEP_GATEWAY_REQUIRE_ENTITLEMENT` | `false` | Require an activated enterprise entitlement JWT |
+| `AEP_GATEWAY_REQUIRE_ENTITLEMENT` | `true` in production; otherwise `false` | Require an activated enterprise entitlement JWT |
 | `AEP_GATEWAY_LICENSE_STATUS_URL` | unset | Internal Control Service License status endpoint |
-| `AEP_GATEWAY_LICENSE_STATUS_TOKEN` | unset | Shared internal Token for License status checks |
+| `AEP_GATEWAY_LICENSE_STATUS_TOKEN` / `_FILE` | unset | Shared internal Token for License status checks; use Secret-backed file injection in production |
 | `AEP_GATEWAY_LICENSE_STATUS_TTL` | `15s` | Cache lifetime for a License status decision |
 
 ## Production Deployment
@@ -98,6 +101,9 @@ Higress service, expose only that authenticated entry point, and use TLS.
 Production automation must render model routes and AI Proxy mappings from the
 approved model catalog and provider-secret store. The static Compose mapping is
 an M1 development fixture, not a catalog-to-Higress reconciliation controller.
+The Control Service and authorizer must receive the same high-entropy License
+status token from the deployment Secret manager. Missing entitlement enforcement,
+status endpoint, or status token is a startup error in production.
 
 Higress and higress-standalone are Apache-2.0 licensed and may be used
 commercially. The M1 profile pins the official all-in-one image by digest for

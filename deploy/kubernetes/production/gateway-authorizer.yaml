@@ -21,6 +21,9 @@ data:
   AEP_GATEWAY_HTTP_IDLE_TIMEOUT: 60s
   AEP_GATEWAY_HTTP_SHUTDOWN_TIMEOUT: 10s
   AEP_GATEWAY_HTTP_MAX_HEADER_BYTES: "1048576"
+  AEP_GATEWAY_REQUIRE_ENTITLEMENT: "true"
+  AEP_GATEWAY_LICENSE_STATUS_URL: http://aep-control-service.aep-system.svc.cluster.local:8080/internal/gateway/licenses
+  AEP_GATEWAY_LICENSE_STATUS_TTL: 15s
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -72,6 +75,12 @@ spec:
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef: {name: aep-gateway-authorizer-config}
+          env:
+            - name: AEP_GATEWAY_LICENSE_STATUS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aep-control-service-secrets
+                  key: gateway-license-status-token
           ports:
             - name: http
               containerPort: 8090

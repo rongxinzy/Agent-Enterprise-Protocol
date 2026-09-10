@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -97,6 +98,43 @@ func TestVerifierChecksAndCachesDeploymentLicenseStatus(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("license status endpoint called %d times, want cached once", calls.Load())
+	}
+}
+
+func TestVerifierFailsClosedForInactiveOrUnavailableLicenseStatus(t *testing.T) {
+	claims := &ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest"}
+	for _, test := range []struct {
+		name     string
+		handler  http.Handler
+		inactive bool
+	}{
+		{
+			name: "revoked License",
+			handler: http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(response).Encode(map[string]any{"active": false, "digest": "sha256:digest", "deploymentId": "deployment-a"})
+			}),
+			inactive: true,
+		},
+		{
+			name: "status service unavailable",
+			handler: http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				response.WriteHeader(http.StatusServiceUnavailable)
+			}),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status := httptest.NewServer(test.handler)
+			defer status.Close()
+			verifier := NewVerifier("http://unused.example/jwks", "issuer", time.Hour, time.Second)
+			verifier.ConfigureLicenseStatus(status.URL, "gateway-secret", 15*time.Second)
+			err := verifier.CheckEntitlement(context.Background(), claims)
+			if err == nil {
+				t.Fatal("expected entitlement check to fail closed")
+			}
+			if test.inactive != errors.Is(err, ErrEntitlementInactive) {
+				t.Fatalf("CheckEntitlement() error = %v", err)
+			}
+		})
 	}
 }
 

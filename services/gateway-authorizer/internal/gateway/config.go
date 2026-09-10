@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,8 @@ type Config struct {
 	LicenseStatusTTL      time.Duration
 }
 
+const maxProductionLicenseStatusTTL = 15 * time.Second
+
 func LoadConfig() (Config, error) {
 	environment := value("AEP_ENVIRONMENT", "development")
 	defaultLogFormat := "text"
@@ -40,17 +43,19 @@ func LoadConfig() (Config, error) {
 		defaultLogFormat = "json"
 	}
 	cfg := Config{
-		Environment:        environment,
-		LogFormat:          value("AEP_LOG_FORMAT", defaultLogFormat),
-		LogLevel:           value("AEP_LOG_LEVEL", "info"),
-		Address:            value("AEP_GATEWAY_ADDRESS", ":8090"),
-		UpstreamURL:        value("AEP_GATEWAY_UPSTREAM_URL", "http://localhost:8080"),
-		JWKSURL:            value("AEP_GATEWAY_JWKS_URL", "http://localhost:8080/.well-known/jwks.json"),
-		Issuer:             value("AEP_GATEWAY_ISSUER", "http://localhost:8080"),
-		LicenseStatusURL:   value("AEP_GATEWAY_LICENSE_STATUS_URL", ""),
-		LicenseStatusToken: os.Getenv("AEP_GATEWAY_LICENSE_STATUS_TOKEN"),
+		Environment:      environment,
+		LogFormat:        value("AEP_LOG_FORMAT", defaultLogFormat),
+		LogLevel:         value("AEP_LOG_LEVEL", "info"),
+		Address:          value("AEP_GATEWAY_ADDRESS", ":8090"),
+		UpstreamURL:      value("AEP_GATEWAY_UPSTREAM_URL", "http://localhost:8080"),
+		JWKSURL:          value("AEP_GATEWAY_JWKS_URL", "http://localhost:8080/.well-known/jwks.json"),
+		Issuer:           value("AEP_GATEWAY_ISSUER", "http://localhost:8080"),
+		LicenseStatusURL: value("AEP_GATEWAY_LICENSE_STATUS_URL", ""),
 	}
 	var err error
+	if cfg.LicenseStatusToken, err = secret("AEP_GATEWAY_LICENSE_STATUS_TOKEN", ""); err != nil {
+		return Config{}, err
+	}
 	durations := []struct {
 		key      string
 		fallback time.Duration
@@ -77,7 +82,7 @@ func LoadConfig() (Config, error) {
 	if cfg.HTTPMaxHeaderBytes, err = integer("AEP_GATEWAY_HTTP_MAX_HEADER_BYTES", 1<<20); err != nil {
 		return Config{}, err
 	}
-	if cfg.RequireEntitlement, err = boolean("AEP_GATEWAY_REQUIRE_ENTITLEMENT", false); err != nil {
+	if cfg.RequireEntitlement, err = boolean("AEP_GATEWAY_REQUIRE_ENTITLEMENT", environment == "production"); err != nil {
 		return Config{}, err
 	}
 	if cfg.LicenseStatusTTL, err = duration("AEP_GATEWAY_LICENSE_STATUS_TTL", 15*time.Second, false); err != nil {
@@ -121,6 +126,14 @@ func (cfg Config) Validate() error {
 	if cfg.RequireEntitlement && (cfg.LicenseStatusURL == "" || cfg.LicenseStatusToken == "") {
 		return errors.New("AEP_GATEWAY_LICENSE_STATUS_URL and AEP_GATEWAY_LICENSE_STATUS_TOKEN are required when entitlement enforcement is enabled")
 	}
+	if cfg.Environment == "production" {
+		if !cfg.RequireEntitlement {
+			return errors.New("AEP_GATEWAY_REQUIRE_ENTITLEMENT must be true in production")
+		}
+		if cfg.LicenseStatusTTL > maxProductionLicenseStatusTTL {
+			return fmt.Errorf("AEP_GATEWAY_LICENSE_STATUS_TTL must not exceed %s in production", maxProductionLicenseStatusTTL)
+		}
+	}
 	return nil
 }
 
@@ -129,6 +142,27 @@ func value(key, fallback string) string {
 		return current
 	}
 	return fallback
+}
+
+func secret(key, fallback string) (string, error) {
+	direct, file := os.Getenv(key), os.Getenv(key+"_FILE")
+	if direct != "" && file != "" {
+		return "", fmt.Errorf("%s and %s_FILE are mutually exclusive", key, key)
+	}
+	if file == "" {
+		if direct != "" {
+			return direct, nil
+		}
+		return fallback, nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE: %w", key, err)
+	}
+	if len(data) > 1<<20 {
+		return "", fmt.Errorf("%s_FILE exceeds 1 MiB", key)
+	}
+	return strings.TrimRight(string(data), "\r\n"), nil
 }
 
 func duration(key string, fallback time.Duration, zeroOK bool) (time.Duration, error) {
