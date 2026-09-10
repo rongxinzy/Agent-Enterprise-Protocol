@@ -122,7 +122,12 @@ async function runScenario() {
 }
 
 async function inference(token, body) {
-  const headers = {'Content-Type': 'application/json', 'X-AEP-Deployment-ID': 'spoofed'};
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-AEP-Deployment-ID': 'spoofed',
+    'X-AEP-License-ID': 'spoofed-license',
+    'X-AEP-Internal-Role': 'admin',
+  };
   if (token) headers.Authorization = 'Bearer ' + token;
   const response = await fetch(gatewayBaseUrl + '/chat/completions', {method: 'POST', headers, body: JSON.stringify(body)});
   return {response, text: await response.text()};

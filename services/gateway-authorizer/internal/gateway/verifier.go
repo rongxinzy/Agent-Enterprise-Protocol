@@ -145,8 +145,15 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (*ModelClaims, error)
 	if (claims.TokenUse != "model" && claims.TokenUse != "entitlement") || claims.Subject == "" || claims.DeploymentID == "" {
 		return nil, errors.New("model token has invalid AEP claims")
 	}
-	if claims.TokenUse == "entitlement" && (claims.LicenseID == "" || claims.LicenseDigest == "" || claims.DeploymentID == "" || claims.Audience == nil || !containsAudience(claims.Audience, "aep-entitlement")) {
-		return nil, errors.New("entitlement token has invalid AEP claims")
+	switch claims.TokenUse {
+	case "model":
+		if claims.SessionID == "" || !containsAudience(claims.Audience, "model-gateway") {
+			return nil, errors.New("model token has invalid AEP claims")
+		}
+	case "entitlement":
+		if claims.LicenseID == "" || claims.LicenseDigest == "" || !containsAudience(claims.Audience, "aep-entitlement") {
+			return nil, errors.New("entitlement token has invalid AEP claims")
+		}
 	}
 	return claims, nil
 }

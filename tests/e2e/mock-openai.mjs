@@ -26,6 +26,10 @@ const server = http.createServer(async (request, response) => {
     sendJSON(response, 400, {error: {message: 'trusted AEP identity headers are missing'}});
     return;
   }
+  if (request.headers['x-aep-license-id'] || request.headers['x-aep-internal-role']) {
+    sendJSON(response, 400, {error: {message: 'untrusted AEP headers reached the provider'}});
+    return;
+  }
   if (body.messages?.[0]?.content === 'force upstream failure') {
     sendJSON(response, 503, {error: {message: 'forced upstream failure', type: 'upstream_error'}});
     return;
