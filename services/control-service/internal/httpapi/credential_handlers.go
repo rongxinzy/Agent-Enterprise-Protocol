@@ -89,7 +89,7 @@ func (s *Server) listAgentCredentials(response http.ResponseWriter, request *htt
 		return
 	}
 	claims := claimsFrom(request)
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT `+credentialColumnsQualified+`
+	rows, err := s.app.Database().Query(request.Context(), `SELECT `+credentialColumnsQualified+`
 FROM credentials c
 JOIN users u ON u.id=$2 AND u.deployment_id=$1
 WHERE c.deployment_id=$1 AND c.enabled=true AND c.delivery_mode='client'
@@ -140,7 +140,7 @@ func (s *Server) resolveAgentCredential(response http.ResponseWriter, request *h
 	}
 	claims := claimsFrom(request)
 	credentialID := chi.URLParam(request, "credentialId")
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
