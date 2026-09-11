@@ -90,6 +90,10 @@ func TestActivateLicenseRejectsExpiredEvidence(t *testing.T) {
 }
 
 func signedLicense(t *testing.T, expiresAt time.Time) ([]byte, string) {
+	return signedLicenseFor(t, expiresAt, "customer-1", "deployment-1")
+}
+
+func signedLicenseFor(t *testing.T, expiresAt time.Time, customerID, deploymentID string) ([]byte, string) {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -100,7 +104,7 @@ func signedLicense(t *testing.T, expiresAt time.Time) ([]byte, string) {
 		issued = "2019-01-01T00:00:00.000Z"
 	}
 	expires := expiresAt.UTC().Format("2006-01-02T15:04:05.000Z")
-	payload := []byte(`{"customerId":"customer-1","deploymentId":"deployment-1","edition":"enterprise","expiresAt":"` + expires + `","features":["enterprise.models"],"graceDays":0,"issuedAt":"` + issued + `","licenseId":"lic-1"}`)
+	payload := []byte(`{"customerId":"` + customerID + `","deploymentId":"` + deploymentID + `","edition":"enterprise","expiresAt":"` + expires + `","features":["enterprise.models"],"graceDays":0,"issuedAt":"` + issued + `","licenseId":"lic-1"}`)
 	signature := ed25519.Sign(private, payload)
 	envelope := []byte(`{"format":"zhiyuan-license-v1","keyId":"license-prod-1","payload":` + string(payload) + `,"signature":"` + base64.RawURLEncoding.EncodeToString(signature) + `"}`)
 	return envelope, base64.RawURLEncoding.EncodeToString(public)

@@ -16,6 +16,7 @@ import (
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/license"
 )
 
 func newRuntimeHTTPApplication(t *testing.T) (*app.App, pgxmock.PgxPoolIface, string, string) {
@@ -195,6 +196,55 @@ func TestLicenseHTTPReadAndInternalStatus(t *testing.T) {
 	handler.ServeHTTP(internalResponse, internal)
 	if internalResponse.Code != http.StatusOK || !strings.Contains(internalResponse.Body.String(), `"active":true`) {
 		t.Fatalf("internal status = %d %s", internalResponse.Code, internalResponse.Body.String())
+	}
+}
+
+func TestLicenseImportLifecycle(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	application.Config.LicenseDeploymentID = "deployment-a"
+	application.Config.LicenseCustomerID = "customer-1"
+	expiresAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	envelope, publicKey := signedLicenseFor(t, expiresAt, "customer-1", "deployment-a")
+	verifier, err := license.NewVerifier(map[string]string{"license-prod-1": publicKey}, "deployment-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	application.LicenseVerifier = verifier
+	handler := New(application).Handler()
+
+	pool.ExpectQuery(`SELECT digest FROM licenses WHERE license_id=\$1`).
+		WithArgs("lic-1").WillReturnError(pgx.ErrNoRows)
+	pool.ExpectExec(`INSERT INTO licenses`).
+		WithArgs("lic-1", "customer-1", "deployment-a", pgxmock.AnyArg(), "license-prod-1", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), []string{"enterprise.models"}, pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectExec(`INSERT INTO license_audit_events`).
+		WithArgs(pgxmock.AnyArg(), "deployment-a", "lic-1", "admin-user", "import", "success", (*string)(nil)).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	now := time.Now().UTC()
+	columns := []string{"license_id", "deployment_id", "customer_id", "digest", "key_id", "status", "issued_at", "expires_at", "grace_ends_at", "features", "payload", "revoked_at", "created_at", "updated_at", "active_activations", "active_users"}
+	pool.ExpectQuery(`SELECT l\.license_id,l\.deployment_id`).WithArgs("deployment-a", "lic-1").WillReturnRows(
+		pgxmock.NewRows(columns).AddRow("lic-1", "deployment-a", "customer-1", "sha256:digest", "license-prod-1", "active", now, nil, nil, []string{"enterprise.models"}, []byte(`{"licenseId":"lic-1"}`), nil, now, now, 0, 0))
+
+	response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/licenses/import", `{"license":`+string(envelope)+`}`)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"licenseId":"lic-1"`) || strings.Contains(response.Body.String(), `"payload"`) {
+		t.Fatalf("license import = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestLicenseImportRejectsCustomerMismatch(t *testing.T) {
+	application, _, adminToken, _ := newRuntimeHTTPApplication(t)
+	application.Config.LicenseDeploymentID = "deployment-a"
+	application.Config.LicenseCustomerID = "customer-other"
+	expiresAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	envelope, publicKey := signedLicenseFor(t, expiresAt, "customer-1", "deployment-a")
+	verifier, err := license.NewVerifier(map[string]string{"license-prod-1": publicKey}, "deployment-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	application.LicenseVerifier = verifier
+	response := userRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/licenses/import", `{"license":`+string(envelope)+`}`)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"LICENSE_CUSTOMER_MISMATCH"`) {
+		t.Fatalf("customer mismatch = %d %s", response.Code, response.Body.String())
 	}
 }
 
