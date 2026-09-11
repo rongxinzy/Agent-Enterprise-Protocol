@@ -28,7 +28,7 @@ func modelRuntimeColumns() []string {
 	}
 }
 
-func attachModelRuntime(t *testing.T, application *app.App) pgxmock.PgxPoolIface {
+func attachRuntimeDatabase(t *testing.T, application *app.App) pgxmock.PgxPoolIface {
 	t.Helper()
 	pool, err := pgxmock.NewPool()
 	if err != nil {
@@ -46,7 +46,7 @@ func attachModelRuntime(t *testing.T, application *app.App) pgxmock.PgxPoolIface
 
 func TestAdminModelLifecycle(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
-	pool := attachModelRuntime(t, application)
+	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 	reasoning := []byte(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}`)
@@ -151,7 +151,7 @@ func TestAdminModelLifecycle(t *testing.T) {
 
 func TestUserModelCatalogUsesAssignmentsAndHidesCredential(t *testing.T) {
 	application, mock, _ := newStoreBackedHTTPApplication(t)
-	pool := attachModelRuntime(t, application)
+	pool := attachRuntimeDatabase(t, application)
 	userToken, _, err := application.Tokens.IssueWithDeploymentSession("user-a", "deployment-a", "session-user", false, false, []string{"member"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestUserModelCatalogUsesAssignmentsAndHidesCredential(t *testing.T) {
 
 func TestAdminModelErrorMappings(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
-	pool := attachModelRuntime(t, application)
+	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
 	validModel := `{"id":"chat-a","displayName":"Chat","sourceType":"gateway","protocol":"openai-compatible","credentialId":"credential-a","capabilities":["text"],"isDefault":false,"enabled":true}`
 
