@@ -216,11 +216,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 }
 
 func (s *Server) passwordChangeStillRequired(request *http.Request, claims *auth.Claims) bool {
-	if s.app.Pool == nil {
+	database := s.app.Database()
+	if database == nil {
 		return true
 	}
 	var required bool
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT require_password_change FROM users WHERE deployment_id=$1 AND id=$2`, claims.DeploymentID, claims.Subject).Scan(&required)
+	err := database.QueryRow(request.Context(), `SELECT require_password_change FROM users WHERE deployment_id=$1 AND id=$2`, claims.DeploymentID, claims.Subject).Scan(&required)
 	return err != nil || required
 }
 
