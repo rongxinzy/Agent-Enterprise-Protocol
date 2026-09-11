@@ -216,7 +216,9 @@ func (a *App) Close() {
 	if a.SQLDB != nil {
 		_ = a.SQLDB.Close()
 	}
-	a.Pool.Close()
+	if a.Pool != nil {
+		a.Pool.Close()
+	}
 }
 
 func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) error {

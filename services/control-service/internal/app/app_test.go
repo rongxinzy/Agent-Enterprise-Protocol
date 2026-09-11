@@ -368,3 +368,381 @@ func TestDatabaseUnavailableContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRuntimeDatabaseAccessorsAndClose(t *testing.T) {
+	application := &App{}
+	if application.Database() != nil {
+		t.Fatal("Database returned a database for an empty application")
+	}
+	payload, pool, sqlMock := newMockApplication(t)
+	if payload.Database() != pool {
+		t.Fatal("Database did not return the configured runtime database")
+	}
+	var replacement RuntimeDatabase = pool
+	application.SetRuntimeDatabase(replacement)
+	if application.Database() != replacement {
+		t.Fatal("SetRuntimeDatabase did not replace the runtime database")
+	}
+	if sqlMock == nil {
+		t.Fatal("sql mock was not initialized")
+	}
+	// Close must also be safe for embedded applications that only provide SQLDB.
+	payload.Close()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&App{SQLDB: db}).Close()
+}
+
+func TestOpenRejectsMalformedDatabaseURL(t *testing.T) {
+	_, err := Open(context.Background(), config.Config{DatabaseURL: "://malformed"})
+	if err == nil {
+		t.Fatal("Open accepted a malformed database URL")
+	}
+}
+
+func TestModelScopesPropagatesQueryAndRowErrors(t *testing.T) {
+	t.Run("query error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(`SELECT DISTINCT m\.id`).WithArgs("deployment-a", "user-a").
+			WillReturnError(errors.New("query failed"))
+		if _, err := application.ModelScopes(context.Background(), "deployment-a", "user-a"); err == nil {
+			t.Fatal("ModelScopes accepted a query failure")
+		}
+	})
+	t.Run("scan error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(`SELECT DISTINCT m\.id`).WithArgs("deployment-a", "user-a").
+			WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(struct{}{}))
+		if _, err := application.ModelScopes(context.Background(), "deployment-a", "user-a"); err == nil {
+			t.Fatal("ModelScopes accepted an invalid model id")
+		}
+	})
+	t.Run("rows error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		rows := pgxmock.NewRows([]string{"id"}).AddRow("chat-a").RowError(0, errors.New("stream failed"))
+		pool.ExpectQuery(`SELECT DISTINCT m\.id`).WithArgs("deployment-a", "user-a").WillReturnRows(rows)
+		if _, err := application.ModelScopes(context.Background(), "deployment-a", "user-a"); err == nil {
+			t.Fatal("ModelScopes accepted a row stream failure")
+		}
+	})
+}
+
+func TestRegisterLicensePropagatesDatabaseErrors(t *testing.T) {
+	verified := testVerifiedLicense()
+	t.Run("lookup error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(regexp.QuoteMeta(`SELECT digest FROM licenses WHERE license_id=$1`)).
+			WithArgs("license-a").WillReturnError(errors.New("lookup failed"))
+		if err := application.RegisterLicense(context.Background(), verified); err == nil {
+			t.Fatal("RegisterLicense accepted a lookup failure")
+		}
+	})
+	t.Run("insert error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(regexp.QuoteMeta(`SELECT digest FROM licenses WHERE license_id=$1`)).
+			WithArgs("license-a").WillReturnError(pgx.ErrNoRows)
+		pool.ExpectExec(`INSERT INTO licenses`).
+			WithArgs("license-a", "customer-a", "deployment-a", "sha256:digest-a", "key-1", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), []string{"enterprise.models"}, verified.Envelope.Payload).
+			WillReturnError(errors.New("insert failed"))
+		if err := application.RegisterLicense(context.Background(), verified); err == nil {
+			t.Fatal("RegisterLicense accepted an insert failure")
+		}
+	})
+}
+
+func TestActivateLicensePropagatesTransactionErrors(t *testing.T) {
+	setup := func(t *testing.T, status string, revokedAt *time.Time) (*App, pgxmock.PgxPoolIface) {
+		t.Helper()
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectBegin()
+		pool.ExpectQuery(`SELECT status, revoked_at FROM licenses`).
+			WithArgs("license-a", "deployment-a").
+			WillReturnRows(pgxmock.NewRows([]string{"status", "revoked_at"}).AddRow(status, revokedAt))
+		return application, pool
+	}
+	t.Run("begin error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectBegin().WillReturnError(errors.New("begin failed"))
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); err == nil {
+			t.Fatal("ActivateLicense accepted a begin failure")
+		}
+	})
+	t.Run("lookup error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectBegin()
+		pool.ExpectQuery(`SELECT status, revoked_at FROM licenses`).WithArgs("license-a", "deployment-a").WillReturnError(errors.New("lookup failed"))
+		pool.ExpectRollback()
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); err == nil {
+			t.Fatal("ActivateLicense accepted a lookup failure")
+		}
+	})
+	t.Run("revoked timestamp", func(t *testing.T) {
+		revoked := time.Now()
+		application, pool := setup(t, "active", &revoked)
+		pool.ExpectRollback()
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); !errors.Is(err, ErrLicenseRevoked) {
+			t.Fatalf("ActivateLicense() error = %v", err)
+		}
+	})
+	t.Run("activation lookup error", func(t *testing.T) {
+		application, pool := setup(t, "active", nil)
+		pool.ExpectQuery(`SELECT EXISTS`).WithArgs("license-a", "deployment-a").WillReturnError(errors.New("activation lookup failed"))
+		pool.ExpectRollback()
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); err == nil {
+			t.Fatal("ActivateLicense accepted an activation lookup failure")
+		}
+	})
+	t.Run("refresh update error", func(t *testing.T) {
+		application, pool := setup(t, "active", nil)
+		pool.ExpectQuery(`SELECT EXISTS`).WithArgs("license-a", "deployment-a").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+		pool.ExpectExec(`UPDATE license_activations SET last_seen_at=now\(\)`).WithArgs("license-a", "deployment-a").WillReturnError(errors.New("update failed"))
+		pool.ExpectRollback()
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); err == nil {
+			t.Fatal("ActivateLicense accepted an activation update failure")
+		}
+	})
+	t.Run("insert error", func(t *testing.T) {
+		application, pool := setup(t, "active", nil)
+		pool.ExpectQuery(`SELECT EXISTS`).WithArgs("license-a", "deployment-a").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+		pool.ExpectExec(`INSERT INTO license_activations`).WithArgs(pgxmock.AnyArg(), "license-a", "deployment-a", "user-a").WillReturnError(errors.New("insert failed"))
+		pool.ExpectRollback()
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); err == nil {
+			t.Fatal("ActivateLicense accepted an activation insert failure")
+		}
+	})
+	t.Run("commit error", func(t *testing.T) {
+		application, pool := setup(t, "active", nil)
+		pool.ExpectQuery(`SELECT EXISTS`).WithArgs("license-a", "deployment-a").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
+		pool.ExpectExec(`INSERT INTO license_activations`).WithArgs(pgxmock.AnyArg(), "license-a", "deployment-a", "user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+		pool.ExpectCommit().WillReturnError(errors.New("commit failed"))
+		if err := application.ActivateLicense(context.Background(), "license-a", "deployment-a", "user-a"); err == nil {
+			t.Fatal("ActivateLicense accepted a commit failure")
+		}
+	})
+}
+
+func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
+	t.Run("password change suppresses model scopes", func(t *testing.T) {
+		application, pool, sqlMock := newMockApplication(t)
+		expectModelScopes(pool)
+		expectUserRoles(sqlMock, "member")
+		pool.ExpectBegin()
+		pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+		pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+		pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 0"))
+		pool.ExpectCommit()
+		result, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage", Status: "active", RequirePasswordChange: true})
+		if err != nil || !result.PasswordChangeRequired {
+			t.Fatalf("IssueUserSession() = %#v, %v", result, err)
+		}
+		claims, parseErr := application.Tokens.ParseModel(result.ModelAccessToken)
+		if parseErr != nil || len(claims.ModelScopes) != 0 {
+			t.Fatalf("password-gated model claims = %#v, %v", claims, parseErr)
+		}
+	})
+	t.Run("model scope error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(`SELECT DISTINCT m\.id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("scope failed"))
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+			t.Fatal("IssueUserSession accepted a model scope failure")
+		}
+	})
+	t.Run("role lookup error", func(t *testing.T) {
+		application, pool, sqlMock := newMockApplication(t)
+		expectModelScopes(pool)
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role lookup failed"))
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+			t.Fatal("IssueUserSession accepted a role lookup failure")
+		}
+	})
+	t.Run("transaction error", func(t *testing.T) {
+		application, pool, sqlMock := newMockApplication(t)
+		expectModelScopes(pool)
+		expectUserRoles(sqlMock, "member")
+		pool.ExpectBegin().WillReturnError(errors.New("begin failed"))
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+			t.Fatal("IssueUserSession accepted a transaction failure")
+		}
+	})
+	t.Run("session insert error", func(t *testing.T) {
+		application, pool, sqlMock := newMockApplication(t)
+		expectModelScopes(pool)
+		expectUserRoles(sqlMock, "member")
+		pool.ExpectBegin()
+		pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").WillReturnError(errors.New("insert failed"))
+		pool.ExpectRollback()
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+			t.Fatal("IssueUserSession accepted a session insert failure")
+		}
+	})
+}
+
+func TestRefreshUserSessionRejectsInvalidAndPropagatesFailures(t *testing.T) {
+	type rowState struct {
+		revokedToken, revokedSession *time.Time
+		expires                      time.Time
+		status                       string
+	}
+	valid := rowState{expires: time.Now().Add(time.Hour), status: "active"}
+	run := func(t *testing.T, state rowState, after func(pgxmock.PgxPoolIface, *App, sqlmock.Sqlmock), wantErr error) {
+		t.Helper()
+		application, pool, sqlMock := newMockApplication(t)
+		raw := "old-refresh-token"
+		pool.ExpectBeginTx(pgx.TxOptions{})
+		pool.ExpectQuery(`SELECT t\.session_id,s\.user_id`).WithArgs(auth.HashRefreshToken(raw)).WillReturnRows(pgxmock.NewRows([]string{
+			"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin",
+		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", state.expires, state.revokedToken, state.revokedSession, state.status, false, false))
+		after(pool, application, sqlMock)
+		pool.ExpectRollback()
+		if _, err := application.RefreshUserSession(context.Background(), raw, "session-a"); (wantErr == nil && err == nil) || (wantErr != nil && !errors.Is(err, wantErr)) {
+			t.Fatalf("RefreshUserSession() error = %v, want %v", err, wantErr)
+		}
+	}
+	t.Run("query error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectBeginTx(pgx.TxOptions{})
+		pool.ExpectQuery(`SELECT t\.session_id,s\.user_id`).WithArgs(auth.HashRefreshToken("old-refresh-token")).WillReturnError(errors.New("query failed"))
+		pool.ExpectRollback()
+		if _, err := application.RefreshUserSession(context.Background(), "old-refresh-token", "session-a"); !errors.Is(err, ErrRefreshTokenInvalid) {
+			t.Fatalf("RefreshUserSession() error = %v", err)
+		}
+	})
+	for _, test := range []struct {
+		name  string
+		state rowState
+	}{
+		{name: "revoked token", state: rowState{expires: time.Now().Add(time.Hour), status: "active", revokedToken: ptrTime(time.Now())}},
+		{name: "revoked session", state: rowState{expires: time.Now().Add(time.Hour), status: "active", revokedSession: ptrTime(time.Now())}},
+		{name: "expired token", state: rowState{expires: time.Now().Add(-time.Minute), status: "active"}},
+		{name: "inactive user", state: rowState{expires: time.Now().Add(time.Hour), status: "disabled"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run(t, test.state, func(pgxmock.PgxPoolIface, *App, sqlmock.Sqlmock) {}, ErrRefreshTokenInvalid)
+		})
+	}
+	t.Run("model scope error", func(t *testing.T) {
+		run(t, valid, func(pool pgxmock.PgxPoolIface, _ *App, _ sqlmock.Sqlmock) {
+			pool.ExpectQuery(`SELECT DISTINCT m\.id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("scope failed"))
+		}, nil)
+	})
+	t.Run("role lookup error", func(t *testing.T) {
+		run(t, valid, func(pool pgxmock.PgxPoolIface, _ *App, sqlMock sqlmock.Sqlmock) {
+			expectModelScopes(pool, "chat-a")
+			sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role failed"))
+		}, nil)
+	})
+	for _, test := range []struct {
+		name      string
+		configure func(pgxmock.PgxPoolIface)
+	}{
+		{name: "old token update error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs(auth.HashRefreshToken("old-refresh-token")).WillReturnError(errors.New("revoke failed"))
+		}},
+		{name: "new token insert error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs(auth.HashRefreshToken("old-refresh-token")).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+			pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), "session-a", pgxmock.AnyArg()).WillReturnError(errors.New("rotate failed"))
+		}},
+		{name: "last seen update error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs(auth.HashRefreshToken("old-refresh-token")).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+			pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), "session-a", pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			pool.ExpectExec(`UPDATE user_sessions SET last_seen_at=now\(\)`).WithArgs("session-a").WillReturnError(errors.New("touch failed"))
+		}},
+		{name: "commit error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs(auth.HashRefreshToken("old-refresh-token")).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+			pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), "session-a", pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			pool.ExpectExec(`UPDATE user_sessions SET last_seen_at=now\(\)`).WithArgs("session-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+			pool.ExpectCommit().WillReturnError(errors.New("commit failed"))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run(t, valid, func(pool pgxmock.PgxPoolIface, _ *App, sqlMock sqlmock.Sqlmock) {
+				expectModelScopes(pool, "chat-a")
+				expectUserRoles(sqlMock, "member")
+				test.configure(pool)
+			}, nil)
+		})
+	}
+}
+
+func ptrTime(value time.Time) *time.Time { return &value }
+
+func TestSessionRevocationPropagatesDatabaseErrors(t *testing.T) {
+	t.Run("token revoke error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectExec(`UPDATE user_session_tokens`).WithArgs(auth.HashRefreshToken("refresh"), "session-a").WillReturnError(errors.New("token revoke failed"))
+		if err := application.RevokeUserSession(context.Background(), "refresh", "session-a"); err == nil {
+			t.Fatal("RevokeUserSession accepted a token update failure")
+		}
+	})
+	t.Run("session revoke error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectExec(`UPDATE user_session_tokens`).WithArgs(auth.HashRefreshToken("refresh"), "session-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+		pool.ExpectExec(`UPDATE user_sessions`).WithArgs("session-a").WillReturnError(errors.New("session revoke failed"))
+		if err := application.RevokeUserSession(context.Background(), "refresh", "session-a"); err == nil {
+			t.Fatal("RevokeUserSession accepted a session update failure")
+		}
+	})
+	t.Run("by id begin error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectBegin().WillReturnError(errors.New("begin failed"))
+		if err := application.RevokeUserSessionByID(context.Background(), "deployment-a", "session-a"); err == nil {
+			t.Fatal("RevokeUserSessionByID accepted a begin failure")
+		}
+	})
+	t.Run("by id lookup error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectBegin()
+		pool.ExpectQuery(`SELECT EXISTS`).WithArgs("deployment-a", "session-a").WillReturnError(errors.New("lookup failed"))
+		pool.ExpectRollback()
+		if err := application.RevokeUserSessionByID(context.Background(), "deployment-a", "session-a"); err == nil {
+			t.Fatal("RevokeUserSessionByID accepted a lookup failure")
+		}
+	})
+	for _, test := range []struct {
+		name      string
+		firstErr  bool
+		secondErr bool
+	}{
+		{name: "token update error", firstErr: true},
+		{name: "session update error", secondErr: true},
+		{name: "commit error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application, pool, _ := newMockApplication(t)
+			pool.ExpectBegin()
+			pool.ExpectQuery(`SELECT EXISTS`).WithArgs("deployment-a", "session-a").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
+			if test.firstErr {
+				pool.ExpectExec(`UPDATE user_session_tokens`).WithArgs("session-a").WillReturnError(errors.New("token update failed"))
+			} else {
+				pool.ExpectExec(`UPDATE user_session_tokens`).WithArgs("session-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+				if test.secondErr {
+					pool.ExpectExec(`UPDATE user_sessions`).WithArgs("deployment-a", "session-a").WillReturnError(errors.New("session update failed"))
+				} else {
+					pool.ExpectExec(`UPDATE user_sessions`).WithArgs("deployment-a", "session-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+					pool.ExpectCommit().WillReturnError(errors.New("commit failed"))
+				}
+			}
+			pool.ExpectRollback()
+			if err := application.RevokeUserSessionByID(context.Background(), "deployment-a", "session-a"); err == nil {
+				t.Fatal("RevokeUserSessionByID accepted a transaction failure")
+			}
+		})
+	}
+	t.Run("set token update error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectExec(`UPDATE user_session_tokens`).WithArgs("user-a").WillReturnError(errors.New("token update failed"))
+		if err := application.RevokeUserSessionSet(context.Background(), "user-a"); err == nil {
+			t.Fatal("RevokeUserSessionSet accepted a token update failure")
+		}
+	})
+	t.Run("set session update error", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectExec(`UPDATE user_session_tokens`).WithArgs("user-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+		pool.ExpectExec(`UPDATE user_sessions`).WithArgs("user-a").WillReturnError(errors.New("session update failed"))
+		if err := application.RevokeUserSessionSet(context.Background(), "user-a"); err == nil {
+			t.Fatal("RevokeUserSessionSet accepted a session update failure")
+		}
+	})
+}
