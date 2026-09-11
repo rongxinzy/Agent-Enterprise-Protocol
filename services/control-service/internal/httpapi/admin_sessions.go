@@ -13,7 +13,7 @@ import (
 // listUserSessions exposes terminal sessions as the canonical operational
 // identity. It intentionally returns no refresh-token material.
 func (s *Server) listUserSessions(response http.ResponseWriter, request *http.Request) {
-	rows, err := s.app.Pool.Query(request.Context(), `
+	rows, err := s.app.Database().Query(request.Context(), `
 SELECT session_id,user_id,topic,created_at,last_seen_at,revoked_at
 FROM user_sessions
 WHERE deployment_id=$1 AND ($2='' OR user_id=$2)
