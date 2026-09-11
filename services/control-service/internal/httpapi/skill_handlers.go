@@ -283,7 +283,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	}
 	id := uuid.NewString()
 	claims := claimsFrom(request)
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -311,7 +311,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 
 func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -369,7 +369,7 @@ func skillAssignmentEventScope(subjectType, subjectID string) (string, *string) 
 
 func (s *Server) skillManifest(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	rows, err := s.app.Pool.Query(request.Context(), `WITH authorized AS (
+	rows, err := s.app.Database().Query(request.Context(), `WITH authorized AS (
 SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes
 FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
 JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
@@ -408,7 +408,7 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 	claims := claimsFrom(request)
 	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
 	var objectKey string
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusForbidden, "SKILL_NOT_ASSIGNED", "The Skill version is not assigned.")
 		return
@@ -449,7 +449,7 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 	sort.Strings(installed)
 	payload, _ := json.Marshal(input)
 	claims := claimsFrom(request)
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
