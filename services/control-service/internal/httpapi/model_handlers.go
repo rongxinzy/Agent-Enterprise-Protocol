@@ -246,7 +246,7 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 		return
 	}
 	capabilities := normalizeCapabilities(*input.Capabilities)
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -317,7 +317,7 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 		return
 	}
 	tenant, modelID := claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId")
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
