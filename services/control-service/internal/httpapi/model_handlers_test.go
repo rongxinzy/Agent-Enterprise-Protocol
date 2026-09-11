@@ -1,6 +1,9 @@
 package httpapi
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestValidReasoningCompatibility(t *testing.T) {
 	valid := &modelReasoningCompatibility{
@@ -27,3 +30,36 @@ func TestValidReasoningCompatibility(t *testing.T) {
 		}
 	}
 }
+
+func TestModelPatchNullableFieldsAndWriteValidation(t *testing.T) {
+	var patch modelPatch
+	if err := json.Unmarshal([]byte(`{"credentialId":null,"reasoningCompatibility":null}`), &patch); err != nil {
+		t.Fatal(err)
+	}
+	if !patch.CredentialID.Set || patch.CredentialID.Value != nil || !patch.ReasoningCompatibility.Set || patch.ReasoningCompatibility.Value != nil {
+		t.Fatalf("nullable patch = %#v", patch)
+	}
+	if err := json.Unmarshal([]byte(`{"credentialId":123}`), &patch); err == nil {
+		t.Fatal("nullable string patch accepted a non-string value")
+	}
+	if err := json.Unmarshal([]byte(`{"reasoningCompatibility":{"thinkingFormat":"deepseek"}}`), &patch); err != nil || patch.ReasoningCompatibility.Value == nil {
+		t.Fatalf("reasoning patch = %#v, %v", patch, err)
+	}
+	valid := true
+	capabilities := []string{"text"}
+	base := modelWrite{ID: "chat", DisplayName: "Chat", SourceType: "gateway", Protocol: "openai-compatible", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid}
+	if !validModelWrite(base) {
+		t.Fatal("valid model descriptor was rejected")
+	}
+	for _, invalid := range []modelWrite{
+		{ID: "chat", DisplayName: "Chat", SourceType: "unknown", Protocol: "openai-compatible", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid},
+		{ID: "chat", DisplayName: "Chat", SourceType: "gateway", Protocol: "http", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid},
+		{ID: "chat", DisplayName: "Chat", SourceType: "gateway", Protocol: "openai-compatible", Capabilities: &capabilities, ContextWindow: ptrInt32(0), IsDefault: &valid, Enabled: &valid},
+	} {
+		if validModelWrite(invalid) {
+			t.Fatalf("invalid model descriptor accepted: %#v", invalid)
+		}
+	}
+}
+
+func ptrInt32(value int32) *int32 { return &value }
