@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"gorm.io/driver/postgres"
@@ -34,6 +35,14 @@ var (
 	ErrSessionNotFound      = errors.New("user session not found")
 )
 
+type runtimeDatabase interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Begin(context.Context) (pgx.Tx, error)
+	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
+}
+
 type App struct {
 	Config          config.Config
 	Pool            *pgxpool.Pool
@@ -44,7 +53,18 @@ type App struct {
 	Credentials     *credential.Sealer
 	LicenseVerifier *license.Verifier
 	License         *license.Verified
+	runtimeDB       runtimeDatabase
 	licenseMu       sync.RWMutex
+}
+
+func (a *App) database() runtimeDatabase {
+	if a.runtimeDB != nil {
+		return a.runtimeDB
+	}
+	if a.Pool == nil {
+		return nil
+	}
+	return a.Pool
 }
 
 // DeploymentID is the stable identity of this single-deployment installation.
@@ -184,7 +204,8 @@ func (a *App) Close() {
 }
 
 func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) error {
-	if a.Pool == nil {
+	database := a.database()
+	if database == nil {
 		return nil
 	}
 	claims := verified.Claims
@@ -192,7 +213,7 @@ func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) er
 		return errors.New("AEP_LICENSE_DEPLOYMENT_ID is required to register a license")
 	}
 	var existingDigest string
-	err := a.Pool.QueryRow(ctx, `SELECT digest FROM licenses WHERE license_id=$1`, claims.LicenseID).Scan(&existingDigest)
+	err := database.QueryRow(ctx, `SELECT digest FROM licenses WHERE license_id=$1`, claims.LicenseID).Scan(&existingDigest)
 	if err == nil {
 		if existingDigest != verified.Digest {
 			return ErrLicenseConflict
@@ -211,15 +232,16 @@ func (a *App) RegisterLicense(ctx context.Context, verified license.Verified) er
 		grace := value.Add(time.Duration(claims.GraceDays) * 24 * time.Hour)
 		graceEndsAt = &grace
 	}
-	_, err = a.Pool.Exec(ctx, `INSERT INTO licenses (license_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, claims.LicenseID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Features, verified.Envelope.Payload)
+	_, err = database.Exec(ctx, `INSERT INTO licenses (license_id,customer_id,deployment_id,digest,key_id,issued_at,expires_at,grace_ends_at,features,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, claims.LicenseID, claims.CustomerID, claims.DeploymentID, verified.Digest, verified.Envelope.KeyID, issuedAt, expiresAt, graceEndsAt, claims.Features, verified.Envelope.Payload)
 	return err
 }
 
 func (a *App) ActivateLicense(ctx context.Context, licenseID, deploymentID, userID string) error {
-	if a.Pool == nil {
+	database := a.database()
+	if database == nil {
 		return nil
 	}
-	tx, err := a.Pool.Begin(ctx)
+	tx, err := database.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -255,7 +277,11 @@ func (a *App) ActivateLicense(ctx context.Context, licenseID, deploymentID, user
 }
 
 func (a *App) ModelScopes(ctx context.Context, deploymentID, userID string) ([]string, error) {
-	rows, err := a.Pool.Query(ctx, `SELECT DISTINCT m.id
+	database := a.database()
+	if database == nil {
+		return nil, errors.New("database is unavailable")
+	}
+	rows, err := database.Query(ctx, `SELECT DISTINCT m.id
 FROM models m
 JOIN model_assignments ma ON ma.deployment_id=m.deployment_id AND ma.model_id=m.id
 JOIN users u ON u.id=$2 AND u.deployment_id=$1
@@ -295,7 +321,8 @@ func (a *App) UserRoleIDs(ctx context.Context, deploymentID, userID string) ([]s
 // IssueUserSession creates a refreshable terminal session that is scoped to a
 // user topic. It does not create or touch a legacy Agent record.
 func (a *App) IssueUserSession(ctx context.Context, user repository.User) (TokenResponse, error) {
-	if a.Pool == nil {
+	database := a.database()
+	if database == nil {
 		return TokenResponse{}, errors.New("database is unavailable")
 	}
 	sessionID := uuid.NewString()
@@ -320,7 +347,7 @@ func (a *App) IssueUserSession(ctx context.Context, user repository.User) (Token
 		return TokenResponse{}, err
 	}
 	expires := time.Now().UTC().Add(a.Config.RefreshTTL)
-	tx, err := a.Pool.Begin(ctx)
+	tx, err := database.Begin(ctx)
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -355,8 +382,12 @@ ON CONFLICT (event_id,session_id) DO NOTHING`, sessionID, a.DeploymentID(), user
 // and session ID stable, allowing each terminal to maintain an independent
 // event cursor.
 func (a *App) RefreshUserSession(ctx context.Context, rawToken, requestedSessionID string) (TokenResponse, error) {
+	database := a.database()
+	if database == nil {
+		return TokenResponse{}, errors.New("database is unavailable")
+	}
 	hash := auth.HashRefreshToken(rawToken)
-	tx, err := a.Pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := database.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -417,18 +448,19 @@ JOIN users u ON u.id=s.user_id
 }
 
 func (a *App) RevokeUserSession(ctx context.Context, rawToken, sessionID string) error {
-	if a.Pool == nil {
+	database := a.database()
+	if database == nil {
 		return nil
 	}
 	hash := auth.HashRefreshToken(rawToken)
 	if sessionID == "" {
 		return nil
 	}
-	_, err := a.Pool.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE token_hash=$1 AND session_id=$2`, hash, sessionID)
+	_, err := database.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE token_hash=$1 AND session_id=$2`, hash, sessionID)
 	if err != nil {
 		return err
 	}
-	_, err = a.Pool.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE session_id=$1`, sessionID)
+	_, err = database.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE session_id=$1`, sessionID)
 	return err
 }
 
@@ -437,13 +469,14 @@ func (a *App) RevokeUserSession(ctx context.Context, rawToken, sessionID string)
 // session is still considered successfully revoked, while an unknown session
 // is reported to the admin API as not found.
 func (a *App) RevokeUserSessionByID(ctx context.Context, deploymentID, sessionID string) error {
-	if a.Pool == nil {
+	database := a.database()
+	if database == nil {
 		return nil
 	}
 	if deploymentID == "" || sessionID == "" {
 		return ErrSessionNotFound
 	}
-	tx, err := a.Pool.Begin(ctx)
+	tx, err := database.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -466,13 +499,14 @@ func (a *App) RevokeUserSessionByID(ctx context.Context, deploymentID, sessionID
 }
 
 func (a *App) RevokeUserSessionSet(ctx context.Context, userID string) error {
-	if a.Pool == nil {
+	database := a.database()
+	if database == nil {
 		return nil
 	}
-	if _, err := a.Pool.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE session_id IN (SELECT session_id FROM user_sessions WHERE user_id=$1) AND revoked_at IS NULL`, userID); err != nil {
+	if _, err := database.Exec(ctx, `UPDATE user_session_tokens SET revoked_at=now() WHERE session_id IN (SELECT session_id FROM user_sessions WHERE user_id=$1) AND revoked_at IS NULL`, userID); err != nil {
 		return err
 	}
-	_, err := a.Pool.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, userID)
+	_, err := database.Exec(ctx, `UPDATE user_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, userID)
 	return err
 }
 
