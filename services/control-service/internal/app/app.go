@@ -35,7 +35,10 @@ var (
 	ErrSessionNotFound      = errors.New("user session not found")
 )
 
-type runtimeDatabase interface {
+// RuntimeDatabase is the small database surface used by request handlers and
+// application services. The production implementation is *pgxpool.Pool; a
+// narrow interface also allows deterministic unit tests with pgxmock.
+type RuntimeDatabase interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -53,11 +56,11 @@ type App struct {
 	Credentials     *credential.Sealer
 	LicenseVerifier *license.Verifier
 	License         *license.Verified
-	runtimeDB       runtimeDatabase
+	runtimeDB       RuntimeDatabase
 	licenseMu       sync.RWMutex
 }
 
-func (a *App) database() runtimeDatabase {
+func (a *App) database() RuntimeDatabase {
 	if a.runtimeDB != nil {
 		return a.runtimeDB
 	}
@@ -65,6 +68,19 @@ func (a *App) database() runtimeDatabase {
 		return nil
 	}
 	return a.Pool
+}
+
+// Database returns the configured runtime database. It is intentionally
+// narrower than *pgxpool.Pool so callers cannot depend on pool internals.
+func (a *App) Database() RuntimeDatabase {
+	return a.database()
+}
+
+// SetRuntimeDatabase replaces the runtime database surface. The server never
+// calls this in production; it exists for embedded deployments and tests that
+// provide a compatible pool implementation.
+func (a *App) SetRuntimeDatabase(database RuntimeDatabase) {
+	a.runtimeDB = database
 }
 
 // DeploymentID is the stable identity of this single-deployment installation.

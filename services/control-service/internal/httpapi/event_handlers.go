@@ -40,12 +40,12 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *http.Request, sessionID string, _ *string) {
 	var pending bool
 	var watermark *string
-	err := s.app.Pool.QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`, sessionID).Scan(&pending, &watermark)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`, sessionID).Scan(&pending, &watermark)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.session_id=$1 AND d.state='pending' AND e.expires_at<=now()`, sessionID)
+	_, _ = s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.session_id=$1 AND d.state='pending' AND e.expires_at<=now()`, sessionID)
 	writeJSON(response, http.StatusOK, map[string]any{
 		"serverTime":    time.Now().UTC(),
 		"controlEvents": map[string]any{"pending": pending, "watermark": stringValue(watermark)},
@@ -74,12 +74,12 @@ func (s *Server) listAgentControlEvents(response http.ResponseWriter, request *h
 }
 
 func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, request *http.Request, sessionID string, after int64) {
-	_, err := s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.session_id=$1 AND d.state='pending' AND e.expires_at<=now()`, sessionID)
+	_, err := s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.session_id=$1 AND d.state='pending' AND e.expires_at<=now()`, sessionID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.created_at,e.expires_at FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now() AND d.cursor>$2 ORDER BY d.cursor LIMIT $3`, sessionID, after, limit(request))
+	rows, err := s.app.Database().Query(request.Context(), `SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.created_at,e.expires_at FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now() AND d.cursor>$2 ORDER BY d.cursor LIMIT $3`, sessionID, after, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -133,14 +133,14 @@ func (s *Server) acknowledgeControlEvent(response http.ResponseWriter, request *
 }
 
 func (s *Server) acknowledgeUserSessionDelivery(response http.ResponseWriter, request *http.Request, deliveryID, sessionID string, receivedAt time.Time) {
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries SET state='received',received_at=COALESCE(received_at,$3),updated_at=now(),attempt_count=attempt_count+1 WHERE delivery_id=$1 AND session_id=$2 AND state IN ('pending','failed')`, deliveryID, sessionID, receivedAt)
+	result, err := s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries SET state='received',received_at=COALESCE(received_at,$3),updated_at=now(),attempt_count=attempt_count+1 WHERE delivery_id=$1 AND session_id=$2 AND state IN ('pending','failed')`, deliveryID, sessionID, receivedAt)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	if result.RowsAffected() == 0 {
 		var state string
-		err = s.app.Pool.QueryRow(request.Context(), `SELECT state FROM session_control_deliveries WHERE delivery_id=$1 AND session_id=$2`, deliveryID, sessionID).Scan(&state)
+		err = s.app.Database().QueryRow(request.Context(), `SELECT state FROM session_control_deliveries WHERE delivery_id=$1 AND session_id=$2`, deliveryID, sessionID).Scan(&state)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The delivery was not found.")
 			return
@@ -180,7 +180,7 @@ func (s *Server) reportControlEventResult(response http.ResponseWriter, request 
 }
 
 func (s *Server) reportUserSessionDeliveryResult(response http.ResponseWriter, request *http.Request, deliveryID, sessionID, status string, startedAt, completedAt *time.Time, appliedRevision, errorCode, message *string) {
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries SET state=$3,started_at=CASE WHEN $3='running' THEN COALESCE($4,now()) ELSE COALESCE($4,started_at) END,completed_at=CASE WHEN $3='running' THEN NULL ELSE COALESCE($5,completed_at) END,applied_revision=CASE WHEN $3='running' THEN NULL ELSE COALESCE($6,applied_revision) END,error_code=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($7,error_code) END,message=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($8,message) END,updated_at=now() WHERE delivery_id=$1 AND session_id=$2 AND (state IN ('received','running') OR state=$3)`, deliveryID, sessionID, status, startedAt, completedAt, appliedRevision, errorCode, message)
+	result, err := s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries SET state=$3,started_at=CASE WHEN $3='running' THEN COALESCE($4,now()) ELSE COALESCE($4,started_at) END,completed_at=CASE WHEN $3='running' THEN NULL ELSE COALESCE($5,completed_at) END,applied_revision=CASE WHEN $3='running' THEN NULL ELSE COALESCE($6,applied_revision) END,error_code=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($7,error_code) END,message=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($8,message) END,updated_at=now() WHERE delivery_id=$1 AND session_id=$2 AND (state IN ('received','running') OR state=$3)`, deliveryID, sessionID, status, startedAt, completedAt, appliedRevision, errorCode, message)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -226,7 +226,7 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 	}
 	claims := claimsFrom(request)
 	eventID := uuid.NewString()
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -301,7 +301,7 @@ func (s *Server) getAdminControlEvent(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) adminEvents(response http.ResponseWriter, request *http.Request, eventID string) {
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
+	rows, err := s.app.Database().Query(request.Context(), `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
 count(*) FILTER(WHERE d.state='pending'),count(*) FILTER(WHERE d.state='received'),count(*) FILTER(WHERE d.state='running'),count(*) FILTER(WHERE d.state='succeeded'),count(*) FILTER(WHERE d.state='failed'),count(*) FILTER(WHERE d.state='expired'),count(*) FILTER(WHERE d.state='superseded')
 FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, eventID, limit(request))
 	if err != nil {
@@ -335,7 +335,7 @@ FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.eve
 
 func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
-	result, err := s.app.Pool.Exec(request.Context(), `UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active'`, eventID, claimsFrom(request).DeploymentID)
+	result, err := s.app.Database().Exec(request.Context(), `UPDATE control_events SET state='cancelled' WHERE event_id=$1 AND deployment_id=$2 AND state='active'`, eventID, claimsFrom(request).DeploymentID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -344,19 +344,19 @@ func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusConflict, "EVENT_STATE_CONFLICT", "The event cannot be cancelled.")
 		return
 	}
-	_, _ = s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id=$1 AND state='pending'`, eventID)
+	_, _ = s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries SET state='superseded',updated_at=now() WHERE event_id=$1 AND state='pending'`, eventID)
 	s.adminEvents(response, request, eventID)
 }
 
 func (s *Server) listControlEventDeliveries(response http.ResponseWriter, request *http.Request) {
 	eventID := chi.URLParam(request, "eventId")
 	tenant := claimsFrom(request).DeploymentID
-	_, err := s.app.Pool.Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
+	_, err := s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries d SET state='expired',updated_at=now() FROM control_events e WHERE d.event_id=e.event_id AND d.event_id=$1 AND e.deployment_id=$2 AND d.state='pending' AND e.expires_at<=now()`, eventID, tenant)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Pool.Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
+	rows, err := s.app.Database().Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -414,7 +414,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED"})
 			continue
 		}
-		_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
+		_, err := s.app.Database().Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
 		if err != nil {
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "INTERNAL_ERROR"})
 			continue
@@ -484,7 +484,7 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 	pageLimit := int(limit(request))
 	args = append(args, pageLimit+1)
 	query := `SELECT event_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at,received_at FROM telemetry_events WHERE ` + strings.Join(conditions, " AND ") + fmt.Sprintf(" ORDER BY occurred_at DESC,event_id DESC LIMIT $%d", len(args))
-	rows, err := s.app.Pool.Query(request.Context(), query, args...)
+	rows, err := s.app.Database().Query(request.Context(), query, args...)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

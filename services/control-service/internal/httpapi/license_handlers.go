@@ -79,7 +79,7 @@ func (s *Server) listLicenses(response http.ResponseWriter, request *http.Reques
 	}
 	query += ` ORDER BY l.license_id LIMIT $` + strconv.Itoa(len(args)+1)
 	args = append(args, limit(request))
-	rows, err := s.app.Pool.Query(request.Context(), query, args...)
+	rows, err := s.app.Database().Query(request.Context(), query, args...)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -119,7 +119,7 @@ func (s *Server) getLicense(response http.ResponseWriter, request *http.Request)
 }
 
 func (s *Server) findLicense(request *http.Request, id string) (licenseRecord, error) {
-	return scanLicense(s.app.Pool.QueryRow(request.Context(), `SELECT `+licenseColumns+` FROM licenses l WHERE l.deployment_id=$1 AND l.license_id=$2`, claimsFrom(request).DeploymentID, id))
+	return scanLicense(s.app.Database().QueryRow(request.Context(), `SELECT `+licenseColumns+` FROM licenses l WHERE l.deployment_id=$1 AND l.license_id=$2`, claimsFrom(request).DeploymentID, id))
 }
 
 func (s *Server) importLicense(response http.ResponseWriter, request *http.Request) {
@@ -163,7 +163,7 @@ func (s *Server) importLicense(response http.ResponseWriter, request *http.Reque
 
 func (s *Server) revokeLicense(response http.ResponseWriter, request *http.Request) {
 	id := chi.URLParam(request, "licenseId")
-	tx, err := s.app.Pool.Begin(request.Context())
+	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -201,6 +201,6 @@ func (s *Server) revokeLicense(response http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) recordLicenseAudit(request *http.Request, licenseID, action, outcome string, reason *string) error {
-	_, err := s.app.Pool.Exec(request.Context(), `INSERT INTO license_audit_events (id,deployment_id,license_id,actor_user_id,action,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7)`, uuid.NewString(), claimsFrom(request).DeploymentID, licenseID, claimsFrom(request).Subject, action, outcome, reason)
+	_, err := s.app.Database().Exec(request.Context(), `INSERT INTO license_audit_events (id,deployment_id,license_id,actor_user_id,action,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6,$7)`, uuid.NewString(), claimsFrom(request).DeploymentID, licenseID, claimsFrom(request).Subject, action, outcome, reason)
 	return err
 }

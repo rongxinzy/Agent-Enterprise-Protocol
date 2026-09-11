@@ -45,7 +45,7 @@ func opaqueHash(parts ...string) string {
 
 func (s *Server) loginThrottle(ctx context.Context, keyHash string, now time.Time) (time.Duration, error) {
 	var blockedUntil pgtype.Timestamptz
-	err := s.app.Pool.QueryRow(ctx, `SELECT blocked_until FROM login_rate_limits WHERE key_hash=$1`, keyHash).Scan(&blockedUntil)
+	err := s.app.Database().QueryRow(ctx, `SELECT blocked_until FROM login_rate_limits WHERE key_hash=$1`, keyHash).Scan(&blockedUntil)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !blockedUntil.Valid) {
 		return 0, nil
 	}
@@ -59,7 +59,7 @@ func (s *Server) loginThrottle(ctx context.Context, keyHash string, now time.Tim
 }
 
 func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID string, now time.Time) (time.Duration, error) {
-	tx, err := s.app.Pool.Begin(ctx)
+	tx, err := s.app.Database().Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -102,11 +102,11 @@ func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFinger
 }
 
 func (s *Server) recordLoginThrottled(ctx context.Context, fingerprint loginFingerprint, enterpriseID string, now time.Time) error {
-	return insertAuthenticationAudit(ctx, s.app.Pool, enterpriseID, "", "login.throttled", "denied", "backoff_active", fingerprint, now)
+	return insertAuthenticationAudit(ctx, s.app.Database(), enterpriseID, "", "login.throttled", "denied", "backoff_active", fingerprint, now)
 }
 
 func (s *Server) recordLoginSuccess(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID string, now time.Time) {
-	tx, err := s.app.Pool.Begin(ctx)
+	tx, err := s.app.Database().Begin(ctx)
 	if err == nil {
 		defer func() { _ = tx.Rollback(ctx) }()
 		_, err = tx.Exec(ctx, `DELETE FROM login_rate_limits WHERE key_hash=$1`, fingerprint.KeyHash)
@@ -123,7 +123,7 @@ func (s *Server) recordLoginSuccess(ctx context.Context, fingerprint loginFinger
 }
 
 func (s *Server) recordPasswordChanged(ctx context.Context, fingerprint loginFingerprint, enterpriseID, userID string, now time.Time) {
-	if err := insertAuthenticationAudit(ctx, s.app.Pool, enterpriseID, userID, "password.changed", "success", "", fingerprint, now); err != nil {
+	if err := insertAuthenticationAudit(ctx, s.app.Database(), enterpriseID, userID, "password.changed", "success", "", fingerprint, now); err != nil {
 		slog.Error("authentication audit failed", "event", "password.changed", "principal_hash", fingerprint.PrincipalHash, "error", err)
 	}
 }
