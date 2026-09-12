@@ -6,8 +6,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,22 +17,70 @@ import (
 )
 
 type loginFingerprint struct {
-	KeyHash       string
-	PrincipalHash string
-	SourceHash    string
+	PrincipalSourceKeyHash string
+	SourceKeyHash          string
+	PrincipalHash          string
+	SourceHash             string
 }
 
 func (s *Server) loginFingerprint(request *http.Request, enterpriseID, username string) loginFingerprint {
-	source := request.RemoteAddr
-	if host, _, err := net.SplitHostPort(source); err == nil {
-		source = host
-	}
-	if source == "" {
-		source = "unknown"
-	}
-	principal := opaqueHash("principal", enterpriseID, username)
+	source := s.loginSource(request)
+	principal := opaqueHash("principal", enterpriseID, strings.ToLower(strings.TrimSpace(username)))
 	sourceHash := opaqueHash("source", source)
-	return loginFingerprint{KeyHash: opaqueHash("login", principal), PrincipalHash: principal, SourceHash: sourceHash}
+	return loginFingerprint{
+		PrincipalSourceKeyHash: opaqueHash("login-principal-source", principal, sourceHash),
+		SourceKeyHash:          opaqueHash("login-source", sourceHash),
+		PrincipalHash:          principal,
+		SourceHash:             sourceHash,
+	}
+}
+
+func (s *Server) loginSource(request *http.Request) string {
+	peer, ok := parseRemoteAddress(request.RemoteAddr)
+	if !ok {
+		return "unknown"
+	}
+	if !addressInPrefixes(peer, s.app.Config.TrustedProxyCIDRs) {
+		return peer.String()
+	}
+	forwarded := strings.TrimSpace(request.Header.Get("X-Forwarded-For"))
+	if forwarded == "" {
+		return peer.String()
+	}
+	chain := strings.Split(forwarded, ",")
+	var leftmost netip.Addr
+	for index := len(chain) - 1; index >= 0; index-- {
+		address, err := netip.ParseAddr(strings.TrimSpace(chain[index]))
+		if err != nil {
+			return peer.String()
+		}
+		address = address.Unmap()
+		leftmost = address
+		if !addressInPrefixes(address, s.app.Config.TrustedProxyCIDRs) {
+			return address.String()
+		}
+	}
+	return leftmost.String()
+}
+
+func parseRemoteAddress(value string) (netip.Addr, bool) {
+	if addressPort, err := netip.ParseAddrPort(value); err == nil {
+		return addressPort.Addr().Unmap(), true
+	}
+	address, err := netip.ParseAddr(value)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return address.Unmap(), true
+}
+
+func addressInPrefixes(address netip.Addr, prefixes []netip.Prefix) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 func opaqueHash(parts ...string) string {
@@ -43,7 +92,19 @@ func opaqueHash(parts ...string) string {
 	return base64.RawURLEncoding.EncodeToString(digest.Sum(nil))
 }
 
-func (s *Server) loginThrottle(ctx context.Context, keyHash string, now time.Time) (time.Duration, error) {
+func (s *Server) loginThrottle(ctx context.Context, fingerprint loginFingerprint, now time.Time) (time.Duration, error) {
+	principalDelay, err := s.loginThrottleForKey(ctx, fingerprint.PrincipalSourceKeyHash, now)
+	if err != nil {
+		return 0, err
+	}
+	sourceDelay, err := s.loginThrottleForKey(ctx, fingerprint.SourceKeyHash, now)
+	if err != nil {
+		return 0, err
+	}
+	return max(principalDelay, sourceDelay), nil
+}
+
+func (s *Server) loginThrottleForKey(ctx context.Context, keyHash string, now time.Time) (time.Duration, error) {
 	var blockedUntil pgtype.Timestamptz
 	err := s.app.Database().QueryRow(ctx, `SELECT blocked_until FROM login_rate_limits WHERE key_hash=$1`, keyHash).Scan(&blockedUntil)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !blockedUntil.Valid) {
@@ -65,22 +126,15 @@ func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFinger
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	failureCount := 0
-	if err := tx.QueryRow(ctx, `INSERT INTO login_rate_limits (key_hash,failure_count,blocked_until,updated_at) VALUES ($1,1,NULL,$2)
-		ON CONFLICT (key_hash) DO UPDATE SET
-		failure_count=CASE WHEN login_rate_limits.updated_at < $3 THEN 1 ELSE login_rate_limits.failure_count+1 END,
-		blocked_until=NULL,updated_at=EXCLUDED.updated_at
-		RETURNING failure_count`, fingerprint.KeyHash, now, now.Add(-s.app.Config.LoginFailureWindow)).Scan(&failureCount); err != nil {
+	principalBackoff, err := s.recordLoginLimitFailure(ctx, tx, fingerprint.PrincipalSourceKeyHash, s.app.Config.LoginFailureLimit, now)
+	if err != nil {
 		return 0, err
 	}
-	backoff := loginBackoff(failureCount, s.app.Config.LoginFailureLimit, s.app.Config.LoginBackoffBase, s.app.Config.LoginBackoffMax)
-	var blockedUntil any
-	if backoff > 0 {
-		blockedUntil = now.Add(backoff)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE login_rate_limits SET blocked_until=$2 WHERE key_hash=$1`, fingerprint.KeyHash, blockedUntil); err != nil {
+	sourceBackoff, err := s.recordLoginLimitFailure(ctx, tx, fingerprint.SourceKeyHash, s.app.Config.LoginSourceFailureLimit, now)
+	if err != nil {
 		return 0, err
 	}
+	backoff := max(principalBackoff, sourceBackoff)
 	if _, err := tx.Exec(ctx, `DELETE FROM login_rate_limits WHERE updated_at < $1`, now.Add(-2*s.app.Config.LoginFailureWindow)); err != nil {
 		return 0, err
 	}
@@ -101,6 +155,26 @@ func (s *Server) recordLoginFailure(ctx context.Context, fingerprint loginFinger
 	return backoff, nil
 }
 
+func (s *Server) recordLoginLimitFailure(ctx context.Context, tx pgx.Tx, keyHash string, failureLimit int, now time.Time) (time.Duration, error) {
+	failureCount := 0
+	if err := tx.QueryRow(ctx, `INSERT INTO login_rate_limits (key_hash,failure_count,blocked_until,updated_at) VALUES ($1,1,NULL,$2)
+		ON CONFLICT (key_hash) DO UPDATE SET
+		failure_count=CASE WHEN login_rate_limits.updated_at < $3 THEN 1 ELSE login_rate_limits.failure_count+1 END,
+		blocked_until=NULL,updated_at=EXCLUDED.updated_at
+		RETURNING failure_count`, keyHash, now, now.Add(-s.app.Config.LoginFailureWindow)).Scan(&failureCount); err != nil {
+		return 0, err
+	}
+	backoff := loginBackoff(failureCount, failureLimit, s.app.Config.LoginBackoffBase, s.app.Config.LoginBackoffMax)
+	var blockedUntil any
+	if backoff > 0 {
+		blockedUntil = now.Add(backoff)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE login_rate_limits SET blocked_until=$2 WHERE key_hash=$1`, keyHash, blockedUntil); err != nil {
+		return 0, err
+	}
+	return backoff, nil
+}
+
 func (s *Server) recordLoginThrottled(ctx context.Context, fingerprint loginFingerprint, enterpriseID string, now time.Time) error {
 	return insertAuthenticationAudit(ctx, s.app.Database(), enterpriseID, "", "login.throttled", "denied", "backoff_active", fingerprint, now)
 }
@@ -109,7 +183,7 @@ func (s *Server) recordLoginSuccess(ctx context.Context, fingerprint loginFinger
 	tx, err := s.app.Database().Begin(ctx)
 	if err == nil {
 		defer func() { _ = tx.Rollback(ctx) }()
-		_, err = tx.Exec(ctx, `DELETE FROM login_rate_limits WHERE key_hash=$1`, fingerprint.KeyHash)
+		_, err = tx.Exec(ctx, `DELETE FROM login_rate_limits WHERE key_hash=$1`, fingerprint.PrincipalSourceKeyHash)
 	}
 	if err == nil {
 		err = insertAuthenticationAudit(ctx, tx, enterpriseID, userID, "login.succeeded", "success", "", fingerprint, now)

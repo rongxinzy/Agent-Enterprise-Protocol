@@ -69,7 +69,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 	}
 	now := time.Now().UTC()
 	fingerprint := s.loginFingerprint(request, deploymentID, input.Username)
-	retryAfter, err := s.loginThrottle(request.Context(), fingerprint.KeyHash, now)
+	retryAfter, err := s.loginThrottle(request.Context(), fingerprint, now)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

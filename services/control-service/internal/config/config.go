@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -29,7 +30,9 @@ type Config struct {
 	HTTPIdleTimeout           time.Duration
 	HTTPShutdownTimeout       time.Duration
 	HTTPMaxHeaderBytes        int
+	TrustedProxyCIDRs         []netip.Prefix
 	LoginFailureLimit         int
+	LoginSourceFailureLimit   int
 	LoginFailureWindow        time.Duration
 	LoginBackoffBase          time.Duration
 	LoginBackoffMax           time.Duration
@@ -166,6 +169,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.LoginFailureLimit, err = integer("AEP_LOGIN_FAILURE_LIMIT", 5); err != nil {
+		return Config{}, err
+	}
+	if cfg.LoginSourceFailureLimit, err = integer("AEP_LOGIN_SOURCE_FAILURE_LIMIT", 100); err != nil {
+		return Config{}, err
+	}
+	if cfg.TrustedProxyCIDRs, err = cidrList("AEP_TRUSTED_PROXY_CIDRS"); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -318,6 +327,28 @@ func integer(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", key)
 	}
 	return parsed, nil
+}
+
+func cidrList(key string) ([]netip.Prefix, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	prefixes := make([]netip.Prefix, 0, strings.Count(raw, ",")+1)
+	seen := make(map[netip.Prefix]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(item))
+		if err != nil {
+			return nil, fmt.Errorf("%s must contain comma-separated CIDR prefixes", key)
+		}
+		prefix = prefix.Masked()
+		if _, exists := seen[prefix]; exists {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes, nil
 }
 
 func absoluteURL(key, raw string, schemes ...string) (*url.URL, error) {

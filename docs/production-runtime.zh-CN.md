@@ -14,7 +14,9 @@ Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并
 
 ## 密码认证
 
-密码必须包含 12 至 1024 个 Unicode 字符，并使用 Argon2id 存储。临时密码会话在完成改密前由服务端限制，所签发的 model token 不包含任何模型作用域。登录失败按不透明的主体哈希记录到 PostgreSQL，因此不同来源和多个 control-service 副本共享渐进退避状态；来源只作为独立的不透明审计哈希保留。部署方可通过 `AEP_LOGIN_FAILURE_LIMIT`、`AEP_LOGIN_FAILURE_WINDOW`、`AEP_LOGIN_BACKOFF_BASE` 和 `AEP_LOGIN_BACKOFF_MAX` 按威胁模型调节参数。
+密码必须包含 12 至 1024 个 Unicode 字符，并使用 Argon2id 存储。临时密码会话在完成改密前由服务端限制，所签发的 model token 不包含任何模型作用域。登录失败按不透明的“来源”和“来源 + 主体”键记录到 PostgreSQL，在多个 control-service 副本间共享渐进退避，同时避免单个远端来源把某个主体对其他来源也永久锁死。`AEP_LOGIN_FAILURE_LIMIT` 控制“来源 + 主体”阈值，`AEP_LOGIN_SOURCE_FAILURE_LIMIT` 控制单一来源的累计失败阈值；部署方应结合 `AEP_LOGIN_FAILURE_WINDOW`、`AEP_LOGIN_BACKOFF_BASE` 和 `AEP_LOGIN_BACKOFF_MAX` 按威胁模型调节参数。
+
+服务默认忽略 `X-Forwarded-For`。部署在反向代理后时，只有在代理已经覆盖或清洗客户端传入的转发头后，才能把代理的精确 CIDR 以逗号分隔配置到 `AEP_TRUSTED_PROXY_CIDRS`。服务会从右向左检查转发链，取第一个不属于可信代理范围的地址。不得为了方便直接信任全部内网网段，否则能够从可信网段直连服务的客户端可自行选择限流身份。
 
 认证审计记录包含企业、Agent 标识及不透明的主体/来源哈希，但不会包含用户名、密码、Token 或请求体。部署方应为 `authentication_audit_events` 设置组织认可的保留策略。管理员重置密码或禁用账号会撤销全部 refresh session；已经签发的 access/model JWT 按配置的短 TTL 到期。
 

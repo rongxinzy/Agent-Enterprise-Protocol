@@ -26,6 +26,7 @@ func configureAuthHTTPApplication(application *app.App) {
 	application.Config.ModelAccessTTL = 2 * time.Minute
 	application.Config.RefreshTTL = 24 * time.Hour
 	application.Config.LoginFailureLimit = 5
+	application.Config.LoginSourceFailureLimit = 100
 	application.Config.LoginFailureWindow = 15 * time.Minute
 	application.Config.LoginBackoffBase = 30 * time.Second
 	application.Config.LoginBackoffMax = 15 * time.Minute
@@ -41,6 +42,7 @@ func issueHTTPUserToken(t *testing.T, application *app.App) string {
 }
 
 func expectNoLoginThrottle(pool pgxmock.PgxPoolIface) {
+	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs(pgxmock.AnyArg()).WillReturnError(pgx.ErrNoRows)
 	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs(pgxmock.AnyArg()).WillReturnError(pgx.ErrNoRows)
 }
 
@@ -129,6 +131,9 @@ func TestPasswordLoginFailureAndActiveThrottle(t *testing.T) {
 	pool.ExpectQuery(`INSERT INTO login_rate_limits`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"failure_count"}).AddRow(1))
 	pool.ExpectExec(`UPDATE login_rate_limits SET blocked_until`).WithArgs(pgxmock.AnyArg(), nil).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	pool.ExpectQuery(`INSERT INTO login_rate_limits`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"failure_count"}).AddRow(1))
+	pool.ExpectExec(`UPDATE login_rate_limits SET blocked_until`).WithArgs(pgxmock.AnyArg(), nil).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
 	pool.ExpectExec(`DELETE FROM login_rate_limits WHERE updated_at`).WithArgs(pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("DELETE 0"))
 	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs(
 		"deployment-a", nil, "login.failed", "failure", "invalid_credentials", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -141,6 +146,7 @@ func TestPasswordLoginFailureAndActiveThrottle(t *testing.T) {
 
 	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs(pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"blocked_until"}).AddRow(time.Now().Add(time.Minute)))
+	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs(pgxmock.AnyArg()).WillReturnError(pgx.ErrNoRows)
 	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs(
 		"deployment-a", nil, "login.throttled", "denied", "backoff_active", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 	).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))

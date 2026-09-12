@@ -316,45 +316,54 @@ func TestLoginThrottleDatabaseBranches(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs("key-a").WillReturnError(pgx.ErrNoRows)
-	if delay, err := server.loginThrottle(ctx, "key-a", now); err != nil || delay != 0 {
+	if delay, err := server.loginThrottleForKey(ctx, "key-a", now); err != nil || delay != 0 {
 		t.Fatalf("missing throttle = %s, %v", delay, err)
 	}
 	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs("key-b").WillReturnRows(pgxmock.NewRows([]string{"blocked_until"}).AddRow(now.Add(time.Minute)))
-	if delay, err := server.loginThrottle(ctx, "key-b", now); err != nil || delay <= 0 {
+	if delay, err := server.loginThrottleForKey(ctx, "key-b", now); err != nil || delay <= 0 {
 		t.Fatalf("active throttle = %s, %v", delay, err)
 	}
 	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs("key-c").WillReturnRows(pgxmock.NewRows([]string{"blocked_until"}).AddRow(now.Add(-time.Minute)))
-	if delay, err := server.loginThrottle(ctx, "key-c", now); err != nil || delay != 0 {
+	if delay, err := server.loginThrottleForKey(ctx, "key-c", now); err != nil || delay != 0 {
 		t.Fatalf("expired throttle = %s, %v", delay, err)
 	}
 	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs("key-d").WillReturnError(errors.New("database unavailable"))
-	if _, err := server.loginThrottle(ctx, "key-d", now); err == nil {
+	if _, err := server.loginThrottleForKey(ctx, "key-d", now); err == nil {
 		t.Fatal("database error was swallowed")
+	}
+	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs("principal-source-key").WillReturnRows(pgxmock.NewRows([]string{"blocked_until"}).AddRow(now.Add(30 * time.Second)))
+	pool.ExpectQuery(`SELECT blocked_until FROM login_rate_limits`).WithArgs("source-key").WillReturnRows(pgxmock.NewRows([]string{"blocked_until"}).AddRow(now.Add(time.Minute)))
+	fingerprint := loginFingerprint{PrincipalSourceKeyHash: "principal-source-key", SourceKeyHash: "source-key"}
+	if delay, err := server.loginThrottle(ctx, fingerprint, now); err != nil || delay != time.Minute {
+		t.Fatalf("combined throttle = %s, %v", delay, err)
 	}
 }
 
 func TestLoginAuditTransactions(t *testing.T) {
 	application, pool, _, _ := newRuntimeHTTPApplication(t)
 	application.Config.LoginFailureLimit = 5
+	application.Config.LoginSourceFailureLimit = 100
 	application.Config.LoginFailureWindow = 15 * time.Minute
 	application.Config.LoginBackoffBase = 30 * time.Second
 	application.Config.LoginBackoffMax = 10 * time.Minute
 	server := New(application)
 	ctx := context.Background()
-	fingerprint := loginFingerprint{KeyHash: "key-hash", PrincipalHash: "principal-hash", SourceHash: "source-hash"}
+	fingerprint := loginFingerprint{PrincipalSourceKeyHash: "principal-source-key", SourceKeyHash: "source-key", PrincipalHash: "principal-hash", SourceHash: "source-hash"}
 	now := time.Now().UTC()
 	pool.ExpectBegin()
-	pool.ExpectQuery(`INSERT INTO login_rate_limits`).WithArgs("key-hash", now, pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"failure_count"}).AddRow(1))
-	pool.ExpectExec(`UPDATE login_rate_limits SET blocked_until`).WithArgs("key-hash", nil).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectQuery(`INSERT INTO login_rate_limits`).WithArgs("principal-source-key", now, pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"failure_count"}).AddRow(1))
+	pool.ExpectExec(`UPDATE login_rate_limits SET blocked_until`).WithArgs("principal-source-key", nil).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectQuery(`INSERT INTO login_rate_limits`).WithArgs("source-key", now, pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"failure_count"}).AddRow(100))
+	pool.ExpectExec(`UPDATE login_rate_limits SET blocked_until`).WithArgs("source-key", now.Add(30*time.Second)).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`DELETE FROM login_rate_limits`).WithArgs(pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("DELETE", 0))
-	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs("deployment-a", nil, "login.failed", "failure", "invalid_credentials", "principal-hash", "source-hash", now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs("deployment-a", nil, "login.throttled", "denied", "failure_limit_reached", "principal-hash", "source-hash", now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectCommit()
-	if delay, err := server.recordLoginFailure(ctx, fingerprint, "deployment-a", "", now); err != nil || delay != 0 {
+	if delay, err := server.recordLoginFailure(ctx, fingerprint, "deployment-a", "", now); err != nil || delay != 30*time.Second {
 		t.Fatalf("record failure = %s, %v", delay, err)
 	}
 
 	pool.ExpectBegin()
-	pool.ExpectExec(`DELETE FROM login_rate_limits`).WithArgs("key-hash").WillReturnResult(pgxmock.NewResult("DELETE", 1))
+	pool.ExpectExec(`DELETE FROM login_rate_limits`).WithArgs("principal-source-key").WillReturnResult(pgxmock.NewResult("DELETE", 1))
 	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs("deployment-a", "user-a", "login.succeeded", "success", nil, "principal-hash", "source-hash", now).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectCommit()
 	server.recordLoginSuccess(ctx, fingerprint, "deployment-a", "user-a", now)
