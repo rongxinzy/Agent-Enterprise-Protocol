@@ -1328,6 +1328,10 @@ export interface components {
             retryable: boolean;
         };
         ControlEventResult: components["schemas"]["RunningResult"] | components["schemas"]["SucceededResult"] | components["schemas"]["FailedResult"];
+        /** @description Portable Skill identifier. Path separators and leading or trailing punctuation are forbidden. */
+        SkillIdentifier: string;
+        /** @description Portable Skill version identifier. It may be SemVer or another safe opaque version. */
+        SkillVersionIdentifier: string;
         SkillPackage: {
             /** Format: uri-reference */
             url: string;
@@ -1335,10 +1339,10 @@ export interface components {
             size: number;
         };
         SkillManifestItem: {
-            id: string;
+            id: components["schemas"]["SkillIdentifier"];
             name: string;
             description?: string;
-            version: string;
+            version: components["schemas"]["SkillVersionIdentifier"];
             enabled: boolean;
             package: components["schemas"]["SkillPackage"];
         };
@@ -1349,8 +1353,8 @@ export interface components {
             skills: components["schemas"]["SkillManifestItem"][];
         };
         SkillSyncItem: {
-            skillId: string;
-            version: string;
+            skillId: components["schemas"]["SkillIdentifier"];
+            version: components["schemas"]["SkillVersionIdentifier"];
             /** @enum {string} */
             action: "install" | "update" | "remove" | "unchanged";
             /** @enum {string} */
@@ -1602,7 +1606,7 @@ export interface components {
             teamIds: string[];
         };
         SkillVersion: {
-            version: string;
+            version: components["schemas"]["SkillVersionIdentifier"];
             /** @enum {string} */
             state: "draft" | "published" | "withdrawn";
             sha256: string;
@@ -1612,7 +1616,7 @@ export interface components {
             createdAt: string;
         };
         AdminSkill: {
-            id: string;
+            id: components["schemas"]["SkillIdentifier"];
             name: string;
             description: string;
             /** @enum {string} */
@@ -1628,7 +1632,7 @@ export interface components {
             nextCursor: string | null;
         };
         SkillWrite: {
-            id: string;
+            id: components["schemas"]["SkillIdentifier"];
             name: string;
             description: string;
         };
@@ -1656,7 +1660,7 @@ export interface components {
             assignments: components["schemas"]["Assignment"][];
         };
         SkillAssignmentWrite: {
-            skillId: string;
+            skillId: components["schemas"]["SkillIdentifier"];
             subject: components["schemas"]["Subject"];
         };
         /** @enum {string} */
@@ -2022,8 +2026,8 @@ export interface components {
         RequestId: string;
         Limit: number;
         DeliveryId: string;
-        SkillId: string;
-        Version: string;
+        SkillId: components["schemas"]["SkillIdentifier"];
+        Version: components["schemas"]["SkillVersionIdentifier"];
         CredentialId: string;
         Cursor: string | null;
         "Limit-2": number;
@@ -3184,7 +3188,7 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": {
-                    version: string;
+                    version: components["schemas"]["SkillVersionIdentifier"];
                     releaseNotes?: string;
                     /** Format: binary */
                     package: string;

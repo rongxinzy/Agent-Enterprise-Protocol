@@ -515,6 +515,11 @@ Every user must have at least one role and one team when created or imported.
 | GET, POST | `/admin/skill-assignments` | List or create assignments |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | Remove an assignment |
 
+Skill IDs are portable identifiers of at most 64 characters. Version
+identifiers are at most 128 characters. Both must start and end with a letter
+or digit; Skill IDs may contain `.`, `_`, and `-`, while versions additionally
+allow `+`. Path separators and traversal segments are not accepted.
+
 Assignment example:
 
 ```json

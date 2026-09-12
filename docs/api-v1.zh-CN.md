@@ -491,6 +491,10 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | GET, POST | `/admin/skill-assignments` | 查询或创建授权关系 |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | 删除授权关系 |
 
+Skill ID 是最长 64 个字符的可移植标识符，版本标识符最长 128 个字符。两者都必须
+以字母或数字开头和结尾；Skill ID 内部可使用 `.`、`_`、`-`，版本还可使用 `+`。
+接口不接受路径分隔符或路径逃逸片段。
+
 授权示例：
 
 ```json
