@@ -2451,6 +2451,7 @@ export interface operations {
                     "application/zip": string;
                 };
             };
+            400: components["responses"]["Problem-2"];
             403: components["responses"]["Problem-2"];
             404: components["responses"]["Problem-2"];
         };
@@ -3120,6 +3121,7 @@ export interface operations {
         };
         responses: {
             201: components["responses"]["AdminSkill"];
+            400: components["responses"]["Problem-2"];
             409: components["responses"]["Problem-2"];
         };
     };
@@ -3135,6 +3137,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["AdminSkill"];
+            400: components["responses"]["Problem-2"];
             404: components["responses"]["Problem-2"];
         };
     };
@@ -3156,6 +3159,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["Problem-2"];
         };
     };
     updateSkill: {
@@ -3174,6 +3178,7 @@ export interface operations {
         };
         responses: {
             200: components["responses"]["AdminSkill"];
+            400: components["responses"]["Problem-2"];
         };
     };
     uploadSkillVersion: {
@@ -3205,6 +3210,7 @@ export interface operations {
                     "application/json": components["schemas"]["SkillVersion"];
                 };
             };
+            400: components["responses"]["Problem-2"];
         };
     };
     publishSkillVersion: {
@@ -3228,6 +3234,7 @@ export interface operations {
                     "application/json": components["schemas"]["SkillVersion"];
                 };
             };
+            400: components["responses"]["Problem-2"];
         };
     };
     deleteSkillVersion: {
@@ -3249,6 +3256,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["Problem-2"];
         };
     };
     listSkillAssignments: {
@@ -3277,6 +3285,7 @@ export interface operations {
         };
         responses: {
             201: components["responses"]["Assignment"];
+            400: components["responses"]["Problem-2"];
         };
     };
     deleteSkillAssignment: {
