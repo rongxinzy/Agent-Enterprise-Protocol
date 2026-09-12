@@ -25,7 +25,7 @@ func (v verifierStub) Ready(context.Context) error {
 	return v.err
 }
 
-func (v verifierStub) CheckEntitlement(context.Context, *ModelClaims) error {
+func (v verifierStub) CheckEntitlement(context.Context, *ModelClaims, string) error {
 	return v.entitlementErr
 }
 
@@ -125,13 +125,13 @@ func TestHandlerFailsClosedForInactiveOrUnavailableEntitlement(t *testing.T) {
 		status int
 		code   string
 	}{
-		{name: "revoked License", err: ErrEntitlementInactive, status: http.StatusForbidden, code: "LICENSE_REVOKED"},
+		{name: "inactive entitlement", err: ErrEntitlementInactive, status: http.StatusForbidden, code: "ENTITLEMENT_INACTIVE"},
 		{name: "status service unavailable", err: context.DeadlineExceeded, status: http.StatusServiceUnavailable, code: "ENTITLEMENT_CHECK_UNAVAILABLE"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			handler, err := NewHandler(Config{UpstreamURL: "http://example.test", RequestLimit: 1024, RequireEntitlement: true}, verifierStub{
 				claims: &ModelClaims{
-					DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest",
+					DeploymentID: "deployment-a", SessionID: "session-a", LicenseID: "license-a", LicenseDigest: "sha256:digest",
 					ModelScopes: []string{"model-a"}, TokenUse: "entitlement",
 				},
 				entitlementErr: test.err,

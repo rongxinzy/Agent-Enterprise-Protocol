@@ -70,13 +70,18 @@ func (v *Verifier) ConfigureLicenseStatus(endpoint, token string, ttl time.Durat
 	v.statusCache = make(map[string]statusCacheEntry)
 }
 
-func (v *Verifier) CheckEntitlement(ctx context.Context, claims *ModelClaims) error {
+func (v *Verifier) CheckEntitlement(ctx context.Context, claims *ModelClaims, modelID string) error {
 	if v.licenseStatusURL == "" || v.licenseStatusToken == "" {
 		return errors.New("license status endpoint is not configured")
 	}
-	key := claims.LicenseID + "\x00" + claims.LicenseDigest + "\x00" + claims.DeploymentID
+	key := claims.LicenseID + "\x00" + claims.LicenseDigest + "\x00" + claims.DeploymentID + "\x00" + claims.Subject + "\x00" + claims.SessionID + "\x00" + modelID
 	now := time.Now()
 	v.statusMu.Lock()
+	for cacheKey, cached := range v.statusCache {
+		if !now.Before(cached.expiresAt) {
+			delete(v.statusCache, cacheKey)
+		}
+	}
 	if cached, ok := v.statusCache[key]; ok && now.Before(cached.expiresAt) {
 		v.statusMu.Unlock()
 		if !cached.active {
@@ -95,6 +100,9 @@ func (v *Verifier) CheckEntitlement(ctx context.Context, claims *ModelClaims) er
 	}
 	request.Header.Set("X-AEP-Gateway-Token", v.licenseStatusToken)
 	request.Header.Set("X-AEP-Deployment-ID", claims.DeploymentID)
+	request.Header.Set("X-AEP-User-ID", claims.Subject)
+	request.Header.Set("X-AEP-Session-ID", claims.SessionID)
+	request.Header.Set("X-AEP-Model-ID", modelID)
 	response, err := v.client.Do(request)
 	if err != nil {
 		return err
@@ -151,7 +159,7 @@ func (v *Verifier) Verify(ctx context.Context, raw string) (*ModelClaims, error)
 			return nil, errors.New("model token has invalid AEP claims")
 		}
 	case "entitlement":
-		if claims.LicenseID == "" || claims.LicenseDigest == "" || !containsAudience(claims.Audience, "aep-entitlement") {
+		if claims.SessionID == "" || claims.LicenseID == "" || claims.LicenseDigest == "" || !containsAudience(claims.Audience, "aep-entitlement") {
 			return nil, errors.New("entitlement token has invalid AEP claims")
 		}
 	}

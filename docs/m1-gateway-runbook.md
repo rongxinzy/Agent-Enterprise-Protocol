@@ -29,11 +29,12 @@ with the data plane.
 Production deployments always require `AEP_GATEWAY_REQUIRE_ENTITLEMENT=true`.
 The authorizer accepts the short-lived `token_use=entitlement` JWT returned
 by `/aep/v1/user/activation`; it requires License ID, digest, deployment ID,
-and model scopes in the signed claims. It also checks the current License status
-through an authenticated internal endpoint and fails closed when that endpoint
-is unavailable. Status decisions are cached for no more than 15 seconds in
-production. Development mode remains compatible with the login-issued model JWT
-by default.
+user ID, session ID, and model scopes in the signed claims. For each requested
+model it also checks the current License, account, session, refresh lifecycle,
+and model assignment through an authenticated internal endpoint, failing closed
+when that endpoint is unavailable. Status decisions are cached for no more than
+15 seconds in production. Development mode remains compatible with the
+login-issued model JWT by default.
 
 Higress native JWT plugins do not, in v2.2.4, enforce all of the AEP-specific
 claims or compare an array claim with the model in an OpenAI request body. That

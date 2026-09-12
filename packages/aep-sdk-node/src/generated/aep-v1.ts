@@ -159,7 +159,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Exchanges the authenticated deployment session for a short-lived entitlement token. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client. */
+        /** @description Exchanges the authenticated deployment session for a short-lived entitlement token bound to the authenticated user and session. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client. */
         post: operations["activateDeploymentLicense"];
         delete?: never;
         options?: never;
@@ -1174,7 +1174,7 @@ export interface components {
         /** @description Empty activation request. The server-side registered License is used. */
         LicenseActivationRequest: Record<string, never>;
         EntitlementTokenResponse: {
-            /** @description Short-lived service-signed token for deployment runtime checks. */
+            /** @description Short-lived service-signed token bound to the authenticated deployment, user, and session for runtime checks. */
             entitlementToken: string;
             /** @constant */
             tokenType: "Bearer";

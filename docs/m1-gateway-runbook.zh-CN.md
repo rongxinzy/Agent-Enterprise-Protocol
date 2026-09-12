@@ -22,9 +22,10 @@ authorizer 接受带 JSON `model` 字段的 `POST /v1/*` 推理请求。它用�
 刷新不是逐请求授权决策，数据面也不持有签名私钥。
 
 生产环境强制启用 `AEP_GATEWAY_REQUIRE_ENTITLEMENT=true`，只接受激活接口签发的
-短期 `token_use=entitlement` JWT，并通过带内部认证的 Control Service 接口复核
-License 当前状态。状态接口不可用时拒绝推理请求；生产缓存最长 15 秒，确保撤销
-在该窗口内生效。开发环境默认仍可使用登录签发的模型 JWT。
+短期 `token_use=entitlement` JWT。Token 强制绑定用户和会话；网关针对每个请求
+模型，通过带内部认证的 Control Service 接口复核 License、账号、会话、refresh
+生命周期和当前模型授权。状态接口不可用时拒绝推理请求；生产缓存最长 15 秒，
+确保撤销在该窗口内生效。开发环境默认仍可使用登录签发的模型 JWT。
 
 Higress v2.2.4 原生 JWT 插件不能完整强制执行 AEP 专用 claim，也不能把数组
 claim 与 OpenAI 请求体中的模型动态比较，因此需要这个职责单一的 authorizer。

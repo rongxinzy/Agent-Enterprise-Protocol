@@ -206,7 +206,9 @@ short-lived service-signed entitlement token:
 ```
 
 The response includes `entitlementToken`, `expiresAt`, and the normalized
-feature list. The token is bound to the authenticated deployment and user.
+feature list. The token is bound to the authenticated deployment, user, and
+session. Production model gateways recheck the current session and requested
+model assignment within their configured status-cache window.
 The Control Service does not sign licenses and must never receive a license
 private key.
 

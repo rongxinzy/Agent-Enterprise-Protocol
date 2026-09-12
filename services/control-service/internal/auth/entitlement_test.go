@@ -13,7 +13,7 @@ func TestEntitlementClaimsAndJWKS(t *testing.T) {
 		t.Fatal(err)
 	}
 	licenseExpiry := time.Now().UTC().Add(48 * time.Hour)
-	raw, expiresAt, err := service.IssueEntitlement("user-1", "deployment-1", "license-1", "sha256:digest", []string{"enterprise.models"}, []string{"chat-a"}, &licenseExpiry)
+	raw, expiresAt, err := service.IssueEntitlement("user-1", "deployment-1", "session-1", "license-1", "sha256:digest", []string{"enterprise.models"}, []string{"chat-a"}, &licenseExpiry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestEntitlementClaimsAndJWKS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Subject != "user-1" || claims.DeploymentID != "deployment-1" || claims.LicenseID != "license-1" || claims.LicenseDigest != "sha256:digest" || claims.TokenUse != "entitlement" || len(claims.Features) != 1 || claims.Features[0] != "enterprise.models" || len(claims.ModelScopes) != 1 || claims.ModelScopes[0] != "chat-a" {
+	if claims.Subject != "user-1" || claims.DeploymentID != "deployment-1" || claims.SessionID != "session-1" || claims.LicenseID != "license-1" || claims.LicenseDigest != "sha256:digest" || claims.TokenUse != "entitlement" || len(claims.Features) != 1 || claims.Features[0] != "enterprise.models" || len(claims.ModelScopes) != 1 || claims.ModelScopes[0] != "chat-a" {
 		t.Fatalf("entitlement claims = %#v", claims)
 	}
 	keys := service.JWKS()
@@ -43,17 +43,20 @@ func TestEntitlementValidationAndExpiry(t *testing.T) {
 		name          string
 		userID        string
 		deploymentID  string
+		sessionID     string
 		licenseID     string
 		digest        string
 		licenseExpiry *time.Time
 	}{
-		{name: "missing deployment", userID: "user-1", licenseID: "license-1", digest: "digest"},
-		{name: "missing license", userID: "user-1", deploymentID: "deployment-1", digest: "digest"},
-		{name: "missing digest", userID: "user-1", deploymentID: "deployment-1", licenseID: "license-1"},
-		{name: "expired license", userID: "user-1", deploymentID: "deployment-1", licenseID: "license-1", digest: "digest", licenseExpiry: func() *time.Time { value := time.Now().UTC().Add(-time.Minute); return &value }()},
+		{name: "missing user", deploymentID: "deployment-1", sessionID: "session-1", licenseID: "license-1", digest: "digest"},
+		{name: "missing deployment", userID: "user-1", sessionID: "session-1", licenseID: "license-1", digest: "digest"},
+		{name: "missing session", userID: "user-1", deploymentID: "deployment-1", licenseID: "license-1", digest: "digest"},
+		{name: "missing license", userID: "user-1", deploymentID: "deployment-1", sessionID: "session-1", digest: "digest"},
+		{name: "missing digest", userID: "user-1", deploymentID: "deployment-1", sessionID: "session-1", licenseID: "license-1"},
+		{name: "expired license", userID: "user-1", deploymentID: "deployment-1", sessionID: "session-1", licenseID: "license-1", digest: "digest", licenseExpiry: func() *time.Time { value := time.Now().UTC().Add(-time.Minute); return &value }()},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, _, err := service.IssueEntitlement(test.userID, test.deploymentID, test.licenseID, test.digest, nil, nil, test.licenseExpiry); err == nil {
+			if _, _, err := service.IssueEntitlement(test.userID, test.deploymentID, test.sessionID, test.licenseID, test.digest, nil, nil, test.licenseExpiry); err == nil {
 				t.Fatal("IssueEntitlement accepted invalid input")
 			}
 		})

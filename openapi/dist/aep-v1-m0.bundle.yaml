@@ -197,7 +197,7 @@ paths:
       tags:
         - Authentication
       operationId: activateDeploymentLicense
-      description: Exchanges the authenticated deployment session for a short-lived entitlement token. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client.
+      description: Exchanges the authenticated deployment session for a short-lived entitlement token bound to the authenticated user and session. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client.
       security:
         - aepBearerAuth: []
       requestBody:
@@ -1522,7 +1522,7 @@ components:
       properties:
         entitlementToken:
           type: string
-          description: Short-lived service-signed token for deployment runtime checks.
+          description: Short-lived service-signed token bound to the authenticated deployment, user, and session for runtime checks.
         tokenType:
           type: string
           const: Bearer

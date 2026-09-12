@@ -64,7 +64,7 @@ func TestVerifierAcceptsDeploymentEntitlementToken(t *testing.T) {
 	defer server.Close()
 	verifier := NewVerifier(server.URL, "https://control.example.test", time.Hour, time.Second)
 	raw := signModelToken(t, private, "test-key", ModelClaims{
-		DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:abc",
+		DeploymentID: "deployment-a", SessionID: "session-a", LicenseID: "license-a", LicenseDigest: "sha256:abc",
 		ModelScopes: []string{"model-a"}, TokenUse: "entitlement",
 		RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-entitlement"),
 	})
@@ -72,7 +72,7 @@ func TestVerifierAcceptsDeploymentEntitlementToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify entitlement token: %v", err)
 	}
-	if claims.TokenUse != "entitlement" || claims.LicenseID != "license-a" || !contains(claims.ModelScopes, "model-a") {
+	if claims.TokenUse != "entitlement" || claims.SessionID != "session-a" || claims.LicenseID != "license-a" || !contains(claims.ModelScopes, "model-a") {
 		t.Fatalf("unexpected entitlement claims: %#v", claims)
 	}
 }
@@ -81,7 +81,8 @@ func TestVerifierChecksAndCachesDeploymentLicenseStatus(t *testing.T) {
 	var calls atomic.Int32
 	status := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
-		if request.Header.Get("X-AEP-Gateway-Token") != "gateway-secret" || request.Header.Get("X-AEP-Deployment-ID") != "deployment-a" {
+		modelID := request.Header.Get("X-AEP-Model-ID")
+		if request.Header.Get("X-AEP-Gateway-Token") != "gateway-secret" || request.Header.Get("X-AEP-Deployment-ID") != "deployment-a" || request.Header.Get("X-AEP-User-ID") != "user-a" || request.Header.Get("X-AEP-Session-ID") != "session-a" || (modelID != "model-a" && modelID != "model-b") {
 			t.Fatalf("missing internal status headers: %v", request.Header)
 		}
 		_ = json.NewEncoder(response).Encode(map[string]any{"active": true, "digest": "sha256:digest", "deploymentId": "deployment-a"})
@@ -89,20 +90,26 @@ func TestVerifierChecksAndCachesDeploymentLicenseStatus(t *testing.T) {
 	defer status.Close()
 	verifier := NewVerifier("http://unused.example/jwks", "issuer", time.Hour, time.Second)
 	verifier.ConfigureLicenseStatus(status.URL, "gateway-secret", time.Minute)
-	claims := &ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest"}
-	if err := verifier.CheckEntitlement(context.Background(), claims); err != nil {
+	claims := &ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", RegisteredClaims: jwt.RegisteredClaims{Subject: "user-a"}}
+	if err := verifier.CheckEntitlement(context.Background(), claims, "model-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifier.CheckEntitlement(context.Background(), claims); err != nil {
+	if err := verifier.CheckEntitlement(context.Background(), claims, "model-a"); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("license status endpoint called %d times, want cached once", calls.Load())
 	}
+	if err := verifier.CheckEntitlement(context.Background(), claims, "model-b"); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("different model reused an entitlement cache entry: %d calls", calls.Load())
+	}
 }
 
 func TestVerifierFailsClosedForInactiveOrUnavailableLicenseStatus(t *testing.T) {
-	claims := &ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest"}
+	claims := &ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", RegisteredClaims: jwt.RegisteredClaims{Subject: "user-a"}}
 	for _, test := range []struct {
 		name     string
 		handler  http.Handler
@@ -127,7 +134,7 @@ func TestVerifierFailsClosedForInactiveOrUnavailableLicenseStatus(t *testing.T) 
 			defer status.Close()
 			verifier := NewVerifier("http://unused.example/jwks", "issuer", time.Hour, time.Second)
 			verifier.ConfigureLicenseStatus(status.URL, "gateway-secret", 15*time.Second)
-			err := verifier.CheckEntitlement(context.Background(), claims)
+			err := verifier.CheckEntitlement(context.Background(), claims, "model-a")
 			if err == nil {
 				t.Fatal("expected entitlement check to fail closed")
 			}
@@ -261,7 +268,8 @@ func TestVerifierRejectsInvalidModelClaims(t *testing.T) {
 	}{
 		{name: "wrong audience", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-control")}},
 		{name: "model with entitlement audience", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-entitlement")}},
-		{name: "entitlement with model audience", claims: ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", TokenUse: "entitlement", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
+		{name: "entitlement with model audience", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", TokenUse: "entitlement", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
+		{name: "missing entitlement session", claims: ModelClaims{DeploymentID: "deployment-a", LicenseID: "license-a", LicenseDigest: "sha256:digest", TokenUse: "entitlement", RegisteredClaims: validRegisteredClaims("https://control.example.test", "aep-entitlement")}},
 		{name: "wrong token use", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "aep", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
 		{name: "wrong issuer", claims: ModelClaims{DeploymentID: "deployment-a", SessionID: "session-a", TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://other.example.test", "model-gateway")}},
 		{name: "missing identity", claims: ModelClaims{TokenUse: "model", RegisteredClaims: validRegisteredClaims("https://control.example.test", "model-gateway")}},
