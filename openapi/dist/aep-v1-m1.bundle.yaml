@@ -901,7 +901,7 @@ paths:
                 - package
               properties:
                 version:
-                  type: string
+                  $ref: '#/components/schemas/SkillVersionIdentifier'
                 releaseNotes:
                   type: string
                 package:
@@ -1975,6 +1975,18 @@ components:
         - $ref: '#/components/schemas/FailedResult'
       discriminator:
         propertyName: status
+    SkillIdentifier:
+      description: Portable Skill identifier. Path separators and leading or trailing punctuation are forbidden.
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$
+    SkillVersionIdentifier:
+      description: Portable Skill version identifier. It may be SemVer or another safe opaque version.
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,126}[A-Za-z0-9])?$
     SkillPackage:
       type: object
       required:
@@ -2001,13 +2013,13 @@ components:
         - package
       properties:
         id:
-          type: string
+          $ref: '#/components/schemas/SkillIdentifier'
         name:
           type: string
         description:
           type: string
         version:
-          type: string
+          $ref: '#/components/schemas/SkillVersionIdentifier'
         enabled:
           type: boolean
         package:
@@ -2037,9 +2049,9 @@ components:
         - status
       properties:
         skillId:
-          type: string
+          $ref: '#/components/schemas/SkillIdentifier'
         version:
-          type: string
+          $ref: '#/components/schemas/SkillVersionIdentifier'
         action:
           type: string
           enum:
@@ -2719,7 +2731,7 @@ components:
         - createdAt
       properties:
         version:
-          type: string
+          $ref: '#/components/schemas/SkillVersionIdentifier'
         state:
           type: string
           enum:
@@ -2749,7 +2761,7 @@ components:
         - updatedAt
       properties:
         id:
-          type: string
+          $ref: '#/components/schemas/SkillIdentifier'
         name:
           type: string
         description:
@@ -2791,7 +2803,7 @@ components:
         - description
       properties:
         id:
-          type: string
+          $ref: '#/components/schemas/SkillIdentifier'
         name:
           type: string
         description:
@@ -2863,7 +2875,7 @@ components:
         - subject
       properties:
         skillId:
-          type: string
+          $ref: '#/components/schemas/SkillIdentifier'
         subject:
           $ref: '#/components/schemas/Subject'
     ControlEventScopeType:
@@ -3468,13 +3480,13 @@ components:
       in: path
       required: true
       schema:
-        type: string
+        $ref: '#/components/schemas/SkillIdentifier'
     Version:
       name: version
       in: path
       required: true
       schema:
-        type: string
+        $ref: '#/components/schemas/SkillVersionIdentifier'
     Cursor:
       name: cursor
       in: query
