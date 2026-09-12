@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -745,4 +746,200 @@ func TestSessionRevocationPropagatesDatabaseErrors(t *testing.T) {
 			t.Fatal("RevokeUserSessionSet accepted a session update failure")
 		}
 	})
+}
+
+func newBootstrapMock(t *testing.T) (*App, pgxmock.PgxConnIface, sqlmock.Sqlmock) {
+	t.Helper()
+	application, _, sqlMock := newMockApplication(t)
+	application.Config.BootstrapAdminUsername = "admin"
+	application.Config.BootstrapAdminDisplayName = "Administrator"
+	application.Config.BootstrapAdminPassword = "bootstrap-password"
+	connection, err := pgxmock.NewConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := connection.ExpectationsWereMet(); err != nil {
+			t.Error(err)
+		}
+	})
+	return application, connection, sqlMock
+}
+
+func expectBootstrapDeployment(sqlMock sqlmock.Sqlmock, id, name string) {
+	sqlMock.ExpectExec(`INSERT INTO deployments`).
+		WithArgs(id, name).WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMock.ExpectQuery(`SELECT \* FROM "deployments" WHERE id = \$1 LIMIT \$2`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "created_at"}).AddRow(id, name, time.Now().UTC()))
+}
+
+func prepareBootstrapScenario(t *testing.T, connection pgxmock.PgxConnIface, sqlMock sqlmock.Sqlmock, failAt string) {
+	t.Helper()
+	failure := errors.New(failAt + " failed")
+	const lockID int64 = 0x4145505F424F4F54
+
+	lock := connection.ExpectExec(`SELECT pg_advisory_lock\(\$1\)`).WithArgs(lockID)
+	if failAt == "lock" {
+		lock.WillReturnError(failure)
+		return
+	}
+	lock.WillReturnResult(pgconn.NewCommandTag("SELECT 1"))
+
+	expectUnlock := func() {
+		unlock := connection.ExpectExec(`SELECT pg_advisory_unlock\(\$1\)`).WithArgs(lockID)
+		if failAt == "unlock" {
+			unlock.WillReturnError(failure)
+			connection.ExpectClose()
+		} else {
+			unlock.WillReturnResult(pgconn.NewCommandTag("SELECT 1"))
+		}
+	}
+
+	publicDeployment := sqlMock.ExpectExec(`INSERT INTO deployments`).
+		WithArgs("deployment-a", "Deployment A")
+	if failAt == "public deployment" {
+		publicDeployment.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	publicDeployment.WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMock.ExpectQuery(`SELECT \* FROM "deployments" WHERE id = \$1 LIMIT \$2`).
+		WithArgs("deployment-a", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "created_at"}).AddRow("deployment-a", "Deployment A", time.Now().UTC()))
+
+	storageDeployment := sqlMock.ExpectExec(`INSERT INTO deployments`).
+		WithArgs("deployment-storage", "Storage deployment")
+	if failAt == "storage deployment" {
+		storageDeployment.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	storageDeployment.WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMock.ExpectQuery(`SELECT \* FROM "deployments" WHERE id = \$1 LIMIT \$2`).
+		WithArgs("deployment-storage", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "created_at"}).AddRow("deployment-storage", "Storage deployment", time.Now().UTC()))
+
+	role := connection.ExpectExec(`INSERT INTO roles`).WithArgs("deployment-storage")
+	if failAt == "role" {
+		role.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	role.WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+
+	permissions := connection.ExpectExec(`INSERT INTO role_permissions`).WithArgs("deployment-storage")
+	if failAt == "permissions" {
+		permissions.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	permissions.WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+
+	team := connection.ExpectExec(`INSERT INTO teams`).WithArgs("deployment-storage")
+	if failAt == "team" {
+		team.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	team.WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+
+	userLookup := sqlMock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND username = \$2 LIMIT \$3`).
+		WithArgs("deployment-storage", "admin", 1)
+	if failAt == "user lookup" {
+		userLookup.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	userLookup.WillReturnRows(sqlmock.NewRows([]string{
+		"id", "deployment_id", "username", "display_name", "email", "password_hash",
+		"status", "require_password_change", "is_admin", "created_at", "updated_at",
+	}).AddRow(
+		"admin-user", "deployment-storage", "admin", "Administrator", nil, "hash",
+		"active", false, true, time.Now().UTC(), time.Now().UTC(),
+	))
+
+	roleBinding := connection.ExpectExec(`INSERT INTO user_role_bindings`).WithArgs("deployment-storage", "admin-user")
+	if failAt == "role binding" {
+		roleBinding.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	roleBinding.WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+
+	teamBinding := connection.ExpectExec(`INSERT INTO user_team_bindings`).WithArgs("deployment-storage", "admin-user")
+	if failAt == "team binding" {
+		teamBinding.WillReturnError(failure)
+		expectUnlock()
+		return
+	}
+	teamBinding.WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	expectUnlock()
+}
+
+func TestBootstrapWithConnectionBoundaries(t *testing.T) {
+	tests := []struct {
+		name          string
+		failAt        string
+		wantErrDetail string
+	}{
+		{name: "success"},
+		{name: "lock failure", failAt: "lock", wantErrDetail: "acquire bootstrap lock: lock failed"},
+		{name: "public deployment failure", failAt: "public deployment", wantErrDetail: "bootstrap deployment: public deployment failed"},
+		{name: "storage deployment failure", failAt: "storage deployment", wantErrDetail: "storage deployment failed"},
+		{name: "role failure", failAt: "role", wantErrDetail: "bootstrap administrator role definition: role failed"},
+		{name: "permission failure", failAt: "permissions", wantErrDetail: "bootstrap administrator permissions: permissions failed"},
+		{name: "team failure", failAt: "team", wantErrDetail: "bootstrap default team: team failed"},
+		{name: "user lookup failure", failAt: "user lookup", wantErrDetail: "user lookup failed"},
+		{name: "role binding failure", failAt: "role binding", wantErrDetail: "bootstrap administrator role: role binding failed"},
+		{name: "team binding failure", failAt: "team binding", wantErrDetail: "bootstrap administrator team: team binding failed"},
+		{name: "unlock failure closes connection", failAt: "unlock"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			application, connection, sqlMock := newBootstrapMock(t)
+			prepareBootstrapScenario(t, connection, sqlMock, test.failAt)
+			err := application.bootstrapWithConnection(context.Background(), connection)
+			if test.wantErrDetail == "" {
+				if err != nil {
+					t.Fatalf("bootstrapWithConnection() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErrDetail) {
+				t.Fatalf("bootstrapWithConnection() error = %v, want detail %q", err, test.wantErrDetail)
+			}
+		})
+	}
+}
+
+func TestBootstrapCreatesMissingAdministrator(t *testing.T) {
+	application, connection, sqlMock := newBootstrapMock(t)
+	const lockID int64 = 0x4145505F424F4F54
+	connection.ExpectExec(`SELECT pg_advisory_lock\(\$1\)`).WithArgs(lockID).
+		WillReturnResult(pgconn.NewCommandTag("SELECT 1"))
+	expectBootstrapDeployment(sqlMock, "deployment-a", "Deployment A")
+	expectBootstrapDeployment(sqlMock, "deployment-storage", "Storage deployment")
+	connection.ExpectExec(`INSERT INTO roles`).WithArgs("deployment-storage").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	connection.ExpectExec(`INSERT INTO role_permissions`).WithArgs("deployment-storage").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	connection.ExpectExec(`INSERT INTO teams`).WithArgs("deployment-storage").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	sqlMock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND username = \$2 LIMIT \$3`).
+		WithArgs("deployment-storage", "admin", 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "deployment_id", "username", "display_name", "email", "password_hash",
+			"status", "require_password_change", "is_admin", "created_at", "updated_at",
+		}))
+	sqlMock.ExpectBegin()
+	sqlMock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	sqlMock.ExpectCommit()
+	connection.ExpectExec(`INSERT INTO user_role_bindings`).
+		WithArgs("deployment-storage", pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	connection.ExpectExec(`INSERT INTO user_team_bindings`).
+		WithArgs("deployment-storage", pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	connection.ExpectExec(`SELECT pg_advisory_unlock\(\$1\)`).WithArgs(lockID).
+		WillReturnResult(pgconn.NewCommandTag("SELECT 1"))
+
+	if err := application.bootstrapWithConnection(context.Background(), connection); err != nil {
+		t.Fatalf("bootstrapWithConnection() error = %v", err)
+	}
 }

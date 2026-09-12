@@ -46,6 +46,23 @@ type RuntimeDatabase interface {
 	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
+type bootstrapConnection interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Close(context.Context) error
+}
+
+type pooledBootstrapConnection struct {
+	connection *pgxpool.Conn
+}
+
+func (c pooledBootstrapConnection) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	return c.connection.Exec(ctx, sql, arguments...)
+}
+
+func (c pooledBootstrapConnection) Close(ctx context.Context) error {
+	return c.connection.Conn().Close(ctx)
+}
+
 type App struct {
 	Config          config.Config
 	Pool            *pgxpool.Pool
@@ -534,6 +551,10 @@ func (a *App) bootstrap(ctx context.Context) error {
 		return err
 	}
 	defer connection.Release()
+	return a.bootstrapWithConnection(ctx, pooledBootstrapConnection{connection: connection})
+}
+
+func (a *App) bootstrapWithConnection(ctx context.Context, connection bootstrapConnection) error {
 	const lockID int64 = 0x4145505F424F4F54
 	if _, err := connection.Exec(ctx, `SELECT pg_advisory_lock($1)`, lockID); err != nil {
 		return fmt.Errorf("acquire bootstrap lock: %w", err)
@@ -542,7 +563,7 @@ func (a *App) bootstrap(ctx context.Context) error {
 		unlockContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if _, err := connection.Exec(unlockContext, `SELECT pg_advisory_unlock($1)`, lockID); err != nil {
-			_ = connection.Conn().Close(unlockContext)
+			_ = connection.Close(unlockContext)
 		}
 	}()
 	if _, err := a.Store.UpsertDeployment(ctx, repository.Deployment{ID: a.DeploymentID(), Name: a.DeploymentName()}); err != nil {
