@@ -46,7 +46,9 @@ npm run compose:up
 
 仅供本地开发的初始化身份为企业 `demo`、用户 `admin`、密码
 `change-this-admin-password`。Compose 还包含固定的开发签名密钥和 MinIO
-凭证。将服务暴露到开发者本机以外之前，必须全部替换。
+凭证。Compose 档位固定使用 `AEP_ENVIRONMENT=development`、关闭 mock 联合认证，
+并将所有发布端口绑定到 `127.0.0.1`。该档位不是生产部署输入；生产环境必须使用
+Kubernetes 基线和部署 Secret 系统。
 
 如需修改服务端口，在启动 Compose 前设置 `AEP_PORT`；MinIO 控制台端口使用
 `AEP_MINIO_CONSOLE_PORT`。`GOPROXY` 可覆盖容器构建使用的 Go 模块代理。

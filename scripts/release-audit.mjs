@@ -172,6 +172,21 @@ assert(!foundationReleaseWorkflow.toLowerCase().includes("private.key"), "founda
 const offlineBundle = await readText("scripts/offline-bundle.mjs");
 assert(offlineBundle.includes("config', '--format', 'json'"), "offline Bundle generation does not resolve final Compose service images");
 assert(offlineBundle.includes("serviceImage('gateway-authorizer')"), "offline Bundle does not pin the resolved gateway-authorizer image");
+assert(offlineBundle.includes("development and air-gap integration topology"), "offline Bundle must identify its non-production Compose boundary");
+const developmentCompose = await readText("deploy/compose/compose.yaml");
+const developmentGatewayCompose = await readText("deploy/compose/gateway.yaml");
+assert(developmentCompose.includes("AEP_ENVIRONMENT: development"), "local Compose must be pinned to the development environment");
+assert(!developmentCompose.includes("AEP_ENVIRONMENT: ${"), "local Compose must not allow promotion to production");
+assert(developmentCompose.includes('AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"'), "local Compose must disable mock federated authentication");
+for (const binding of [
+  '127.0.0.1:${AEP_MINIO_CONSOLE_PORT:-9001}:9001',
+  '127.0.0.1:${AEP_PORT:-8080}:8080',
+]) {
+  assert(developmentCompose.includes(binding), "local Compose port is not loopback-only: " + binding);
+}
+assert(developmentGatewayCompose.includes("AEP_ENVIRONMENT: development"), "local gateway Compose must be pinned to the development environment");
+assert(!developmentGatewayCompose.includes("AEP_ENVIRONMENT: ${"), "local gateway Compose must not allow promotion to production");
+assert(developmentGatewayCompose.includes('127.0.0.1:${AEP_GATEWAY_PORT:-8090}:8090'), "local gateway port is not loopback-only");
 
 for (const readme of ["README.md", "README.zh-CN.md"]) {
   const content = await readText(readme);

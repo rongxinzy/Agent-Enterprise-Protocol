@@ -13,7 +13,9 @@
 
 版本化 AEP 镜像已装入离线 Bundle。本地 Compose gateway 档位使用的第三方镜像
 仍在 Bundle 自身的 `manifest.json` 中记录引用与 digest。gateway Bundle 只用于
-集成和隔离网验证，不会把 `higress-standalone` 变成获批的生产拓扑。
+集成和隔离网验证，不会把 `higress-standalone` 变成获批的生产拓扑。两个
+Compose Bundle 均固定为开发档位，宿主端口仅绑定回环地址；它们用于验证离线
+镜像传输和集成，客户生产部署必须使用 Kubernetes 基线和外部 Secret。
 
 传输前应下载同一 Release 的全部文件并校验：
 

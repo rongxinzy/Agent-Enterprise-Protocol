@@ -70,7 +70,16 @@ const manifest = {
 await writeFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 await writeFile(path.join(outputDir, 'SHA256SUMS'), `${manifestImages.map(item => `${item.archiveSha256}  ${item.archive}`).join('\n')}\n`);
 await writeFile(path.join(outputDir, 'deploy', 'compose', 'offline.yaml'), offlineCompose(manifestImages, serviceImages));
-await writeFile(path.join(outputDir, 'OFFLINE-README.md'), offlineReadme(manifest));
+const offlineDocumentation = offlineReadme(manifest)
+  .replace(
+    '\n\n## Transfer and verify',
+    '\n\n> This Compose bundle is a development and air-gap integration topology. It is pinned to `AEP_ENVIRONMENT=development` and loopback-only host ports. Do not use it as a customer production deployment; use the production Kubernetes baseline and externally supplied Secrets.\n\n## Transfer and verify',
+  )
+  .replace(
+    'The bundle contains no provider API keys, License private keys, signing seeds, database data, MinIO data, or customer configuration. Supply those through the deployment Secret mechanism.',
+    'The bundle contains no provider API keys, License private keys, database data, MinIO data, or customer configuration. The copied development Compose file contains only disposable local fixture values.',
+  );
+await writeFile(path.join(outputDir, 'OFFLINE-README.md'), offlineDocumentation);
 console.log(JSON.stringify({status: 'passed', outputDir, profile, images: manifestImages.map(item => ({reference: item.reference, digest: item.digest, archive: item.archive}))}, null, 2));
 
 function offlineCompose(manifestImages, serviceImages) {
