@@ -94,7 +94,7 @@ services:
       higress:
         condition: service_healthy
     environment:
-      AEP_ENVIRONMENT: ${AEP_ENVIRONMENT:-development}
+      AEP_ENVIRONMENT: development
       AEP_LOG_FORMAT: ${AEP_LOG_FORMAT:-text}
       AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
       AEP_GATEWAY_ADDRESS: :8090
@@ -105,7 +105,7 @@ services:
       AEP_GATEWAY_LICENSE_STATUS_URL: http://control-service:8080/internal/gateway/licenses
       AEP_GATEWAY_LICENSE_STATUS_TOKEN: ${AEP_GATEWAY_LICENSE_STATUS_TOKEN:-m1-local-license-status-token}
     ports:
-      - ${AEP_GATEWAY_PORT:-8090}:8090
+      - "127.0.0.1:${AEP_GATEWAY_PORT:-8090}:8090"
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

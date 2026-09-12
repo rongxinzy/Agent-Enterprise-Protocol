@@ -1,3 +1,4 @@
+# Local development and CI only. Production deployments use deploy/kubernetes/production.
 name: aep-m0
 
 services:
@@ -22,7 +23,7 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - ${AEP_MINIO_CONSOLE_PORT:-9001}:9001
+      - "127.0.0.1:${AEP_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
 
@@ -45,7 +46,8 @@ services:
       minio:
         condition: service_started
     environment:
-      AEP_ENVIRONMENT: ${AEP_ENVIRONMENT:-development}
+      AEP_ENVIRONMENT: development
+      AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"
       AEP_LOG_FORMAT: ${AEP_LOG_FORMAT:-text}
       AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
       AEP_ADDRESS: :8080
@@ -70,7 +72,7 @@ services:
       AEP_LOGIN_BACKOFF_BASE: ${AEP_LOGIN_BACKOFF_BASE:-30s}
       AEP_LOGIN_BACKOFF_MAX: ${AEP_LOGIN_BACKOFF_MAX:-15m}
     ports:
-      - ${AEP_PORT:-8080}:8080
+      - "127.0.0.1:${AEP_PORT:-8080}:8080"
     healthcheck:
       test: [CMD, /aep-control, healthcheck, http://127.0.0.1:8080/readyz]
       interval: 5s

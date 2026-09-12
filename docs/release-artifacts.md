@@ -16,7 +16,10 @@ The versioned AEP images are embedded in the offline bundles. Third-party images
 used by the local Compose gateway profile remain identified by image reference
 and digest in each Bundle's `manifest.json`. The gateway Bundle is an
 integration and air-gap test topology; it does not turn `higress-standalone`
-into an approved production topology.
+into an approved production topology. Both Compose bundles are pinned to the
+development profile and loopback-only host ports. They validate offline image
+transfer and integration; customer production deployment uses the Kubernetes
+baseline and externally supplied Secrets.
 
 Download all release files and verify them before transferring the Bundle:
 

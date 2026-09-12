@@ -48,8 +48,10 @@ The default local endpoints are:
 
 The local-only bootstrap identity is enterprise `demo`, user `admin`, password
 `change-this-admin-password`. Compose also contains fixed development signing and
-MinIO credentials. Change all of these before exposing the service outside a
-developer workstation.
+MinIO credentials. The Compose profile fixes `AEP_ENVIRONMENT=development`,
+disables mock federated authentication, and binds every published port to
+`127.0.0.1`. It is not a production deployment input; use the production
+Kubernetes baseline and deployment Secret system instead.
 
 To use a different service port, set `AEP_PORT` before starting Compose. Set
 `AEP_MINIO_CONSOLE_PORT` similarly for the MinIO console. Set `GOPROXY` to
