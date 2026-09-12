@@ -62,7 +62,11 @@ async function verifyRuntimeEndpoints() {
   });
   assert(metadata.status === 200 && metadata.headers.get('x-request-id') === 'runtime-request-1', 'request ID was not preserved');
   const metadataBody = await metadata.json();
-  assert(!metadataBody.features.includes('federated_auth'), 'local Compose exposed mock federated authentication');
+  assert(
+    Array.isArray(metadataBody.capabilities) &&
+      !metadataBody.capabilities.includes('federated_auth'),
+    'local Compose exposed mock federated authentication',
+  );
   const metrics = await (await fetch(baseUrl + '/metrics')).text();
   assert(metrics.includes('aep_control_service_http_requests_total'), 'Prometheus request counter was not exposed');
   assert(metrics.includes('route="/aep/v1/metadata"'), 'Prometheus metric omitted the stable route label');
