@@ -49,6 +49,9 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	if !requireSkillIdentifier(response, request, input.ID) {
+		return
+	}
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
@@ -68,7 +71,11 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) getSkill(response http.ResponseWriter, request *http.Request) {
-	skill, err := s.app.Store.GetSkill(request.Context(), chi.URLParam(request, "skillId"))
+	skillID := chi.URLParam(request, "skillId")
+	if !requireSkillIdentifier(response, request, skillID) {
+		return
+	}
+	skill, err := s.app.Store.GetSkill(request.Context(), skillID)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
 		return
@@ -86,6 +93,10 @@ func (s *Server) getSkill(response http.ResponseWriter, request *http.Request) {
 }
 
 func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request) {
+	skillID := chi.URLParam(request, "skillId")
+	if !requireSkillIdentifier(response, request, skillID) {
+		return
+	}
 	var input struct {
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
@@ -100,7 +111,7 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_STATE", err.Error())
 		return
 	}
-	skill, err := s.app.Store.UpdateSkill(request.Context(), chi.URLParam(request, "skillId"), repository.UpdateSkillParams{
+	skill, err := s.app.Store.UpdateSkill(request.Context(), skillID, repository.UpdateSkillParams{
 		Name: input.Name, Description: input.Description, Enabled: enabled,
 	})
 	if errors.Is(err, repository.ErrNotFound) {
@@ -120,7 +131,11 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.DeleteSkill(request.Context(), chi.URLParam(request, "skillId"))
+	skillID := chi.URLParam(request, "skillId")
+	if !requireSkillIdentifier(response, request, skillID) {
+		return
+	}
+	err := s.app.Store.DeleteSkill(request.Context(), skillID)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
 		return
@@ -194,6 +209,10 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		return
 	}
 	defer file.Close()
+	skillID := chi.URLParam(request, "skillId")
+	if !requireSkillIdentifier(response, request, skillID) || !requireSkillVersionIdentifier(response, request, version) {
+		return
+	}
 	archive, err := io.ReadAll(io.LimitReader(file, 32<<20+1))
 	if err != nil || len(archive) > 32<<20 {
 		writeProblem(response, request, http.StatusRequestEntityTooLarge, "PACKAGE_TOO_LARGE", "The Skill package exceeds 32 MiB.")
@@ -201,8 +220,11 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 	}
 	digest := sha256.Sum256(archive)
 	sha := hex.EncodeToString(digest[:])
-	skillID := chi.URLParam(request, "skillId")
-	objectKey := strings.Join([]string{"skills", skillID, version, sha + ".zip"}, "/")
+	objectKey, ok := skillObjectKey(skillID, version, sha)
+	if !ok {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The Skill object key is invalid.")
+		return
+	}
 	if err := s.app.Blobs.Put(request.Context(), objectKey, archive); err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -219,6 +241,9 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 
 func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http.Request) {
 	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
+	if !requireSkillIdentifier(response, request, skillID) || !requireSkillVersionIdentifier(response, request, version) {
+		return
+	}
 	err := s.app.Store.PublishSkillVersion(request.Context(), skillID, version)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
@@ -233,6 +258,9 @@ func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http
 
 func (s *Server) deleteSkillVersion(response http.ResponseWriter, request *http.Request) {
 	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
+	if !requireSkillIdentifier(response, request, skillID) || !requireSkillVersionIdentifier(response, request, version) {
+		return
+	}
 	objectKey, err := s.app.Store.DeleteSkillVersion(request.Context(), skillID, version)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
@@ -275,6 +303,9 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		} `json:"subject"`
 	}
 	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if !requireSkillIdentifier(response, request, input.SkillID) {
 		return
 	}
 	if input.Subject.Type != "user" && input.Subject.Type != "role" && input.Subject.Type != "team" {
@@ -407,6 +438,9 @@ SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.Deploy
 func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
 	skillID, version := chi.URLParam(request, "skillId"), chi.URLParam(request, "version")
+	if !requireSkillIdentifier(response, request, skillID) || !requireSkillVersionIdentifier(response, request, version) {
+		return
+	}
 	var objectKey string
 	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -442,6 +476,9 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 	}
 	installed := make([]string, 0)
 	for _, item := range input.Items {
+		if !requireSkillIdentifier(response, request, item.SkillID) {
+			return
+		}
 		if item.Status == "installed" || item.Status == "updated" || item.Status == "unchanged" {
 			installed = append(installed, item.SkillID)
 		}
