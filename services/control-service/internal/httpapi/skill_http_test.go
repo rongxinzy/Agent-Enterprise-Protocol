@@ -21,8 +21,11 @@ import (
 )
 
 type memorySkillBlobStore struct {
-	objects map[string][]byte
-	deleted []string
+	objects   map[string][]byte
+	deleted   []string
+	putErr    error
+	getErr    error
+	deleteErr error
 }
 
 func newMemorySkillBlobStore() *memorySkillBlobStore {
@@ -30,11 +33,17 @@ func newMemorySkillBlobStore() *memorySkillBlobStore {
 }
 
 func (s *memorySkillBlobStore) Put(_ context.Context, key string, content []byte) error {
+	if s.putErr != nil {
+		return s.putErr
+	}
 	s.objects[key] = append([]byte(nil), content...)
 	return nil
 }
 
 func (s *memorySkillBlobStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	content, ok := s.objects[key]
 	if !ok {
 		return nil, errors.New("object not found")
@@ -43,6 +52,9 @@ func (s *memorySkillBlobStore) Get(_ context.Context, key string) (io.ReadCloser
 }
 
 func (s *memorySkillBlobStore) Delete(_ context.Context, key string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	if _, ok := s.objects[key]; !ok {
 		return errors.New("object not found")
 	}
