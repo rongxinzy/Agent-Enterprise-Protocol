@@ -3,7 +3,7 @@
 Status: release candidate
 Implementation profile: M3
 Measured foundation completion: 95%
-Assessment date: 2026-09-03
+Assessment date: 2026-09-12
 
 ## Release Decision
 
@@ -52,6 +52,8 @@ The gateway reconciler now applies tenant Ingress and Higress WasmPlugin resourc
 ## Remaining 5%
 
 GA validation, 5%: the repeatable load/soak workflow, PostgreSQL/MinIO backup and disaster-recovery rehearsal, release SBOM pipeline, automated dependency/CodeQL baseline, and release-candidate protocol metadata are complete. The remaining work is an independent external security review and formal local customer-artifact signing. See the [GA validation runbook](ga-validation-runbook.md), [external security review runbook](security-review-runbook.md), and [backup and disaster-recovery runbook](backup-restore-runbook.md). The M3 profile exposes single Skill-version withdrawal through the admin API; withdrawing a version prevents future downloads while preserving the audit record.
+
+The [2026-09-12 security remediation record](../release/evidence/security-remediation-2026-09-12.md) captures engineering verification and CI evidence for the completed remediation boundaries. It is not an external attestation and does not close the independent security-review or GA gate.
 
 ## Go Or No-Go
 

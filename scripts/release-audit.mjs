@@ -189,6 +189,9 @@ for (const content of [signerBoundary, signerBoundaryZh]) {
 const securityReviewRunbook = await readText("docs/security-review-runbook.md");
 assert(securityReviewRunbook.includes("No open critical or high findings"), "external security review exit criteria are missing");
 assert(securityReviewRunbook.includes("must remain `release-candidate` and 95%"), "external review must not be marked complete before evidence exists");
+const securityRemediationEvidence = await readText("release/evidence/security-remediation-2026-09-12.md");
+assert(securityRemediationEvidence.includes("independent retest pending"), "security remediation evidence must preserve the independent-retest gate");
+assert(securityRemediationEvidence.includes("Release status therefore remains `release-candidate` at 95%."), "security remediation evidence must preserve release-candidate status");
 
 assert(!manifest.productionCapabilities.includes("federated_auth"), "mock federated auth cannot be a production capability");
 assert(manifest.developmentOnlyCapabilities.includes("federated_auth"), "mock federated auth must be marked development-only");
