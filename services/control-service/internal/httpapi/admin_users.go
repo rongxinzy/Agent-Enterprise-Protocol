@@ -58,6 +58,9 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	if !s.authorizeRoleGrant(response, request, input.RoleIDs) {
 		return
 	}
+	if !s.authorizeTeamGrant(response, request, input.TeamIDs) {
+		return
+	}
 	user, err := s.insertUser(request, input)
 	if err != nil {
 		if errors.Is(err, auth.ErrPasswordPolicy) {
@@ -96,12 +99,17 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 		return
 	}
 	roleIDs := make([]string, 0)
+	teamIDs := make([]string, 0)
 	for _, item := range input.Users {
 		if code, _ := userMembershipProblem(item.RoleIDs, item.TeamIDs); code == "" {
 			roleIDs = append(roleIDs, item.RoleIDs...)
+			teamIDs = append(teamIDs, item.TeamIDs...)
 		}
 	}
 	if !s.authorizeRoleGrant(response, request, roleIDs) {
+		return
+	}
+	if !s.authorizeTeamGrant(response, request, teamIDs) {
 		return
 	}
 	created := 0
