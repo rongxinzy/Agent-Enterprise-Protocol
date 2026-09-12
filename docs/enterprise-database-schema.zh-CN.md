@@ -138,7 +138,7 @@ PostgreSQL 最终结构。生产数据库以
 
 | 字段 | 类型 | 约束/说明 |
 | --- | --- | --- |
-| `key_hash` | `text` | PK；脱敏限流键 |
+| `key_hash` | `text` | PK；脱敏限流键，分别存储来源桶和来源 + 主体桶 |
 | `failure_count` | `integer` | NN, CK `> 0` |
 | `blocked_until` | `timestamptz` | 可空 |
 | `updated_at` | `timestamptz` | NN, DF `now()` |

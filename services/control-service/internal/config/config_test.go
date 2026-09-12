@@ -20,7 +20,8 @@ var environmentKeys = []string{
 	"AEP_GATEWAY_LICENSE_STATUS_TOKEN", "AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE",
 	"AEP_DEPLOYMENT_ID", "AEP_DEPLOYMENT_NAME",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
-	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
+	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_SOURCE_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
+	"AEP_TRUSTED_PROXY_CIDRS",
 }
 
 func TestLoadDevelopmentDefaults(t *testing.T) {
@@ -29,7 +30,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
 	}
 }
@@ -56,7 +57,9 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 		{key: "AEP_HTTP_READ_TIMEOUT", value: "forever"},
 		{key: "AEP_HTTP_MAX_HEADER_BYTES", value: "0"},
 		{key: "AEP_LOGIN_FAILURE_LIMIT", value: "0"},
+		{key: "AEP_LOGIN_SOURCE_FAILURE_LIMIT", value: "0"},
 		{key: "AEP_LOGIN_FAILURE_WINDOW", value: "forever"},
+		{key: "AEP_TRUSTED_PROXY_CIDRS", value: "not-a-cidr"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			clearEnvironment(t)
@@ -65,6 +68,18 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 				t.Fatalf("Load() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestLoadParsesTrustedProxyCIDRs(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_TRUSTED_PROXY_CIDRS", "10.20.0.17/16, 2001:db8::1/48, 10.20.0.0/16")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 || cfg.TrustedProxyCIDRs[0].String() != "10.20.0.0/16" || cfg.TrustedProxyCIDRs[1].String() != "2001:db8::/48" {
+		t.Fatalf("trusted proxy CIDRs = %v", cfg.TrustedProxyCIDRs)
 	}
 }
 
