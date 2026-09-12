@@ -10,7 +10,6 @@ const baseUrl = 'http://localhost:' + port;
 const composeEnv = {
   AEP_PORT: port,
   AEP_MINIO_CONSOLE_PORT: process.env.AEP_RUNTIME_MINIO_CONSOLE_PORT ?? '19007',
-  AEP_ENVIRONMENT: 'test',
   AEP_LOG_FORMAT: 'json',
 };
 const replicas = [project + '-replica-a', project + '-replica-b'];
@@ -62,6 +61,8 @@ async function verifyRuntimeEndpoints() {
     headers: {'X-Request-ID': 'runtime-request-1'},
   });
   assert(metadata.status === 200 && metadata.headers.get('x-request-id') === 'runtime-request-1', 'request ID was not preserved');
+  const metadataBody = await metadata.json();
+  assert(!metadataBody.features.includes('federated_auth'), 'local Compose exposed mock federated authentication');
   const metrics = await (await fetch(baseUrl + '/metrics')).text();
   assert(metrics.includes('aep_control_service_http_requests_total'), 'Prometheus request counter was not exposed');
   assert(metrics.includes('route="/aep/v1/metadata"'), 'Prometheus metric omitted the stable route label');
@@ -95,7 +96,7 @@ async function verifyJSONLogs() {
   const records = output.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   assert(records.some(item => item.msg === 'control service listening'), 'structured startup log was missing');
   assert(records.some(item => item.msg === 'http request' && item.request_id === 'runtime-log-request'), 'structured access log was missing');
-  assert(records.every(item => item.service === 'aep-control-service' && item.environment === 'test'), 'structured log context was incomplete');
+  assert(records.every(item => item.service === 'aep-control-service' && item.environment === 'development'), 'structured log context was incomplete');
 }
 
 async function waitForStatus(route, expected) {
