@@ -242,3 +242,34 @@ func TestDelegatedRolePermissionsRejectEscalation(t *testing.T) {
 		t.Fatalf("permission escalation = %d %s", deniedResponse.Code, deniedResponse.Body.String())
 	}
 }
+
+func TestDelegatedTeamMembershipRejectsEscalation(t *testing.T) {
+	application, mock, _ := newStoreBackedHTTPApplication(t)
+	server := &Server{app: application}
+	token, _, err := application.Tokens.IssueWithDeploymentSession("delegated-admin", "deployment-a", "session-delegated", false, false, []string{"user-manager"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := application.Tokens.ParseAccess(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPut, "/aep/v1/admin/users/user-a/rbac", nil)
+	request = request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims))
+
+	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).
+		WithArgs("deployment-a", "delegated-admin").
+		WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("engineering"))
+	allowedResponse := httptest.NewRecorder()
+	if !server.authorizeTeamGrant(allowedResponse, request, []string{"engineering"}) || allowedResponse.Code != http.StatusOK {
+		t.Fatalf("Team subset rejected = %d %s", allowedResponse.Code, allowedResponse.Body.String())
+	}
+
+	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).
+		WithArgs("deployment-a", "delegated-admin").
+		WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("engineering"))
+	deniedResponse := httptest.NewRecorder()
+	if server.authorizeTeamGrant(deniedResponse, request, []string{"privileged"}) || deniedResponse.Code != http.StatusForbidden || !strings.Contains(deniedResponse.Body.String(), `"code":"TEAM_GRANT_FORBIDDEN"`) {
+		t.Fatalf("Team escalation = %d %s", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}

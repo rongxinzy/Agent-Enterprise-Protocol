@@ -275,6 +275,9 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 	if !s.authorizeRoleGrant(response, request, input.RoleIDs) {
 		return
 	}
+	if !s.authorizeTeamGrant(response, request, input.TeamIDs) {
+		return
+	}
 	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
 		ReplaceUserRBAC(request.Context(), userID, input.RoleIDs, input.TeamIDs)
 	if errors.Is(err, repository.ErrNotFound) {
@@ -326,6 +329,23 @@ func (s *Server) authorizeRoleGrant(response http.ResponseWriter, request *http.
 	return true
 }
 
+func (s *Server) authorizeTeamGrant(response http.ResponseWriter, request *http.Request, teamIDs []string) bool {
+	claims := claimsFrom(request)
+	if claims.Admin {
+		return true
+	}
+	teams, err := s.app.Store.Deployment(claims.DeploymentID).UserTeamIDs(request.Context(), claims.Subject)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return false
+	}
+	if !teamGrantAllowed(false, teams, teamIDs) {
+		writeProblem(response, request, http.StatusForbidden, "TEAM_GRANT_FORBIDDEN", "Administrators cannot grant Team memberships they do not hold.")
+		return false
+	}
+	return true
+}
+
 func (s *Server) authorizeDelegatedPermissions(response http.ResponseWriter, request *http.Request, requested []string) bool {
 	claims := claimsFrom(request)
 	if claims.Admin {
@@ -355,6 +375,22 @@ func roleGrantAllowed(admin bool, grantorPermissions []string, roles []repositor
 		requested = append(requested, role.Permissions...)
 	}
 	return permissionSubset(grantorPermissions, requested)
+}
+
+func teamGrantAllowed(admin bool, grantorTeams, requestedTeams []string) bool {
+	if admin {
+		return true
+	}
+	available := make(map[string]struct{}, len(grantorTeams))
+	for _, teamID := range grantorTeams {
+		available[teamID] = struct{}{}
+	}
+	for _, teamID := range requestedTeams {
+		if _, ok := available[teamID]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func permissionSubset(grantorPermissions, requested []string) bool {

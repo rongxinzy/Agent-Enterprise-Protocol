@@ -50,3 +50,15 @@ func TestRoleGrantAllowed(t *testing.T) {
 		t.Fatal("system administrator could not grant the built-in administrator role")
 	}
 }
+
+func TestTeamGrantAllowed(t *testing.T) {
+	if !teamGrantAllowed(false, []string{"engineering", "all-users"}, []string{"engineering"}) {
+		t.Fatal("delegated administrator could not grant an existing Team membership")
+	}
+	if teamGrantAllowed(false, []string{"all-users"}, []string{"privileged"}) {
+		t.Fatal("delegated administrator granted an unheld Team membership")
+	}
+	if !teamGrantAllowed(true, nil, []string{"privileged"}) {
+		t.Fatal("system administrator could not grant an arbitrary Team membership")
+	}
+}
