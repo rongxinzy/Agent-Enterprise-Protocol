@@ -172,3 +172,77 @@ func validProductionEnvironment(t *testing.T) {
 	t.Setenv("AEP_LICENSE_FILE", filepath.Join(t.TempDir(), "license.zylic"))
 	t.Setenv("AEP_GATEWAY_LICENSE_STATUS_TOKEN", "production-gateway-license-status-token")
 }
+
+func validConfig() Config {
+	return Config{
+		Environment: "development", LogFormat: "text", LogLevel: "info",
+		DatabaseURL: "postgres://aep:secret@postgres.internal/aep", Issuer: "https://control.internal",
+		MinioEndpoint: "minio.internal:9000", MinioBucket: "skills",
+		DeploymentID: "deployment-a", DeploymentName: "Deployment A",
+		LoginBackoffBase: time.Second, LoginBackoffMax: time.Minute,
+	}
+}
+
+func TestValidateRejectsInvalidRuntimeFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		match  string
+	}{
+		{name: "environment", mutate: func(cfg *Config) { cfg.Environment = "staging" }, match: "AEP_ENVIRONMENT"},
+		{name: "log format", mutate: func(cfg *Config) { cfg.LogFormat = "yaml" }, match: "AEP_LOG_FORMAT"},
+		{name: "log level", mutate: func(cfg *Config) { cfg.LogLevel = "trace" }, match: "AEP_LOG_LEVEL"},
+		{name: "database URL", mutate: func(cfg *Config) { cfg.DatabaseURL = "postgres-without-host" }, match: "AEP_DATABASE_URL"},
+		{name: "database scheme", mutate: func(cfg *Config) { cfg.DatabaseURL = "https://postgres.internal/aep" }, match: "must use one of these schemes"},
+		{name: "issuer", mutate: func(cfg *Config) { cfg.Issuer = "://invalid" }, match: "AEP_ISSUER"},
+		{name: "model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "ftp://gateway.internal" }, match: "AEP_MODEL_GATEWAY_BASE_URL"},
+		{name: "MinIO endpoint", mutate: func(cfg *Config) { cfg.MinioEndpoint = " " }, match: "AEP_MINIO_ENDPOINT"},
+		{name: "deployment identity", mutate: func(cfg *Config) { cfg.DeploymentID = "" }, match: "AEP_DEPLOYMENT_ID"},
+		{name: "login backoff", mutate: func(cfg *Config) { cfg.LoginBackoffMax = 0 }, match: "AEP_LOGIN_BACKOFF_MAX"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.mutate(&cfg)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.match) {
+				t.Fatalf("Validate() error = %v, want detail %q", err, test.match)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsMissingProductionLicenseBindings(t *testing.T) {
+	validProduction := validConfig()
+	validProduction.Environment = "production"
+	validProduction.SigningKeyBase64 = "signing-key"
+	validProduction.MinioAccessKey = "access"
+	validProduction.MinioSecretKey = "secret"
+	validProduction.BootstrapAdminPassword = "secure-admin-password"
+	validProduction.LicenseTrustedKeys = map[string]string{"license-prod": "public-key"}
+	validProduction.LicenseDeploymentID = "deployment-a"
+	validProduction.LicenseCustomerID = "customer-a"
+	validProduction.LicenseFile = "license.zylic"
+	validProduction.GatewayLicenseStatusToken = "gateway-token"
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		match  string
+	}{
+		{name: "trusted keys", mutate: func(cfg *Config) { cfg.LicenseTrustedKeys = nil }, match: "AEP_LICENSE_TRUSTED_KEYS_FILE"},
+		{name: "deployment", mutate: func(cfg *Config) { cfg.LicenseDeploymentID = " " }, match: "AEP_LICENSE_DEPLOYMENT_ID"},
+		{name: "customer", mutate: func(cfg *Config) { cfg.LicenseCustomerID = "" }, match: "AEP_LICENSE_CUSTOMER_ID"},
+		{name: "license file", mutate: func(cfg *Config) { cfg.LicenseFile = "" }, match: "AEP_LICENSE_FILE"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validProduction
+			test.mutate(&cfg)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.match) {
+				t.Fatalf("Validate() error = %v, want detail %q", err, test.match)
+			}
+		})
+	}
+}

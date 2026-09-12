@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,18 +18,28 @@ import (
 	runtime "github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/runtime"
 )
 
+type serverDependencies struct {
+	loadConfig      func() (config.Config, error)
+	configureLogger func(format, level, service, environment string) error
+	openApplication func(context.Context, config.Config) (*app.App, error)
+	listenAndServe  func(*http.Server) error
+	shutdown        func(*http.Server, context.Context) error
+	probe           func(string, time.Duration) error
+}
+
+var productionServerDependencies = serverDependencies{
+	loadConfig:      config.Load,
+	configureLogger: runtime.ConfigureLogger,
+	openApplication: app.Open,
+	listenAndServe:  (*http.Server).ListenAndServe,
+	shutdown:        (*http.Server).Shutdown,
+	probe:           runtime.Probe,
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
-		url := "http://127.0.0.1:8080/readyz"
-		if len(os.Args) == 3 {
-			url = os.Args[2]
-		} else if len(os.Args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: aep-control healthcheck [url]")
-			os.Exit(2)
-		}
-		if err := runtime.Probe(url, 2*time.Second); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+		if exitCode := runHealthcheck(os.Args[2:], os.Stderr, productionServerDependencies.probe); exitCode != 0 {
+			os.Exit(exitCode)
 		}
 		return
 	}
@@ -39,16 +50,35 @@ func main() {
 }
 
 func run() error {
-	cfg, err := config.Load()
+	return runWithDependencies(productionServerDependencies)
+}
+
+func runHealthcheck(arguments []string, stderr io.Writer, probe func(string, time.Duration) error) int {
+	url := "http://127.0.0.1:8080/readyz"
+	if len(arguments) == 1 {
+		url = arguments[0]
+	} else if len(arguments) != 0 {
+		fmt.Fprintln(stderr, "usage: aep-control healthcheck [url]")
+		return 2
+	}
+	if err := probe(url, 2*time.Second); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func runWithDependencies(dependencies serverDependencies) error {
+	cfg, err := dependencies.loadConfig()
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
 	}
-	if err := runtime.ConfigureLogger(cfg.LogFormat, cfg.LogLevel, "aep-control-service", cfg.Environment); err != nil {
+	if err := dependencies.configureLogger(cfg.LogFormat, cfg.LogLevel, "aep-control-service", cfg.Environment); err != nil {
 		return fmt.Errorf("configure logger: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	application, err := app.Open(ctx, cfg)
+	application, err := dependencies.openApplication(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("initialize: %w", err)
 	}
@@ -71,7 +101,7 @@ func run() error {
 	serverErrors := make(chan error, 1)
 	go func() {
 		slog.Info("control service listening", "address", cfg.Address)
-		serverErrors <- server.ListenAndServe()
+		serverErrors <- dependencies.listenAndServe(server)
 	}()
 
 	var serveErr error
@@ -84,7 +114,7 @@ func run() error {
 	}
 	shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
-	if err := server.Shutdown(shutdownContext); err != nil {
+	if err := dependencies.shutdown(server, shutdownContext); err != nil {
 		if serveErr == nil {
 			serveErr = fmt.Errorf("shutdown: %w", err)
 		} else {
