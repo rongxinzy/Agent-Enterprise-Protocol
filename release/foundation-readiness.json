@@ -7,7 +7,7 @@
     "sdkVersion": "0.2.11",
     "stage": "release-candidate",
     "completionPercent": 95,
-    "asOf": "2026-09-10"
+    "asOf": "2026-09-12"
   },
   "completedGates": [
     {
@@ -85,7 +85,8 @@
       "weight": 5,
       "evidence": [
         "tests/e2e/runtime.mjs",
-        "docs/production-runtime.md"
+        "docs/production-runtime.md",
+        "release/evidence/security-remediation-2026-09-12.md"
       ]
     },
     {

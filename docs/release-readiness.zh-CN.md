@@ -3,7 +3,7 @@
 状态：发布候选
 实现档位：M3
 企业底座完成度：95%
-评估日期：2026-09-03
+评估日期：2026-09-12
 
 ## 发布结论
 
@@ -52,6 +52,8 @@ gateway reconciler 现已通过 Kubernetes server-side apply 下发租户 Ingres
 ## 剩余 5%
 
 GA 验证，5%：负载与长稳验证、PostgreSQL/MinIO 备份与灾备恢复、发布 SBOM 流水线、自动依赖/CodeQL 基线和发布候选协议元数据均已完成。剩余工作是独立外部安全评审和正式客户制品本地签名。详见 [GA 验证手册](ga-validation-runbook.zh-CN.md)、[外部安全评审手册](security-review-runbook.zh-CN.md) 和 [备份与灾备恢复手册](backup-restore-runbook.zh-CN.md)。M3 已通过管理 API 提供单个 Skill 版本撤回；撤回后禁止继续下载该版本，同时保留审计记录。
+
+[2026-09-12 安全修复记录](../release/evidence/security-remediation-2026-09-12.md)汇总了已完成修复边界的工程验证与 CI 证据。该记录不是外部鉴证，也不会关闭独立安全评审或 GA 门禁。
 
 ## Go 或 No-Go
 
