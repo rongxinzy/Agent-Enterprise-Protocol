@@ -59,6 +59,7 @@ export class FetchTransport implements AepTransport {
           method: request.method,
           headers,
           body,
+          redirect: 'error',
           signal: controller.signal,
         });
         const parsed = await parseResponse<T>(response, request.responseType);
