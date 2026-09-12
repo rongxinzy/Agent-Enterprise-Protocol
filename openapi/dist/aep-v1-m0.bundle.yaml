@@ -369,6 +369,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        '400':
+          $ref: '#/components/responses/Problem-2'
         '403':
           $ref: '#/components/responses/Problem-2'
         '404':
@@ -836,6 +838,8 @@ paths:
       responses:
         '201':
           $ref: '#/components/responses/AdminSkill'
+        '400':
+          $ref: '#/components/responses/Problem-2'
         '409':
           $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skills/{skillId}:
@@ -848,6 +852,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/AdminSkill'
+        '400':
+          $ref: '#/components/responses/Problem-2'
         '404':
           $ref: '#/components/responses/Problem-2'
     patch:
@@ -863,6 +869,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/AdminSkill'
+        '400':
+          $ref: '#/components/responses/Problem-2'
     delete:
       tags:
         - Admin Skills
@@ -870,6 +878,8 @@ paths:
       responses:
         '204':
           description: Skill withdrawn
+        '400':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skills/{skillId}/versions:
     post:
       tags:
@@ -901,6 +911,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SkillVersion'
+        '400':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skills/{skillId}/versions/{version}/publish:
     post:
       tags:
@@ -916,6 +928,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SkillVersion'
+        '400':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skill-assignments:
     get:
       tags:
@@ -937,6 +951,8 @@ paths:
       responses:
         '201':
           $ref: '#/components/responses/Assignment'
+        '400':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skill-assignments/{assignmentId}:
     delete:
       tags:
