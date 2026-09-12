@@ -72,6 +72,7 @@ func (s *Server) activateLicense(response http.ResponseWriter, request *http.Req
 	token, tokenExpiresAt, err := s.app.Tokens.IssueEntitlement(
 		claims.Subject,
 		verified.Claims.DeploymentID,
+		claims.SessionID,
 		verified.Claims.LicenseID,
 		verified.Digest,
 		features,

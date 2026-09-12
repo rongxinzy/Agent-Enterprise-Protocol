@@ -53,7 +53,7 @@ func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Subject != "user-1" || claims.DeploymentID != "deployment-1" || claims.SessionID != "" || claims.LicenseID != "lic-1" {
+	if claims.Subject != "user-1" || claims.DeploymentID != "deployment-1" || claims.SessionID != "session-1" || claims.LicenseID != "lic-1" {
 		t.Fatalf("entitlement identity binding = %#v", claims)
 	}
 	if len(document.Features) != 1 || document.Features[0] != "enterprise.models" {

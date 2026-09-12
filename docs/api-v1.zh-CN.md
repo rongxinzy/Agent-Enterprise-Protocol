@@ -196,7 +196,8 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 ```
 
 响应包含 `entitlementToken`、`expiresAt` 和规范化后的功能列表。Token 绑定当前
-认证部署和用户。Control Service 不签发 License，且绝不能接收 License 私钥。
+认证部署、用户和会话；生产模型网关会在状态缓存窗口内复核会话和请求模型的
+当前授权。Control Service 不签发 License，且绝不能接收 License 私钥。
 
 ## 4. 当前身份
 

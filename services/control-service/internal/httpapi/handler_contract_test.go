@@ -119,7 +119,7 @@ func TestAuthenticationAndInternalServiceBoundaries(t *testing.T) {
 		{name: "missing user token", method: http.MethodGet, path: "/aep/v1/user/me", status: http.StatusUnauthorized, code: "TOKEN_INVALID"},
 		{name: "invalid user token", method: http.MethodGet, path: "/aep/v1/user/me", token: "invalid", status: http.StatusUnauthorized, code: "TOKEN_INVALID"},
 		{name: "missing gateway secret", method: http.MethodGet, path: "/internal/gateway/licenses/license-a", status: http.StatusUnauthorized, code: "INTERNAL_AUTH_REQUIRED"},
-		{name: "missing deployment header", method: http.MethodGet, path: "/internal/gateway/licenses/license-a", headers: map[string]string{"X-AEP-Gateway-Token": "gateway-secret"}, status: http.StatusBadRequest, code: "DEPLOYMENT_REQUIRED"},
+		{name: "missing entitlement context", method: http.MethodGet, path: "/internal/gateway/licenses/license-a", headers: map[string]string{"X-AEP-Gateway-Token": "gateway-secret"}, status: http.StatusBadRequest, code: "ENTITLEMENT_CONTEXT_REQUIRED"},
 		{name: "missing reconciler secret", method: http.MethodGet, path: "/internal/data-plane/desired-state", status: http.StatusUnauthorized, code: "INTERNAL_AUTH_REQUIRED"},
 	}
 	for _, test := range tests {

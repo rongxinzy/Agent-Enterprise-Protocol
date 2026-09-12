@@ -23,7 +23,7 @@ type TokenVerifier interface {
 }
 
 type EntitlementVerifier interface {
-	CheckEntitlement(context.Context, *ModelClaims) error
+	CheckEntitlement(context.Context, *ModelClaims, string) error
 }
 
 type Handler struct {
@@ -92,21 +92,6 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusForbidden, "ENTITLEMENT_REQUIRED", "An active enterprise entitlement token is required.")
 		return
 	}
-	if h.requireEntitlement {
-		checker, ok := h.verifier.(EntitlementVerifier)
-		if !ok {
-			writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Deployment entitlement status could not be checked.")
-			return
-		}
-		if err := checker.CheckEntitlement(request.Context(), claims); err != nil {
-			if errors.Is(err, ErrEntitlementInactive) {
-				writeProblem(response, request, http.StatusForbidden, "LICENSE_REVOKED", "The enterprise License entitlement is inactive.")
-			} else {
-				writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Deployment entitlement status could not be checked.")
-			}
-			return
-		}
-	}
 	body, model, err := readModelRequest(request.Body, h.limit)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -124,6 +109,21 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	if model == "" || len(model) > 256 || !contains(claims.ModelScopes, model) {
 		writeProblem(response, request, http.StatusForbidden, "MODEL_NOT_ALLOWED", "The model token does not grant access to the requested model.")
 		return
+	}
+	if h.requireEntitlement {
+		checker, ok := h.verifier.(EntitlementVerifier)
+		if !ok {
+			writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Deployment entitlement status could not be checked.")
+			return
+		}
+		if err := checker.CheckEntitlement(request.Context(), claims, model); err != nil {
+			if errors.Is(err, ErrEntitlementInactive) {
+				writeProblem(response, request, http.StatusForbidden, "ENTITLEMENT_INACTIVE", "The enterprise entitlement is no longer active for this session and model.")
+			} else {
+				writeProblem(response, request, http.StatusServiceUnavailable, "ENTITLEMENT_CHECK_UNAVAILABLE", "Deployment entitlement status could not be checked.")
+			}
+			return
+		}
 	}
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	request.ContentLength = int64(len(body))

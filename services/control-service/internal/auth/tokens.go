@@ -78,9 +78,9 @@ func (s *Service) ParseModel(raw string) (*Claims, error) {
 	return s.parse(raw, "model-gateway", "model")
 }
 
-func (s *Service) IssueEntitlement(userID, deploymentID, licenseID, licenseDigest string, features, modelScopes []string, licenseExpiresAt *time.Time) (string, time.Time, error) {
+func (s *Service) IssueEntitlement(userID, deploymentID, sessionID, licenseID, licenseDigest string, features, modelScopes []string, licenseExpiresAt *time.Time) (string, time.Time, error) {
 	now := time.Now().UTC()
-	if deploymentID == "" || licenseID == "" || licenseDigest == "" {
+	if userID == "" || deploymentID == "" || sessionID == "" || licenseID == "" || licenseDigest == "" {
 		return "", time.Time{}, errors.New("invalid enterprise license activation")
 	}
 	// Entitlements are deliberately short-lived. The license expiry remains the
@@ -96,7 +96,7 @@ func (s *Service) IssueEntitlement(userID, deploymentID, licenseID, licenseDiges
 		expiresAt = maximum
 	}
 	claims := Claims{
-		DeploymentID: deploymentID, LicenseID: licenseID, LicenseDigest: licenseDigest,
+		DeploymentID: deploymentID, SessionID: sessionID, LicenseID: licenseID, LicenseDigest: licenseDigest,
 		Features: append([]string(nil), features...), ModelScopes: append([]string(nil), modelScopes...), TokenUse: "entitlement",
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer: s.issuer, Subject: userID, Audience: jwt.ClaimStrings{"aep-entitlement"},

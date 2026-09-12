@@ -189,13 +189,52 @@ func TestLicenseHTTPReadAndInternalStatus(t *testing.T) {
 	}
 
 	pool.ExpectQuery(`SELECT status,digest,deployment_id FROM licenses`).WithArgs("deployment-a", "lic-1").WillReturnRows(pgxmock.NewRows([]string{"status", "digest", "deployment_id"}).AddRow("active", "sha256:abc", "deployment-a"))
+	pool.ExpectQuery(`SELECT EXISTS\(`).WithArgs("deployment-a", "session-user", "user-a", "model-a").WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	internal := httptest.NewRequest(http.MethodGet, "/internal/gateway/licenses/lic-1", nil)
 	internal.Header.Set("X-AEP-Gateway-Token", "gateway-secret")
 	internal.Header.Set("X-AEP-Deployment-ID", "deployment-a")
+	internal.Header.Set("X-AEP-User-ID", "user-a")
+	internal.Header.Set("X-AEP-Session-ID", "session-user")
+	internal.Header.Set("X-AEP-Model-ID", "model-a")
 	internalResponse := httptest.NewRecorder()
 	handler.ServeHTTP(internalResponse, internal)
 	if internalResponse.Code != http.StatusOK || !strings.Contains(internalResponse.Body.String(), `"active":true`) {
 		t.Fatalf("internal status = %d %s", internalResponse.Code, internalResponse.Body.String())
+	}
+}
+
+func TestInternalLicenseStatusFailsClosedForInactiveContext(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		licenseStatus string
+		contextActive *bool
+	}{
+		{name: "revoked License", licenseStatus: "revoked"},
+		{name: "inactive session or model assignment", licenseStatus: "active", contextActive: func() *bool { value := false; return &value }()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application, pool, _, _ := newRuntimeHTTPApplication(t)
+			handler := New(application).Handler()
+			pool.ExpectQuery(`SELECT status,digest,deployment_id FROM licenses`).WithArgs("deployment-a", "lic-1").WillReturnRows(
+				pgxmock.NewRows([]string{"status", "digest", "deployment_id"}).AddRow(test.licenseStatus, "sha256:abc", "deployment-a"),
+			)
+			if test.contextActive != nil {
+				pool.ExpectQuery(`SELECT EXISTS\(`).WithArgs("deployment-a", "session-user", "user-a", "model-a").WillReturnRows(
+					pgxmock.NewRows([]string{"exists"}).AddRow(*test.contextActive),
+				)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/internal/gateway/licenses/lic-1", nil)
+			request.Header.Set("X-AEP-Gateway-Token", "gateway-secret")
+			request.Header.Set("X-AEP-Deployment-ID", "deployment-a")
+			request.Header.Set("X-AEP-User-ID", "user-a")
+			request.Header.Set("X-AEP-Session-ID", "session-user")
+			request.Header.Set("X-AEP-Model-ID", "model-a")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"active":false`) {
+				t.Fatalf("internal status = %d %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 
