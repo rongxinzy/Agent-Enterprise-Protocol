@@ -9,11 +9,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
+
+type migrationConnection interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Begin(context.Context) (pgx.Tx, error)
+	Close(context.Context) error
+}
+
+type pooledMigrationConnection struct {
+	connection *pgxpool.Conn
+}
+
+func (c pooledMigrationConnection) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	return c.connection.Exec(ctx, sql, arguments...)
+}
+
+func (c pooledMigrationConnection) QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row {
+	return c.connection.QueryRow(ctx, sql, arguments...)
+}
+
+func (c pooledMigrationConnection) Begin(ctx context.Context) (pgx.Tx, error) {
+	return c.connection.Begin(ctx)
+}
+
+func (c pooledMigrationConnection) Close(ctx context.Context) error {
+	return c.connection.Conn().Close(ctx)
+}
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	connection, err := pool.Acquire(ctx)
@@ -21,6 +50,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	defer connection.Release()
+	return migrateWithConnection(ctx, pooledMigrationConnection{connection: connection}, migrations)
+}
+
+func migrateWithConnection(ctx context.Context, connection migrationConnection, migrationFS fs.FS) error {
 	const lockID int64 = 0x4145505F4D494752
 	if _, err := connection.Exec(ctx, `SELECT pg_advisory_lock($1)`, lockID); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
@@ -29,13 +62,13 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		unlockContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if _, err := connection.Exec(unlockContext, `SELECT pg_advisory_unlock($1)`, lockID); err != nil {
-			_ = connection.Conn().Close(unlockContext)
+			_ = connection.Close(unlockContext)
 		}
 	}()
 	if _, err := connection.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	entries, err := fs.ReadDir(migrations, "migrations")
+	entries, err := fs.ReadDir(migrationFS, "migrations")
 	if err != nil {
 		return err
 	}
@@ -51,7 +84,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		if applied {
 			continue
 		}
-		content, err := migrations.ReadFile("migrations/" + entry.Name())
+		content, err := fs.ReadFile(migrationFS, "migrations/"+entry.Name())
 		if err != nil {
 			return err
 		}
