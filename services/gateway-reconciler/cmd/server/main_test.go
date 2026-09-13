@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -128,5 +130,107 @@ func TestRunTenantStopsAfterPendingStatus(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("reconciler did not stop when canceled")
+	}
+}
+
+func TestRunTenantReportsControlPlaneFailureAndStops(t *testing.T) {
+	observed := make(chan reconciler.Status, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			http.Error(response, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var status reconciler.Status
+		if err := json.NewDecoder(request.Body).Decode(&status); err != nil {
+			t.Errorf("decode failure status: %v", err)
+			return
+		}
+		observed <- status
+	}))
+	defer server.Close()
+	worker, err := reconciler.New(reconciler.Config{ControlURL: server.URL, Token: "test-token", OutputDir: t.TempDir(), Tenants: []string{"demo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		runTenant(ctx, worker, "demo", time.Hour)
+		close(done)
+	}()
+	select {
+	case status := <-observed:
+		if status.State != "error" || status.ErrorCode == nil || *status.ErrorCode != "CONTROL_PLANE_UNAVAILABLE" {
+			t.Fatalf("unexpected failure status: %#v", status)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconciler did not report control-plane failure")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconciler did not stop during backoff")
+	}
+}
+
+func TestServeHealthRespondsAndShutsDown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		serveHealth(ctx, address)
+		close(done)
+	}()
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		response, err := client.Get("http://" + address + "/livez")
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("health listener did not start: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, test := range []struct {
+		path   string
+		status int
+	}{
+		{"/livez", http.StatusOK},
+		{"/readyz", http.StatusOK},
+		{"/missing", http.StatusNotFound},
+	} {
+		response, err := client.Get("http://" + address + test.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != test.status {
+			t.Fatalf("%s: status = %d, body = %q, error = %v", test.path, response.StatusCode, body, err)
+		}
+		if test.status == http.StatusOK && string(body) != `{"status":"ok"}` {
+			t.Fatalf("%s: unexpected health body %q", test.path, body)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("health listener did not stop after cancellation")
 	}
 }
