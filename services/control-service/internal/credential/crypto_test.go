@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,60 @@ func TestProviderValidationAndMasking(t *testing.T) {
 	}
 	if got := Mask("abc"); got != "****" {
 		t.Fatalf("Mask(short) = %q", got)
+	}
+}
+
+func TestFileProviderRejectsInvalidKeyring(t *testing.T) {
+	valid := base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901"))
+	for _, test := range []struct {
+		name, content, want string
+	}{
+		{"empty", "  \n", "empty"},
+		{"invalid base64", "not-base64", "illegal base64"},
+		{"short key", base64.StdEncoding.EncodeToString([]byte("short")), "exactly 32 bytes"},
+		{"malformed json", "{broken", "decode credential keyring"},
+		{"missing active key", `{"keys":{"one":"` + valid + `"}}`, "requires activeKeyId"},
+		{"missing keys", `{"activeKeyId":"one","keys":{}}`, "requires activeKeyId"},
+		{"invalid member", `{"activeKeyId":"one","keys":{"one":"broken"}}`, `decode credential key "one"`},
+		{"unknown active key", `{"activeKeyId":"two","keys":{"one":"` + valid + `"}}`, "not present"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "keys")
+			if err := os.WriteFile(path, []byte(test.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := NewProvider("", path); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("NewProvider() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+	if _, _, err := NewProvider("", filepath.Join(t.TempDir(), "missing")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing key file error = %v", err)
+	}
+}
+
+func TestSealerRejectsMissingKeysAndInvalidEnvelopes(t *testing.T) {
+	ctx := context.Background()
+	provider, enabled, err := NewProvider(base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901")), "")
+	if err != nil || !enabled {
+		t.Fatalf("NewProvider() = %v, %v", enabled, err)
+	}
+	sealer := NewSealer(provider)
+	envelope, err := sealer.Seal(ctx, []byte("secret"), AssociatedData("deployment", "credential"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sealer.Open(ctx, Envelope{KeyID: "unknown", Nonce: envelope.Nonce, Ciphertext: envelope.Ciphertext}, nil); !errors.Is(err, ErrKeyUnavailable) {
+		t.Fatalf("unknown key error = %v", err)
+	}
+	if _, err := sealer.Open(ctx, Envelope{KeyID: envelope.KeyID, Nonce: envelope.Nonce[:len(envelope.Nonce)-1], Ciphertext: envelope.Ciphertext}, nil); err == nil || !strings.Contains(err.Error(), "nonce") {
+		t.Fatalf("invalid nonce error = %v", err)
+	}
+	invalid := NewSealer(&staticProvider{key: MasterKey{ID: "short", Bytes: []byte("short")}})
+	if _, err := invalid.Seal(ctx, []byte("secret"), nil); err == nil {
+		t.Fatal("Seal accepted a short master key")
+	}
+	if _, err := invalid.Open(ctx, Envelope{KeyID: "short"}, nil); err == nil {
+		t.Fatal("Open accepted a short master key")
 	}
 }

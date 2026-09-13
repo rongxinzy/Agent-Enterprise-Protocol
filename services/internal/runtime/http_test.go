@@ -48,3 +48,44 @@ func TestHTTPMetricsUseStableRoutesAndRedactedLogs(t *testing.T) {
 		t.Fatalf("safe access-log fields missing: %s", logOutput)
 	}
 }
+
+func TestHTTPMetricsFallbackRoutesAndProbeFailures(t *testing.T) {
+	previous := slog.Default()
+	defer slog.SetDefault(previous)
+	var logs bytes.Buffer
+	slog.SetDefault(NewTestLogger(&logs))
+	metrics := NewHTTPMetrics("gateway.authorizer")
+	handler := metrics.Middleware(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/readyz" {
+			http.Error(response, "unavailable", http.StatusServiceUnavailable)
+		}
+	}))
+	for _, test := range []struct {
+		path   string
+		status int
+	}{
+		{"/v1/chat/completions?token=secret", 200},
+		{"/other/secret-path", 200},
+		{"/readyz", 503},
+		{"/healthz", 200},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.path, nil))
+		if response.Code != test.status {
+			t.Fatalf("%s returned %d", test.path, response.Code)
+		}
+	}
+	response := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, metric := range []string{
+		`route="/v1/*",status="200"`, `route="unmatched",status="200"`,
+		`route="/readyz",status="503"`, `route="/healthz",status="200"`,
+	} {
+		if !strings.Contains(response.Body.String(), metric) {
+			t.Fatalf("missing %s in metrics: %s", metric, response.Body.String())
+		}
+	}
+	if strings.Contains(logs.String(), "secret") || strings.Contains(logs.String(), `"route":"/healthz"`) || !strings.Contains(logs.String(), `"route":"/readyz"`) {
+		t.Fatalf("unsafe or missing access log: %s", logs.String())
+	}
+}
