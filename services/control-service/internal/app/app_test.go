@@ -578,6 +578,66 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 			t.Fatal("IssueUserSession accepted a session insert failure")
 		}
 	})
+	for _, test := range []struct {
+		name      string
+		configure func(pgxmock.PgxPoolIface)
+	}{
+		{name: "refresh token insert error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnError(errors.New("token insert failed"))
+			pool.ExpectRollback()
+		}},
+		{name: "delivery insert error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a").WillReturnError(errors.New("delivery insert failed"))
+			pool.ExpectRollback()
+		}},
+		{name: "commit error", configure: func(pool pgxmock.PgxPoolIface) {
+			pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			pool.ExpectCommit().WillReturnError(errors.New("commit failed"))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application, pool, sqlMock := newMockApplication(t)
+			expectModelScopes(pool, "chat-a")
+			expectUserRoles(sqlMock, "member")
+			pool.ExpectBegin()
+			pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			test.configure(pool)
+			result, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"})
+			if err == nil || result.AccessToken != "" || result.RefreshToken != "" {
+				t.Fatalf("IssueUserSession() = %#v, %v; failed transaction exposed tokens", result, err)
+			}
+		})
+	}
+}
+
+func TestRefreshUserSessionPasswordChangeSuppressesModelScopes(t *testing.T) {
+	application, pool, sqlMock := newMockApplication(t)
+	rawRefresh := "old-refresh-token"
+	pool.ExpectBeginTx(pgx.TxOptions{})
+	pool.ExpectQuery(`SELECT t\.session_id,s\.user_id`).WithArgs(auth.HashRefreshToken(rawRefresh)).WillReturnRows(pgxmock.NewRows([]string{
+		"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin",
+	}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", true, false))
+	expectModelScopes(pool, "chat-a")
+	expectUserRoles(sqlMock, "member")
+	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs(auth.HashRefreshToken(rawRefresh)).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), "session-a", pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	pool.ExpectExec(`UPDATE user_sessions SET last_seen_at=now\(\)`).WithArgs("session-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	pool.ExpectCommit()
+
+	result, err := application.RefreshUserSession(context.Background(), rawRefresh, "")
+	if err != nil || !result.PasswordChangeRequired || result.RefreshToken == "" || result.SessionID != "session-a" {
+		t.Fatalf("RefreshUserSession() = %#v, %v", result, err)
+	}
+	accessClaims, err := application.Tokens.ParseAccess(result.AccessToken)
+	if err != nil || !accessClaims.PasswordChangeRequired {
+		t.Fatalf("access claims = %#v, %v", accessClaims, err)
+	}
+	modelClaims, err := application.Tokens.ParseModel(result.ModelAccessToken)
+	if err != nil || len(modelClaims.ModelScopes) != 0 {
+		t.Fatalf("password-gated model claims = %#v, %v", modelClaims, err)
+	}
 }
 
 func TestRefreshUserSessionRejectsInvalidAndPropagatesFailures(t *testing.T) {
