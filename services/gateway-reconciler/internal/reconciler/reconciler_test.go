@@ -135,3 +135,107 @@ func TestSyncReportsKubernetesApplyFailure(t *testing.T) {
 		t.Fatalf("Sync() error = %v, statuses = %#v", err, statuses)
 	}
 }
+
+func TestSyncReportsControlAndDesiredStateFailures(t *testing.T) {
+	for _, test := range []struct {
+		name, failureCode                                                         string
+		fetchStatus                                                               int
+		malformed, noRevision, noDeployment, badHash, blockedOutput, rejectStatus bool
+		wantStates                                                                []string
+	}{
+		{name: "control unavailable", fetchStatus: http.StatusServiceUnavailable, failureCode: "CONTROL_PLANE_UNAVAILABLE", wantStates: []string{"error"}},
+		{name: "invalid desired json", malformed: true, failureCode: "CONTROL_PLANE_UNAVAILABLE", wantStates: []string{"error"}},
+		{name: "not published", noRevision: true, wantStates: []string{"pending"}},
+		{name: "invalid deployment", noDeployment: true, failureCode: "RENDER_FAILED", wantStates: []string{"applying", "error"}},
+		{name: "mismatched desired hash", badHash: true, failureCode: "DESIRED_HASH_MISMATCH", wantStates: []string{"applying", "error"}},
+		{name: "output not writable", blockedOutput: true, failureCode: "OUTPUT_WRITE_FAILED", wantStates: []string{"applying", "error"}},
+		{name: "status update rejected", rejectStatus: true, failureCode: "status update returned 503", wantStates: []string{"applying"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{}}
+			desired.ContentHash = canonicalHash(desired)
+			if test.noRevision {
+				desired.Revision = ""
+			}
+			if test.noDeployment {
+				desired.DeploymentID = ""
+			}
+			if test.badHash {
+				desired.ContentHash = "mismatched"
+			}
+			statuses := make([]Status, 0, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				if request.Method == http.MethodGet {
+					if test.fetchStatus != 0 {
+						response.WriteHeader(test.fetchStatus)
+						return
+					}
+					if test.malformed {
+						_, _ = response.Write([]byte("{"))
+						return
+					}
+					_ = json.NewEncoder(response).Encode(desired)
+					return
+				}
+				var status Status
+				if err := json.NewDecoder(request.Body).Decode(&status); err != nil {
+					t.Errorf("decode status: %v", err)
+				}
+				statuses = append(statuses, status)
+				if test.rejectStatus {
+					response.WriteHeader(http.StatusServiceUnavailable)
+				}
+			}))
+			defer server.Close()
+			output := t.TempDir()
+			if test.blockedOutput {
+				output = filepath.Join(output, "not-a-directory")
+				if err := os.WriteFile(output, []byte("file"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			worker, err := New(Config{ControlURL: server.URL, Token: "token", OutputDir: output, Tenants: []string{"demo"}, HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = worker.Sync(context.Background(), "demo")
+			if test.failureCode == "" && err != nil || test.failureCode != "" && (err == nil || !strings.Contains(err.Error(), test.failureCode)) {
+				t.Fatalf("Sync() error = %v, want %q", err, test.failureCode)
+			}
+			if len(statuses) != len(test.wantStates) {
+				t.Fatalf("statuses = %#v", statuses)
+			}
+			for i, want := range test.wantStates {
+				if statuses[i].State != want {
+					t.Fatalf("status %d = %#v, want %s", i, statuses[i], want)
+				}
+			}
+			if test.failureCode != "" && !test.rejectStatus {
+				last := statuses[len(statuses)-1]
+				if last.ErrorCode == nil || *last.ErrorCode != test.failureCode {
+					t.Fatalf("failure status = %#v", last)
+				}
+			}
+		})
+	}
+}
+
+func TestNewReconcilerValidatesConfigAndSortsTenants(t *testing.T) {
+	for _, config := range []Config{
+		{Token: "token", OutputDir: "/tmp", Tenants: []string{"demo"}},
+		{ControlURL: "https://control.example", OutputDir: "/tmp", Tenants: []string{"demo"}},
+		{ControlURL: "https://control.example", Token: "token", Tenants: []string{"demo"}},
+		{ControlURL: "https://control.example", Token: "token", OutputDir: "/tmp"},
+	} {
+		if _, err := New(config); err == nil {
+			t.Fatalf("New(%#v) accepted missing configuration", config)
+		}
+	}
+	worker, err := New(Config{ControlURL: "https://control.example///", Token: "token", OutputDir: t.TempDir(), Tenants: []string{"z", "a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker.config.ControlURL != "https://control.example" || worker.config.Tenants[0] != "a" || worker.config.HTTPClient == nil {
+		t.Fatalf("normalized config = %#v", worker.config)
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +62,76 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 	}
 	if !strings.Contains(applied[0].path, "/ingresses/aep-model-gateway-demo-tenant-") || !strings.Contains(applied[1].path, "/wasmplugins/aep-ai-proxy-demo-tenant-") {
 		t.Fatalf("unexpected resource paths: %#v", applied)
+	}
+}
+
+func TestKubernetesApplierValidatesConfigurationAndResources(t *testing.T) {
+	for _, config := range []KubernetesConfig{
+		{URL: "https://kubernetes.example"},
+		{Token: "token"},
+		{URL: "ftp://kubernetes.example", Token: "token"},
+		{URL: "://broken", Token: "token"},
+	} {
+		if _, err := NewKubernetesApplier(config); err == nil {
+			t.Fatalf("accepted invalid Kubernetes config: %#v", config)
+		}
+	}
+	missing := filepath.Join(t.TempDir(), "missing-ca")
+	if _, err := NewKubernetesApplier(KubernetesConfig{URL: "https://kubernetes.example", Token: "token", CAFile: missing}); err == nil || !strings.Contains(err.Error(), "read Kubernetes CA") {
+		t.Fatalf("missing CA error = %v", err)
+	}
+	ca := filepath.Join(t.TempDir(), "invalid-ca")
+	if err := os.WriteFile(ca, []byte("not a PEM certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewKubernetesApplier(KubernetesConfig{URL: "https://kubernetes.example", Token: "token", CAFile: ca}); err == nil || !strings.Contains(err.Error(), "no certificates") {
+		t.Fatalf("invalid CA error = %v", err)
+	}
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: "http://localhost", Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applier.Apply(context.Background(), DesiredState{DeploymentID: "demo"}, "not a rendered document"); err == nil {
+		t.Fatal("Apply accepted a missing Higress resource")
+	}
+}
+
+func TestKubernetesApplierHandlesDeletedAndRejectedIngress(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		deleteStatus int
+		wantError    bool
+	}{
+		{"already absent", http.StatusNotFound, false},
+		{"delete rejected", http.StatusForbidden, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			methods := make([]string, 0, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				methods = append(methods, request.Method)
+				if request.Method == http.MethodDelete {
+					response.WriteHeader(test.deleteStatus)
+				}
+			}))
+			defer server.Close()
+			applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			desired := DesiredState{DeploymentID: "demo", Revision: "rev-1"}
+			document, _, err := Render(desired)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = applier.Apply(context.Background(), desired, document)
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), "403") || len(methods) != 1 {
+					t.Fatalf("Apply() = %v, methods = %v", err, methods)
+				}
+			} else if err != nil || len(methods) != 2 || methods[1] != http.MethodPatch {
+				t.Fatalf("Apply() = %v, methods = %v", err, methods)
+			}
+		})
 	}
 }
 
