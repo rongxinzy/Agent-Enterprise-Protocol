@@ -12,8 +12,6 @@ const commit = options.commit ?? process.env.GITHUB_SHA;
 if (!commit || !/^[a-f0-9]{40}$/i.test(commit)) throw new Error('--commit must be a full Git commit SHA');
 
 const expected = [
-  `aep-offline-base-v${version}.tar.gz`,
-  `aep-offline-gateway-v${version}.tar.gz`,
   'aep-foundation.source.sbom.cdx.json',
   'aep-control-service.image.sbom.cdx.json',
   'aep-gateway-authorizer.image.sbom.cdx.json',
@@ -37,7 +35,6 @@ for (const file of actual) {
     const sbom = JSON.parse(content.toString('utf8'));
     if (sbom.bomFormat !== 'CycloneDX') throw new Error(`release SBOM is not CycloneDX: ${file}`);
   }
-  if (file.endsWith('.tar.gz') && (content[0] !== 0x1f || content[1] !== 0x8b)) throw new Error(`release Bundle is not gzip encoded: ${file}`);
   artifacts.push({file, bytes: content.byteLength, sha256: digest(content)});
 }
 const manifest = {

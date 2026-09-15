@@ -1,8 +1,9 @@
 # 离线部署 Bundle
 
-仓库可以导出用于受控内网/隔离网安装的 Docker 镜像 Bundle。Bundle 包含
+仓库可以暂存用于受控内网/隔离网安装的 Docker 镜像 Bundle。Bundle 包含
 Compose 输入文件、镜像归档、镜像 ID/digest 和 SHA-256 校验值，不包含
-PostgreSQL/MinIO 数据、供应商 API Key、License 私钥、签名 seed 或客户配置。
+PostgreSQL/MinIO 数据、供应商 API Key、License 私钥、签名 seed、离线制品签名
+私钥或客户配置。
 
 ## 导出
 
@@ -15,20 +16,47 @@ npm run compose:gateway:up
 npm run offline:bundle -- --output-dir release/offline-gateway --profile gateway
 ```
 
-如果 Compose 声明的镜像未存在于本机，命令会失败。每个归档都记录在
-`manifest.json` 和 `SHA256SUMS` 中，传输时必须保持完整目录结构。
+如果 Compose 声明的镜像未存在于本机，命令会失败。命令生成 `manifest.json`
+和 `SHA256SUMS` 后以 `awaiting-signature` 状态结束。manifest 会列出所有载荷
+文件；checksum 文件覆盖 manifest、安装器、Compose 输入、文档、测试夹具和
+全部镜像归档。
+
+不属于本仓库和云端 CI 的获批本地签名器，必须对 `SHA256SUMS` 的准确字节生成
+Ed25519 detached signature：
+
+```sh
+openssl pkeyutl -sign -rawin \
+  -inkey /secure/offline-release.private.pem \
+  -in release/offline-base/SHA256SUMS \
+  -out release/offline-base/SHA256SUMS.sig
+```
+
+每个 profile 都应分别签名，并使用单独保管的公钥完成校验后才能打包。不得发布
+未签名的暂存目录。
 
 ## 隔离网安装
 
-目标机可以直接运行 Bundle 自带的无依赖安装器。安装器会校验每个镜像归档的
-SHA-256、执行离线 `docker load`、启动 Compose，并等待 control-service 就绪：
+受信 Ed25519 公钥必须通过不同于 Bundle 的渠道预置到目标机。执行任何 Bundle
+内代码前，先使用宿主机可信工具验证 checksum 签名并校验全部载荷：
 
 ```sh
-node install-offline-bundle.mjs --project aep-offline --port 8080
+openssl pkeyutl -verify -pubin \
+  -inkey /etc/aep/offline-release.pub.pem \
+  -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig
+sha256sum --check SHA256SUMS
 ```
 
-可先使用 `node install-offline-bundle.mjs --dry-run` 查看计划而不修改 Docker
-状态。仅使用 base Bundle 时安装器会自动省略 gateway 配置。生成的
+随后运行 Bundle 自带的无依赖安装器。安装器会再次完成签名和全文件校验，再执行
+离线 `docker load`、启动 Compose，并等待 control-service 就绪：
+
+```sh
+node install-offline-bundle.mjs \
+  --trusted-public-key /etc/aep/offline-release.pub.pem \
+  --project aep-offline --port 8080
+```
+
+安装器会拒绝使用 Bundle 目录内的公钥，因为它不构成独立信任锚。追加
+`--dry-run` 可查看计划而不修改 Docker 状态。仅使用 base Bundle 时安装器会自动省略 gateway 配置。生成的
 `offline.yaml` 会移除构建上下文，并固定使用 Bundle 中已加载的 AEP 服务镜像。PostgreSQL、MinIO、部署
 Secret、License 和供应商凭据仍由部署方通过离线 Secret 流程单独提供。
 

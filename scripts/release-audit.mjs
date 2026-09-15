@@ -38,6 +38,8 @@ assert(packageDocument.version === release.packageVersion, "package version does
 assert(packageDocument.scripts?.["release:audit"] === "node scripts/release-audit.mjs", "release:audit script is not wired");
 assert(packageDocument.scripts?.["release:artifacts:manifest"] === "node scripts/release-artifact-manifest.mjs", "release artifact manifest script is not wired");
 assert(packageDocument.scripts?.["test:release-artifacts"] === "node tests/release-artifacts.mjs", "release artifact manifest tests are not wired");
+assert(packageDocument.scripts?.["test:offline-bundle-integrity"] === "node tests/offline-bundle-integrity.mjs", "offline Bundle integrity tests are not wired");
+assert(packageDocument.scripts?.check?.includes("npm run test:offline-bundle-integrity"), "default checks omit offline Bundle integrity tests");
 assert(packageDocument.scripts?.["security:check"]?.includes("govulncheck@v1.8.0"), "reachable Go vulnerability scan is not wired");
 assert(packageDocument.scripts?.["license:boundary:check"] === "node scripts/license-boundary-audit.mjs", "license boundary audit is not wired");
 assert(packageDocument.scripts?.["sdk:package:check"]?.includes("scripts/sdk-package-check.mjs"), "SDK package check is not wired");
@@ -164,15 +166,21 @@ assert(sdkReleaseWorkflow.includes("git merge-base --is-ancestor"), "SDK release
 assert(sdkReleaseWorkflow.includes("npm run sdk:package:check"), "SDK release workflow bypasses the package check");
 assert(foundationReleaseWorkflow.includes("anchore/sbom-action@v0"), "foundation release workflow does not generate an SBOM");
 assert(foundationReleaseWorkflow.includes("npm run offline:bundle"), "foundation release workflow does not build offline bundles");
+assert(!foundationReleaseWorkflow.includes("tar -C release/offline"), "cloud release workflow must not publish unsigned offline bundles");
 assert(foundationReleaseWorkflow.includes("aep-control-service.image.sbom.cdx.json"), "foundation release workflow omits the control-service image SBOM");
 assert(foundationReleaseWorkflow.includes("aep-gateway-authorizer.image.sbom.cdx.json"), "foundation release workflow omits the gateway-authorizer image SBOM");
 assert(foundationReleaseWorkflow.includes("aep-gateway-reconciler.image.sbom.cdx.json"), "foundation release workflow omits the gateway-reconciler image SBOM");
 assert(foundationReleaseWorkflow.includes("release:artifacts:manifest"), "foundation release workflow does not publish a release manifest and checksums");
 assert(!foundationReleaseWorkflow.toLowerCase().includes("private.key"), "foundation release workflow must not reference a private signing key");
 const offlineBundle = await readText("scripts/offline-bundle.mjs");
+const offlineInstaller = await readText("scripts/install-offline-bundle.mjs");
 assert(offlineBundle.includes("config', '--format', 'json'"), "offline Bundle generation does not resolve final Compose service images");
 assert(offlineBundle.includes("serviceImage('gateway-authorizer')"), "offline Bundle does not pin the resolved gateway-authorizer image");
 assert(offlineBundle.includes("development and air-gap integration topology"), "offline Bundle must identify its non-production Compose boundary");
+assert(offlineBundle.includes("status: 'awaiting-signature'"), "offline Bundle generation must not claim unsigned output is release-ready");
+assert(offlineInstaller.includes("--trusted-public-key is required"), "offline installer must require an external trust anchor");
+assert(offlineInstaller.includes("must be provisioned outside the Bundle directory"), "offline installer must reject a bundled trust anchor");
+assert(offlineInstaller.includes("verify(null, checksumContent, publicKey, signature)"), "offline installer must verify the signed checksum manifest");
 const developmentCompose = await readText("deploy/compose/compose.yaml");
 const developmentGatewayCompose = await readText("deploy/compose/gateway.yaml");
 assert(developmentCompose.includes("AEP_ENVIRONMENT: development"), "local Compose must be pinned to the development environment");
@@ -196,6 +204,8 @@ for (const readme of ["README.md", "README.zh-CN.md"]) {
 const gitignore = await readText(".gitignore");
 assert(gitignore.includes("license-signer-local/"), "local signer directory must be ignored");
 assert(gitignore.includes("*.license.private.*"), "private License artifacts must be ignored");
+assert(gitignore.includes("offline-signer-local/"), "offline Bundle signer directory must be ignored");
+assert(gitignore.includes("*.offline.private.*"), "offline Bundle private keys must be ignored");
 const signerBoundary = await readText("docs/license-signing-local.md");
 const signerBoundaryZh = await readText("docs/license-signing-local.zh-CN.md");
 for (const content of [signerBoundary, signerBoundaryZh]) {

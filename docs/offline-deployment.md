@@ -1,10 +1,10 @@
 # Offline Deployment Bundle
 
-The repository can export a self-contained Docker image bundle for a controlled
+The repository can stage a self-contained Docker image bundle for a controlled
 air-gapped installation. The bundle contains Compose inputs, locally saved image
 archives, immutable image IDs/digests, and SHA-256 checksums. It never contains
 PostgreSQL data, MinIO data, provider credentials, License private keys, signing
-seeds, or customer configuration.
+seeds, offline release private keys, or customer configuration.
 
 ## Export
 
@@ -17,21 +17,50 @@ npm run compose:gateway:up
 npm run offline:bundle -- --output-dir release/offline-gateway --profile gateway
 ```
 
-The command fails if any declared image is missing locally. Each archive is
-listed in `manifest.json` and `SHA256SUMS`. Keep the manifest and image archives
-together during transfer.
+The command fails if any declared image is missing locally. It writes
+`manifest.json` and `SHA256SUMS`, then exits with `awaiting-signature`. Every
+payload file is listed in the manifest, and the checksum file covers the
+manifest, installer, Compose inputs, documentation, fixtures, and image
+archives.
+
+The approved local signer, which is not part of this repository or cloud CI,
+must create the detached Ed25519 signature over the exact `SHA256SUMS` bytes:
+
+```sh
+openssl pkeyutl -sign -rawin \
+  -inkey /secure/offline-release.private.pem \
+  -in release/offline-base/SHA256SUMS \
+  -out release/offline-base/SHA256SUMS.sig
+```
+
+Repeat for each profile, validate it with the separately held public key, and
+only then package the directory. Never publish the unsigned staging directory.
 
 ## Air-gapped install
 
-On the target host, run the dependency-free installer bundled with the release.
-It verifies every archive against both checksum sources, loads the images, starts
-Compose without pulling or building, and waits for control-service readiness:
+Provision the trusted Ed25519 public key on the target through a different
+channel from the bundle. Before executing any bundled code, use trusted host
+tools to authenticate the checksum file and validate every payload:
 
 ```sh
-node install-offline-bundle.mjs --project aep-offline --port 8080
+openssl pkeyutl -verify -pubin \
+  -inkey /etc/aep/offline-release.pub.pem \
+  -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig
+sha256sum --check SHA256SUMS
 ```
 
-Use `node install-offline-bundle.mjs --dry-run` to inspect the actions without
+Then run the dependency-free installer. It repeats the signature and full-file
+checks, loads images, starts Compose without pulling or building, and waits for
+control-service readiness:
+
+```sh
+node install-offline-bundle.mjs \
+  --trusted-public-key /etc/aep/offline-release.pub.pem \
+  --project aep-offline --port 8080
+```
+
+The installer rejects a public key located inside the bundle; such a key is not
+an independent trust anchor. Add `--dry-run` to inspect the actions without
 changing Docker state. For a base-only bundle the installer automatically omits
 `gateway.yaml`. The generated `offline.yaml` removes build contexts and pins the loaded AEP service images. PostgreSQL,
 MinIO, deployment Secrets, License material, and provider credentials remain

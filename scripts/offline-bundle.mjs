@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {cp, mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
+import {cp, mkdir, readFile, readdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -41,20 +42,20 @@ for (const [index, image] of images.entries()) {
   const archiveName = `${String(index + 1).padStart(2, '0')}-${safeName(image)}.tar`;
   const archivePath = path.join(imageDir, archiveName);
   await command('docker', ['save', '--output', archivePath, image]);
-  const archive = await readFile(archivePath);
+  const archive = await fileDigest(archivePath);
   manifestImages.push({
     reference: image,
     digest,
     imageId: imageID,
     archive: `images/${archiveName}`,
-    archiveSha256: createHash('sha256').update(archive).digest('hex'),
-    archiveBytes: archive.byteLength,
+    archiveSha256: archive.sha256,
+    archiveBytes: archive.bytes,
   });
 }
 
 const packageVersion = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
 const manifest = {
-  format: 'aep-offline-bundle-v1',
+  format: 'aep-offline-bundle-v2',
   protocolVersion: '1.0',
   packageVersion,
   profile,
@@ -66,9 +67,12 @@ const manifest = {
     'deploy/compose/offline.yaml',
   ],
   images: manifestImages,
+  signature: {
+    algorithm: 'Ed25519',
+    payload: 'SHA256SUMS',
+    file: 'SHA256SUMS.sig',
+  },
 };
-await writeFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-await writeFile(path.join(outputDir, 'SHA256SUMS'), `${manifestImages.map(item => `${item.archiveSha256}  ${item.archive}`).join('\n')}\n`);
 await writeFile(path.join(outputDir, 'deploy', 'compose', 'offline.yaml'), offlineCompose(manifestImages, serviceImages));
 const offlineDocumentation = offlineReadme(manifest)
   .replace(
@@ -80,7 +84,18 @@ const offlineDocumentation = offlineReadme(manifest)
     'The bundle contains no provider API keys, License private keys, database data, MinIO data, or customer configuration. The copied development Compose file contains only disposable local fixture values.',
   );
 await writeFile(path.join(outputDir, 'OFFLINE-README.md'), offlineDocumentation);
-console.log(JSON.stringify({status: 'passed', outputDir, profile, images: manifestImages.map(item => ({reference: item.reference, digest: item.digest, archive: item.archive}))}, null, 2));
+manifest.files = await describePayloadFiles(outputDir);
+await writeFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+const signedFiles = [await describeFile(outputDir, 'manifest.json'), ...manifest.files].sort((left, right) => left.path.localeCompare(right.path));
+await writeFile(path.join(outputDir, 'SHA256SUMS'), `${signedFiles.map(item => `${item.sha256}  ${item.path}`).join('\n')}\n`);
+console.log(JSON.stringify({
+  status: 'awaiting-signature',
+  outputDir,
+  profile,
+  signingPayload: path.join(outputDir, 'SHA256SUMS'),
+  signatureFile: path.join(outputDir, 'SHA256SUMS.sig'),
+  images: manifestImages.map(item => ({reference: item.reference, digest: item.digest, archive: item.archive})),
+}, null, 2));
 
 function offlineCompose(manifestImages, serviceImages) {
   const serviceImage = name => {
@@ -110,8 +125,48 @@ function offlineCompose(manifestImages, serviceImages) {
 
 function offlineReadme(manifest) {
   const files = manifest.composeFiles.map(file => `- \`${file}\``).join('\n');
-  const compose = manifest.composeFiles.map(file => `-f ${file}`).join(' ');
-  return `# AEP Offline Bundle\n\nThis bundle was generated for the **${manifest.profile}** profile. It contains the exact image archives and SHA-256 values recorded in \`manifest.json\`.\n\n## Transfer and verify\n\nCopy the complete bundle directory to the air-gapped host. Verify \`SHA256SUMS\` with a trusted local checksum tool before installation.\n\n## One-command install\n\nRun the bundled dependency-free installer from the Bundle directory:\n\n\`\`\`sh\nnode install-offline-bundle.mjs --project aep-offline --port 8080\n\`\`\`\n\nThe installer verifies every archive against both \`SHA256SUMS\` and \`manifest.json\`, loads the images, starts Compose with \`--pull never --no-build\`, and waits for the control service readiness endpoint. Use \`--dry-run\` to inspect actions without changing Docker state.\n\nThe generated \`offline.yaml\` disables build contexts and pins the locally loaded AEP service images. Do not use \`--build\` on the air-gapped host.\n\nCompose inputs:\n\n${files}\n\nThe bundle contains no provider API keys, License private keys, signing seeds, database data, MinIO data, or customer configuration. Supply those through the deployment Secret mechanism.\n`;
+  return `# AEP Offline Bundle\n\nThis **${manifest.profile}** bundle is an unsigned staging directory until the approved offline release signer creates \`SHA256SUMS.sig\`. The signed checksum file covers \`manifest.json\`, the installer, every Compose input, documentation, fixtures, and every image archive.\n\n## Transfer and verify\n\nProvision the trusted Ed25519 public key separately from the bundle. Before executing the bundled installer, use trusted host tools:\n\n\`\`\`sh\nopenssl pkeyutl -verify -pubin -inkey /etc/aep/offline-release.pub.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig\nsha256sum --check SHA256SUMS\n\`\`\`\n\nNever accept a public key copied from the same bundle.\n\n## One-command install\n\nAfter the independent preflight, run the dependency-free installer and pass the separately provisioned public key:\n\n\`\`\`sh\nnode install-offline-bundle.mjs --trusted-public-key /etc/aep/offline-release.pub.pem --project aep-offline --port 8080\n\`\`\`\n\nThe installer repeats signature and full-file verification before it loads images, starts Compose with \`--pull never --no-build\`, and waits for the control service readiness endpoint. Use \`--dry-run\` to inspect actions without changing Docker state.\n\nThe generated \`offline.yaml\` disables build contexts and pins the locally loaded AEP service images. Do not use \`--build\` on the air-gapped host.\n\nCompose inputs:\n\n${files}\n\nThe bundle contains no provider API keys, License private keys, signing seeds, database data, MinIO data, or customer configuration. Supply those through the deployment Secret mechanism.\n`;
+}
+
+async function describePayloadFiles(directory) {
+  const paths = await walk(directory);
+  const files = [];
+  for (const file of paths
+    .filter(item => !['manifest.json', 'SHA256SUMS', 'SHA256SUMS.sig'].includes(item))
+    .sort()) {
+    files.push(await describeFile(directory, file));
+  }
+  return files;
+}
+
+async function walk(directory, prefix = '') {
+  const entries = await readdir(path.join(directory, prefix), {withFileTypes: true});
+  const files = [];
+  for (const entry of entries) {
+    const relative = path.posix.join(prefix.replaceAll(path.sep, '/'), entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`Offline Bundle cannot contain symbolic links: ${relative}`);
+    if (entry.isDirectory()) files.push(...await walk(directory, relative));
+    else if (entry.isFile()) files.push(relative);
+    else throw new Error(`Offline Bundle contains an unsupported filesystem entry: ${relative}`);
+  }
+  return files;
+}
+
+async function describeFile(directory, relative) {
+  const details = await fileDigest(path.join(directory, relative.replaceAll('/', path.sep)));
+  return {path: relative, sha256: details.sha256, bytes: details.bytes};
+}
+
+async function fileDigest(file) {
+  const details = await stat(file);
+  const hash = createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const stream = createReadStream(file);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  return {sha256: hash.digest('hex'), bytes: details.size};
 }
 
 function parseArgs(args) {
