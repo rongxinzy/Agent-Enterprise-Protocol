@@ -1,58 +1,75 @@
-import {createHash} from 'node:crypto';
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+
+import {
+  BACKUP_FORMAT,
+  assertHelperImage,
+  createBackupEnvelope,
+  protectArtifact,
+  readKeyEncryptionKey,
+  secureDirectory,
+  writePrivateFile,
+} from './backup-security.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const options = parseArgs(process.argv.slice(2));
 const project = options.project ?? 'aep-m0';
 const composeFiles = (options['compose-file'] ?? 'deploy/compose/compose.yaml').split(',').map(file => path.resolve(root, file));
 const outputDir = path.resolve(root, options['output-dir'] ?? path.join('backups', timestamp()));
-const helperImage = options['helper-image'] ?? 'alpine:3.20';
+const helperImage = assertHelperImage(options['helper-image'] ?? 'alpine:3.20');
+const encryptionKeyFile = options['encryption-key-file'] ?? process.env.AEP_BACKUP_ENCRYPTION_KEY_FILE;
 const minioConsolePort = options['minio-console-port'] ?? process.env.AEP_MINIO_CONSOLE_PORT;
 if (minioConsolePort) process.env.AEP_MINIO_CONSOLE_PORT = minioConsolePort;
 const composeArgs = ['compose', '-p', project, ...composeFiles.flatMap(file => ['-f', file])];
 
-await mkdir(outputDir, {recursive: true});
+await secureDirectory(outputDir);
+const keyEncryptionKey = encryptionKeyFile ? await readKeyEncryptionKey(path.resolve(root, encryptionKeyFile)) : null;
+let envelope = null;
 let stopped = false;
+let dump = null;
+let minioArchive = null;
 try {
+  envelope = keyEncryptionKey ? createBackupEnvelope(keyEncryptionKey) : null;
   await command('docker', [...composeArgs, 'stop', 'control-service', 'minio']);
   stopped = true;
 
-  const dump = await commandOutput('docker', [
+  dump = await commandOutput('docker', [
     ...composeArgs, 'exec', '-T', 'postgres', 'pg_dump', '-U', 'aep', '-d', 'aep', '--format=custom',
   ]);
-  const databasePath = path.join(outputDir, 'postgres.dump');
-  await writeFile(databasePath, dump);
+  const protectedDatabase = protectArtifact('postgres.dump', dump, envelope?.dataKey ?? null);
+  await writePrivateFile(path.join(outputDir, protectedDatabase.manifest.file), protectedDatabase.bytes);
+  if (protectedDatabase.bytes !== dump) protectedDatabase.bytes.fill(0);
 
   const volume = `${project}_minio-data`;
-  const archive = await commandOutput('docker', [
-    'run', '--rm', '-v', `${volume}:/source:ro`, helperImage,
+  minioArchive = await commandOutput('docker', [
+    'run', '--rm', '--pull', 'never', '-v', `${volume}:/source:ro`, helperImage,
     'tar', '-czf', '-', '-C', '/source', '.',
   ]);
-  const minioPath = path.join(outputDir, 'minio-data.tgz');
-  await writeFile(minioPath, archive);
+  const protectedMinio = protectArtifact('minio-data.tgz', minioArchive, envelope?.dataKey ?? null);
+  await writePrivateFile(path.join(outputDir, protectedMinio.manifest.file), protectedMinio.bytes);
+  if (protectedMinio.bytes !== minioArchive) protectedMinio.bytes.fill(0);
 
   const manifest = {
-    format: 'aep-backup-v1',
+    format: BACKUP_FORMAT,
     project,
     composeFiles: composeFiles.map(file => path.relative(root, file).replaceAll('\\', '/')),
     createdAt: new Date().toISOString(),
     helperImage,
+    encryption: envelope?.manifest ?? null,
     artifacts: [
-      artifact('postgres.dump', dump),
-      artifact('minio-data.tgz', archive),
+      protectedDatabase.manifest,
+      protectedMinio.manifest,
     ],
   };
-  await writeFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writePrivateFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify({status: 'passed', outputDir, project, artifacts: manifest.artifacts}, null, 2));
 } finally {
+  dump?.fill(0);
+  minioArchive?.fill(0);
+  envelope?.dataKey.fill(0);
+  keyEncryptionKey?.fill(0);
   if (stopped) await command('docker', [...composeArgs, 'start', 'minio', 'control-service'], true);
-}
-
-function artifact(file, bytes) {
-  return {file, bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex')};
 }
 
 function timestamp() {
