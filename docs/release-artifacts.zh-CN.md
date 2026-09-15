@@ -3,7 +3,6 @@
 对 `main` 历史中的提交创建 `aep-v<package-version>` 标签后，发布工作流会执行
 完整门禁并创建 AEP foundation GitHub Release。Release 包含：
 
-- base 与 gateway 两个离线 Compose Bundle；
 - CycloneDX 源码 SBOM；
 - control-service、gateway-authorizer、gateway-reconciler 三个镜像的
   CycloneDX SBOM；
@@ -11,11 +10,10 @@
   版本；
 - 覆盖所有制品及 release manifest 的 `SHA256SUMS`。
 
-版本化 AEP 镜像已装入离线 Bundle。本地 Compose gateway 档位使用的第三方镜像
-仍在 Bundle 自身的 `manifest.json` 中记录引用与 digest。gateway Bundle 只用于
-集成和隔离网验证，不会把 `higress-standalone` 变成获批的生产拓扑。两个
-Compose Bundle 均固定为开发档位，宿主端口仅绑定回环地址；它们用于验证离线
-镜像传输和集成，客户生产部署必须使用 Kubernetes 基线和外部 Secret。
+云端发布工作流只构建 base 与 gateway 离线目录，用于验证未签名的待签输入，
+不会打包或发布这些目录，因为生产离线制品签名私钥不会进入 GitHub CI。获批的
+本地发布工作站负责签署 `SHA256SUMS`，使用带外公钥复核完整 Bundle，再生成客户
+交付包。具体流程见 `offline-deployment.zh-CN.md`。
 
 传输前应下载同一 Release 的全部文件并校验：
 
@@ -23,9 +21,8 @@ Compose Bundle 均固定为开发档位，宿主端口仅绑定回环地址；�
 sha256sum --check SHA256SUMS
 ```
 
-云端工作流不会接收 License 私钥、客户制品签名私钥、部署 Secret、供应商凭据
-或客户 License。客户交付需要签名时，由获批的本地签名环境签署审阅后的
-`release-manifest.json` 或客户打包清单；签名器、私钥和未脱敏日志继续置于本
-仓库及 CI 之外。
+云端工作流不会接收 License 私钥、离线 Bundle 签名私钥、部署 Secret、供应商
+凭据或客户 License。离线签名器、私钥和未脱敏日志必须始终位于本仓库与 CI
+之外，未签名的 CI 暂存目录不得作为可安装 Bundle 分发。
 
 这些制品构成可校验的发布证据，但不能替代外部安全评审和客户验收。

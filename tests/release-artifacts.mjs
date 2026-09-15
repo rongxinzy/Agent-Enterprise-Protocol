@@ -10,8 +10,6 @@ const fixture = await mkdtemp(path.join(os.tmpdir(), 'aep-release-artifacts-'));
 const version = '9.8.7';
 const commit = '0123456789abcdef0123456789abcdef01234567';
 const expected = [
-  `aep-offline-base-v${version}.tar.gz`,
-  `aep-offline-gateway-v${version}.tar.gz`,
   'aep-foundation.source.sbom.cdx.json',
   'aep-control-service.image.sbom.cdx.json',
   'aep-gateway-authorizer.image.sbom.cdx.json',
@@ -20,9 +18,7 @@ const expected = [
 
 try {
   for (const file of expected) {
-    const content = file.endsWith('.sbom.cdx.json')
-      ? JSON.stringify({bomFormat: 'CycloneDX', specVersion: '1.6', components: []})
-      : Buffer.from([0x1f, 0x8b, 0x08, 0x00]);
+    const content = JSON.stringify({bomFormat: 'CycloneDX', specVersion: '1.6', components: []});
     await writeFile(path.join(fixture, file), content);
   }
   await command(['--artifact-dir', fixture, '--version', version, '--commit', commit]);

@@ -50,12 +50,12 @@ jobs:
             -f deploy/compose/compose.yaml \
             -f deploy/compose/gateway.yaml \
             build control-service gateway-authorizer gateway-reconciler
-      - name: Generate offline bundles
+      - name: Validate unsigned offline bundle signing inputs
         run: |
           npm run offline:bundle -- --output-dir release/offline-base --profile base
           npm run offline:bundle -- --output-dir release/offline-gateway --profile gateway
-          tar -C release/offline-base -czf "release/artifacts/aep-offline-base-v${AEP_RELEASE_VERSION}.tar.gz" .
-          tar -C release/offline-gateway -czf "release/artifacts/aep-offline-gateway-v${AEP_RELEASE_VERSION}.tar.gz" .
+          test ! -e release/offline-base/SHA256SUMS.sig
+          test ! -e release/offline-gateway/SHA256SUMS.sig
       - name: Generate control-service image SBOM
         uses: anchore/sbom-action@v0
         with:

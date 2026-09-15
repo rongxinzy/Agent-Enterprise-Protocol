@@ -14,3 +14,7 @@ license-signer-local/
 .license-signer/
 *.license.private.*
 *.license.signing.*
+offline-signer-local/
+.offline-signer/
+*.offline.private.*
+*.offline.signing.*
