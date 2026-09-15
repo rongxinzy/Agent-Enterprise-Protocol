@@ -36,6 +36,7 @@
     "test:e2e:m3-kubernetes": "node tests/e2e/m3-kubernetes.mjs",
     "test:e2e:load": "node tests/e2e/load-soak.mjs",
     "test:e2e:backup-restore": "node tests/e2e/backup-restore.mjs",
+    "test:backup-security": "node tests/backup-security.mjs",
     "offline:bundle": "node scripts/offline-bundle.mjs",
     "offline:install": "node scripts/install-offline-bundle.mjs",
     "test:offline-bundle-integrity": "node tests/offline-bundle-integrity.mjs",
@@ -52,7 +53,7 @@
     "license:boundary:check": "node scripts/license-boundary-audit.mjs",
     "sdk:package:check": "npm run build --workspace @aep/sdk-node && node scripts/sdk-package-check.mjs",
     "release:check": "npm run check && npm run release:audit && npm run license:boundary:check && npm run sdk:package:check && go test ./... && go test -race ./... && go vet ./... && go build ./... && npm run test:e2e && npm run test:e2e:backup-restore",
-    "check": "npm run openapi:lint && npm run build && npm test && npm run test:release-artifacts && npm run test:offline-bundle-integrity"
+    "check": "npm run openapi:lint && npm run build && npm test && npm run test:release-artifacts && npm run test:offline-bundle-integrity && npm run test:backup-security"
   },
   "devDependencies": {
     "@redocly/cli": "^2.6.0",

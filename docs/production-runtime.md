@@ -56,6 +56,8 @@ Database migrations are forward-only. Application rollback is allowed only when 
 
 Use a maintenance window or coordinated storage snapshots so PostgreSQL and the Skill bucket represent one recovery point. PostgreSQL contains identities, assignments, encrypted Credential material, events, audit, and object references; MinIO contains immutable Skill ZIP objects. Back up the signing seed and every Credential keyring entry separately through the Secret system. Losing an old Credential key makes its rows undecryptable.
 
+The Compose operational tools, private file modes, optional AES-256-GCM envelope encryption, and isolated restore procedure are documented in [backup-restore-runbook.md](backup-restore-runbook.md). Keep the backup key-encryption key outside the backup directory and repository.
+
 Restore into isolated PostgreSQL and MinIO instances first, verify object counts and database integrity, then start exactly one control-service replica to run embedded migrations. Confirm `/readyz`, JWKS continuity, a Credential resolve audit, and a Skill checksum before adding replicas or switching traffic.
 
 ## Verification

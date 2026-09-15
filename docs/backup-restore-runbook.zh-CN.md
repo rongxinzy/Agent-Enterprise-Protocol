@@ -34,10 +34,32 @@ MinIO 数据卷归档到同一目录；完成后自动恢复服务：
 npm run ops:backup -- --project aep-m0 --output-dir backups/20260909
 ```
 
-输出目录包含 `postgres.dump`、`minio-data.tgz` 和记录大小及 SHA-256 的
-`manifest.json`。归档 MinIO 数据需要目标机预置 `alpine:3.20`（可通过
-`--helper-image` 指定组织批准的等价镜像）。脚本不会备份数据库密码、部署
-Secret、License 材料或供应商凭据。
+输出目录会强制设置为 `0700`，所有制品和 manifest 会强制设置为 `0600`。
+未加密备份包含 `postgres.dump`、`minio-data.tgz` 和记录大小及 SHA-256 的
+v2 `manifest.json`。即使 Credential 值在应用层仍为密文，也必须将整个目录
+作为敏感数据保护。
+
+离线信封加密需要在仓库外生成 base64 编码的 32 字节密钥加密密钥，并由部署
+Secret 系统独立保管：
+
+```sh
+umask 077
+openssl rand -base64 32 > /secure/aep-backup.key
+npm run ops:backup -- --project aep-m0 --output-dir backups/20260909 \
+  --encryption-key-file /secure/aep-backup.key
+```
+
+每次备份都会生成随机数据密钥，用上述密钥加密密钥包裹，再通过 AES-256-GCM
+加密两个制品；输出文件名为 `postgres.dump.enc` 和 `minio-data.tgz.enc`。
+也可通过 `AEP_BACKUP_ENCRYPTION_KEY_FILE` 提供密钥路径。密钥内容不会写入
+manifest 或命令输出，必须与备份制品分开备份。
+
+归档 MinIO 数据需要目标机预置 `alpine:3.20`。如需使用组织批准的等价镜像，
+必须使用带 tag 或 digest 的显式引用，并在备份和恢复时都传入相同的
+`--helper-image`。helper 容器固定使用 `--pull never`，恢复时若 manifest 中的
+镜像与本地选择不一致会直接拒绝。脚本不会备份数据库密码、部署 Secret、
+License 文件、签名 seed、Credential keyring 或外部 Secret 系统中的供应商
+密钥。
 
 恢复会覆盖目标项目的数据库和 MinIO 数据卷，必须显式确认：
 
@@ -45,7 +67,16 @@ Secret、License 材料或供应商凭据。
 npm run ops:restore -- --project aep-m0 --input-dir backups/20260909 --confirm yes
 ```
 
+恢复加密备份时必须提供同一个密钥加密密钥：
+
+```sh
+npm run ops:restore -- --project aep-m0 --input-dir backups/20260909 \
+  --encryption-key-file /secure/aep-backup.key --confirm yes
+```
+
 恢复前应停止对目标项目的所有写入，并先在隔离项目演练。恢复脚本会重新
-校验 `manifest.json` 中的 SHA-256，使用 `--no-build --pull never` 启动服务，
-最后等待 `/readyz` 返回成功。若恢复失败，应保持目标项目停止状态并按照
-组织的灾备流程从上一恢复点处理；脚本不会自动删除或回滚现有数据。
+校验 `manifest.json` 中的 SHA-256，在将明文交给恢复进程前认证所有加密制品，
+拒绝符号链接和加密降级，使用 `--no-build --pull never` 启动服务，最后等待
+`/readyz` 返回成功。工具仍兼容旧的 v1 未加密备份。若恢复失败，应保持目标
+项目停止状态并按照组织的灾备流程从上一恢复点处理；脚本不会自动删除或回滚
+现有数据。

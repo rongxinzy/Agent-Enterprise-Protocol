@@ -1,6 +1,6 @@
-import {createHash} from 'node:crypto';
+import {createHash, randomBytes} from 'node:crypto';
 import {spawn} from 'node:child_process';
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {lstat, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -19,34 +19,39 @@ const restoreBaseUrl = `http://127.0.0.1:${restorePort}`;
 const sourceEnv = {AEP_PORT: sourcePort, AEP_MINIO_CONSOLE_PORT: sourceMinioPort};
 const restoreEnv = {AEP_PORT: restorePort, AEP_MINIO_CONSOLE_PORT: restoreMinioPort};
 const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'aep-backup-restore-'));
-const dumpPath = path.join(tempDirectory, 'aep.dump');
-const minioArchivePath = path.join(tempDirectory, 'minio-data.tgz');
+const backupDirectory = path.join(tempDirectory, 'backup');
+const encryptionKeyPath = path.join(tempDirectory, 'backup-encryption.key');
+const helperImage = 'alpine:3.20';
 
 let seeded;
 try {
+  await writeFile(encryptionKeyPath, `${randomBytes(32).toString('base64')}\n`, {mode: 0o600});
+  await command('docker', ['pull', helperImage]);
   await compose(sourceProject, sourceEnv, ['up', '-d', '--build']);
   await waitForHttp(`${sourceBaseUrl}/healthz`);
   seeded = await seedSource();
 
-  // Stop application writes before taking the coordinated database and object-store backup.
-  await compose(sourceProject, sourceEnv, ['stop', 'control-service']);
-  const dump = await commandOutput('docker', [
-    'compose', '-p', sourceProject, '-f', composeFile, 'exec', '-T', 'postgres',
-    'pg_dump', '-U', 'aep', '-d', 'aep', '--format=custom',
+  await command(process.execPath, [
+    path.join(root, 'scripts', 'backup-compose.mjs'),
+    '--project', sourceProject,
+    '--output-dir', backupDirectory,
+    '--helper-image', helperImage,
+    '--encryption-key-file', encryptionKeyPath,
+    '--minio-console-port', sourceMinioPort,
   ], sourceEnv);
-  await writeFile(dumpPath, dump);
-  await compose(sourceProject, sourceEnv, ['stop', 'minio']);
-  await archiveVolume(`${sourceProject}_minio-data`, minioArchivePath);
+  await verifyEncryptedBackup();
 
-  await compose(restoreProject, restoreEnv, ['up', '-d', 'postgres']);
-  await waitForPostgres();
-  await restoreDatabase();
-  await compose(restoreProject, restoreEnv, ['up', '-d', 'minio']);
-  await compose(restoreProject, restoreEnv, ['stop', 'minio']);
-  await restoreVolume(`${restoreProject}_minio-data`, minioArchivePath);
-  await compose(restoreProject, restoreEnv, ['start', 'minio']);
-  await compose(restoreProject, restoreEnv, ['up', '-d', 'control-service']);
-  await waitForHttp(`${restoreBaseUrl}/healthz`);
+  await compose(restoreProject, restoreEnv, ['build', 'control-service']);
+  await command(process.execPath, [
+    path.join(root, 'scripts', 'restore-compose.mjs'),
+    '--project', restoreProject,
+    '--input-dir', backupDirectory,
+    '--helper-image', helperImage,
+    '--encryption-key-file', encryptionKeyPath,
+    '--port', restorePort,
+    '--minio-console-port', restoreMinioPort,
+    '--confirm', 'yes',
+  ], restoreEnv);
   await verifyRestore(seeded);
 
   console.log(JSON.stringify({
@@ -56,6 +61,8 @@ try {
     checks: [
       'coordinated PostgreSQL custom-format dump',
       'MinIO volume archive and restore',
+      'AES-256-GCM envelope encryption and private file modes',
+      'restore helper image trust and pull-never policy',
       'restored admin session and JWKS continuity',
       'restored Skill metadata and published version',
       'restored Skill manifest and ZIP SHA-256',
@@ -69,6 +76,21 @@ try {
   await compose(sourceProject, sourceEnv, ['down', '-v', '--remove-orphans'], true);
   await compose(restoreProject, restoreEnv, ['down', '-v', '--remove-orphans'], true);
   await rm(tempDirectory, {recursive: true, force: true});
+}
+
+async function verifyEncryptedBackup() {
+  const manifest = JSON.parse(await readFile(path.join(backupDirectory, 'manifest.json'), 'utf8'));
+  assert(manifest.format === 'aep-backup-v2', 'backup tool did not emit the v2 manifest');
+  assert(manifest.encryption?.algorithm === 'aes-256-gcm', 'backup tool did not enable envelope encryption');
+  assert(manifest.artifacts?.every(item => item.file.endsWith('.enc')), 'backup tool emitted a plaintext artifact');
+  assert(!(await lstat(path.join(backupDirectory, 'postgres.dump')).catch(() => null)), 'plaintext PostgreSQL dump was left on disk');
+  assert(!(await lstat(path.join(backupDirectory, 'minio-data.tgz')).catch(() => null)), 'plaintext MinIO archive was left on disk');
+  if (process.platform !== 'win32') {
+    assert(((await lstat(backupDirectory)).mode & 0o777) === 0o700, 'backup directory mode is not 0700');
+    for (const file of ['manifest.json', 'postgres.dump.enc', 'minio-data.tgz.enc']) {
+      assert(((await lstat(path.join(backupDirectory, file))).mode & 0o777) === 0o600, `${file} mode is not 0600`);
+    }
+  }
 }
 
 async function seedSource() {
@@ -119,32 +141,6 @@ async function verifyRestore(expected) {
   assert(digest(packageBytes) === expected.sha256, 'restored Skill package checksum changed');
 }
 
-async function restoreDatabase() {
-  const dump = await readFile(dumpPath);
-  await commandWithInput('docker', [
-    'compose', '-p', restoreProject, '-f', composeFile, 'exec', '-T', 'postgres',
-    'pg_restore', '-U', 'aep', '-d', 'aep', '--clean', '--if-exists', '--no-owner', '--no-privileges',
-  ], dump, restoreEnv);
-}
-
-async function archiveVolume(volume, outputPath) {
-  await command('docker', [
-    'run', '--rm', '-v', `${volume}:/source:ro`, '-v', `${tempDirectory}:/backup`,
-    'alpine:3.20', 'tar', '-czf', '/backup/minio-data.tgz', '-C', '/source', '.',
-  ]);
-  const archive = await readFile(outputPath);
-  assert(archive.length > 0, 'MinIO volume archive was empty');
-}
-
-async function restoreVolume(volume, archivePath) {
-  await command('docker', [
-    'run', '--rm', '-v', `${volume}:/target`, '-v', `${tempDirectory}:/backup:ro`,
-    'alpine:3.20', 'sh', '-c', 'find /target -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf /backup/minio-data.tgz -C /target',
-  ]);
-  const archive = await readFile(archivePath);
-  assert(archive.length > 0, 'MinIO restore archive disappeared');
-}
-
 async function login(baseUrl, username, password) {
   const result = await request(baseUrl, '/auth/password/login', {method: 'POST', body: {deploymentId: 'demo', username, password}});
   assert(typeof result.accessToken === 'string' && result.accessToken.length > 0, 'login did not return an access token');
@@ -173,31 +169,6 @@ async function waitForHttp(url) {
   });
 }
 
-// pg_isready can briefly report success while Postgres is still completing
-// startup or transitioning out of a shutdown. Require a real query to work
-// across multiple consecutive probes before feeding the server to pg_restore.
-async function waitForPostgres() {
-  const deadline = Date.now() + 120_000;
-  let consecutive = 0;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      await composeOutput(restoreProject, restoreEnv, ['exec', '-T', 'postgres', 'pg_isready', '-U', 'aep', '-d', 'aep']);
-      const result = await composeOutput(restoreProject, restoreEnv, [
-        'exec', '-T', 'postgres', 'psql', '-U', 'aep', '-d', 'aep', '-Atqc', 'SELECT 1',
-      ]);
-      if (result.toString('utf8').trim() !== '1') throw new Error('Postgres readiness query returned an unexpected result');
-      consecutive += 1;
-      if (consecutive >= 3) return;
-    } catch (error) {
-      lastError = error;
-      consecutive = 0;
-    }
-    await new Promise(resolve => setTimeout(resolve, 1_000));
-  }
-  throw new Error(`Postgres readiness timed out: ${lastError?.message ?? 'unknown error'}`);
-}
-
 async function waitForCommand(readiness) {
   const deadline = Date.now() + 120_000;
   let lastError;
@@ -215,36 +186,6 @@ async function waitForCommand(readiness) {
 
 function compose(project, env, args, allowFailure = false) {
   return command('docker', ['compose', '-p', project, '-f', composeFile, ...args], env, allowFailure);
-}
-
-function composeOutput(project, env, args) {
-  return commandOutput('docker', ['compose', '-p', project, '-f', composeFile, ...args], env);
-}
-
-function commandOutput(executable, args, extraEnv = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {cwd: root, env: {...process.env, ...extraEnv}, stdio: ['ignore', 'pipe', 'pipe'], shell: false});
-    const stdout = [];
-    const stderr = [];
-    child.stdout.on('data', chunk => stdout.push(Buffer.from(chunk)));
-    child.stderr.on('data', chunk => stderr.push(Buffer.from(chunk)));
-    child.on('error', reject);
-    child.on('exit', code => {
-      if (code === 0) return resolve(Buffer.concat(stdout));
-      reject(new Error(`${executable} ${args.join(' ')} exited with ${code}: ${Buffer.concat(stderr).toString('utf8').trim()}`));
-    });
-  });
-}
-
-function commandWithInput(executable, args, input, extraEnv = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {cwd: root, env: {...process.env, ...extraEnv}, stdio: ['pipe', 'pipe', 'pipe'], shell: false});
-    const stderr = [];
-    child.stderr.on('data', chunk => stderr.push(Buffer.from(chunk)));
-    child.on('error', reject);
-    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`${executable} ${args.join(' ')} exited with ${code}: ${Buffer.concat(stderr).toString('utf8').trim()}`)));
-    child.stdin.end(input);
-  });
 }
 
 function command(executable, args, extraEnv = {}, allowFailure = false) {

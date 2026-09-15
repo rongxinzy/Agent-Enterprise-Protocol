@@ -56,6 +56,8 @@ Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并
 
 使用维护窗口或协调存储快照，使 PostgreSQL 与 Skill bucket 属于同一恢复点。PostgreSQL 保存身份、授权、Credential 密文、事件、审计和对象引用；MinIO 保存不可变 Skill ZIP。签名 seed 和所有 Credential keyring 条目必须由 Secret 系统独立备份，旧密钥丢失会导致对应 Credential 无法解密。
 
+Compose 操作工具、私有文件权限、可选 AES-256-GCM 信封加密及隔离恢复流程见 [backup-restore-runbook.zh-CN.md](backup-restore-runbook.zh-CN.md)。备份密钥加密密钥必须与备份目录及仓库分开保管。
+
 先恢复到隔离的 PostgreSQL 与 MinIO，校验对象数量和数据库完整性，再只启动一个 control-service 运行内嵌 migration。验证 `/readyz`、JWKS 连续性、Credential 解析审计和 Skill checksum 后，才能增加副本或切换流量。
 
 ## 验证

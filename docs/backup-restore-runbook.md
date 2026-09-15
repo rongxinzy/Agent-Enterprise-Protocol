@@ -38,11 +38,35 @@ and a MinIO data-volume archive to one directory, and restarts the services:
 npm run ops:backup -- --project aep-m0 --output-dir backups/20260909
 ```
 
-The directory contains `postgres.dump`, `minio-data.tgz`, and a
-`manifest.json` with byte counts and SHA-256 values. MinIO volume archiving uses
-`alpine:3.20` by default; preload an organization-approved equivalent and pass
-`--helper-image` when required. The scripts never back up database passwords,
-deployment Secrets, License material, or provider credentials.
+The output directory is forced to mode `0700`, and every artifact and manifest
+is forced to mode `0600`. An unencrypted backup contains `postgres.dump`,
+`minio-data.tgz`, and a v2 `manifest.json` with byte counts and SHA-256 values.
+Treat the directory as sensitive even though Credential values remain encrypted
+at the application layer.
+
+For offline envelope encryption, create a base64-encoded 32-byte key-encryption
+key outside the repository and protect it in the deployment Secret system:
+
+```sh
+umask 077
+openssl rand -base64 32 > /secure/aep-backup.key
+npm run ops:backup -- --project aep-m0 --output-dir backups/20260909 \
+  --encryption-key-file /secure/aep-backup.key
+```
+
+The script creates a random data key for each backup, wraps it with the supplied
+key-encryption key, and encrypts both artifacts with AES-256-GCM. The output
+files are then named `postgres.dump.enc` and `minio-data.tgz.enc`. The key path
+may instead be supplied through `AEP_BACKUP_ENCRYPTION_KEY_FILE`; key material
+is never written to the manifest or command output. Back up the key separately.
+
+MinIO volume archiving uses the locally preloaded `alpine:3.20` image by
+default. A different organization-approved, explicitly tagged or digest-pinned
+image must be passed with `--helper-image` to both backup and restore. Helper
+containers always run with `--pull never`, and restore rejects a manifest whose
+helper image differs from the locally selected image. The scripts do not back
+up database passwords, deployment Secrets, License files, signing seeds,
+Credential keyrings, or provider keys held by the external Secret system.
 
 Restore replaces the target project's database and MinIO volume and therefore
 requires an explicit confirmation:
@@ -51,8 +75,17 @@ requires an explicit confirmation:
 npm run ops:restore -- --project aep-m0 --input-dir backups/20260909 --confirm yes
 ```
 
+Supply the same key-encryption key when restoring an encrypted backup:
+
+```sh
+npm run ops:restore -- --project aep-m0 --input-dir backups/20260909 \
+  --encryption-key-file /secure/aep-backup.key --confirm yes
+```
+
 Stop all writes before restoring and rehearse in an isolated project first. The
 restore command rechecks every SHA-256, starts Compose with `--no-build --pull
-never`, and waits for `/readyz`. It does not delete or roll back existing data;
-on failure, keep the target stopped and follow the organization's recovery
-procedure.
+never`, authenticates every encrypted artifact before passing plaintext to a
+restore process, rejects symlinks and encryption downgrades, and waits for
+`/readyz`. The tool still accepts legacy v1 unencrypted backups. It does not
+delete or roll back existing data; on failure, keep the target stopped and
+follow the organization's recovery procedure.
