@@ -4,6 +4,9 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const migrationDirectory = path.join(root, 'services/control-service/internal/db/migrations');
+const migrationFiles = (await readdir(migrationDirectory))
+  .filter(name => name.endsWith('.sql')).sort();
 const composeFile = path.join(root, 'deploy', 'compose', 'compose.yaml');
 const project = 'aep-control-upgrade-e2e';
 const port = process.env.AEP_UPGRADE_E2E_PORT ?? '18088';
@@ -47,13 +50,11 @@ try {
 }
 
 async function installLegacySchema() {
-  const files = (await readdir(path.join(root, 'services/control-service/internal/db/migrations')))
-    .filter(name => name.endsWith('.sql')).sort();
-  const legacyFiles = files.filter(name => Number(name.slice(0, 3)) <= 9);
+  const legacyFiles = migrationFiles.filter(name => Number(name.slice(0, 3)) <= 9);
   assert(legacyFiles.length === 9, 'legacy fixture did not find the expected migration window');
   await psql('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
   for (const file of legacyFiles) {
-    const sql = await readFile(path.join(root, 'services/control-service/internal/db/migrations', file), 'utf8');
+    const sql = await readFile(path.join(migrationDirectory, file), 'utf8');
     await psqlInput(sql);
     await psql('INSERT INTO schema_migrations (version) VALUES (' + quote(file) + ') ON CONFLICT DO NOTHING');
   }
@@ -97,7 +98,7 @@ async function verifyConcurrentMigration() {
     }
   });
   const versions = await psql('SELECT count(*) FROM schema_migrations');
-  assert(versions === '23', 'concurrent startup did not apply all migrations, found ' + versions);
+  assert(versions === String(migrationFiles.length), 'concurrent startup did not apply all migrations, found ' + versions);
   for (const replica of replicas) await command('docker', ['rm', '-f', replica], {}, true);
 }
 
