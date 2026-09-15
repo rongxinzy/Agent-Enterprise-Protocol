@@ -31,18 +31,21 @@ control-service 默认每 15 分钟（`AEP_RETENTION_CLEANUP_INTERVAL`）执行�
 | 端点 | 语义 | 编排用途 |
 | --- | --- | --- |
 | `/livez` | 进程仍能提供 HTTP，不检查依赖 | Liveness probe |
-| `/readyz` | 管控服务检查 PostgreSQL 与 MinIO；网关检查可信 JWKS 可刷新 | Readiness probe |
+| `/readyz` | 管控服务检查 PostgreSQL 与 MinIO；网关检查可信 JWKS 可刷新；reconciler 检查所有已配置 deployment 的最近一次同步均成功 | Readiness probe |
 | `/healthz` | `/readyz` 的兼容别名 | 现有集成 |
 | `/metrics` | Prometheus/OpenMetrics，包含稳定路由、方法、状态、延迟和并发数 | 内网监控采集 |
 
 指标不会使用企业、用户、Agent、资源 ID、请求 ID、查询串或 Token 作为 label。访问日志只记录请求 ID、方法、稳定路由、状态、响应字节数与耗时。生产默认 JSON 日志，不记录 Authorization、请求体、查询串、Credential 明文或模型 Prompt。
 
-两个 distroless 镜像均提供内置探针命令：
+三个 distroless 镜像均提供内置探针命令：
 
 ```sh
 /aep-control healthcheck http://127.0.0.1:8080/readyz
 /aep-gateway-authorizer healthcheck http://127.0.0.1:8090/readyz
+/aep-gateway-reconciler healthcheck http://127.0.0.1:8091/readyz
 ```
+
+reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-plane 或 Kubernetes 可用性影响；`/readyz` 启动时为未就绪，并持续反映每个已配置 deployment 最近一次同步的结果。
 
 ## 可用性与发布
 

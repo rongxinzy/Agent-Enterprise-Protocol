@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -41,9 +42,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	go serveHealth(ctx, config.address)
+	readiness := newReadinessState(config.worker.Tenants)
+	go serveHealth(ctx, config.address, readiness)
 	for _, tenant := range config.worker.Tenants {
-		go runTenant(ctx, worker, tenant, config.interval)
+		go runTenant(ctx, worker, tenant, config.interval, readiness)
 	}
 	<-ctx.Done()
 }
@@ -78,10 +80,11 @@ func loadConfig() (serverConfig, error) {
 	return serverConfig{worker: workerConfig, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
 }
 
-func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration) {
+func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration, readiness *readinessState) {
 	backoff := time.Second
 	for {
 		err := worker.Sync(ctx, tenant)
+		readiness.record(tenant, err)
 		if err != nil {
 			slog.Error("data-plane reconciliation failed", "tenant", tenant, "error", err)
 			backoff *= 2
@@ -104,14 +107,58 @@ func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string
 	}
 }
 
-func serveHealth(ctx context.Context, address string) {
+type readinessState struct {
+	mutex   sync.RWMutex
+	tenants map[string]bool
+}
+
+func newReadinessState(tenants []string) *readinessState {
+	state := &readinessState{tenants: make(map[string]bool, len(tenants))}
+	for _, tenant := range tenants {
+		state.tenants[tenant] = false
+	}
+	return state
+}
+
+func (s *readinessState) record(tenant string, err error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.tenants[tenant] = err == nil
+}
+
+func (s *readinessState) ready() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	if len(s.tenants) == 0 {
+		return false
+	}
+	for _, ready := range s.tenants {
+		if !ready {
+			return false
+		}
+	}
+	return true
+}
+
+func serveHealth(ctx context.Context, address string, readiness *readinessState) {
 	server := &http.Server{Addr: address, Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/livez" || request.URL.Path == "/readyz" {
+		switch request.URL.Path {
+		case "/livez":
+			response.Header().Set("Content-Type", "application/json")
 			response.WriteHeader(http.StatusOK)
 			_, _ = response.Write([]byte(`{"status":"ok"}`))
-			return
+		case "/readyz":
+			response.Header().Set("Content-Type", "application/json")
+			if readiness.ready() {
+				response.WriteHeader(http.StatusOK)
+				_, _ = response.Write([]byte(`{"status":"ok"}`))
+				return
+			}
+			response.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = response.Write([]byte(`{"status":"not_ready"}`))
+		default:
+			http.NotFound(response, request)
 		}
-		http.NotFound(response, request)
 	})}
 	go func() {
 		<-ctx.Done()

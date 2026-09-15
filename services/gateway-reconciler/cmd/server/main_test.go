@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -115,9 +116,10 @@ func TestRunTenantStopsAfterPendingStatus(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	readiness := newReadinessState([]string{"demo"})
 	done := make(chan struct{})
 	go func() {
-		runTenant(ctx, worker, "demo", time.Hour)
+		runTenant(ctx, worker, "demo", time.Hour, readiness)
 		close(done)
 	}()
 	select {
@@ -125,6 +127,7 @@ func TestRunTenantStopsAfterPendingStatus(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("reconciler did not publish pending status")
 	}
+	waitForReadiness(t, readiness, true)
 	cancel()
 	select {
 	case <-done:
@@ -154,9 +157,11 @@ func TestRunTenantReportsControlPlaneFailureAndStops(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	readiness := newReadinessState([]string{"demo"})
+	readiness.record("demo", nil)
 	done := make(chan struct{})
 	go func() {
-		runTenant(ctx, worker, "demo", time.Hour)
+		runTenant(ctx, worker, "demo", time.Hour, readiness)
 		close(done)
 	}()
 	select {
@@ -167,12 +172,48 @@ func TestRunTenantReportsControlPlaneFailureAndStops(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("reconciler did not report control-plane failure")
 	}
+	waitForReadiness(t, readiness, false)
 	cancel()
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("reconciler did not stop during backoff")
 	}
+}
+
+func TestReadinessRequiresEveryTenantAndTracksLatestResult(t *testing.T) {
+	readiness := newReadinessState([]string{"first", "second"})
+	if readiness.ready() {
+		t.Fatal("readiness was true before the first synchronization")
+	}
+	readiness.record("first", nil)
+	if readiness.ready() {
+		t.Fatal("readiness was true before every tenant synchronized")
+	}
+	readiness.record("second", nil)
+	if !readiness.ready() {
+		t.Fatal("readiness remained false after every tenant synchronized")
+	}
+	readiness.record("first", errors.New("control plane unavailable"))
+	if readiness.ready() {
+		t.Fatal("readiness remained true after a tenant synchronization failed")
+	}
+	readiness.record("first", nil)
+	if !readiness.ready() {
+		t.Fatal("readiness did not recover after the failed tenant synchronized")
+	}
+}
+
+func waitForReadiness(t *testing.T, readiness *readinessState, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if readiness.ready() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("readiness = %v, want %v", readiness.ready(), want)
 }
 
 func TestServeHealthRespondsAndShutsDown(t *testing.T) {
@@ -186,9 +227,10 @@ func TestServeHealthRespondsAndShutsDown(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	readiness := newReadinessState([]string{"demo"})
 	done := make(chan struct{})
 	go func() {
-		serveHealth(ctx, address)
+		serveHealth(ctx, address, readiness)
 		close(done)
 	}()
 	client := &http.Client{Timeout: 200 * time.Millisecond}
@@ -209,10 +251,11 @@ func TestServeHealthRespondsAndShutsDown(t *testing.T) {
 	for _, test := range []struct {
 		path   string
 		status int
+		body   string
 	}{
-		{"/livez", http.StatusOK},
-		{"/readyz", http.StatusOK},
-		{"/missing", http.StatusNotFound},
+		{"/livez", http.StatusOK, `{"status":"ok"}`},
+		{"/readyz", http.StatusServiceUnavailable, `{"status":"not_ready"}`},
+		{"/missing", http.StatusNotFound, "404 page not found\n"},
 	} {
 		response, err := client.Get("http://" + address + test.path)
 		if err != nil {
@@ -220,12 +263,19 @@ func TestServeHealthRespondsAndShutsDown(t *testing.T) {
 		}
 		body, err := io.ReadAll(response.Body)
 		_ = response.Body.Close()
-		if err != nil || response.StatusCode != test.status {
+		if err != nil || response.StatusCode != test.status || string(body) != test.body {
 			t.Fatalf("%s: status = %d, body = %q, error = %v", test.path, response.StatusCode, body, err)
 		}
-		if test.status == http.StatusOK && string(body) != `{"status":"ok"}` {
-			t.Fatalf("%s: unexpected health body %q", test.path, body)
-		}
+	}
+	readiness.record("demo", nil)
+	response, err := client.Get("http://" + address + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != `{"status":"ok"}` {
+		t.Fatalf("ready status = %d, body = %q, error = %v", response.StatusCode, body, err)
 	}
 	cancel()
 	select {
