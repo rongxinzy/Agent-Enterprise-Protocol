@@ -292,6 +292,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_models_default ON models (deployment_id) W
 CREATE INDEX IF NOT EXISTS idx_model_assignments_subject ON model_assignments (deployment_id, subject_type, subject_id, model_id);
 CREATE INDEX IF NOT EXISTS idx_credential_assignments_subject ON credential_assignments (deployment_id, subject_type, subject_id, credential_id);
 CREATE INDEX IF NOT EXISTS idx_credential_resolution_audit ON credential_resolution_audit (deployment_id, credential_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_resolution_audit_retention ON credential_resolution_audit (created_at, id);
 
 CREATE TABLE IF NOT EXISTS login_rate_limits (
   key_hash text PRIMARY KEY,
@@ -315,6 +316,7 @@ CREATE TABLE IF NOT EXISTS authentication_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_login_rate_limits_updated ON login_rate_limits (updated_at);
 CREATE INDEX IF NOT EXISTS idx_authentication_audit_deployment_time ON authentication_audit_events (deployment_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_authentication_audit_retention ON authentication_audit_events (created_at, cursor);
 
 CREATE TABLE IF NOT EXISTS licenses (
   license_id text PRIMARY KEY,
@@ -360,3 +362,11 @@ CREATE TABLE IF NOT EXISTS license_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_license_audit_deployment_time ON license_audit_events (deployment_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_license_audit_license_time ON license_audit_events (license_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_license_audit_retention ON license_audit_events (created_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_retention ON telemetry_events (received_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_skill_sync_retention ON skill_sync_results (created_at, id);
+CREATE INDEX IF NOT EXISTS idx_session_deliveries_retention ON session_control_deliveries (updated_at, delivery_id) WHERE state IN ('succeeded', 'expired', 'superseded');
+CREATE INDEX IF NOT EXISTS idx_control_events_retention ON control_events (GREATEST(created_at, expires_at), event_id);
+CREATE INDEX IF NOT EXISTS idx_session_tokens_retention ON user_session_tokens (LEAST(expires_at, COALESCE(revoked_at, expires_at)), token_hash);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_retention ON user_sessions (GREATEST(last_seen_at, COALESCE(revoked_at, last_seen_at)), session_id);

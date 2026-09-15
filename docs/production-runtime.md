@@ -18,7 +18,13 @@ Passwords must contain 12 to 1024 Unicode characters and are stored with Argon2i
 
 The service ignores `X-Forwarded-For` by default. When it is behind a reverse proxy, set `AEP_TRUSTED_PROXY_CIDRS` to the exact comma-separated proxy CIDRs only after those proxies are configured to replace or sanitize inbound forwarding headers. The service then walks the forwarding chain from right to left and selects the first address outside the trusted proxy ranges. Never configure all private networks merely for convenience: a client that can connect from a trusted range can otherwise choose its own rate-limit identity.
 
-Authentication audit rows contain deployment and session identifiers plus opaque principal/source hashes, but never usernames, passwords, tokens, or request bodies. Apply an organization-approved retention policy to `authentication_audit_events`. Logout, password reset, account disablement, and administrator session revocation immediately invalidate the affected control-plane access token because every authenticated control request checks current user and session state. A model token remains locally verifiable by the gateway; production gateway entitlement checks observe the same session revocation within the configured status-cache window.
+Authentication audit rows contain deployment and session identifiers plus opaque principal/source hashes, but never usernames, passwords, tokens, or request bodies. Logout, password reset, account disablement, and administrator session revocation immediately invalidate the affected control-plane access token because every authenticated control request checks current user and session state. A model token remains locally verifiable by the gateway; production gateway entitlement checks observe the same session revocation within the configured status-cache window.
+
+## Data Retention
+
+The control service runs a bounded PostgreSQL cleanup every `AEP_RETENTION_CLEANUP_INTERVAL` (default 15 minutes). A transaction-scoped advisory lock allows only one replica to clean at a time, and each root delete statement selects at most `AEP_RETENTION_CLEANUP_BATCH_SIZE` rows per cycle. Foreign-key cascades can additionally remove dependent token or delivery rows. Active sessions, usable refresh tokens, active unexpired control events, and pending or retryable deliveries are never selected as cleanup roots. Each cycle has a 30-second database deadline and logs per-category direct row counts when it removes data.
+
+`AEP_OPERATIONAL_RETENTION` defaults to 720 hours and covers expired/revoked session tokens, inactive sessions, terminal control deliveries, and expired or non-active control events. `AEP_TELEMETRY_RETENTION` defaults to 2160 hours and covers telemetry plus Skill synchronization results. `AEP_AUDIT_RETENTION` defaults to 8760 hours and covers authentication, Credential resolution, and License audit rows. Stale login-rate-limit keys are removed after the longer of the configured failure window and maximum backoff. Set an individual retention window to `0` for an approved legal hold, or set the cleanup interval to `0` to disable the worker entirely; either choice requires independent database capacity monitoring and a documented manual purge process. Backups retain data captured before cleanup, so align backup expiration with the same approved policy.
 
 ## Runtime Endpoints
 
@@ -40,7 +46,7 @@ Both distroless images expose an internal probe command:
 
 ## Availability And Rollout
 
-Migration execution and bootstrap administrator initialization are protected by PostgreSQL advisory locks. Multiple control-service replicas may start against a new or upgraded database without racing schema or bootstrap writes. MinIO bucket initialization also tolerates concurrent first creation.
+Migration execution, bootstrap administrator initialization, and retention cleanup are protected by PostgreSQL advisory locks. Multiple control-service replicas may start against a new or upgraded database without racing schema or bootstrap writes, and only one replica performs a cleanup cycle. MinIO bucket initialization also tolerates concurrent first creation.
 
 Use at least two control-service and two gateway-authorizer replicas across failure domains when the dependent services meet the same availability target. During rollout:
 
@@ -66,6 +72,6 @@ Restore into isolated PostgreSQL and MinIO instances first, verify object counts
 npm run test:e2e:runtime
 ```
 
-The scenario validates concurrent first startup, dependency-aware readiness, independent liveness, Prometheus metrics, structured logs, container hardening, and clean SIGTERM exit. The complete release gate remains `npm run test:e2e`.
+The scenario validates concurrent first startup, dependency-aware readiness, independent liveness, Prometheus metrics, structured logs, bounded retention cleanup, container hardening, and clean SIGTERM exit. The complete release gate remains `npm run test:e2e`.
 
 The Kubernetes, Higress Helm, TLS, RBAC, External Secrets, and live data-plane reconciliation baseline is documented in [production-data-plane.md](production-data-plane.md).
