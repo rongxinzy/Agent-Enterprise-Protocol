@@ -15,6 +15,7 @@ const port = process.env.AEP_M3_DATA_PLANE_E2E_PORT ?? '18088';
 const kubePort = process.env.AEP_M3_KUBERNETES_E2E_PORT ?? '18089';
 const baseUrl = `http://localhost:${port}`;
 const kubeUrl = `http://127.0.0.1:${kubePort}`;
+const reconcilerHealthUrl = 'http://127.0.0.1:18091';
 const composeEnv = {AEP_PORT: port, AEP_MINIO_CONSOLE_PORT: process.env.AEP_M3_MINIO_CONSOLE_PORT ?? '19008'};
 const outputDir = await mkdtemp(path.join(tmpdir(), 'aep-m3-reconciler-'));
 const reconcilerBinary = path.join(outputDir, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
@@ -62,9 +63,11 @@ try {
   const admin = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
   await admin.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
   startReconciler();
+  await waitForHealth('/livez', 200);
 
   const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
   await waitForReady(admin, 'rev-1');
+  await waitForHealth('/readyz', 200);
   assert(resources.size === 2, 'Ingress and WasmPlugin were not both applied');
   const firstCount = applyCount;
   const firstResources = snapshot();
@@ -87,14 +90,19 @@ try {
   failWasm = true;
   await admin.putDataPlaneDesiredState({revision: 'rev-3', routes: [route('chat', '/v1/chat', 'provider-c', 'api-key-c')]});
   await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'KUBERNETES_APPLY_FAILED');
+  await waitForHealth('/readyz', 503);
+  await waitForHealth('/livez', 200);
   failWasm = false;
   await waitForReady(admin, 'rev-3');
+  await waitForHealth('/readyz', 200);
 
   kubeAvailable = false;
   await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [route('chat', '/v1/chat', 'provider-d', 'api-key-d')]});
   await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'KUBERNETES_APPLY_FAILED');
+  await waitForHealth('/readyz', 503);
   kubeAvailable = true;
   await waitForReady(admin, 'rev-4');
+  await waitForHealth('/readyz', 200);
 
   await expectProblem(admin.putDataPlaneDesiredState({revision: 'malformed', routes: [{...route('bad', '', 'provider', 'key')}]}), 400, 'INVALID_DATA_PLANE_STATE');
   await expectProblem(admin.putDataPlaneDesiredState({revision: 'unsupported-provider', routes: [{...route('bad-provider', '/v1/chat', 'provider', 'key'), providerType: 'unknown'}]}), 400, 'INVALID_DATA_PLANE_STATE');
@@ -171,6 +179,13 @@ async function waitForStatus(admin, predicate) {
   await waitFor(async () => {
     const status = await admin.getDataPlaneStatus();
     assert(predicate(status), `data-plane status was ${JSON.stringify(status)}`);
+  });
+}
+
+function waitForHealth(pathname, status) {
+  return waitFor(async () => {
+    const response = await fetch(reconcilerHealthUrl + pathname);
+    assert(response.status === status, `${pathname} returned ${response.status}, expected ${status}`);
   });
 }
 

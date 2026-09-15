@@ -18,10 +18,15 @@ const work = await mkdtemp(path.join(tmpdir(), 'aep-m3-kind-'));
 const binary = path.join(work, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
 let desired = state('rev-kind-1', [{modelId: 'chat', enabled: true, endpoint: '/v1/chat', upstreamModel: 'kind-upstream', protocol: 'openai-compatible', providerType: 'deepseek', credentialRef: {name: 'provider-secrets', key: 'api-key', namespace: 'higress-system'}}]);
 let observed = {};
+let controlAvailable = true;
 let proxy;
 const reconcilers = [];
 
 const control = createServer(async (request, response) => {
+  if (!controlAvailable) {
+    response.writeHead(503).end();
+    return;
+  }
   if (request.headers['x-aep-data-plane-token'] !== 'kind-control-token' || request.headers['x-aep-deployment-id'] !== 'demo') {
     response.writeHead(401).end();
     return;
@@ -48,6 +53,7 @@ try {
   await command('go', ['build', '-o', binary, './services/gateway-reconciler/cmd/server']);
   reconcilers.push(startReconciler(18095, 'a'), startReconciler(18096, 'b'));
   await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-1', `status is ${JSON.stringify(observed)}`));
+  await waitForHealth('/readyz', 200);
 
   const ingressName = `aep-model-gateway-${suffix('demo')}`;
   const pluginName = `aep-ai-proxy-${suffix('demo')}`;
@@ -56,6 +62,12 @@ try {
   const plugin = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', pluginName, '-o', 'json']));
   assert(plugin.spec.matchRules[0].config.credentialRef.name === 'provider-secrets', 'Higress resource omitted the Secret reference');
   assert(plugin.spec.matchRules[0].config.provider.type === 'deepseek', 'Higress resource did not select the DeepSeek provider');
+
+  controlAvailable = false;
+  await waitForHealth('/readyz', 503);
+  await waitForHealth('/livez', 200);
+  controlAvailable = true;
+  await waitForHealth('/readyz', 200);
 
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'patch', 'ingress', ingressName, '--type=json', '-p', '[{"op":"replace","path":"/spec/rules/0/http/paths/0/path","value":"/drifted"}]']);
   await waitFor(async () => {
@@ -97,6 +109,13 @@ function startReconciler(port, instance) {
     AEP_RECONCILER_KUBERNETES_URL: kubeUrl,
     AEP_RECONCILER_KUBERNETES_TOKEN: 'kubectl-proxy-authenticates-upstream',
   }, stdio: 'ignore', shell: false});
+}
+
+function waitForHealth(pathname, status) {
+  return waitFor(async () => {
+    const responses = await Promise.all([18095, 18096].map(port => fetch(`http://127.0.0.1:${port}${pathname}`)));
+    assert(responses.every(response => response.status === status), `${pathname} returned ${responses.map(response => response.status).join(', ')}, expected ${status}`);
+  });
 }
 
 async function waitFor(operation) {

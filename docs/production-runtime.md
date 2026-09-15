@@ -31,18 +31,21 @@ The control service runs a bounded PostgreSQL cleanup every `AEP_RETENTION_CLEAN
 | Endpoint | Meaning | Orchestrator use |
 | --- | --- | --- |
 | `/livez` | Process can serve HTTP; no dependency check | Liveness probe |
-| `/readyz` | Control: PostgreSQL and MinIO ready. Gateway: trusted JWKS refresh succeeds | Readiness probe |
+| `/readyz` | Control: PostgreSQL and MinIO ready. Gateway: trusted JWKS refresh succeeds. Reconciler: every configured deployment's latest synchronization succeeded | Readiness probe |
 | `/healthz` | Backward-compatible alias of `/readyz` | Existing integrations |
 | `/metrics` | Prometheus/OpenMetrics with stable route, method, status, latency, and in-flight requests | Internal metrics scrape |
 
 Metrics never label by tenant, user, Agent, resource ID, request ID, query string, or token. Access logs contain request ID, method, stable route, status, response bytes, and duration only. Production defaults to JSON logs. Authorization headers, bodies, query strings, Credential values, and model prompts are not logged.
 
-Both distroless images expose an internal probe command:
+All three distroless images expose an internal probe command:
 
 ```sh
 /aep-control healthcheck http://127.0.0.1:8080/readyz
 /aep-gateway-authorizer healthcheck http://127.0.0.1:8090/readyz
+/aep-gateway-reconciler healthcheck http://127.0.0.1:8091/readyz
 ```
+
+The reconciler does not expose the legacy `/healthz` alias. Its `/livez` stays independent of control-plane and Kubernetes availability, while `/readyz` starts unavailable and tracks the latest result for every configured deployment.
 
 ## Availability And Rollout
 
