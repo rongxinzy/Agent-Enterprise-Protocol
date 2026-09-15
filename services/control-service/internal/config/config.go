@@ -59,6 +59,11 @@ type Config struct {
 	LicenseDeploymentID       string
 	LicenseCustomerID         string
 	RefreshTTL                time.Duration
+	RetentionCleanupInterval  time.Duration
+	OperationalRetention      time.Duration
+	TelemetryRetention        time.Duration
+	AuditRetention            time.Duration
+	RetentionCleanupBatchSize int
 	BootstrapDeploymentID     string
 	BootstrapDeploymentName   string
 	BootstrapAdminUsername    string
@@ -151,6 +156,10 @@ func Load() (Config, error) {
 		{"AEP_ACCESS_TTL", 15 * time.Minute, &cfg.AccessTTL, false},
 		{"AEP_MODEL_ACCESS_TTL", 15 * time.Minute, &cfg.ModelAccessTTL, false},
 		{"AEP_REFRESH_TTL", 30 * 24 * time.Hour, &cfg.RefreshTTL, false},
+		{"AEP_RETENTION_CLEANUP_INTERVAL", 15 * time.Minute, &cfg.RetentionCleanupInterval, true},
+		{"AEP_OPERATIONAL_RETENTION", 30 * 24 * time.Hour, &cfg.OperationalRetention, true},
+		{"AEP_TELEMETRY_RETENTION", 90 * 24 * time.Hour, &cfg.TelemetryRetention, true},
+		{"AEP_AUDIT_RETENTION", 365 * 24 * time.Hour, &cfg.AuditRetention, true},
 		{"AEP_HTTP_READ_HEADER_TIMEOUT", 5 * time.Second, &cfg.HTTPReadHeaderTimeout, false},
 		{"AEP_HTTP_READ_TIMEOUT", 15 * time.Second, &cfg.HTTPReadTimeout, false},
 		{"AEP_HTTP_WRITE_TIMEOUT", 30 * time.Second, &cfg.HTTPWriteTimeout, true},
@@ -172,6 +181,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.LoginSourceFailureLimit, err = integer("AEP_LOGIN_SOURCE_FAILURE_LIMIT", 100); err != nil {
+		return Config{}, err
+	}
+	if cfg.RetentionCleanupBatchSize, err = integer("AEP_RETENTION_CLEANUP_BATCH_SIZE", 1000); err != nil {
 		return Config{}, err
 	}
 	if cfg.TrustedProxyCIDRs, err = cidrList("AEP_TRUSTED_PROXY_CIDRS"); err != nil {
@@ -212,6 +224,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.LoginBackoffMax < cfg.LoginBackoffBase {
 		return errors.New("AEP_LOGIN_BACKOFF_MAX must be greater than or equal to AEP_LOGIN_BACKOFF_BASE")
+	}
+	if cfg.RetentionCleanupBatchSize <= 0 || cfg.RetentionCleanupBatchSize > 100000 {
+		return errors.New("AEP_RETENTION_CLEANUP_BATCH_SIZE must be between 1 and 100000")
 	}
 	if cfg.Environment == "production" {
 		switch {

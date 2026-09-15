@@ -83,6 +83,12 @@ func runWithDependencies(dependencies serverDependencies) error {
 		return fmt.Errorf("initialize: %w", err)
 	}
 	defer application.Close()
+	retentionContext, stopRetention := context.WithCancel(ctx)
+	retentionDone := make(chan struct{})
+	go func() {
+		defer close(retentionDone)
+		application.RunRetention(retentionContext)
+	}()
 
 	metrics := runtime.NewHTTPMetrics("control_service")
 	api := httpapi.New(application, metrics.Middleware).Handler()
@@ -112,6 +118,7 @@ func runWithDependencies(dependencies serverDependencies) error {
 			serveErr = err
 		}
 	}
+	stopRetention()
 	shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
 	if err := dependencies.shutdown(server, shutdownContext); err != nil {
@@ -121,5 +128,6 @@ func runWithDependencies(dependencies serverDependencies) error {
 			slog.Error("control service shutdown failed", "error", err)
 		}
 	}
+	<-retentionDone
 	return serveErr
 }

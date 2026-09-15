@@ -18,7 +18,13 @@ Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并
 
 服务默认忽略 `X-Forwarded-For`。部署在反向代理后时，只有在代理已经覆盖或清洗客户端传入的转发头后，才能把代理的精确 CIDR 以逗号分隔配置到 `AEP_TRUSTED_PROXY_CIDRS`。服务会从右向左检查转发链，取第一个不属于可信代理范围的地址。不得为了方便直接信任全部内网网段，否则能够从可信网段直连服务的客户端可自行选择限流身份。
 
-认证审计记录包含部署、会话标识及不透明的主体/来源哈希，但不会包含用户名、密码、Token 或请求体。部署方应为 `authentication_audit_events` 设置组织认可的保留策略。退出登录、管理员重置密码、禁用账号或撤销会话后，管控面会在每次认证请求中检查用户与会话的当前状态，因此受影响的 access token 立即失效。model token 仍由网关本地验签；生产网关的 entitlement 状态检查会在配置的状态缓存窗口内观察到同一会话撤销。
+认证审计记录包含部署、会话标识及不透明的主体/来源哈希，但不会包含用户名、密码、Token 或请求体。退出登录、管理员重置密码、禁用账号或撤销会话后，管控面会在每次认证请求中检查用户与会话的当前状态，因此受影响的 access token 立即失效。model token 仍由网关本地验签；生产网关的 entitlement 状态检查会在配置的状态缓存窗口内观察到同一会话撤销。
+
+## 数据留存
+
+control-service 默认每 15 分钟（`AEP_RETENTION_CLEANUP_INTERVAL`）执行一次有界 PostgreSQL 清理。事务级 advisory lock 保证多个副本中同一时刻只有一个副本清理，每条根删除语句每轮最多选择 `AEP_RETENTION_CLEANUP_BATCH_SIZE` 行；外键级联可能额外删除其从属 token 或投递行。活动会话、仍可使用的 refresh token、尚未过期的活动控管事件，以及待处理或可重试投递不会被选为清理根。每轮数据库操作最长 30 秒，实际删除数据时会按类别记录直接删除行数。
+
+`AEP_OPERATIONAL_RETENTION` 默认 720 小时，覆盖过期/已撤销的会话令牌、非活动会话、终态控管投递，以及已过期或非活动控管事件。`AEP_TELEMETRY_RETENTION` 默认 2160 小时，覆盖遥测和 Skill 同步结果。`AEP_AUDIT_RETENTION` 默认 8760 小时，覆盖认证、Credential 解析和 License 审计。登录限流键会在“失败窗口”和“最大退避”两者较长的期限后清理。单独把某个留存窗口设为 `0` 可用于经批准的法务保留；把清理间隔设为 `0` 会完全停用后台任务。两种情况都必须配套独立的数据库容量监控和有记录的手工清理流程。备份仍会保留清理前捕获的数据，因此备份到期策略也必须与获批留存策略一致。
 
 ## 运行端点
 
@@ -40,7 +46,7 @@ Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并
 
 ## 可用性与发布
 
-数据库 migration 和初始管理员初始化使用 PostgreSQL advisory lock 串行执行；多个 control-service 副本可同时连接新库或升级库，不会竞争 schema 与 bootstrap 写入。MinIO bucket 首次并发创建也可安全收敛。
+数据库 migration、初始管理员初始化和数据留存清理都使用 PostgreSQL advisory lock 串行执行；多个 control-service 副本可同时连接新库或升级库，不会竞争 schema 与 bootstrap 写入，同一轮清理也只由一个副本执行。MinIO bucket 首次并发创建同样可安全收敛。
 
 当依赖服务达到相同可用性目标时，control-service 与 gateway-authorizer 应至少各部署两个跨故障域副本。发布顺序：
 
@@ -67,6 +73,6 @@ npm run test:e2e:runtime
 npm run test:e2e:upgrade
 ```
 
-运行基线场景验证首次并发启动、依赖感知 readiness、独立 liveness、Prometheus 指标、结构化日志、容器权限收敛和 SIGTERM 零退出。升级场景从迁移 009 的旧 schema 启动，验证 forward-only migration、旧数据转换与保留、多个副本并发迁移、服务重启和升级后的 API 可用性。完整发布门仍为 `npm run test:e2e`。
+运行基线场景验证首次并发启动、依赖感知 readiness、独立 liveness、Prometheus 指标、结构化日志、有界数据留存清理、容器权限收敛和 SIGTERM 零退出。升级场景从迁移 009 的旧 schema 启动，验证 forward-only migration、旧数据转换与保留、多个副本并发迁移、服务重启和升级后的 API 可用性。完整发布门仍为 `npm run test:e2e`。
 
 Kubernetes、Higress Helm、TLS、RBAC、External Secrets 与在线数据面收敛基线见 [production-data-plane.zh-CN.md](production-data-plane.zh-CN.md)。

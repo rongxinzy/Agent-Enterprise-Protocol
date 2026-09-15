@@ -21,6 +21,7 @@ var environmentKeys = []string{
 	"AEP_DEPLOYMENT_ID", "AEP_DEPLOYMENT_NAME",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
 	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_SOURCE_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
+	"AEP_RETENTION_CLEANUP_INTERVAL", "AEP_OPERATIONAL_RETENTION", "AEP_TELEMETRY_RETENTION", "AEP_AUDIT_RETENTION", "AEP_RETENTION_CLEANUP_BATCH_SIZE",
 	"AEP_TRUSTED_PROXY_CIDRS",
 }
 
@@ -30,7 +31,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" || cfg.RetentionCleanupInterval != 15*time.Minute || cfg.OperationalRetention != 30*24*time.Hour || cfg.TelemetryRetention != 90*24*time.Hour || cfg.AuditRetention != 365*24*time.Hour || cfg.RetentionCleanupBatchSize != 1000 {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
 	}
 }
@@ -59,6 +60,9 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 		{key: "AEP_LOGIN_FAILURE_LIMIT", value: "0"},
 		{key: "AEP_LOGIN_SOURCE_FAILURE_LIMIT", value: "0"},
 		{key: "AEP_LOGIN_FAILURE_WINDOW", value: "forever"},
+		{key: "AEP_OPERATIONAL_RETENTION", value: "forever"},
+		{key: "AEP_RETENTION_CLEANUP_INTERVAL", value: "-1s"},
+		{key: "AEP_RETENTION_CLEANUP_BATCH_SIZE", value: "0"},
 		{key: "AEP_TRUSTED_PROXY_CIDRS", value: "not-a-cidr"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
@@ -89,6 +93,21 @@ func TestLoadRejectsInvertedLoginBackoff(t *testing.T) {
 	t.Setenv("AEP_LOGIN_BACKOFF_MAX", "1m")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_LOGIN_BACKOFF_MAX") {
 		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+func TestLoadAllowsRetentionCleanupToBeDisabled(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_RETENTION_CLEANUP_INTERVAL", "0")
+	t.Setenv("AEP_OPERATIONAL_RETENTION", "0")
+	t.Setenv("AEP_TELEMETRY_RETENTION", "0")
+	t.Setenv("AEP_AUDIT_RETENTION", "0")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RetentionCleanupInterval != 0 || cfg.OperationalRetention != 0 || cfg.TelemetryRetention != 0 || cfg.AuditRetention != 0 {
+		t.Fatalf("retention disablement was not preserved: %#v", cfg)
 	}
 }
 
@@ -195,6 +214,7 @@ func validConfig() Config {
 		MinioEndpoint: "minio.internal:9000", MinioBucket: "skills",
 		DeploymentID: "deployment-a", DeploymentName: "Deployment A",
 		LoginBackoffBase: time.Second, LoginBackoffMax: time.Minute,
+		RetentionCleanupBatchSize: 1000,
 	}
 }
 
@@ -214,6 +234,8 @@ func TestValidateRejectsInvalidRuntimeFields(t *testing.T) {
 		{name: "MinIO endpoint", mutate: func(cfg *Config) { cfg.MinioEndpoint = " " }, match: "AEP_MINIO_ENDPOINT"},
 		{name: "deployment identity", mutate: func(cfg *Config) { cfg.DeploymentID = "" }, match: "AEP_DEPLOYMENT_ID"},
 		{name: "login backoff", mutate: func(cfg *Config) { cfg.LoginBackoffMax = 0 }, match: "AEP_LOGIN_BACKOFF_MAX"},
+		{name: "zero retention batch size", mutate: func(cfg *Config) { cfg.RetentionCleanupBatchSize = 0 }, match: "AEP_RETENTION_CLEANUP_BATCH_SIZE"},
+		{name: "large retention batch size", mutate: func(cfg *Config) { cfg.RetentionCleanupBatchSize = 100001 }, match: "AEP_RETENTION_CLEANUP_BATCH_SIZE"},
 	}
 
 	for _, test := range tests {
