@@ -202,27 +202,29 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "The access token is invalid or expired.")
 			return
 		}
-		// The access token carries the state at the time it was issued. Consult
-		// the account record before rejecting a stale token: an administrator can
-		// have the temporary-password flag cleared by an approved recovery or
-		// migration while that short-lived token is still in use. A database
-		// failure is deliberately treated as still restricted.
-		if claims.PasswordChangeRequired && !passwordChangeRouteAllowed(request) && s.passwordChangeStillRequired(request, claims) {
+		if claims.SessionID == "" {
+			writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "The access token is not bound to a user session.")
+			return
+		}
+		state, err := s.app.ValidateAccessSession(request.Context(), claims.DeploymentID, claims.Subject, claims.SessionID)
+		if errors.Is(err, app.ErrAccessSessionInvalid) {
+			writeProblem(response, request, http.StatusUnauthorized, "SESSION_REVOKED", "The user session is inactive or revoked.")
+			return
+		}
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		// Authorization and password state are mutable and must never be trusted
+		// from a previously issued access token.
+		claims.Admin = state.Admin
+		claims.PasswordChangeRequired = state.PasswordChangeRequired
+		if state.PasswordChangeRequired && !passwordChangeRouteAllowed(request) {
 			writeProblem(response, request, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "The temporary password must be changed before using this operation.")
 			return
 		}
 		next.ServeHTTP(response, request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims)))
 	})
-}
-
-func (s *Server) passwordChangeStillRequired(request *http.Request, claims *auth.Claims) bool {
-	database := s.app.Database()
-	if database == nil {
-		return true
-	}
-	var required bool
-	err := database.QueryRow(request.Context(), `SELECT require_password_change FROM users WHERE deployment_id=$1 AND id=$2`, claims.DeploymentID, claims.Subject).Scan(&required)
-	return err != nil || required
 }
 
 func passwordChangeRouteAllowed(request *http.Request) bool {

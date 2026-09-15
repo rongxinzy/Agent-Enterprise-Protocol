@@ -18,7 +18,7 @@ Passwords must contain 12 to 1024 Unicode characters and are stored with Argon2i
 
 The service ignores `X-Forwarded-For` by default. When it is behind a reverse proxy, set `AEP_TRUSTED_PROXY_CIDRS` to the exact comma-separated proxy CIDRs only after those proxies are configured to replace or sanitize inbound forwarding headers. The service then walks the forwarding chain from right to left and selects the first address outside the trusted proxy ranges. Never configure all private networks merely for convenience: a client that can connect from a trusted range can otherwise choose its own rate-limit identity.
 
-Authentication audit rows contain enterprise and Agent identifiers plus opaque principal/source hashes, but never usernames, passwords, tokens, or request bodies. Apply an organization-approved retention policy to `authentication_audit_events`. A password reset or account disable revokes all refresh sessions; already issued access and model JWTs expire at their configured short TTL.
+Authentication audit rows contain deployment and session identifiers plus opaque principal/source hashes, but never usernames, passwords, tokens, or request bodies. Apply an organization-approved retention policy to `authentication_audit_events`. Logout, password reset, account disablement, and administrator session revocation immediately invalidate the affected control-plane access token because every authenticated control request checks current user and session state. A model token remains locally verifiable by the gateway; production gateway entitlement checks observe the same session revocation within the configured status-cache window.
 
 ## Runtime Endpoints
 

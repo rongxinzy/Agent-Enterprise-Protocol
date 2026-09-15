@@ -439,13 +439,11 @@ func TestUserSkillFailureBoundaries(t *testing.T) {
 	})
 
 	t.Run("session required", func(t *testing.T) {
-		application, pool, _, _ := newRuntimeHTTPApplication(t)
+		application, _, _, _ := newRuntimeHTTPApplication(t)
 		token, _, err := application.Tokens.IssueWithDeploymentSession("user-a", "deployment-a", "", false, false, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		pool.ExpectBegin()
-		pool.ExpectRollback()
 		response := userRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/user/skills/sync-results", `{"revision":"revision-1","status":"completed"}`)
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusUnauthorized, "SESSION_REQUIRED")
 	})

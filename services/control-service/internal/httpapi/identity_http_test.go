@@ -15,7 +15,7 @@ func TestCurrentIdentityRejectsForeignDeploymentToken(t *testing.T) {
 	}
 
 	response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/me", "")
-	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"INVALID_TOKEN"`) {
+	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"SESSION_REVOKED"`) {
 		t.Fatalf("foreign deployment identity = %d %s", response.Code, response.Body.String())
 	}
 }

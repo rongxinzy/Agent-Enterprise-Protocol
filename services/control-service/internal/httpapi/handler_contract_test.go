@@ -20,6 +20,12 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
+type accessSessionValidatorFunc func(context.Context, string, string, string) (app.AccessSessionState, error)
+
+func (function accessSessionValidatorFunc) ValidateAccessSession(ctx context.Context, deploymentID, userID, sessionID string) (app.AccessSessionState, error) {
+	return function(ctx, deploymentID, userID, sessionID)
+}
+
 func testHTTPApplication(t *testing.T) (*app.App, string, string) {
 	t.Helper()
 	tokens, err := auth.NewService("https://issuer.example", "", time.Minute, time.Minute)
@@ -47,6 +53,12 @@ func testHTTPApplication(t *testing.T) (*app.App, string, string) {
 		Tokens:      tokens,
 		Credentials: credential.NewSealer(provider),
 	}
+	application.SetAccessSessionValidator(accessSessionValidatorFunc(func(_ context.Context, deploymentID, userID, sessionID string) (app.AccessSessionState, error) {
+		if deploymentID != "deployment-a" || sessionID == "" {
+			return app.AccessSessionState{}, app.ErrAccessSessionInvalid
+		}
+		return app.AccessSessionState{Admin: userID == "admin-user"}, nil
+	}))
 	return application, adminToken, userToken
 }
 

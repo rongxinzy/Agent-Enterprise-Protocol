@@ -147,10 +147,13 @@ token expiry; deployments requiring faster convergence can issue a
 
 Access tokens authenticate normal requests. Refresh tokens are used only at
 the refresh endpoint. Refresh rotates the model token as well as the AEP token.
-Logout or account disablement revokes the refresh session, while already
-issued short-lived tokens remain bounded by their expiry. The current-identity
-endpoint is the canonical source for displayed user, deployment, and session
-data.
+For every authenticated control-plane request, the Control Service checks that
+the user is active and the token's session is still present and unrevoked.
+Logout, password reset, account disablement, or administrator session
+revocation therefore invalidates the affected access token immediately. Model
+tokens remain locally verifiable by the gateway and converge within the
+configured entitlement status-cache window. The current-identity endpoint is
+the canonical source for displayed user, deployment, and session data.
 
 ## 8. Skill Synchronization
 
