@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -53,7 +54,11 @@ func TestPasswordChangeRequiredSessionIsRestricted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := New(&app.App{Tokens: tokens}).Handler()
+	application := &app.App{Tokens: tokens}
+	application.SetAccessSessionValidator(accessSessionValidatorFunc(func(context.Context, string, string, string) (app.AccessSessionState, error) {
+		return app.AccessSessionState{PasswordChangeRequired: true}, nil
+	}))
+	handler := New(application).Handler()
 	request := httptest.NewRequest(http.MethodGet, "/aep/v1/user/models", nil)
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)

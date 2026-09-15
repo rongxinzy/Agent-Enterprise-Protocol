@@ -101,6 +101,51 @@ func TestDeploymentMetadataAndLicenseSnapshot(t *testing.T) {
 	}
 }
 
+func TestValidateAccessSessionUsesCurrentDatabaseState(t *testing.T) {
+	t.Run("active administrator", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(`SELECT u\.status,u\.require_password_change,u\.is_admin,EXISTS`).
+			WithArgs("deployment-a", "user-a", "session-a").
+			WillReturnRows(pgxmock.NewRows([]string{"status", "require_password_change", "is_admin", "session_active"}).AddRow("active", true, true, true))
+		state, err := application.ValidateAccessSession(context.Background(), "deployment-a", "user-a", "session-a")
+		if err != nil || !state.Admin || !state.PasswordChangeRequired {
+			t.Fatalf("ValidateAccessSession() = %#v, %v", state, err)
+		}
+	})
+	for _, test := range []struct {
+		name          string
+		status        string
+		sessionActive bool
+	}{
+		{name: "disabled user", status: "disabled", sessionActive: true},
+		{name: "revoked session", status: "active", sessionActive: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application, pool, _ := newMockApplication(t)
+			pool.ExpectQuery(`SELECT u\.status,u\.require_password_change,u\.is_admin,EXISTS`).
+				WithArgs("deployment-a", "user-a", "session-a").
+				WillReturnRows(pgxmock.NewRows([]string{"status", "require_password_change", "is_admin", "session_active"}).AddRow(test.status, false, false, test.sessionActive))
+			if _, err := application.ValidateAccessSession(context.Background(), "deployment-a", "user-a", "session-a"); !errors.Is(err, ErrAccessSessionInvalid) {
+				t.Fatalf("ValidateAccessSession() error = %v", err)
+			}
+		})
+	}
+	t.Run("missing identity", func(t *testing.T) {
+		application, _, _ := newMockApplication(t)
+		if _, err := application.ValidateAccessSession(context.Background(), "", "user-a", "session-a"); !errors.Is(err, ErrAccessSessionInvalid) {
+			t.Fatalf("ValidateAccessSession() error = %v", err)
+		}
+	})
+	t.Run("query failure", func(t *testing.T) {
+		application, pool, _ := newMockApplication(t)
+		pool.ExpectQuery(`SELECT u\.status,u\.require_password_change,u\.is_admin,EXISTS`).
+			WithArgs("deployment-a", "user-a", "session-a").WillReturnError(errors.New("query failed"))
+		if _, err := application.ValidateAccessSession(context.Background(), "deployment-a", "user-a", "session-a"); err == nil || errors.Is(err, ErrAccessSessionInvalid) {
+			t.Fatalf("ValidateAccessSession() error = %v", err)
+		}
+	})
+}
+
 func TestRegisterLicenseIsIdempotentAndRejectsDigestConflict(t *testing.T) {
 	verified := testVerifiedLicense()
 	for _, test := range []struct {

@@ -125,9 +125,11 @@ model access token 在登录和刷新时签发，包含明确的模型网关 aud
 范围。权限变更最迟在凭证到期时生效；需要更快收敛时，可以投递
 `model.catalog.changed` 管控事件并要求刷新会话。
 
-access token 用于普通请求，refresh token 仅用于刷新接口。退出登录时撤销 refresh 会话。
-刷新会同时轮换 AEP token 与模型 token。退出登录或禁用账号会撤销 refresh 会话，已签发
-的短期 token 则由有效期限制。当前身份接口是客户端展示用户、部署和会话信息的唯一可信来源。
+access token 用于普通请求，refresh token 仅用于刷新接口，刷新会同时轮换 AEP token 与
+model token。管控服务会在每次认证请求中检查用户仍为启用状态，且 token 对应的会话仍存在、
+未被撤销。退出登录、密码重置、禁用账号或管理员撤销会话后，受影响的 access token 会立即
+失效。model token 仍由网关本地验签，并在配置的 entitlement 状态缓存窗口内完成收敛。
+当前身份接口是客户端展示用户、部署和会话信息的唯一可信来源。
 
 ## 8. Skill 同步
 

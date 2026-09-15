@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -38,7 +39,11 @@ func TestActivateLicenseIssuesBoundEntitlement(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
-	New(&app.App{Tokens: tokens, LicenseVerifier: verifier, License: &verified}).Handler().ServeHTTP(response, request)
+	application := &app.App{Tokens: tokens, LicenseVerifier: verifier, License: &verified}
+	application.SetAccessSessionValidator(accessSessionValidatorFunc(func(context.Context, string, string, string) (app.AccessSessionState, error) {
+		return app.AccessSessionState{}, nil
+	}))
+	New(application).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("activation status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -83,7 +88,11 @@ func TestActivateLicenseRejectsExpiredEvidence(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+access)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	response := httptest.NewRecorder()
-	New(&app.App{Tokens: tokens, LicenseVerifier: verifier, License: &verified}).Handler().ServeHTTP(response, request)
+	application := &app.App{Tokens: tokens, LicenseVerifier: verifier, License: &verified}
+	application.SetAccessSessionValidator(accessSessionValidatorFunc(func(context.Context, string, string, string) (app.AccessSessionState, error) {
+		return app.AccessSessionState{}, nil
+	}))
+	New(application).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("expired activation status = %d, body = %s", response.Code, response.Body.String())
 	}

@@ -29,6 +29,7 @@ import (
 
 var (
 	ErrRefreshTokenInvalid  = errors.New("refresh token is invalid or expired")
+	ErrAccessSessionInvalid = errors.New("access session is invalid or revoked")
 	ErrLicenseNotRegistered = errors.New("license is not registered for this enterprise")
 	ErrLicenseRevoked       = errors.New("license has been revoked")
 	ErrLicenseConflict      = errors.New("license ID is already registered with a different digest")
@@ -44,6 +45,15 @@ type RuntimeDatabase interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 	Begin(context.Context) (pgx.Tx, error)
 	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
+}
+
+type AccessSessionState struct {
+	Admin                  bool
+	PasswordChangeRequired bool
+}
+
+type AccessSessionValidator interface {
+	ValidateAccessSession(context.Context, string, string, string) (AccessSessionState, error)
 }
 
 type bootstrapConnection interface {
@@ -74,6 +84,7 @@ type App struct {
 	LicenseVerifier *license.Verifier
 	License         *license.Verified
 	runtimeDB       RuntimeDatabase
+	accessSessions  AccessSessionValidator
 	licenseMu       sync.RWMutex
 }
 
@@ -98,6 +109,42 @@ func (a *App) Database() RuntimeDatabase {
 // provide a compatible pool implementation.
 func (a *App) SetRuntimeDatabase(database RuntimeDatabase) {
 	a.runtimeDB = database
+}
+
+// SetAccessSessionValidator replaces the access-session lookup. Production
+// uses the application database; embedded deployments and tests may provide a
+// compatible implementation without depending on pgx pool internals.
+func (a *App) SetAccessSessionValidator(validator AccessSessionValidator) {
+	a.accessSessions = validator
+}
+
+func (a *App) ValidateAccessSession(ctx context.Context, deploymentID, userID, sessionID string) (AccessSessionState, error) {
+	if deploymentID == "" || userID == "" || sessionID == "" {
+		return AccessSessionState{}, ErrAccessSessionInvalid
+	}
+	if a.accessSessions != nil {
+		return a.accessSessions.ValidateAccessSession(ctx, deploymentID, userID, sessionID)
+	}
+	database := a.database()
+	if database == nil {
+		return AccessSessionState{}, errors.New("database is unavailable")
+	}
+	var status string
+	var state AccessSessionState
+	var sessionActive bool
+	err := database.QueryRow(ctx, `SELECT u.status,u.require_password_change,u.is_admin,EXISTS(
+  SELECT 1 FROM user_sessions s
+  WHERE s.deployment_id=u.deployment_id AND s.user_id=u.id AND s.session_id=$3 AND s.revoked_at IS NULL
+)
+FROM users u WHERE u.deployment_id=$1 AND u.id=$2`, deploymentID, userID, sessionID).
+		Scan(&status, &state.PasswordChangeRequired, &state.Admin, &sessionActive)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (status != "active" || !sessionActive) {
+		return AccessSessionState{}, ErrAccessSessionInvalid
+	}
+	if err != nil {
+		return AccessSessionState{}, err
+	}
+	return state, nil
 }
 
 // DeploymentID is the stable identity of this single-deployment installation.
