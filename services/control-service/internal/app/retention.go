@@ -24,12 +24,13 @@ type RetentionResult struct {
 	SessionTokens             int64
 	Sessions                  int64
 	LoginRateLimits           int64
+	ExpiredAssignments        int64
 }
 
 func (result RetentionResult) Total() int64 {
 	return result.AuthenticationAudit + result.CredentialResolutionAudit + result.LicenseAudit +
 		result.Telemetry + result.SkillSync + result.ControlDeliveries + result.ControlEvents +
-		result.SessionTokens + result.Sessions + result.LoginRateLimits
+		result.SessionTokens + result.Sessions + result.LoginRateLimits + result.ExpiredAssignments
 }
 
 func (a *App) CleanupRetention(ctx context.Context, now time.Time) (result RetentionResult, err error) {
@@ -98,6 +99,18 @@ func (a *App) CleanupRetention(ctx context.Context, now time.Time) (result Reten
 		if result.LoginRateLimits, err = retentionDelete(ctx, tx, "login rate limits", `DELETE FROM login_rate_limits WHERE key_hash IN (SELECT key_hash FROM login_rate_limits WHERE updated_at<$1 ORDER BY updated_at LIMIT $2)`, now.Add(-loginRetention), batchSize); err != nil {
 			return result, err
 		}
+	}
+
+	// Expired grants already stopped authorizing at their expiry instant
+	// (evaluation filters eagerly); this sweep physically removes the rows.
+	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
+		deleted, err := retentionDelete(ctx, tx, "expired "+table,
+			`DELETE FROM `+table+` WHERE id IN (SELECT id FROM `+table+` WHERE expires_at IS NOT NULL AND expires_at<$1 ORDER BY expires_at LIMIT $2)`,
+			now, batchSize)
+		if err != nil {
+			return result, err
+		}
+		result.ExpiredAssignments += deleted
 	}
 
 	if err := tx.Commit(ctx); err != nil {

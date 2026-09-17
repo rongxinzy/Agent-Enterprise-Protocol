@@ -74,12 +74,13 @@ type SkillVersion struct {
 func (SkillVersion) TableName() string { return "skill_versions" }
 
 type SkillAssignment struct {
-	ID           string    `gorm:"column:id;primaryKey"`
-	DeploymentID string    `gorm:"column:deployment_id;not null"`
-	SkillID      string    `gorm:"column:skill_id;not null"`
-	SubjectType  string    `gorm:"column:subject_type;not null"`
-	SubjectID    string    `gorm:"column:subject_id;not null"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
+	ID           string     `gorm:"column:id;primaryKey"`
+	DeploymentID string     `gorm:"column:deployment_id;not null"`
+	SkillID      string     `gorm:"column:skill_id;not null"`
+	SubjectType  string     `gorm:"column:subject_type;not null"`
+	SubjectID    string     `gorm:"column:subject_id;not null"`
+	ExpiresAt    *time.Time `gorm:"column:expires_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (SkillAssignment) TableName() string { return "skill_assignments" }
@@ -104,12 +105,13 @@ type Credential struct {
 func (Credential) TableName() string { return "credentials" }
 
 type CredentialAssignment struct {
-	ID           string    `gorm:"column:id;primaryKey"`
-	DeploymentID string    `gorm:"column:deployment_id;not null"`
-	CredentialID string    `gorm:"column:credential_id;not null"`
-	SubjectType  string    `gorm:"column:subject_type;not null"`
-	SubjectID    string    `gorm:"column:subject_id;not null"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
+	ID           string     `gorm:"column:id;primaryKey"`
+	DeploymentID string     `gorm:"column:deployment_id;not null"`
+	CredentialID string     `gorm:"column:credential_id;not null"`
+	SubjectType  string     `gorm:"column:subject_type;not null"`
+	SubjectID    string     `gorm:"column:subject_id;not null"`
+	ExpiresAt    *time.Time `gorm:"column:expires_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (CredentialAssignment) TableName() string { return "credential_assignments" }
@@ -136,12 +138,13 @@ type Model struct {
 func (Model) TableName() string { return "models" }
 
 type ModelAssignment struct {
-	ID           string    `gorm:"column:id;primaryKey"`
-	DeploymentID string    `gorm:"column:deployment_id;not null"`
-	ModelID      string    `gorm:"column:model_id;not null"`
-	SubjectType  string    `gorm:"column:subject_type;not null"`
-	SubjectID    string    `gorm:"column:subject_id;not null"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
+	ID           string     `gorm:"column:id;primaryKey"`
+	DeploymentID string     `gorm:"column:deployment_id;not null"`
+	ModelID      string     `gorm:"column:model_id;not null"`
+	SubjectType  string     `gorm:"column:subject_type;not null"`
+	SubjectID    string     `gorm:"column:subject_id;not null"`
+	ExpiresAt    *time.Time `gorm:"column:expires_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (ModelAssignment) TableName() string { return "model_assignments" }

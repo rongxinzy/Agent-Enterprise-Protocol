@@ -20,6 +20,7 @@ type User struct {
 	Status                string    `gorm:"column:status;not null"`
 	RequirePasswordChange bool      `gorm:"column:require_password_change;not null"`
 	IsAdmin               bool      `gorm:"column:is_admin;not null"`
+	Kind                  string    `gorm:"column:kind;not null"`
 	CreatedAt             time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt             time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
@@ -61,6 +62,9 @@ type Team struct {
 	Description  string    `gorm:"column:description;not null"`
 	BuiltIn      bool      `gorm:"column:built_in;not null"`
 	Enabled      bool      `gorm:"column:enabled;not null"`
+	ParentTeamID *string   `gorm:"column:parent_team_id"`
+	Path         string    `gorm:"column:path;not null"`
+	Depth        int       `gorm:"column:depth;not null"`
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }

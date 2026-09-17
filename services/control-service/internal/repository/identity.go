@@ -13,6 +13,7 @@ type CreateUserParams struct {
 	PasswordHash          string
 	RequirePasswordChange bool
 	IsAdmin               bool
+	Kind                  string // "human" (default) or "agent"
 	RoleIDs               []string
 	TeamIDs               []string
 }
@@ -98,10 +99,15 @@ func (s *DeploymentStore) ListUsers(ctx context.Context, cursor string, limit in
 func (s *DeploymentStore) CreateUser(ctx context.Context, params CreateUserParams) (UserRecord, error) {
 	var result UserRecord
 	err := s.transaction(ctx, func(tx *DeploymentStore) error {
+		kind := params.Kind
+		if kind != "agent" {
+			kind = "human"
+		}
 		user := User{
 			ID: params.ID, DeploymentID: tx.deploymentID, Username: params.Username,
 			DisplayName: params.DisplayName, Email: params.Email, PasswordHash: params.PasswordHash,
 			Status: "active", RequirePasswordChange: params.RequirePasswordChange, IsAdmin: params.IsAdmin,
+			Kind: kind,
 		}
 		if err := tx.db.Create(&user).Error; err != nil {
 			return err

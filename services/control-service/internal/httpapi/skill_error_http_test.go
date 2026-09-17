@@ -276,7 +276,7 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 	t.Run("create insert", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "user", "user-a").WillReturnError(errors.New("insert unavailable"))
+		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "user", "user-a", pgxmock.AnyArg()).WillReturnError(errors.New("insert unavailable"))
 		pool.ExpectRollback()
 		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skill-assignments", `{"skillId":"writer","subject":{"type":"user","id":"user-a"}}`)
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -285,7 +285,7 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 	t.Run("create event", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -298,7 +298,7 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 	t.Run("create supersede event", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -314,7 +314,7 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 	t.Run("create delivery event", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -333,7 +333,7 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 	t.Run("create commit", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "team", "engineering").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "team", "engineering", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		expectSkillAssignmentEvent(pool)
 		pool.ExpectCommit().WillReturnError(errors.New("commit unavailable"))
 		pool.ExpectRollback()

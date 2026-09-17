@@ -155,10 +155,7 @@ func (s *Server) listTeams(response http.ResponseWriter, request *http.Request) 
 	teams, nextCursor := page(teams, pageSize, func(item repository.TeamRecord) string { return item.ID })
 	items := make([]map[string]any, 0, len(teams))
 	for _, team := range teams {
-		items = append(items, map[string]any{
-			"id": team.ID, "name": team.Name, "description": team.Description,
-			"builtIn": team.BuiltIn, "enabled": team.Enabled, "memberCount": team.MemberCount,
-		})
+		items = append(items, publicTeam(team))
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"teams": items, "nextCursor": nextCursor})
 }
@@ -168,14 +165,38 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		ParentID    string `json:"parentId"`
 	}
 	if !decodeJSON(response, request, &input) || !validRBACID(input.ID) || strings.TrimSpace(input.Name) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The team id and name are invalid.")
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateTeam(request.Context(), repository.Team{
-		ID: input.ID, Name: strings.TrimSpace(input.Name), Description: input.Description,
-	})
+	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
+	team := repository.Team{ID: input.ID, Name: strings.TrimSpace(input.Name), Description: input.Description}
+	// Department hierarchy: a new team pins its materialized path and depth at
+	// creation. Parents never move afterwards, so cycles are structurally
+	// impossible; re-parenting means delete + recreate.
+	if input.ParentID != "" {
+		parent, err := store.GetTeamRecord(request.Context(), input.ParentID)
+		if errors.Is(err, repository.ErrNotFound) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The parent team does not exist.")
+			return
+		}
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		parentPath := parent.Path
+		if parentPath == "" || parentPath == "/" {
+			parentPath = "/" + parent.ID
+		}
+		team.ParentTeamID = &input.ParentID
+		team.Path = parentPath + "/" + input.ID
+		team.Depth = parent.Depth + 1
+	} else {
+		team.Path = "/" + input.ID
+	}
+	err := store.CreateTeam(request.Context(), team)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "TEAM_EXISTS", "The team already exists.")
@@ -184,7 +205,7 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": input.ID, "name": strings.TrimSpace(input.Name)})
+	writeJSON(response, http.StatusCreated, map[string]any{"id": input.ID, "name": strings.TrimSpace(input.Name), "parentId": input.ParentID, "path": team.Path, "depth": team.Depth})
 }
 
 func (s *Server) getTeam(response http.ResponseWriter, request *http.Request) {
@@ -247,7 +268,11 @@ func publicRole(role repository.RoleRecord) map[string]any {
 	return map[string]any{"id": role.ID, "name": role.Name, "description": role.Description, "builtIn": role.BuiltIn, "enabled": role.Enabled, "permissions": role.Permissions}
 }
 func publicTeam(team repository.TeamRecord) map[string]any {
-	return map[string]any{"id": team.ID, "name": team.Name, "description": team.Description, "builtIn": team.BuiltIn, "enabled": team.Enabled, "memberCount": team.MemberCount}
+	response := map[string]any{"id": team.ID, "name": team.Name, "description": team.Description, "builtIn": team.BuiltIn, "enabled": team.Enabled, "memberCount": team.MemberCount, "path": team.Path, "depth": team.Depth}
+	if team.ParentTeamID != nil {
+		response["parentId"] = *team.ParentTeamID
+	}
+	return response
 }
 
 func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Request) {

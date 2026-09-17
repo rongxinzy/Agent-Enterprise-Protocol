@@ -142,6 +142,19 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Get("/aep/v1/admin/credential-assignments", server.listCredentialAssignments)
 			admin.Post("/aep/v1/admin/credential-assignments", server.createCredentialAssignment)
 			admin.Delete("/aep/v1/admin/credential-assignments/{assignmentId}", server.deleteCredentialAssignment)
+			admin.Get("/aep/v1/admin/agents", server.listAgents)
+			admin.Post("/aep/v1/admin/agents", server.createAgent)
+			admin.Put("/aep/v1/admin/agents/{agentId}/profile", server.updateAgentProfile)
+			admin.Get("/aep/v1/admin/identity-sources", server.listIdentitySources)
+			admin.Post("/aep/v1/admin/identity-sources", server.createIdentitySource)
+			admin.Get("/aep/v1/admin/identity-sources/{sourceId}/mappings", server.listIdentityMappings)
+			admin.Put("/aep/v1/admin/identity-sources/{sourceId}/mappings", server.upsertIdentityMapping)
+			admin.Delete("/aep/v1/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}", server.deleteIdentityMapping)
+			admin.Get("/aep/v1/admin/data-scope-rules", server.listDataScopeRules)
+			admin.Post("/aep/v1/admin/data-scope-rules", server.createDataScopeRule)
+			admin.Get("/aep/v1/admin/data-scope-rules/{ruleId}", server.getDataScopeRule)
+			admin.Delete("/aep/v1/admin/data-scope-rules/{ruleId}", server.deleteDataScopeRule)
+			admin.Get("/aep/v1/admin/data-scope/context", server.dataScopeContext)
 		})
 	})
 	server.router = router
@@ -337,6 +350,21 @@ func requiredAdminPermission(method, path string) string {
 		return "events.write"
 	case strings.HasPrefix(path, "/aep/v1/admin/data-plane"):
 		return "data_plane.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/agents"):
+		if method == http.MethodGet {
+			return "agents.read"
+		}
+		return "users.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/identity-sources"):
+		if method == http.MethodGet {
+			return "identity.read"
+		}
+		return "identity.write"
+	case strings.HasPrefix(path, "/aep/v1/admin/data-scope"):
+		if method == http.MethodGet {
+			return "data_scope.read"
+		}
+		return "data_scope.write"
 	}
 	return ""
 }

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   require_password_change boolean NOT NULL DEFAULT true,
   is_admin boolean NOT NULL DEFAULT false,
+  kind text NOT NULL DEFAULT 'human' CHECK (kind IN ('human', 'agent')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (deployment_id, username)
@@ -52,11 +53,20 @@ CREATE TABLE IF NOT EXISTS teams (
   description text NOT NULL DEFAULT '',
   built_in boolean NOT NULL DEFAULT false,
   enabled boolean NOT NULL DEFAULT true,
+  parent_team_id text,
+  path text NOT NULL DEFAULT '/',
+  depth integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (deployment_id, id),
-  UNIQUE (deployment_id, name)
+  UNIQUE (deployment_id, name),
+  CONSTRAINT teams_depth_check CHECK (depth >= 0),
+  CONSTRAINT teams_parent_fk FOREIGN KEY (deployment_id, parent_team_id)
+    REFERENCES teams (deployment_id, id) ON DELETE RESTRICT
 );
+
+CREATE INDEX IF NOT EXISTS idx_teams_parent ON teams (deployment_id, parent_team_id);
+CREATE INDEX IF NOT EXISTS idx_teams_path ON teams (deployment_id, path text_pattern_ops);
 
 CREATE TABLE IF NOT EXISTS user_role_bindings (
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
@@ -128,9 +138,13 @@ CREATE TABLE IF NOT EXISTS skill_assignments (
   skill_id text NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
   subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
   subject_id text NOT NULL,
+  expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (deployment_id, skill_id, subject_type, subject_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_skill_assignments_expiry
+  ON skill_assignments (expires_at, id) WHERE expires_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS credentials (
   deployment_id text NOT NULL REFERENCES deployments(id),
@@ -156,10 +170,14 @@ CREATE TABLE IF NOT EXISTS credential_assignments (
   credential_id text NOT NULL,
   subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
   subject_id text NOT NULL,
+  expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (deployment_id, credential_id) REFERENCES credentials(deployment_id, id) ON DELETE CASCADE,
   UNIQUE (deployment_id, credential_id, subject_type, subject_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_credential_assignments_expiry
+  ON credential_assignments (expires_at, id) WHERE expires_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS credential_resolution_audit (
   id text PRIMARY KEY,
@@ -199,10 +217,14 @@ CREATE TABLE IF NOT EXISTS model_assignments (
   model_id text NOT NULL,
   subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
   subject_id text NOT NULL,
+  expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (deployment_id, model_id) REFERENCES models(deployment_id, id) ON DELETE CASCADE,
   UNIQUE (deployment_id, model_id, subject_type, subject_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_model_assignments_expiry
+  ON model_assignments (expires_at, id) WHERE expires_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS control_events (
   event_id text PRIMARY KEY,
@@ -370,3 +392,81 @@ CREATE INDEX IF NOT EXISTS idx_session_deliveries_retention ON session_control_d
 CREATE INDEX IF NOT EXISTS idx_control_events_retention ON control_events (GREATEST(created_at, expires_at), event_id);
 CREATE INDEX IF NOT EXISTS idx_session_tokens_retention ON user_session_tokens (LEAST(expires_at, COALESCE(revoked_at, expires_at)), token_hash);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_retention ON user_sessions (GREATEST(last_seen_at, COALESCE(revoked_at, last_seen_at)), session_id);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_type_time ON telemetry_events (deployment_id, type, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS identity_sources (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  id text NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('ldap', 'ad', 'oidc', 'hr', 'feishu', 'wecom')),
+  display_name text NOT NULL,
+  config jsonb NOT NULL DEFAULT '{}',
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS identity_mappings (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  source_id text NOT NULL,
+  external_subject_type text NOT NULL CHECK (external_subject_type IN ('user', 'team')),
+  external_id text NOT NULL,
+  local_subject_id text NOT NULL,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  linked_at timestamptz NOT NULL DEFAULT now(),
+  last_synced_at timestamptz,
+  PRIMARY KEY (deployment_id, source_id, external_subject_type, external_id),
+  FOREIGN KEY (deployment_id, source_id)
+    REFERENCES identity_sources (deployment_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_identity_mappings_local
+  ON identity_mappings (deployment_id, external_subject_type, local_subject_id);
+
+CREATE TABLE IF NOT EXISTS data_scope_rules (
+  id text PRIMARY KEY,
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  rule_kind text NOT NULL CHECK (rule_kind IN
+    ('department_default', 'management_scope', 'exception_grant', 'explicit_deny')),
+  subject_type text NOT NULL CHECK (subject_type IN ('user', 'role', 'team')),
+  subject_id text NOT NULL,
+  resource_kind text NOT NULL CHECK (resource_kind IN ('knowledge_base', 'classification', 'team')),
+  resource_id text NOT NULL,
+  priority integer NOT NULL DEFAULT 0,
+  starts_at timestamptz,
+  expires_at timestamptz,
+  reason text NOT NULL DEFAULT '',
+  created_by text NOT NULL REFERENCES users(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (deployment_id, rule_kind, subject_type, subject_id, resource_kind, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_scope_rules_subject
+  ON data_scope_rules (deployment_id, subject_type, subject_id, resource_kind);
+CREATE INDEX IF NOT EXISTS idx_data_scope_rules_resource
+  ON data_scope_rules (deployment_id, resource_kind, resource_id);
+CREATE INDEX IF NOT EXISTS idx_data_scope_rules_expiry
+  ON data_scope_rules (expires_at, id) WHERE expires_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agent_profiles (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  display_title text NOT NULL DEFAULT '',
+  description text NOT NULL DEFAULT '',
+  avatar_object_key text,
+  home_team_id text NOT NULL,
+  prompt_skill_id text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, user_id),
+  FOREIGN KEY (deployment_id, home_team_id)
+    REFERENCES teams (deployment_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (prompt_skill_id) REFERENCES skills(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_kind_agent
+  ON users (deployment_id, kind) WHERE kind = 'agent';
+CREATE INDEX IF NOT EXISTS idx_agent_profiles_home_team
+  ON agent_profiles (deployment_id, home_team_id);

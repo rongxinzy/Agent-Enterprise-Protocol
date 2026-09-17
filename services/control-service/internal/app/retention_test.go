@@ -35,6 +35,10 @@ func TestCleanupRetentionDeletesBoundedExpiredData(t *testing.T) {
 	pool.ExpectExec(`DELETE FROM user_sessions`).WithArgs(now.Add(-application.Config.OperationalRetention), 100, now).
 		WillReturnResult(pgxmock.NewResult("DELETE", 9))
 	expectRetentionDelete(pool, `DELETE FROM login_rate_limits`, now.Add(-time.Hour), 100, 10)
+	expectRetentionDelete(pool, `DELETE FROM skill_assignments`, now, 100, 0)
+	expectRetentionDelete(pool, `DELETE FROM model_assignments`, now, 100, 0)
+	expectRetentionDelete(pool, `DELETE FROM credential_assignments`, now, 100, 0)
+	expectRetentionDelete(pool, `DELETE FROM data_scope_rules`, now, 100, 0)
 	pool.ExpectCommit()
 
 	result, err := application.CleanupRetention(context.Background(), now)
