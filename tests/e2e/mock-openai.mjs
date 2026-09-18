@@ -71,6 +71,43 @@ const server = http.createServer(async (request, response) => {
     streamSlowCompletion(request, response);
     return;
   }
+  if (lastUserText.includes('AEP_DEPT_REPORT')) {
+    // Scripted department-report flow for digital-employee E2E: the model
+    // first calls the dept_data tool, then relays the (scope-filtered)
+    // dataset the runtime returned as the final report text.
+    const toolResult = body.messages?.find(
+      message => message.role === 'tool' && message.tool_call_id === 'call-dept-data-1',
+    );
+    if (toolResult) {
+      const report = `AEP_DEPT_REPORT_OK ${String(toolResult.content)}`;
+      if (body.stream === true) {
+        streamCompletion(response, report, 'Department data compiled.');
+      } else {
+        response.setHeader('X-Mock-Provider-Auth', 'accepted');
+        sendJSON(response, 200, {
+          id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+          choices: [{index: 0, message: {role: 'assistant', content: report, reasoning_content: 'Department data compiled.'}, finish_reason: 'stop'}],
+          usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+        });
+      }
+      return;
+    }
+    const toolCall = {
+      index: 0, id: 'call-dept-data-1', type: 'function',
+      function: {name: 'dept_data', arguments: '{"dataset":"monthly_sales"}'},
+    };
+    if (body.stream === true) {
+      streamNamedToolCall(response, toolCall, 'Fetch the department dataset.');
+    } else {
+      response.setHeader('X-Mock-Provider-Auth', 'accepted');
+      sendJSON(response, 200, {
+        id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+        choices: [{index: 0, message: {role: 'assistant', content: '', tool_calls: [toolCall]}, finish_reason: 'tool_calls'}],
+        usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+      });
+    }
+    return;
+  }
   response.setHeader('X-Mock-Provider-Auth', 'accepted');
   if (body.stream === true) {
     response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
@@ -108,6 +145,18 @@ function streamCompletion(response, content, reasoningContent) {
   response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
   response.write(`data: ${JSON.stringify(chunk('', reasoningContent))}\n\n`);
   response.write(`data: ${JSON.stringify(chunk(content, undefined, 'stop'))}\n\n`);
+  response.end('data: [DONE]\n\n');
+}
+
+function streamNamedToolCall(response, toolCall, reasoning) {
+  response.setHeader('X-Mock-Provider-Auth', 'accepted');
+  response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
+  response.write(`data: ${JSON.stringify(chunk('', reasoning))}\n\n`);
+  response.write(`data: ${JSON.stringify({
+    id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel,
+    choices: [{index: 0, delta: {tool_calls: [toolCall]}, finish_reason: null}],
+  })}\n\n`);
+  response.write(`data: ${JSON.stringify(chunk('', undefined, 'tool_calls'))}\n\n`);
   response.end('data: [DONE]\n\n');
 }
 
