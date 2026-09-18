@@ -58,11 +58,11 @@ func TestStoreScopesDeploymentAndUserQueries(t *testing.T) {
 func TestListUsersReturnsStableMembershipsAndEmptySlices(t *testing.T) {
 	store, mock := newMockStore(t)
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id > \$2 ORDER BY id LIMIT \$3`).
-		WithArgs("deployment-a", "user-0", 3).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "username", "display_name", "status", "password_hash", "require_password_change", "is_admin", "created_at", "updated_at"}).
-			AddRow("user-a", "deployment-a", "alice", "Alice", "active", "hash", false, false, now, now).
-			AddRow("user-b", "deployment-a", "bob", "Bob", "active", "hash", false, false, now, now))
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND kind = \$2 AND id > \$3 ORDER BY id LIMIT \$4`).
+		WithArgs("deployment-a", "human", "user-0", 3).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "username", "display_name", "status", "password_hash", "require_password_change", "is_admin", "kind", "created_at", "updated_at"}).
+			AddRow("user-a", "deployment-a", "alice", "Alice", "active", "hash", false, false, "human", now, now).
+			AddRow("user-b", "deployment-a", "bob", "Bob", "active", "hash", false, false, "human", now, now))
 	mock.ExpectQuery(`SELECT \* FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id IN \(\$2,\$3\) ORDER BY user_id, role_id`).
 		WithArgs("deployment-a", "user-a", "user-b").
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id", "role_id", "is_primary", "created_at"}).

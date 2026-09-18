@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"gorm.io/gorm/clause"
 )
 
 // AgentProfile carries digital-employee presentation metadata for a user with
@@ -45,27 +47,26 @@ type IdentitySource struct {
 func (IdentitySource) TableName() string { return "identity_sources" }
 
 type IdentityMapping struct {
-	DeploymentID         string     `gorm:"column:deployment_id;primaryKey"`
-	SourceID             string     `gorm:"column:source_id;primaryKey"`
-	ExternalSubjectType  string     `gorm:"column:external_subject_type;primaryKey"`
-	ExternalID           string     `gorm:"column:external_id;primaryKey"`
-	LocalSubjectID       string     `gorm:"column:local_subject_id;not null"`
-	Status               string     `gorm:"column:status;not null"`
-	LinkedAt             time.Time  `gorm:"column:linked_at;autoCreateTime"`
-	LastSyncedAt         *time.Time `gorm:"column:last_synced_at"`
+	DeploymentID        string     `gorm:"column:deployment_id;primaryKey"`
+	SourceID            string     `gorm:"column:source_id;primaryKey"`
+	ExternalSubjectType string     `gorm:"column:external_subject_type;primaryKey"`
+	ExternalID          string     `gorm:"column:external_id;primaryKey"`
+	LocalSubjectID      string     `gorm:"column:local_subject_id;not null"`
+	Status              string     `gorm:"column:status;not null"`
+	LinkedAt            time.Time  `gorm:"column:linked_at;autoCreateTime"`
+	LastSyncedAt        *time.Time `gorm:"column:last_synced_at"`
 }
 
 func (IdentityMapping) TableName() string { return "identity_mappings" }
 
 type DataScopeRule struct {
+	DeploymentID string     `gorm:"column:deployment_id;primaryKey"`
 	ID           string     `gorm:"column:id;primaryKey"`
-	DeploymentID string     `gorm:"column:deployment_id;not null"`
 	RuleKind     string     `gorm:"column:rule_kind;not null"`
 	SubjectType  string     `gorm:"column:subject_type;not null"`
 	SubjectID    string     `gorm:"column:subject_id;not null"`
 	ResourceKind string     `gorm:"column:resource_kind;not null"`
 	ResourceID   string     `gorm:"column:resource_id;not null"`
-	Priority     int        `gorm:"column:priority;not null"`
 	StartsAt     *time.Time `gorm:"column:starts_at"`
 	ExpiresAt    *time.Time `gorm:"column:expires_at"`
 	Reason       string     `gorm:"column:reason;not null"`
@@ -90,8 +91,9 @@ func (s *DeploymentStore) GetAgentProfile(ctx context.Context, userID string) (A
 }
 
 // ListAgentDirectory joins service accounts (kind='agent') with their profile
-// and the freshest active-session heartbeat for presence projection.
-func (s *DeploymentStore) ListAgentDirectory(ctx context.Context) ([]AgentDirectoryEntry, error) {
+// and the freshest active-session heartbeat for presence projection. Pages by
+// user id after the optional cursor.
+func (s *DeploymentStore) ListAgentDirectory(ctx context.Context, cursor string, fetchLimit int32) ([]AgentDirectoryEntry, error) {
 	rows, err := s.db.WithContext(ctx).Raw(`
 SELECT u.id, u.username, u.display_name, u.status, u.kind,
        p.display_title, p.description, p.avatar_object_key, p.home_team_id, p.prompt_skill_id,
@@ -104,8 +106,9 @@ LEFT JOIN LATERAL (
   FROM user_sessions s2
   WHERE s2.deployment_id = u.deployment_id AND s2.user_id = u.id AND s2.revoked_at IS NULL
 ) presence ON true
-WHERE u.deployment_id = ? AND u.kind = 'agent'
-ORDER BY u.id`, s.deploymentID).Rows()
+WHERE u.deployment_id = ? AND u.kind = 'agent' AND (? = '' OR u.id > ?)
+ORDER BY u.id
+LIMIT ?`, s.deploymentID, cursor, cursor, fetchLimit).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -162,10 +165,14 @@ func (s *DeploymentStore) CreateIdentitySource(ctx context.Context, source Ident
 	return source, err
 }
 
-func (s *DeploymentStore) ListIdentitySources(ctx context.Context) ([]IdentitySource, error) {
+func (s *DeploymentStore) ListIdentitySources(ctx context.Context, cursor string, fetchLimit int32) ([]IdentitySource, error) {
 	sources := make([]IdentitySource, 0)
-	err := s.db.WithContext(ctx).
-		Where("deployment_id = ?", s.deploymentID).Order("id").Find(&sources).Error
+	query := s.db.WithContext(ctx).
+		Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	err := query.Order("id").Limit(int(fetchLimit)).Find(&sources).Error
 	return sources, err
 }
 
@@ -201,21 +208,35 @@ func (s *DeploymentStore) DeleteIdentitySource(ctx context.Context, id string) e
 		Delete(&IdentitySource{}).Error
 }
 
+// UpsertIdentityMapping inserts a mapping or retargets an existing one. The
+// update path only touches the mutable columns so a fresh struct cannot zero
+// out linked_at on a rebind.
 func (s *DeploymentStore) UpsertIdentityMapping(ctx context.Context, mapping IdentityMapping) error {
 	mapping.DeploymentID = s.deploymentID
 	if mapping.Status == "" {
 		mapping.Status = "active"
 	}
-	return s.db.WithContext(ctx).Save(&mapping).Error
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "deployment_id"}, {Name: "source_id"},
+			{Name: "external_subject_type"}, {Name: "external_id"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{"local_subject_id", "status", "last_synced_at"}),
+	}).Create(&mapping).Error
 }
 
-func (s *DeploymentStore) ListIdentityMappings(ctx context.Context, sourceID, subjectType string) ([]IdentityMapping, error) {
+// ListIdentityMappings pages by (external_subject_type, external_id) after the
+// optional "subjectType/externalId" cursor.
+func (s *DeploymentStore) ListIdentityMappings(ctx context.Context, sourceID, subjectType, cursorSubjectType, cursorExternalID string, fetchLimit int32) ([]IdentityMapping, error) {
 	mappings := make([]IdentityMapping, 0)
 	query := s.db.WithContext(ctx).Where("deployment_id = ? AND source_id = ?", s.deploymentID, sourceID)
 	if subjectType != "" {
 		query = query.Where("external_subject_type = ?", subjectType)
 	}
-	err := query.Order("external_id").Find(&mappings).Error
+	if cursorExternalID != "" {
+		query = query.Where("(external_subject_type, external_id) > (?, ?)", cursorSubjectType, cursorExternalID)
+	}
+	err := query.Order("external_subject_type, external_id").Limit(int(fetchLimit)).Find(&mappings).Error
 	return mappings, err
 }
 
@@ -232,13 +253,13 @@ func (s *DeploymentStore) CreateDataScopeRule(ctx context.Context, rule DataScop
 	return rule, err
 }
 
-func (s *DeploymentStore) ListDataScopeRules(ctx context.Context, fetchLimit int32) ([]DataScopeRule, error) {
+func (s *DeploymentStore) ListDataScopeRules(ctx context.Context, cursor string, fetchLimit int32) ([]DataScopeRule, error) {
 	rules := make([]DataScopeRule, 0)
-	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("rule_kind, subject_type, subject_id, resource_kind, resource_id")
-	if fetchLimit > 0 {
-		query = query.Limit(int(fetchLimit))
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
 	}
-	err := query.Find(&rules).Error
+	err := query.Order("id").Limit(int(fetchLimit)).Find(&rules).Error
 	return rules, err
 }
 
@@ -253,39 +274,4 @@ func (s *DeploymentStore) DeleteDataScopeRule(ctx context.Context, id string) er
 	return s.db.WithContext(ctx).
 		Where("deployment_id = ? AND id = ?", s.deploymentID, id).
 		Delete(&DataScopeRule{}).Error
-}
-
-// DeleteExpiredAssignments physically removes authorization rows whose
-// expiry has passed. Entitlement evaluation already filters them eagerly, so
-// this sweep only reclaims space and keeps assignment listings honest.
-func (s *DeploymentStore) DeleteExpiredAssignments(ctx context.Context) (skill, model, credential, scope int64, err error) {
-	result := s.db.WithContext(ctx).
-		Where("deployment_id = ? AND expires_at IS NOT NULL AND expires_at <= now()", s.deploymentID).
-		Delete(&SkillAssignment{})
-	if result.Error != nil {
-		return 0, 0, 0, 0, result.Error
-	}
-	skill = result.RowsAffected
-	result = s.db.WithContext(ctx).
-		Where("deployment_id = ? AND expires_at IS NOT NULL AND expires_at <= now()", s.deploymentID).
-		Delete(&ModelAssignment{})
-	if result.Error != nil {
-		return 0, 0, 0, 0, result.Error
-	}
-	model = result.RowsAffected
-	result = s.db.WithContext(ctx).
-		Where("deployment_id = ? AND expires_at IS NOT NULL AND expires_at <= now()", s.deploymentID).
-		Delete(&CredentialAssignment{})
-	if result.Error != nil {
-		return 0, 0, 0, 0, result.Error
-	}
-	credential = result.RowsAffected
-	result = s.db.WithContext(ctx).
-		Where("deployment_id = ? AND expires_at IS NOT NULL AND expires_at <= now()", s.deploymentID).
-		Delete(&DataScopeRule{})
-	if result.Error != nil {
-		return 0, 0, 0, 0, result.Error
-	}
-	scope = result.RowsAffected
-	return skill, model, credential, scope, nil
 }

@@ -15,9 +15,11 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (deployment_id, user_id),
-  FOREIGN KEY (deployment_id, home_team_id)
+  CONSTRAINT agent_profiles_home_team_fk
+    FOREIGN KEY (deployment_id, home_team_id)
     REFERENCES teams (deployment_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (prompt_skill_id) REFERENCES skills(id) ON DELETE SET NULL
+  CONSTRAINT agent_profiles_prompt_skill_fk
+    FOREIGN KEY (prompt_skill_id) REFERENCES skills(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_kind_agent

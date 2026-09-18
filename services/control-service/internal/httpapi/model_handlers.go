@@ -424,8 +424,8 @@ func (s *Server) listModelAssignments(response http.ResponseWriter, request *htt
 
 func (s *Server) createModelAssignment(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		ModelID   string     `json:"modelId"`
-		Subject   struct {
+		ModelID string `json:"modelId"`
+		Subject struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
 		} `json:"subject"`

@@ -558,6 +558,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Requires the users.read permission (or a full administrator). Returns the digital employee directory page by page. Cursor pagination follows the admin users convention: pass nextCursor back as cursor until it is null. Problem codes: TOKEN_INVALID, ACCESS_DENIED. */
+        get: operations["listAgents"];
+        put?: never;
+        /** @description Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, or INVALID_TEAM; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS. */
+        post: operations["createAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/agents/{agentId}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Requires the users.write permission (or a full administrator). Updates the digital employee profile. Every field is optional; a null value clears the stored field. Changing homeTeamId requires the same team grant rights as creation. Problem codes: 400 INVALID_AGENT; 404 RESOURCE_NOT_FOUND. */
+        put: operations["updateAgentProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/identity-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Requires the identity.read permission (or a full administrator). Returns the configured external identity sources page by page. The stored connector config is never echoed. Problem codes: TOKEN_INVALID, ACCESS_DENIED. */
+        get: operations["listIdentitySources"];
+        put?: never;
+        /** @description Requires the identity.write permission (or a full administrator). Registers an external identity source. kind is a protocol category only (ldap, oidc, or directory); product-specific connector flavors belong inside config on the deployment side. config MUST be a JSON object and MUST NOT contain secret keys; secret material may only be expressed as credential store references. Problem codes: 400 INVALID_IDENTITY_SOURCE; 409 IDENTITY_SOURCE_EXISTS. */
+        post: operations["createIdentitySource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/identity-sources/{sourceId}/mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Requires the identity.read permission (or a full administrator). Returns the subject mappings of one identity source page by page. Problem codes: TOKEN_INVALID, ACCESS_DENIED. */
+        get: operations["listIdentityMappings"];
+        /** @description Requires the identity.write permission (or a full administrator). Creates or replaces the mapping of one external subject to one local user or team. Problem codes: 400 INVALID_IDENTITY_MAPPING; 404 RESOURCE_NOT_FOUND. */
+        put: operations["upsertIdentityMapping"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Requires the identity.write permission (or a full administrator). Removes one external subject mapping. Deleting an unknown mapping is idempotent and still returns 204. */
+        delete: operations["deleteIdentityMapping"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/data-scope-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Requires the data_scope.read permission (or a full administrator). Returns the deployment data scope rules page by page. Problem codes: TOKEN_INVALID, ACCESS_DENIED. */
+        get: operations["listDataScopeRules"];
+        put?: never;
+        /** @description Requires the data_scope.write permission (or a full administrator). Creates a data scope rule. resourceKind is the protocol-defined team or a deployment-defined lowercase identifier; the control plane treats every non-team kind as an opaque reference. Problem codes: 400 INVALID_DATA_SCOPE_RULE; 409 DATA_SCOPE_RULE_EXISTS. */
+        post: operations["createDataScopeRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/data-scope-rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: components["parameters"]["RuleId"];
+            };
+            cookie?: never;
+        };
+        /** @description Requires the data_scope.read permission (or a full administrator). Returns one data scope rule. Problem codes: RESOURCE_NOT_FOUND. */
+        get: operations["getDataScopeRule"];
+        put?: never;
+        post?: never;
+        /** @description Requires the data_scope.write permission (or a full administrator). Deletes one data scope rule. Deleting an unknown rule is idempotent and still returns 204. */
+        delete: operations["deleteDataScopeRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/data-scope/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Requires the data_scope.read permission (or a full administrator). Returns the derived retrieval authorization context for one user. The organization scope is the subtree of the user's teams. allowed and denied resources are (kind, id) references; kind team is protocol-defined and every other kind is deployment-defined and opaque to the control plane. Problem codes: 400 USER_REQUIRED; 404 RESOURCE_NOT_FOUND. */
+        get: operations["getDataScopeContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skills": {
         parameters: {
             query?: never;
@@ -1581,6 +1724,12 @@ export interface components {
             builtIn: boolean;
             enabled: boolean;
             memberCount: number;
+            /** @description Parent team. Omitted for root teams. */
+            parentId?: string | null;
+            /** @description Materialized team path, for example /hq/engineering. */
+            path: string;
+            /** @description Distance from the team forest root. */
+            depth: number;
         };
         TeamPage: {
             teams: components["schemas"]["Team"][];
@@ -1590,6 +1739,8 @@ export interface components {
             id: string;
             name: string;
             description?: string;
+            /** @description Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible. */
+            parentId?: string | null;
         };
         UpdateTeamRequest: {
             name?: string;
@@ -1604,6 +1755,171 @@ export interface components {
             userId: string;
             roleIds: string[];
             teamIds: string[];
+        };
+        AgentDirectoryEntry: {
+            id: string;
+            username: string;
+            displayName: string;
+            /** @enum {string} */
+            status: "active" | "disabled";
+            online: boolean;
+            /** Format: date-time */
+            lastHeartbeatAt?: string | null;
+            homeTeamId?: string | null;
+            displayTitle?: string | null;
+            description?: string | null;
+            promptSkillId?: string | null;
+        };
+        AgentDirectoryPage: {
+            agents: components["schemas"]["AgentDirectoryEntry"][];
+            nextCursor: string | null;
+        };
+        /** @description Digital employee account identifier with RBAC identifier syntax. */
+        AgentIdentifier: string;
+        CreateAgentRequest: {
+            username: components["schemas"]["AgentIdentifier"];
+            displayName: string;
+            /** @description Initial password of at least 8 characters. Stored only as an Argon2id hash under the deployment password policy. */
+            password: string;
+            roleIds: string[];
+            teamIds?: string[];
+            /** @description Primary team of the digital employee. Always granted in addition to teamIds. */
+            homeTeamId: string;
+            displayTitle?: string | null;
+            description?: string | null;
+            /** @description Identifier of the Skill that carries the digital employee prompt. Optional. */
+            promptSkillId?: string | null;
+        };
+        AgentResponse: {
+            id: string;
+            username: string;
+            displayName: string;
+            homeTeamId: string;
+            displayTitle: string;
+        };
+        /** @description Patch semantics: an absent field leaves the stored value unchanged. Unlike a JSON merge patch, an explicit null is indistinguishable from an absent field on the wire for this operation. */
+        UpdateAgentProfileRequest: {
+            /** @description New display title; an empty string clears the stored title. */
+            displayTitle?: string;
+            /** @description New description; an empty string clears the stored description. */
+            description?: string;
+            /** @description New home team. Must exist and be grantable by the caller. */
+            homeTeamId?: string;
+            /** @description Identifier of the prompt Skill; an empty string clears the binding. */
+            promptSkillId?: string;
+        };
+        UpdateAgentProfileResponse: {
+            id: string;
+            homeTeamId: string;
+            displayTitle: string;
+        };
+        /**
+         * @description Protocol identity source category. Product-specific connector flavors are deployment config, not protocol vocabulary.
+         * @enum {string}
+         */
+        IdentitySourceKind: "ldap" | "oidc" | "directory";
+        IdentitySource: {
+            id: string;
+            kind: components["schemas"]["IdentitySourceKind"];
+            displayName: string;
+            enabled: boolean;
+        };
+        IdentitySourcePage: {
+            identitySources: components["schemas"]["IdentitySource"][];
+            nextCursor: string | null;
+        };
+        CreateIdentitySourceRequest: {
+            id: string;
+            kind: components["schemas"]["IdentitySourceKind"];
+            displayName: string;
+            /**
+             * @description Connector settings as a plain JSON object. MUST NOT contain secret keys such as password, secret, token, apikey, clientsecret, or bindpassword; secret material may only be expressed as credential store references.
+             * @default {}
+             */
+            config: {
+                [key: string]: unknown;
+            };
+        };
+        IdentityMapping: {
+            sourceId: string;
+            /** @enum {string} */
+            externalSubjectType: "user" | "team";
+            externalId: string;
+            localSubjectId: string;
+            /** @enum {string} */
+            status: "active" | "disabled";
+        };
+        IdentityMappingPage: {
+            mappings: components["schemas"]["IdentityMapping"][];
+            nextCursor: string | null;
+        };
+        UpsertIdentityMappingRequest: {
+            /** @enum {string} */
+            externalSubjectType: "user" | "team";
+            externalId: string;
+            localSubjectId: string;
+        };
+        IdentityMappingResult: {
+            sourceId: string;
+            externalId: string;
+            localSubjectId: string;
+        };
+        /** @enum {string} */
+        DataScopeRuleKind: "management_scope" | "exception_grant" | "explicit_deny";
+        /** @description The protocol-defined team kind, or a deployment-defined lowercase identifier. The protocol does not enumerate deployment kinds and treats them as opaque references. */
+        DataScopeResourceKind: string;
+        DataScopeRule: {
+            id: string;
+            ruleKind: components["schemas"]["DataScopeRuleKind"];
+            /** @enum {string} */
+            subjectType: "user" | "role" | "team";
+            subjectId: string;
+            resourceKind: components["schemas"]["DataScopeResourceKind"];
+            resourceId: string;
+            /** Format: date-time */
+            startsAt?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            reason: string;
+        };
+        DataScopeRulePage: {
+            rules: components["schemas"]["DataScopeRule"][];
+            nextCursor: string | null;
+        };
+        CreateDataScopeRuleRequest: {
+            id: string;
+            ruleKind: components["schemas"]["DataScopeRuleKind"];
+            /** @enum {string} */
+            subjectType: "user" | "role" | "team";
+            subjectId: string;
+            resourceKind: components["schemas"]["DataScopeResourceKind"];
+            resourceId: string;
+            /** Format: date-time */
+            startsAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Temporary grant that stops authorizing at this time.
+             */
+            expiresAt?: string | null;
+            reason?: string | null;
+        };
+        DataScopeResourceRef: {
+            kind: components["schemas"]["DataScopeResourceKind"];
+            id: string;
+        };
+        RetrievalContext: {
+            principalId: string;
+            deploymentId: string;
+            /** @description Team subtree identifiers the principal may retrieve. */
+            orgScope: string[];
+            ownTeamIds?: string[];
+            roleScope: string[];
+            /** @description Explicitly granted (kind, id) references. */
+            allowedResources?: components["schemas"]["DataScopeResourceRef"][];
+            /** @description Explicitly denied (kind, id) references. Deny wins over allow. */
+            deniedResources?: components["schemas"]["DataScopeResourceRef"][];
+            /** @description Reason recorded when a rule extends scope beyond the principal's own team subtree. */
+            crossDepartmentReason?: string;
         };
         SkillVersion: {
             version: components["schemas"]["SkillVersionIdentifier"];
@@ -1662,6 +1978,11 @@ export interface components {
         SkillAssignmentWrite: {
             skillId: components["schemas"]["SkillIdentifier"];
             subject: components["schemas"]["Subject"];
+            /**
+             * Format: date-time
+             * @description Temporary grant that stops authorizing at this time.
+             */
+            expiresAt?: string | null;
         };
         /** @enum {string} */
         ControlEventScopeType: "global" | "team" | "role" | "user";
@@ -1838,6 +2159,11 @@ export interface components {
         CredentialAssignmentWrite: {
             credentialId: string;
             subject: components["schemas"]["CredentialSubject"];
+            /**
+             * Format: date-time
+             * @description Temporary grant that stops authorizing at this time.
+             */
+            expiresAt?: string | null;
         };
         AdminModel: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
@@ -1882,6 +2208,11 @@ export interface components {
         ModelAssignmentWrite: {
             modelId: string;
             subject: components["schemas"]["ModelSubject"];
+            /**
+             * Format: date-time
+             * @description Temporary grant that stops authorizing at this time.
+             */
+            expiresAt?: string | null;
         };
     };
     responses: {
@@ -2034,6 +2365,11 @@ export interface components {
         UserId: string;
         RoleId: string;
         TeamId: string;
+        AgentId: string;
+        SourceId: string;
+        ExternalSubjectType: "user" | "team";
+        ExternalId: string;
+        RuleId: string;
         AssignmentId: string;
         EventId: string;
         LicenseId: string;
@@ -3079,6 +3415,350 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listAgents: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Digital employee directory page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDirectoryPage"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    createAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Digital employee created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    updateAgentProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAgentProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated digital employee profile */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateAgentProfileResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listIdentitySources: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Identity source page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentitySourcePage"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    createIdentitySource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateIdentitySourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Identity source registered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentitySource"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    listIdentityMappings: {
+        parameters: {
+            query?: {
+                subjectType?: "user" | "team";
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path: {
+                sourceId: components["parameters"]["SourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Identity mapping page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityMappingPage"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    upsertIdentityMapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sourceId: components["parameters"]["SourceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertIdentityMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description Mapping stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityMappingResult"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    deleteIdentityMapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sourceId: components["parameters"]["SourceId"];
+                subjectType: components["parameters"]["ExternalSubjectType"];
+                externalId: components["parameters"]["ExternalId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Mapping removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    listDataScopeRules: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Data scope rule page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataScopeRulePage"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    createDataScopeRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDataScopeRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description Data scope rule created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataScopeRule"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    getDataScopeRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: components["parameters"]["RuleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Data scope rule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataScopeRule"];
+                };
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    deleteDataScopeRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: components["parameters"]["RuleId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Data scope rule deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+        };
+    };
+    getDataScopeContext: {
+        parameters: {
+            query: {
+                userId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Derived retrieval context */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalContext"];
+                };
+            };
+            400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];

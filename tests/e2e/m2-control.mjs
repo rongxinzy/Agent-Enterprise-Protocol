@@ -92,6 +92,7 @@ async function runScenario() {
   const allUsersTeam = teams.teams.find(item => item.id === 'all-users');
   assert(allUsersTeam?.name === 'All users' && allUsersTeam.builtIn === true, 'Built-in All users Team label was not normalized');
   await assertDelegatedRoleBoundaries(admin, runId);
+  await assertDigitalEmployeeFoundations(admin, adminStore, runId);
   await assertBuiltinRbacLabelsSurviveUpgrade(adminStore);
   const userStore = new MemoryTokenStore();
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
@@ -293,6 +294,12 @@ async function assertDelegatedRoleBoundaries(admin, suffix) {
     403,
     'ROLE_GRANT_FORBIDDEN',
   );
+  // The agent directory must enforce the same grant derivation as the human
+  // user path; a digital employee is not an escalation side channel.
+  await expectProblem(delegated.createAgent({
+    username: 'escalated-agent-' + suffix, displayName: 'Escalated agent',
+    password: 'escalated-password-123', roleIds: ['admin'], teamIds: [], homeTeamId: 'all-users',
+  }), 403, 'ROLE_GRANT_FORBIDDEN');
   await expectProblem(delegated.createRole({
     id: 'escalated-role-' + suffix,
     name: 'Escalated role',
@@ -363,6 +370,111 @@ async function adminGet(path, tokenStore) {
   const text = await response.text();
   if (!response.ok) throw new Error('Admin request ' + path + ' failed with ' + response.status + ': ' + text);
   return text ? JSON.parse(text) : null;
+}
+
+async function adminDelete(path, tokenStore) {
+  const tokens = await tokenStore.get();
+  assert(tokens?.accessToken, 'Admin session did not provide an access token');
+  const response = await fetch(baseUrl + path, {
+    method: 'DELETE',
+    headers: {
+      Authorization: 'Bearer ' + tokens.accessToken,
+      'X-AEP-Protocol-Version': '1.0',
+    },
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  return {status: response.status, body};
+}
+
+// Digital employee foundations: department tree, agent directory, identity
+// sources, and data scope rules against the running control service.
+async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
+  // Department tree: path and depth are pinned at creation; parents never
+  // move afterwards, so cycles are structurally impossible.
+  const parentTeamId = 'm2-dept-' + suffix;
+  const childTeamId = 'm2-dept-child-' + suffix;
+  const otherTeamId = 'm2-dept-other-' + suffix;
+  const parentTeam = await adminRequest('/aep/v1/admin/teams', {id: parentTeamId, name: 'M2 Department'}, adminStore);
+  assert(parentTeam?.path === '/' + parentTeamId && parentTeam?.depth === 0, 'Team creation did not pin the root path');
+  const childTeam = await adminRequest('/aep/v1/admin/teams', {id: childTeamId, name: 'M2 Child Department', parentId: parentTeamId}, adminStore);
+  assert(childTeam?.parentId === parentTeamId && childTeam?.path === '/' + parentTeamId + '/' + childTeamId && childTeam?.depth === 1, 'Child team did not pin path and depth');
+  await adminRequest('/aep/v1/admin/teams', {id: otherTeamId, name: 'M2 Other Department'}, adminStore);
+
+  // Agent directory: create with the shared membership floor, list, update.
+  const roleId = 'm2-role-' + suffix;
+  const agentUsername = 'm2-agent-' + suffix;
+  const agent = await admin.createAgent({
+    username: agentUsername, displayName: 'M2 Agent ' + suffix,
+    password: 'agent-password-123', roleIds: [roleId], teamIds: [], homeTeamId: childTeamId,
+    displayTitle: 'Assistant',
+  });
+  assert(agent?.id && agent?.homeTeamId === childTeamId, 'Agent creation did not echo the home team');
+  await expectProblem(admin.createAgent({
+    username: agentUsername, displayName: 'Duplicate agent', password: 'agent-password-123',
+    roleIds: [roleId], teamIds: [], homeTeamId: childTeamId,
+  }), 409, 'AGENT_EXISTS');
+  await expectProblem(admin.createAgent({
+    username: 'm2-orphan-' + suffix, displayName: 'Orphan agent', password: 'agent-password-123',
+    roleIds: [roleId], teamIds: [], homeTeamId: childTeamId, promptSkillId: 'missing-skill-' + suffix,
+  }), 400, 'INVALID_AGENT');
+  const directory = await admin.listAgents();
+  const listedAgent = directory.agents.find(item => item.id === agent.id);
+  assert(listedAgent?.online === false && listedAgent?.homeTeamId === childTeamId, 'Agent directory omitted the created digital employee');
+  const profile = await admin.updateAgentProfile(agent.id, {displayTitle: 'Senior Assistant'});
+  assert(profile?.displayTitle === 'Senior Assistant', 'Agent profile update was not persisted');
+
+  // Identity sources accept protocol categories only; vendor connector
+  // flavors are deployment config, never a protocol vocabulary.
+  const sourceId = 'm2-src-' + suffix;
+  const source = await admin.createIdentitySource({
+    id: sourceId, kind: 'directory', displayName: 'M2 Directory', config: {flavor: 'example'},
+  });
+  assert(source?.kind === 'directory', 'Identity source creation failed');
+  await expectProblem(admin.createIdentitySource({
+    id: 'm2-src-vendor-' + suffix, kind: 'feishu', displayName: 'Vendor connector',
+  }), 400, 'INVALID_IDENTITY_SOURCE');
+  const mapping = await admin.upsertIdentityMapping(sourceId, {
+    externalSubjectType: 'user', externalId: 'ext-' + suffix, localSubjectId: agent.id,
+  });
+  assert(mapping?.localSubjectId === agent.id, 'Identity mapping upsert failed');
+  const mappings = await admin.listIdentityMappings(sourceId, {});
+  assert(mappings.mappings.some(item => item.externalId === 'ext-' + suffix), 'Identity mapping list omitted the mapping');
+  await admin.deleteIdentityMapping(sourceId, 'user', 'ext-' + suffix);
+
+  // Data scope: management scope expands cross-department, explicit deny
+  // wins, and the reserved department_default kind is rejected.
+  const grantId = 'm2-scope-grant-' + suffix;
+  const denyId = 'm2-scope-deny-' + suffix;
+  await admin.createDataScopeRule({
+    id: grantId, ruleKind: 'management_scope', subjectType: 'user', subjectId: agent.id,
+    resourceKind: 'team', resourceId: otherTeamId, reason: 'm2 e2e management scope',
+  });
+  await expectProblem(admin.createDataScopeRule({
+    id: grantId + '-dup', ruleKind: 'management_scope', subjectType: 'user', subjectId: agent.id,
+    resourceKind: 'team', resourceId: otherTeamId,
+  }), 409, 'DATA_SCOPE_RULE_EXISTS');
+  await expectProblem(admin.createDataScopeRule({
+    id: 'm2-scope-default-' + suffix, ruleKind: 'department_default', subjectType: 'user', subjectId: agent.id,
+    resourceKind: 'team', resourceId: childTeamId,
+  }), 400, 'INVALID_DATA_SCOPE_RULE');
+  await admin.createDataScopeRule({
+    id: denyId, ruleKind: 'explicit_deny', subjectType: 'user', subjectId: agent.id,
+    resourceKind: 'team', resourceId: childTeamId, reason: 'm2 e2e deny',
+  });
+  let context = await admin.getDataScopeContext(agent.id);
+  assert(context.orgScope.includes(otherTeamId), 'Management scope did not expand the cross-department subtree');
+  assert(context.crossDepartmentReason?.includes('management_scope'), 'Cross-department reason was not reported');
+  assert(context.deniedResources?.some(item => item.kind === 'team' && item.id === childTeamId), 'Explicit deny did not reach the retrieval context');
+  await admin.deleteDataScopeRule(denyId);
+  context = await admin.getDataScopeContext(agent.id);
+  assert(!context.deniedResources?.some(item => item.id === childTeamId), 'Deleted deny rule still denies');
+
+  // Team deletion is blocked by children and by digital employees homed there.
+  const homeTeamDelete = await adminDelete('/aep/v1/admin/teams/' + childTeamId, adminStore);
+  assert(homeTeamDelete.status === 409 && homeTeamDelete.body?.code === 'TEAM_HAS_AGENTS', 'Home team delete was not rejected with TEAM_HAS_AGENTS');
+  const parentDelete = await adminDelete('/aep/v1/admin/teams/' + parentTeamId, adminStore);
+  assert(parentDelete.status === 409 && parentDelete.body?.code === 'TEAM_HAS_CHILDREN', 'Parent team delete was not rejected with TEAM_HAS_CHILDREN');
 }
 
 async function expectProblem(promise, status, code) {

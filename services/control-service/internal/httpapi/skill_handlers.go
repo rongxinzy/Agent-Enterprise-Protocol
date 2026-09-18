@@ -296,8 +296,8 @@ func (s *Server) listSkillAssignments(response http.ResponseWriter, request *htt
 
 func (s *Server) createSkillAssignment(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		SkillID   string     `json:"skillId"`
-		Subject   struct {
+		SkillID string `json:"skillId"`
+		Subject struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
 		} `json:"subject"`

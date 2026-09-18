@@ -352,7 +352,7 @@ func requiredAdminPermission(method, path string) string {
 		return "data_plane.write"
 	case strings.HasPrefix(path, "/aep/v1/admin/agents"):
 		if method == http.MethodGet {
-			return "agents.read"
+			return "users.read"
 		}
 		return "users.write"
 	case strings.HasPrefix(path, "/aep/v1/admin/identity-sources"):

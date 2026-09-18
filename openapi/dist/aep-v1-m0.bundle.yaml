@@ -2419,6 +2419,8 @@ components:
         - builtIn
         - enabled
         - memberCount
+        - path
+        - depth
       properties:
         id:
           type: string
@@ -2433,6 +2435,18 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        parentId:
+          type:
+            - string
+            - 'null'
+          description: Parent team. Omitted for root teams.
+        path:
+          type: string
+          description: Materialized team path, for example /hq/engineering.
+        depth:
+          type: integer
+          minimum: 0
+          description: Distance from the team forest root.
     TeamPage:
       type: object
       required:
@@ -2465,6 +2479,12 @@ components:
         description:
           type: string
           maxLength: 1024
+        parentId:
+          type:
+            - string
+            - 'null'
+          maxLength: 100
+          description: Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible.
     UpdateTeamRequest:
       type: object
       minProperties: 1
@@ -2674,6 +2694,12 @@ components:
           $ref: '#/components/schemas/SkillIdentifier'
         subject:
           $ref: '#/components/schemas/Subject'
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Temporary grant that stops authorizing at this time.
     ControlEventScopeType:
       type: string
       enum:

@@ -56,9 +56,13 @@ func (s *DeploymentStore) GetUserRecord(ctx context.Context, id string) (UserRec
 	return UserRecord{User: user, RoleIDs: roleIDs, TeamIDs: teamIDs}, nil
 }
 
+// ListUsers pages human accounts. Digital employees (kind='agent') are
+// listed by the agent directory, so the platform user listing keeps its
+// pre-agent response shape.
 func (s *DeploymentStore) ListUsers(ctx context.Context, cursor string, limit int32) ([]UserRecord, error) {
 	query := s.db.WithContext(ctx).
 		Where("deployment_id = ?", s.deploymentID).
+		Where("kind = ?", "human").
 		Order("id").Limit(int(limit))
 	if cursor != "" {
 		query = query.Where("id > ?", cursor)

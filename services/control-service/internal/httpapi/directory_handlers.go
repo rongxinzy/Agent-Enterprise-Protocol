@@ -28,12 +28,24 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		Description   string   `json:"description"`
 		PromptSkillID string   `json:"promptSkillId"`
 	}
-	if !decodeJSON(response, request, &input) || !validRBACID(input.Username) || strings.TrimSpace(input.DisplayName) == "" || len(input.Password) < 8 {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent username, display name, and password are invalid.")
+	if !decodeJSON(response, request, &input) || !validRBACID(input.Username) || strings.TrimSpace(input.DisplayName) == "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent username and display name are invalid.")
+		return
+	}
+	if err := auth.ValidatePassword(input.Password); err != nil {
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 12 to 1024 characters.")
 		return
 	}
 	if input.HomeTeamID == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent home team is required.")
+		return
+	}
+	// The home team always counts as a granted team, so delegated admins are
+	// held to the same membership, existence, and grant-derivation guardrails
+	// as the human createUser path.
+	teams := append(append(make([]string, 0, len(input.TeamIDs)+1), input.TeamIDs...), input.HomeTeamID)
+	if code, detail := userMembershipProblem(input.RoleIDs, teams); code != "" {
+		writeProblem(response, request, http.StatusBadRequest, code, detail)
 		return
 	}
 	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
@@ -44,15 +56,48 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
+	for _, roleID := range input.RoleIDs {
+		if _, err := store.GetRoleRecord(request.Context(), roleID); errors.Is(err, repository.ErrNotFound) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent contains an unknown role.")
+			return
+		} else if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	for _, teamID := range input.TeamIDs {
+		if _, err := store.GetTeamRecord(request.Context(), teamID); errors.Is(err, repository.ErrNotFound) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent contains an unknown team.")
+			return
+		} else if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	if !s.authorizeRoleGrant(response, request, input.RoleIDs) {
+		return
+	}
+	if !s.authorizeTeamGrant(response, request, teams) {
+		return
+	}
+	if input.PromptSkillID != "" {
+		if _, err := s.app.Store.GetSkill(request.Context(), input.PromptSkillID); errors.Is(err, repository.ErrNotFound) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The prompt skill does not exist.")
+			return
+		} else if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
 	passwordHash, err := auth.HashPassword(input.Password)
 	if err != nil {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent password is invalid.")
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 12 to 1024 characters.")
 		return
 	}
 	record, err := store.CreateUser(request.Context(), repository.CreateUserParams{
 		ID: uuid.NewString(), Username: input.Username, DisplayName: strings.TrimSpace(input.DisplayName),
 		PasswordHash: passwordHash, RequirePasswordChange: false, IsAdmin: false, Kind: "agent",
-		RoleIDs: input.RoleIDs, TeamIDs: input.TeamIDs,
+		RoleIDs: input.RoleIDs, TeamIDs: teams,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -80,7 +125,8 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) listAgents(response http.ResponseWriter, request *http.Request) {
-	entries, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListAgentDirectory(request.Context())
+	entries, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListAgentDirectory(request.Context(), request.URL.Query().Get("cursor"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -105,7 +151,11 @@ func (s *Server) listAgents(response http.ResponseWriter, request *http.Request)
 		}
 		items = append(items, item)
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"agents": items})
+	var nextCursor any
+	if len(entries) == int(limit(request)) {
+		nextCursor = entries[len(entries)-1].User.ID
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"agents": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) updateAgentProfile(response http.ResponseWriter, request *http.Request) {
@@ -136,6 +186,17 @@ func (s *Server) updateAgentProfile(response http.ResponseWriter, request *http.
 		profile.Description = *input.Description
 	}
 	if input.HomeTeamID != nil {
+		store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
+		if _, err := store.GetTeamRecord(request.Context(), *input.HomeTeamID); errors.Is(err, repository.ErrNotFound) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The home team does not exist.")
+			return
+		} else if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		if !s.authorizeTeamGrant(response, request, []string{*input.HomeTeamID}) {
+			return
+		}
 		profile.HomeTeamID = *input.HomeTeamID
 	}
 	if input.PromptSkillID != nil {
@@ -154,12 +215,31 @@ func (s *Server) updateAgentProfile(response http.ResponseWriter, request *http.
 
 // ---- Identity sources and mappings ----
 
+// Identity source kinds are protocol categories only; product-specific
+// connector flavors live inside `config` on the deployment side.
 func validIdentitySourceKind(kind string) bool {
 	switch kind {
-	case "ldap", "ad", "oidc", "hr", "feishu", "wecom":
+	case "ldap", "oidc", "directory":
 		return true
 	}
 	return false
+}
+
+var identitySourceConfigReservedKeys = map[string]struct{}{
+	"password": {}, "secret": {}, "token": {}, "apikey": {}, "clientsecret": {}, "bindpassword": {},
+}
+
+func identitySourceConfigProblem(config json.RawMessage) string {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(config, &object); err != nil {
+		return "The identity source config must be a JSON object."
+	}
+	for key := range object {
+		if _, reserved := identitySourceConfigReservedKeys[strings.ToLower(key)]; reserved {
+			return "The identity source config must not contain secret values; reference the credential store instead."
+		}
+	}
+	return ""
 }
 
 func (s *Server) createIdentitySource(response http.ResponseWriter, request *http.Request) {
@@ -175,8 +255,8 @@ func (s *Server) createIdentitySource(response http.ResponseWriter, request *htt
 	}
 	if len(input.Config) == 0 {
 		input.Config = json.RawMessage("{}")
-	} else if !json.Valid(input.Config) {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_SOURCE", "The identity source config must be a JSON object.")
+	} else if problem := identitySourceConfigProblem(input.Config); problem != "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_SOURCE", problem)
 		return
 	}
 	source, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateIdentitySource(request.Context(), repository.IdentitySource{
@@ -194,7 +274,8 @@ func (s *Server) createIdentitySource(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) listIdentitySources(response http.ResponseWriter, request *http.Request) {
-	sources, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListIdentitySources(request.Context())
+	sources, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListIdentitySources(request.Context(), request.URL.Query().Get("cursor"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -203,7 +284,11 @@ func (s *Server) listIdentitySources(response http.ResponseWriter, request *http
 	for _, source := range sources {
 		items = append(items, map[string]any{"id": source.ID, "kind": source.Kind, "displayName": source.DisplayName, "enabled": source.Enabled})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"identitySources": items})
+	var nextCursor any
+	if len(sources) == int(limit(request)) {
+		nextCursor = sources[len(sources)-1].ID
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"identitySources": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) upsertIdentityMapping(response http.ResponseWriter, request *http.Request) {
@@ -239,8 +324,15 @@ func (s *Server) upsertIdentityMapping(response http.ResponseWriter, request *ht
 }
 
 func (s *Server) listIdentityMappings(response http.ResponseWriter, request *http.Request) {
+	cursorSubjectType, cursorExternalID := "", ""
+	if cursor := request.URL.Query().Get("cursor"); cursor != "" {
+		if separator := strings.Index(cursor, "/"); separator > 0 && separator < len(cursor)-1 {
+			cursorSubjectType, cursorExternalID = cursor[:separator], cursor[separator+1:]
+		}
+	}
 	mappings, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListIdentityMappings(
-		request.Context(), chi.URLParam(request, "sourceId"), request.URL.Query().Get("subjectType"))
+		request.Context(), chi.URLParam(request, "sourceId"), request.URL.Query().Get("subjectType"),
+		cursorSubjectType, cursorExternalID, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -252,7 +344,12 @@ func (s *Server) listIdentityMappings(response http.ResponseWriter, request *htt
 			"externalId": mapping.ExternalID, "localSubjectId": mapping.LocalSubjectID, "status": mapping.Status,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"mappings": items})
+	var nextCursor any
+	if len(mappings) == int(limit(request)) {
+		last := mappings[len(mappings)-1]
+		nextCursor = last.ExternalSubjectType + "/" + last.ExternalID
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"mappings": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) deleteIdentityMapping(response http.ResponseWriter, request *http.Request) {
@@ -268,11 +365,30 @@ func (s *Server) deleteIdentityMapping(response http.ResponseWriter, request *ht
 // ---- Data scope rules and retrieval context ----
 
 var dataScopeRuleKinds = map[string]bool{
-	"department_default": true, "management_scope": true, "exception_grant": true, "explicit_deny": true,
+	"management_scope": true, "exception_grant": true, "explicit_deny": true,
 }
 
-var dataScopeResourceKinds = map[string]bool{
-	"knowledge_base": true, "classification": true, "team": true,
+// validDataScopeResourceKind accepts the protocol-defined "team" or any
+// deployment-defined lowercase identifier; the control plane treats the
+// latter as opaque references.
+func validDataScopeResourceKind(kind string) bool {
+	if kind == "team" {
+		return true
+	}
+	if kind == "" || len(kind) > 64 {
+		return false
+	}
+	for index, character := range kind {
+		lowercase := character >= 'a' && character <= 'z'
+		digitOrSeparator := (character >= '0' && character <= '9') || character == '_' || character == '-'
+		if index == 0 && !lowercase {
+			return false
+		}
+		if !lowercase && !digitOrSeparator {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http.Request) {
@@ -283,23 +399,20 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 		SubjectID    string     `json:"subjectId"`
 		ResourceKind string     `json:"resourceKind"`
 		ResourceID   string     `json:"resourceId"`
-		Priority     *int       `json:"priority"`
+		StartsAt     *time.Time `json:"startsAt"`
 		ExpiresAt    *time.Time `json:"expiresAt"`
 		Reason       string     `json:"reason"`
 	}
 	if !decodeJSON(response, request, &input) || !validRBACID(input.ID) || !dataScopeRuleKinds[input.RuleKind] ||
 		!validSubjectType(input.SubjectType) || strings.TrimSpace(input.SubjectID) == "" ||
-		!dataScopeResourceKinds[input.ResourceKind] || strings.TrimSpace(input.ResourceID) == "" {
+		!validDataScopeResourceKind(input.ResourceKind) || strings.TrimSpace(input.ResourceID) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_SCOPE_RULE", "The rule kind, subject, and resource are invalid.")
 		return
 	}
 	rule := repository.DataScopeRule{
 		ID: input.ID, RuleKind: input.RuleKind, SubjectType: input.SubjectType, SubjectID: strings.TrimSpace(input.SubjectID),
 		ResourceKind: input.ResourceKind, ResourceID: strings.TrimSpace(input.ResourceID),
-		ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: claimsFrom(request).Subject,
-	}
-	if input.Priority != nil {
-		rule.Priority = *input.Priority
+		StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: claimsFrom(request).Subject,
 	}
 	created, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateDataScopeRule(request.Context(), rule)
 	if err != nil {
@@ -320,7 +433,10 @@ func validSubjectType(value string) bool {
 func publicDataScopeRule(rule repository.DataScopeRule) map[string]any {
 	item := map[string]any{
 		"id": rule.ID, "ruleKind": rule.RuleKind, "subjectType": rule.SubjectType, "subjectId": rule.SubjectID,
-		"resourceKind": rule.ResourceKind, "resourceId": rule.ResourceID, "priority": rule.Priority, "reason": rule.Reason,
+		"resourceKind": rule.ResourceKind, "resourceId": rule.ResourceID, "reason": rule.Reason,
+	}
+	if rule.StartsAt != nil {
+		item["startsAt"] = rule.StartsAt.UTC().Format(time.RFC3339Nano)
 	}
 	if rule.ExpiresAt != nil {
 		item["expiresAt"] = rule.ExpiresAt.UTC().Format(time.RFC3339Nano)
@@ -329,7 +445,8 @@ func publicDataScopeRule(rule repository.DataScopeRule) map[string]any {
 }
 
 func (s *Server) listDataScopeRules(response http.ResponseWriter, request *http.Request) {
-	rules, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListDataScopeRules(request.Context(), limit(request))
+	rules, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListDataScopeRules(request.Context(), request.URL.Query().Get("cursor"), limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -338,7 +455,11 @@ func (s *Server) listDataScopeRules(response http.ResponseWriter, request *http.
 	for _, rule := range rules {
 		items = append(items, publicDataScopeRule(rule))
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"rules": items})
+	var nextCursor any
+	if len(rules) == int(limit(request)) {
+		nextCursor = rules[len(rules)-1].ID
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"rules": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) getDataScopeRule(response http.ResponseWriter, request *http.Request) {

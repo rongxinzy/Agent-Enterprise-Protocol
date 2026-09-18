@@ -39,7 +39,7 @@ type credentialPatch struct {
 }
 
 type credentialAssignmentInput struct {
-	CredentialID string     `json:"credentialId"`
+	CredentialID string `json:"credentialId"`
 	Subject      struct {
 		Type string `json:"type"`
 		ID   string `json:"id"`
@@ -408,6 +408,16 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 func isForeignKeyViolation(err error) bool {
 	var pgError *pgconn.PgError
 	return errors.As(err, &pgError) && pgError.Code == "23503"
+}
+
+// foreignKeyConstraint returns the constraint name of a foreign key
+// violation, or an empty string when the error is not one.
+func foreignKeyConstraint(err error) string {
+	var pgError *pgconn.PgError
+	if errors.As(err, &pgError) && pgError.Code == "23503" {
+		return pgError.ConstraintName
+	}
+	return ""
 }
 
 func (s *Server) listCredentialAssignments(response http.ResponseWriter, request *http.Request) {

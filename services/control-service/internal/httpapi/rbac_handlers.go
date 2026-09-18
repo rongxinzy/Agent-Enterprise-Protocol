@@ -258,6 +258,18 @@ func (s *Server) deleteTeam(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	if err != nil {
+		switch foreignKeyConstraint(err) {
+		case "teams_parent_fk":
+			writeProblem(response, request, http.StatusConflict, "TEAM_HAS_CHILDREN", "The team has child teams and cannot be deleted.")
+			return
+		case "agent_profiles_home_team_fk":
+			writeProblem(response, request, http.StatusConflict, "TEAM_HAS_AGENTS", "The team is the home team of digital employees and cannot be deleted.")
+			return
+		}
+		if isForeignKeyViolation(err) {
+			writeProblem(response, request, http.StatusConflict, "TEAM_IN_USE", "The team is referenced and cannot be deleted.")
+			return
+		}
 		databaseFailure(response, request, err)
 		return
 	}

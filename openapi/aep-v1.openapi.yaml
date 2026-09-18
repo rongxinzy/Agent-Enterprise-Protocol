@@ -963,18 +963,21 @@ components:
       properties:
         skillId: {$ref: '#/components/schemas/SkillIdentifier'}
         subject: {$ref: '#/components/schemas/Subject'}
+        expiresAt: {type: [string, 'null'], format: date-time, description: Temporary grant that stops authorizing at this time.}
     CredentialAssignmentWrite:
       type: object
       required: [credentialId, subject]
       properties:
         credentialId: {type: string}
         subject: {$ref: '#/components/schemas/CredentialSubject'}
+        expiresAt: {type: [string, 'null'], format: date-time, description: Temporary grant that stops authorizing at this time.}
     ModelAssignmentWrite:
       type: object
       required: [modelId, subject]
       properties:
         modelId: {type: string}
         subject: {$ref: '#/components/schemas/ModelSubject'}
+        expiresAt: {type: [string, 'null'], format: date-time, description: Temporary grant that stops authorizing at this time.}
     CredentialCreate:
       type: object
       required: [name, service, type, deliveryMode, value, enabled]

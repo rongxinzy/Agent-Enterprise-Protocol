@@ -11,12 +11,11 @@ import (
 // ScopeRule is the storage-agnostic view of one data_scope_rules row.
 type ScopeRule struct {
 	ID           string
-	RuleKind     string // department_default | management_scope | exception_grant | explicit_deny
+	RuleKind     string // management_scope | exception_grant | explicit_deny
 	SubjectType  string // user | role | team
 	SubjectID    string
-	ResourceKind string // knowledge_base | classification | team
+	ResourceKind string // 'team' or a deployment-defined opaque kind
 	ResourceID   string
-	Priority     int
 	StartsAt     *time.Time
 	ExpiresAt    *time.Time
 }
@@ -38,27 +37,26 @@ type TeamNode struct {
 }
 
 // RetrievalContext is the structured authorization contract handed to the
-// policy enforcement point before any knowledge retrieval. It mirrors the
-// technical design document field for field.
+// policy enforcement point before any retrieval. Non-team resources are
+// opaque (kind, id) references whose vocabulary is defined by the deployment,
+// not by the protocol.
 type RetrievalContext struct {
-	PrincipalID            string   `json:"principalId"`
-	DeploymentID           string   `json:"deploymentId"`
-	OrgScope               []string `json:"orgScope"`
-	OwnTeamIDs             []string `json:"ownTeamIds,omitempty"`
-	RoleScope              []string `json:"roleScope"`
-	AllowedKnowledgeBaseIDs []string `json:"allowedKnowledgeBaseIds,omitempty"`
-	AllowedClassifications  []string `json:"allowedClassifications,omitempty"`
-	DeniedKnowledgeBaseIDs  []string `json:"deniedKnowledgeBaseIds,omitempty"`
-	DeniedClassifications   []string `json:"deniedClassifications,omitempty"`
-	DeniedTeamIDs           []string `json:"deniedTeamIds,omitempty"`
-	CrossDepartmentReason   string   `json:"crossDepartmentReason,omitempty"`
+	PrincipalID           string        `json:"principalId"`
+	DeploymentID          string        `json:"deploymentId"`
+	OrgScope              []string      `json:"orgScope"`
+	OwnTeamIDs            []string      `json:"ownTeamIds,omitempty"`
+	RoleScope             []string      `json:"roleScope"`
+	AllowedResources      []ResourceRef `json:"allowedResources,omitempty"`
+	DeniedResources       []ResourceRef `json:"deniedResources,omitempty"`
+	CrossDepartmentReason string        `json:"crossDepartmentReason,omitempty"`
 }
 
-// ResourceRef identifies the knowledge target a PEP decision is made for.
+// ResourceRef identifies the target a PEP decision is made for. Kind "team"
+// is protocol-defined; every other kind is deployment-defined and opaque to
+// the control plane.
 type ResourceRef struct {
-	KnowledgeBaseID string
-	Classification  string
-	TeamID          string
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
 }
 
 func ruleApplies(rule ScopeRule, subject ScopeSubject) bool {
@@ -138,10 +136,11 @@ func contains(values []string, target string) bool {
 	return false
 }
 
-// BuildRetrievalContext evaluates the four rule layers with explicit deny
-// precedence: explicit_deny > exception_grant > management_scope >
-// department_default. The implicit layer is the own-team subtree, which no
-// rule can remove — only explicit_deny on a resource can.
+// BuildRetrievalContext evaluates the rule layers with explicit deny
+// precedence: explicit_deny > exception_grant > management_scope > the
+// implicit own-department baseline (the own-team subtree). The implicit layer
+// is the own-team subtree, which no rule can remove — only an explicit_deny
+// on a resource can override it.
 func BuildRetrievalContext(deploymentID, userID string, roles, ownTeams []string, teams map[string]TeamNode, rules []ScopeRule, now time.Time) RetrievalContext {
 	orgScope := make([]string, 0, len(ownTeams))
 	for _, teamID := range ownTeams {
@@ -168,10 +167,8 @@ func BuildRetrievalContext(deploymentID, userID string, roles, ownTeams []string
 					context.CrossDepartmentReason += "," + rule.RuleKind
 				}
 			}
-		} else if rule.ResourceKind == "knowledge_base" {
-			context.AllowedKnowledgeBaseIDs = append(context.AllowedKnowledgeBaseIDs, rule.ResourceID)
-		} else if rule.ResourceKind == "classification" {
-			context.AllowedClassifications = append(context.AllowedClassifications, rule.ResourceID)
+		} else {
+			context.AllowedResources = append(context.AllowedResources, ResourceRef{Kind: rule.ResourceKind, ID: rule.ResourceID})
 		}
 	}
 	for teamID := range expansions {
@@ -181,43 +178,50 @@ func BuildRetrievalContext(deploymentID, userID string, roles, ownTeams []string
 		if rule.RuleKind != "explicit_deny" || !ruleApplies(rule, ScopeSubject{UserID: userID, RoleIDs: roles, TeamIDs: ownTeams}) || !ruleInWindow(rule, now) {
 			continue
 		}
-		switch rule.ResourceKind {
-		case "knowledge_base":
-			context.DeniedKnowledgeBaseIDs = append(context.DeniedKnowledgeBaseIDs, rule.ResourceID)
-		case "classification":
-			context.DeniedClassifications = append(context.DeniedClassifications, rule.ResourceID)
-		case "team":
-			context.DeniedTeamIDs = append(context.DeniedTeamIDs, rule.ResourceID)
-		}
+		context.DeniedResources = append(context.DeniedResources, ResourceRef{Kind: rule.ResourceKind, ID: rule.ResourceID})
 	}
-	context.AllowedKnowledgeBaseIDs = uniqueSorted(context.AllowedKnowledgeBaseIDs)
-	context.AllowedClassifications = uniqueSorted(context.AllowedClassifications)
-	context.DeniedKnowledgeBaseIDs = uniqueSorted(context.DeniedKnowledgeBaseIDs)
-	context.DeniedClassifications = uniqueSorted(context.DeniedClassifications)
-	context.DeniedTeamIDs = uniqueSorted(context.DeniedTeamIDs)
+	context.AllowedResources = uniqueResourceRefs(context.AllowedResources)
+	context.DeniedResources = uniqueResourceRefs(context.DeniedResources)
 	return context
 }
 
-// Allows is the default-deny PEP decision for one knowledge resource. Deny
-// lists win over every allowance; absence of any matching allowance denies.
+func uniqueResourceRefs(values []ResourceRef) []ResourceRef {
+	seen := make(map[ResourceRef]struct{}, len(values))
+	result := make([]ResourceRef, 0, len(values))
+	for _, value := range values {
+		if value.Kind == "" || value.ID == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Kind != result[j].Kind {
+			return result[i].Kind < result[j].Kind
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
+}
+
+// Allows is the default-deny PEP decision for one resource. Deny entries win
+// over every allowance; absence of any matching allowance denies.
 func (c RetrievalContext) Allows(resource ResourceRef) bool {
-	if resource.TeamID != "" && contains(c.DeniedTeamIDs, resource.TeamID) {
-		return false
+	for _, denied := range c.DeniedResources {
+		if denied == resource {
+			return false
+		}
 	}
-	if resource.Classification != "" && contains(c.DeniedClassifications, resource.Classification) {
-		return false
-	}
-	if resource.KnowledgeBaseID != "" && contains(c.DeniedKnowledgeBaseIDs, resource.KnowledgeBaseID) {
-		return false
-	}
-	if resource.TeamID != "" && contains(c.OrgScope, resource.TeamID) {
+	if resource.Kind == "team" && contains(c.OrgScope, resource.ID) {
 		return true
 	}
-	if resource.KnowledgeBaseID != "" && contains(c.AllowedKnowledgeBaseIDs, resource.KnowledgeBaseID) {
-		return true
-	}
-	if resource.Classification != "" && contains(c.AllowedClassifications, resource.Classification) {
-		return true
+	for _, allowed := range c.AllowedResources {
+		if allowed == resource {
+			return true
+		}
 	}
 	return false
 }
@@ -270,7 +274,7 @@ WHERE t.deployment_id=$1 AND t.enabled=true`, deploymentID, userID)
 	if err := treeRows.Err(); err != nil {
 		return RetrievalContext{}, err
 	}
-	ruleRows, err := database.Query(ctx, `SELECT id, rule_kind, subject_type, subject_id, resource_kind, resource_id, priority, starts_at, expires_at
+	ruleRows, err := database.Query(ctx, `SELECT id, rule_kind, subject_type, subject_id, resource_kind, resource_id, starts_at, expires_at
 FROM data_scope_rules
 WHERE deployment_id=$1
   AND (starts_at IS NULL OR starts_at<=now())
@@ -285,7 +289,7 @@ WHERE deployment_id=$1
 	var rules []ScopeRule
 	for ruleRows.Next() {
 		rule := ScopeRule{}
-		if err := ruleRows.Scan(&rule.ID, &rule.RuleKind, &rule.SubjectType, &rule.SubjectID, &rule.ResourceKind, &rule.ResourceID, &rule.Priority, &rule.StartsAt, &rule.ExpiresAt); err != nil {
+		if err := ruleRows.Scan(&rule.ID, &rule.RuleKind, &rule.SubjectType, &rule.SubjectID, &rule.ResourceKind, &rule.ResourceID, &rule.StartsAt, &rule.ExpiresAt); err != nil {
 			return RetrievalContext{}, err
 		}
 		rules = append(rules, rule)

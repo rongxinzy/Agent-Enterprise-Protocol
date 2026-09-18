@@ -1,11 +1,13 @@
 -- Identity sources and mappings: landing ground for the reserved federated
--- identity contract and HR/AD/LDAP/Feishu/WeCom directory synchronization.
--- Source config is plaintext metadata only; every secret stays in the
--- credential store.
+-- identity contract and directory synchronization. `kind` is a protocol
+-- category only (LDAP-family directory, OIDC, generic directory sync);
+-- product-specific connector flavors are deployment configuration inside
+-- `config` and never a protocol vocabulary. Source config is plaintext
+-- metadata only; every secret stays in the credential store.
 CREATE TABLE IF NOT EXISTS identity_sources (
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
   id text NOT NULL,
-  kind text NOT NULL CHECK (kind IN ('ldap', 'ad', 'oidc', 'hr', 'feishu', 'wecom')),
+  kind text NOT NULL CHECK (kind IN ('ldap', 'oidc', 'directory')),
   display_name text NOT NULL,
   config jsonb NOT NULL DEFAULT '{}',
   enabled boolean NOT NULL DEFAULT true,
