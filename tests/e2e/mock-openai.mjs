@@ -71,6 +71,42 @@ const server = http.createServer(async (request, response) => {
     streamSlowCompletion(request, response);
     return;
   }
+  if (lastUserText.includes('AEP_KNOWLEDGE_SEARCH')) {
+    // Scripted knowledge-search flow: the model calls the knowledge_search
+    // tool, then relays the PEP-filtered passages as the final answer.
+    const toolResult = body.messages?.find(
+      message => message.role === 'tool' && message.tool_call_id === 'call-kn-1',
+    );
+    if (toolResult) {
+      const report = `AEP_KNOWLEDGE_OK ${String(toolResult.content)}`;
+      if (body.stream === true) {
+        streamCompletion(response, report, 'Knowledge compiled.');
+      } else {
+        response.setHeader('X-Mock-Provider-Auth', 'accepted');
+        sendJSON(response, 200, {
+          id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+          choices: [{index: 0, message: {role: 'assistant', content: report, reasoning_content: 'Knowledge compiled.'}, finish_reason: 'stop'}],
+          usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+        });
+      }
+      return;
+    }
+    const toolCall = {
+      index: 0, id: 'call-kn-1', type: 'function',
+      function: {name: 'knowledge_search', arguments: '{"query":"department handbook"}'},
+    };
+    if (body.stream === true) {
+      streamNamedToolCall(response, toolCall, 'Search the knowledge base.');
+    } else {
+      response.setHeader('X-Mock-Provider-Auth', 'accepted');
+      sendJSON(response, 200, {
+        id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+        choices: [{index: 0, message: {role: 'assistant', content: '', tool_calls: [toolCall]}, finish_reason: 'tool_calls'}],
+        usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+      });
+    }
+    return;
+  }
   if (lastUserText.includes('AEP_DEPT_REPORT')) {
     // Scripted department-report flow for digital-employee E2E: the model
     // first calls the dept_data tool, then relays the (scope-filtered)
