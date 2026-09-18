@@ -42,7 +42,8 @@ WHERE s.deployment_id=$1 AND s.session_id=$2 AND s.user_id=$3 AND s.revoked_at I
   AND EXISTS (SELECT 1 FROM user_session_tokens st WHERE st.session_id=s.session_id AND st.revoked_at IS NULL AND st.expires_at>now())
   AND EXISTS (
     SELECT 1 FROM model_assignments ma
-    WHERE ma.deployment_id=s.deployment_id AND ma.model_id=m.id AND (
+    WHERE ma.deployment_id=s.deployment_id AND ma.model_id=m.id
+      AND (ma.expires_at IS NULL OR ma.expires_at>now()) AND (
       (ma.subject_type='user' AND ma.subject_id=s.user_id)
       OR (ma.subject_type='role' AND EXISTS (
         SELECT 1 FROM user_role_bindings urb

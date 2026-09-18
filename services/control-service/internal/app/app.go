@@ -367,7 +367,7 @@ func (a *App) ModelScopes(ctx context.Context, deploymentID, userID string) ([]s
 FROM models m
 JOIN model_assignments ma ON ma.deployment_id=m.deployment_id AND ma.model_id=m.id
 JOIN users u ON u.id=$2 AND u.deployment_id=$1
-WHERE m.deployment_id=$1 AND m.enabled=true AND (
+WHERE m.deployment_id=$1 AND m.enabled=true AND (ma.expires_at IS NULL OR ma.expires_at>now()) AND (
   (ma.subject_type='user' AND ma.subject_id=$2)
   OR (ma.subject_type='role' AND EXISTS (
     SELECT 1 FROM user_role_bindings urb

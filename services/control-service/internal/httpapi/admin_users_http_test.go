@@ -31,16 +31,16 @@ func newUserHTTPApplication(t *testing.T) (*app.App, sqlmock.Sqlmock, pgxmock.Pg
 }
 
 func userColumns() []string {
-	return []string{"id", "deployment_id", "username", "display_name", "email", "password_hash", "status", "require_password_change", "is_admin", "created_at", "updated_at"}
+	return []string{"id", "deployment_id", "username", "display_name", "email", "password_hash", "status", "require_password_change", "is_admin", "kind", "created_at", "updated_at"}
 }
 
 func TestAdminUserListAndCreate(t *testing.T) {
 	application, mock, _, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id > \$2 ORDER BY id LIMIT \$3`).
-		WithArgs("deployment-a", "user-0", 1).
-		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", "secret-hash", "active", true, false, now, now))
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND kind = \$2 AND id > \$3 ORDER BY id LIMIT \$4`).
+		WithArgs("deployment-a", "human", "user-0", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", "secret-hash", "active", true, false, "human", now, now))
 	mock.ExpectQuery(`SELECT \* FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id IN \(\$2\) ORDER BY user_id, role_id`).
 		WithArgs("deployment-a", "user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id", "role_id", "is_primary", "created_at"}).AddRow("deployment-a", "user-a", "member", true, now))
@@ -48,7 +48,7 @@ func TestAdminUserListAndCreate(t *testing.T) {
 		WithArgs("deployment-a", "user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id", "team_id", "is_primary", "created_at"}).AddRow("deployment-a", "user-a", "engineering", true, now))
 	listed := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/users?cursor=user-0&limit=1", "")
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"nextCursor":"user-a"`) || !strings.Contains(listed.Body.String(), `"roleIds":["member"]`) || strings.Contains(listed.Body.String(), "secret-hash") {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"nextCursor":"user-a"`) || !strings.Contains(listed.Body.String(), `"kind":"human"`) || !strings.Contains(listed.Body.String(), `"roleIds":["member"]`) || strings.Contains(listed.Body.String(), "secret-hash") {
 		t.Fatalf("user list = %d %s", listed.Code, listed.Body.String())
 	}
 
@@ -89,7 +89,7 @@ func TestAdminUserUpdateDisableAndResetPassword(t *testing.T) {
 	mock.ExpectExec(`UPDATE "users" SET`).WithArgs("Disabled Alice", "disabled", sqlmock.AnyArg(), "deployment-a", "user-a").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
-		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Disabled Alice", nil, "hash", "disabled", false, false, now, now))
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Disabled Alice", nil, "hash", "disabled", false, false, "human", now, now))
 	mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("member"))
 	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("engineering"))
 	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgxmock.NewResult("UPDATE", 1))

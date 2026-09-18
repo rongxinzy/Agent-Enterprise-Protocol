@@ -96,7 +96,7 @@ func TestPasswordLoginSuccessAndAudit(t *testing.T) {
 
 	expectNoLoginThrottle(pool)
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND username = \$2 LIMIT \$3`).WithArgs("deployment-a", "alice", 1).
-		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, now, now))
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
 	expectHTTPModelScopes(pool, "deployment-a", "user-a", "chat-a")
 	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member")
 	expectHTTPSessionIssue(pool, "deployment-a", "user-a")
@@ -208,7 +208,7 @@ func TestChangePasswordAndCurrentIdentity(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
-		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", true, false, now, now))
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", true, false, "human", now, now))
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "users" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -231,7 +231,7 @@ func TestChangePasswordAndCurrentIdentity(t *testing.T) {
 	}
 
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
-		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, now, now))
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
 	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member", "operator")
 	identity := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/me", "")
 	if identity.Code != http.StatusOK || !strings.Contains(identity.Body.String(), `"sessionId":"session-user"`) || !strings.Contains(identity.Body.String(), `"roles":["member","operator"]`) || strings.Contains(identity.Body.String(), passwordHash) {
@@ -260,7 +260,7 @@ func TestMockFederatedStartAndExchange(t *testing.T) {
 	}
 
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND username = \$2 LIMIT \$3`).WithArgs("deployment-a", "admin", 1).
-		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("admin-user", "deployment-a", "admin", "Administrator", nil, "unused", "active", false, true, now, now))
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("admin-user", "deployment-a", "admin", "Administrator", nil, "unused", "active", false, true, "human", now, now))
 	expectHTTPModelScopes(pool, "deployment-a", "admin-user", "chat-a")
 	expectHTTPUserRoles(mock, "deployment-a", "admin-user", "admin")
 	expectHTTPSessionIssue(pool, "deployment-a", "admin-user")

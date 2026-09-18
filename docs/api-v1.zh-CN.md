@@ -464,7 +464,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。
 
 ### RBAC 与会话
 
@@ -478,6 +478,93 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PUT | `/admin/users/{userId}/rbac` | 替换用户的角色和团队绑定 |
 | GET | `/admin/sessions` | 查询用户会话及心跳状态 |
 | POST | `/admin/sessions/{sessionId}/revoke` | 撤销一个用户会话 |
+
+团队构成一个森林。`POST /admin/teams` 接受可选的 `parentId`，每个团队都带有创建时即固定的
+`path` 和 `depth`；父团队创建后不可变更，因此不可能出现环形层级。删除仍被引用的团队时，
+存在子团队返回 `TEAM_HAS_CHILDREN`（409），是数字员工主团队返回 `TEAM_HAS_AGENTS`（409），
+其他引用返回 `TEAM_IN_USE`（409）。
+
+### 数字员工
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET, POST | `/admin/agents` | 查询或创建数字员工账号 |
+| PUT | `/admin/agents/{agentId}/profile` | 更新单个数字员工的档案 |
+
+读取需要 `users.read` 权限，写入需要 `users.write` 权限，完整管理员始终满足。数字员工是
+带主团队、展示头衔、可选描述和可选提示 Skill 的平台账号。主团队总会与 `teamIds` 一并授权，
+且调用方必须有权授予请求的每个角色和团队。
+
+`password` 至少 8 个字符，仅以 Argon2id 哈希存储。`GET /admin/agents` 使用 `cursor` 和
+`limit`（1-200，默认 50）分页，返回 `agents` 和最后一页为 `null` 的 `nextCursor`。
+
+档案更新接受 `displayTitle`、`description`、`homeTeamId` 和 `promptSkillId`；每个字段都可
+传 null 清除已存储的值。
+
+错误码：
+
+| 错误码 | 状态 | 含义 |
+| --- | --- | --- |
+| `INVALID_AGENT` | 400 | 用户名、显示名、密码、主团队、提示 Skill 无效，或包含未知的角色、团队 |
+| `USER_RBAC_REQUIRED` | 400 | 至少需要一个角色和一个团队（含主团队） |
+| `INVALID_ROLE`、`INVALID_TEAM` | 400 | 角色或团队绑定无效 |
+| `ROLE_GRANT_FORBIDDEN`、`TEAM_GRANT_FORBIDDEN` | 403 | 调用方无权授予请求的角色或团队 |
+| `AGENT_EXISTS` | 409 | 用户名已存在 |
+
+### 身份源
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET, POST | `/admin/identity-sources` | 查询或注册外部身份源 |
+| GET, PUT | `/admin/identity-sources/{sourceId}/mappings` | 查询或替换主体映射 |
+| DELETE | `/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}` | 删除一条映射 |
+
+读取需要 `identity.read` 权限，写入需要 `identity.write` 权限。`kind` 只是协议类别
+（`ldap`、`oidc` 或 `directory`）；产品专用的连接器形态由部署侧在 `config` 内表达，不属于
+协议词表。`config` 必须是纯 JSON 对象，且不得包含 `password`、`secret`、`token`、`apikey`、
+`clientsecret`、`bindpassword` 等秘密键；秘密材料只能以凭证库引用表达。已存储的 `config`
+不会在任何读取响应中回显。
+
+两个列表端点均使用 `cursor` 和 `limit` 分页；映射列表还接受可选的 `subjectType` 过滤
+（`user` 或 `team`）。列表响应返回的 `nextCursor` 在最后一页为 `null`。
+
+错误码：
+
+| 错误码 | 状态 | 含义 |
+| --- | --- | --- |
+| `INVALID_IDENTITY_SOURCE` | 400 | id、kind 或显示名无效；或 `config` 不是 JSON 对象、包含秘密键 |
+| `IDENTITY_SOURCE_EXISTS` | 409 | 身份源 id 已存在 |
+| `INVALID_IDENTITY_MAPPING` | 400 | 主体类型、外部 id 或本地主体 id 缺失或无效 |
+| `RESOURCE_NOT_FOUND` | 404 | 身份源不存在 |
+
+### 数据范围
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET, POST | `/admin/data-scope-rules` | 查询或创建数据范围规则 |
+| GET, DELETE | `/admin/data-scope-rules/{ruleId}` | 读取或删除单条规则 |
+| GET | `/admin/data-scope/context` | 解析单个用户的检索上下文 |
+
+读取需要 `data_scope.read` 权限，写入需要 `data_scope.write` 权限。规则以
+`management_scope`、`exception_grant` 或 `explicit_deny` 之一的规则种类把主体（`user`、
+`role` 或 `team`）绑定到资源。`resourceKind` 为协议定义的 `team` 或部署自定义的小写标识符；
+协议不枚举部署自定义种类，并将其视为不透明引用。`startsAt` 和 `expiresAt` 标记临时窗口，
+规则到期即停止授权。
+
+`GET /admin/data-scope/context?userId=...` 基于已存储的绑定和规则推导单个用户的检索上下文：
+`orgScope` 是用户所属团队的子树，`allowedResources` 和 `deniedResources` 是 `(kind, id)`
+引用（除 `team` 外 kind 均由部署定义），显式拒绝优先于允许。
+
+规则列表使用 `cursor` 和 `limit` 分页，返回的 `nextCursor` 在最后一页为 `null`。
+
+错误码：
+
+| 错误码 | 状态 | 含义 |
+| --- | --- | --- |
+| `INVALID_DATA_SCOPE_RULE` | 400 | id、规则种类、主体或资源无效 |
+| `DATA_SCOPE_RULE_EXISTS` | 409 | 规则 id 已存在 |
+| `USER_REQUIRED` | 400 | 缺少必需的 `userId` 查询参数 |
+| `RESOURCE_NOT_FOUND` | 404 | 规则或用户不存在 |
 
 ### Skill
 

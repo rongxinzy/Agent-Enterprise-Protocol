@@ -7,6 +7,22 @@ import type {
   AdminModelPatch,
   AdminModelWrite,
   AgentModelList,
+  AgentDirectoryPage,
+  AgentResponse,
+  CreateAgentRequest,
+  UpdateAgentProfileRequest,
+  UpdateAgentProfileResponse,
+  CreateIdentitySourceRequest,
+  IdentityMapping,
+  IdentityMappingPage,
+  IdentityMappingResult,
+  IdentitySource,
+  IdentitySourcePage,
+  UpsertIdentityMappingRequest,
+  CreateDataScopeRuleRequest,
+  DataScopeRule,
+  DataScopeRulePage,
+  RetrievalContext,
   AdminControlEvent,
   AdminControlEventPage,
   AepClientOptions,
@@ -478,6 +494,84 @@ export class AepClient {
 
   replaceUserRBAC(userId: string, input: ReplaceUserRBACRequest): Promise<UserRBAC> {
     return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/users/${segment(userId)}/rbac`, body: asJson(input)});
+  }
+
+  listAgents(filters: {cursor?: string; limit?: number} = {}): Promise<AgentDirectoryPage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/agents?${query(filters)}`});
+  }
+
+  createAgent(input: CreateAgentRequest): Promise<AgentResponse> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/agents', body: asJson(input)});
+  }
+
+  updateAgentProfile(agentId: string, input: UpdateAgentProfileRequest): Promise<UpdateAgentProfileResponse> {
+    return this.#send({
+      method: HttpMethod.Put,
+      path: `/aep/v1/admin/agents/${segment(agentId)}/profile`,
+      body: asJson(input),
+    });
+  }
+
+  listIdentitySources(filters: {cursor?: string; limit?: number} = {}): Promise<IdentitySourcePage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/identity-sources?${query(filters)}`});
+  }
+
+  createIdentitySource(input: CreateIdentitySourceRequest): Promise<IdentitySource> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/identity-sources', body: asJson(input)});
+  }
+
+  listIdentityMappings(
+    sourceId: string,
+    filters: {subjectType?: IdentityMapping['externalSubjectType']; cursor?: string; limit?: number} = {},
+  ): Promise<IdentityMappingPage> {
+    return this.#send({
+      method: HttpMethod.Get,
+      path: `/aep/v1/admin/identity-sources/${segment(sourceId)}/mappings?${query(filters)}`,
+    });
+  }
+
+  upsertIdentityMapping(sourceId: string, input: UpsertIdentityMappingRequest): Promise<IdentityMappingResult> {
+    return this.#send({
+      method: HttpMethod.Put,
+      path: `/aep/v1/admin/identity-sources/${segment(sourceId)}/mappings`,
+      body: asJson(input),
+    });
+  }
+
+  deleteIdentityMapping(
+    sourceId: string,
+    subjectType: IdentityMapping['externalSubjectType'],
+    externalId: string,
+  ): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: `/aep/v1/admin/identity-sources/${segment(sourceId)}/mappings/${segment(subjectType)}/${segment(externalId)}`,
+      responseType: 'empty',
+    });
+  }
+
+  listDataScopeRules(filters: {cursor?: string; limit?: number} = {}): Promise<DataScopeRulePage> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-scope-rules?${query(filters)}`});
+  }
+
+  createDataScopeRule(input: CreateDataScopeRuleRequest): Promise<DataScopeRule> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/data-scope-rules', body: asJson(input)});
+  }
+
+  getDataScopeRule(ruleId: string): Promise<DataScopeRule> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-scope-rules/${segment(ruleId)}`});
+  }
+
+  deleteDataScopeRule(ruleId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: `/aep/v1/admin/data-scope-rules/${segment(ruleId)}`,
+      responseType: 'empty',
+    });
+  }
+
+  getDataScopeContext(userId: string): Promise<RetrievalContext> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-scope/context?${query({userId})}`});
   }
 
   listSkills(filters: Query = {}): Promise<JsonObject> {

@@ -145,7 +145,7 @@ func TestModelQueriesAndAssignmentsEnforceDeploymentScope(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "model_assignments"`).
-		WithArgs("assignment-a", "deployment-a", "chat-a", "team", "team-a", sqlmock.AnyArg()).
+		WithArgs("assignment-a", "deployment-a", "chat-a", "team", "team-a", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	assignment, err := store.Deployment("deployment-a").CreateModelAssignment(context.Background(), ModelAssignment{
@@ -286,7 +286,7 @@ func TestAssignmentListsAndCredentialCreation(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "credential_assignments"`).
-		WithArgs("assignment-new", "deployment-a", "credential-a", "user", "user-a", sqlmock.AnyArg()).
+		WithArgs("assignment-new", "deployment-a", "credential-a", "user", "user-a", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	created, err := store.Deployment("deployment-a").CreateCredentialAssignment(context.Background(), CredentialAssignment{
@@ -301,7 +301,7 @@ func TestTeamCreationAndDeletion(t *testing.T) {
 	store, mock := newMockStore(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "teams"`).
-		WithArgs("deployment-a", "team-a", "Engineering", "Builders", false, true, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("deployment-a", "team-a", "Engineering", "Builders", false, true, nil, "", 0, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	if err := store.Deployment("deployment-a").CreateTeam(context.Background(), Team{

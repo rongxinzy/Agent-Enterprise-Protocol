@@ -160,8 +160,8 @@ describe('AepClient SDK gate', () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     const desired = await client.getDataPlaneDesiredState();
     expect(desired.revision).toBe('rev-1');
-    expect(desired.routes[0].providerType).toBe('deepseek');
-    expect(desired.routes[0].credentialRef).toEqual({name: 'provider-secrets', key: 'model-1'});
+    expect(desired.routes[0]?.providerType).toBe('deepseek');
+    expect(desired.routes[0]?.credentialRef).toEqual({name: 'provider-secrets', key: 'model-1'});
     expect(JSON.stringify(desired)).not.toContain('provider-secret-value');
     await expect(client.putDataPlaneDesiredState({
       revision: 'rev-next',
@@ -287,7 +287,21 @@ describe('AepClient SDK gate', () => {
     expect((await client.cancelControlEvent('event-1')).eventId).toBe('event-1');
     expect((await client.listLicenses()).items[0]?.licenseId).toBe('lic-1');
     expect((await client.getLicense('lic-1')).licenseId).toBe('lic-1');
-    expect((await client.importLicense({license: {format: 'zhiyuan-license-v1', keyId: 'k1', payload: {}, signature: 'sig'}})).licenseId).toBe('lic-1');
+    expect((await client.importLicense({license: {
+      format: 'zhiyuan-license-v1',
+      keyId: 'k1',
+      payload: {
+        licenseId: 'lic-1',
+        customerId: 'customer-1',
+        deploymentId: 'ent-1',
+        edition: 'enterprise',
+        issuedAt: '2026-08-01T00:00:00Z',
+        expiresAt: null,
+        graceDays: 30,
+        features: ['enterprise.models'],
+      },
+      signature: 'sig',
+    }})).licenseId).toBe('lic-1');
     expect((await client.revokeLicense('lic-1')).status).toBe('revoked');
     const paths = server.requests.map(request => `${request.method} ${request.path}`);
     expect(paths).toEqual(expect.arrayContaining([
@@ -319,5 +333,95 @@ describe('AepClient SDK gate', () => {
       '?cursor=model-2&limit=25',
       '?sessionId=session-2&type=model.request.completed&result=success&limit=25',
     ]);
+  });
+
+  test('covers digital employee directory administration', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    expect((await client.listAgents()).agents[0]).toMatchObject({id: 'agent-1', username: 'review-agent', status: 'active', online: true});
+    await client.listAgents({cursor: 'agent-2', limit: 25});
+    expect(server.requests.at(-1)?.search).toBe('?cursor=agent-2&limit=25');
+
+    await expect(client.createAgent({
+      username: 'review-agent',
+      displayName: 'Review Agent',
+      password: 'initial-password',
+      roleIds: ['operator'],
+      teamIds: ['team-1'],
+      homeTeamId: 'team-1',
+      displayTitle: 'Reviewer',
+    })).resolves.toMatchObject({id: 'agent-1', username: 'review-agent', homeTeamId: 'team-1'});
+
+    await expect(client.createAgent({
+      username: 'invalid agent!',
+      displayName: 'Review Agent',
+      password: 'initial-password',
+      roleIds: ['operator'],
+      homeTeamId: 'team-1',
+    })).rejects.toMatchObject({status: 400, code: 'INVALID_AGENT'});
+
+    await expect(client.updateAgentProfile('agent-1', {displayTitle: 'Senior Reviewer', homeTeamId: 'team-2'}))
+      .resolves.toMatchObject({id: 'agent-1', homeTeamId: 'team-2', displayTitle: 'Senior Reviewer'});
+
+    const paths = server.requests.map(request => `${request.method} ${request.path}`);
+    expect(paths).toEqual(expect.arrayContaining([
+      'GET /aep/v1/admin/agents',
+      'POST /aep/v1/admin/agents',
+      'PUT /aep/v1/admin/agents/agent-1/profile',
+    ]));
+  });
+
+  test('covers identity source and mapping administration', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    expect((await client.listIdentitySources()).identitySources[0]).toMatchObject({id: 'ldap-1', kind: 'ldap', enabled: true});
+    await client.listIdentitySources({cursor: 'source-2', limit: 25});
+    expect(server.requests.at(-1)?.search).toBe('?cursor=source-2&limit=25');
+
+    await expect(client.createIdentitySource({id: 'ldap-1', kind: 'ldap', displayName: 'Corporate LDAP', config: {url: 'ldap://directory.example'}}))
+      .resolves.toMatchObject({id: 'ldap-1', kind: 'ldap', enabled: true});
+
+    expect((await client.listIdentityMappings('ldap-1')).mappings[0]).toMatchObject({
+      sourceId: 'ldap-1',
+      externalSubjectType: 'user',
+      externalId: 'ext-user-1',
+      localSubjectId: 'user-1',
+    });
+    await client.listIdentityMappings('ldap-1', {subjectType: 'user', cursor: 'mapping-2', limit: 25});
+    expect(server.requests.at(-1)?.search).toBe('?subjectType=user&cursor=mapping-2&limit=25');
+
+    await expect(client.upsertIdentityMapping('ldap-1', {externalSubjectType: 'user', externalId: 'ext-user-1', localSubjectId: 'user-1'}))
+      .resolves.toMatchObject({sourceId: 'ldap-1', externalId: 'ext-user-1', localSubjectId: 'user-1'});
+
+    await client.deleteIdentityMapping('ldap-1', 'user', 'ext-user-1');
+    expect(server.requests.at(-1)).toMatchObject({method: 'DELETE', path: '/aep/v1/admin/identity-sources/ldap-1/mappings/user/ext-user-1'});
+  });
+
+  test('covers data scope rules and retrieval context derivation', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    expect((await client.listDataScopeRules()).rules[0]).toMatchObject({id: 'rule-1', ruleKind: 'exception_grant', resourceKind: 'team', resourceId: 'team-9'});
+    await client.listDataScopeRules({cursor: 'rule-2', limit: 25});
+    expect(server.requests.at(-1)?.search).toBe('?cursor=rule-2&limit=25');
+
+    await expect(client.createDataScopeRule({
+      id: 'rule-1',
+      ruleKind: 'exception_grant',
+      subjectType: 'user',
+      subjectId: 'user-1',
+      resourceKind: 'team',
+      resourceId: 'team-9',
+      expiresAt: '2027-01-01T00:00:00Z',
+      reason: 'Cross-department review',
+    })).resolves.toMatchObject({id: 'rule-1', subjectId: 'user-1'});
+
+    await expect(client.getDataScopeRule('rule-1')).resolves.toMatchObject({id: 'rule-1', resourceKind: 'team'});
+    await client.deleteDataScopeRule('rule-1');
+    expect(server.requests.at(-1)).toMatchObject({method: 'DELETE', path: '/aep/v1/admin/data-scope-rules/rule-1'});
+
+    await expect(client.getDataScopeContext('user-1')).resolves.toMatchObject({
+      principalId: 'user-1',
+      orgScope: ['team-1'],
+      allowedResources: [{kind: 'team', id: 'team-9'}],
+    });
+    expect(server.requests.at(-1)?.search).toBe('?userId=user-1');
+    await expect(client.getDataScopeContext('')).rejects.toMatchObject({status: 400, code: 'USER_REQUIRED'});
   });
 });

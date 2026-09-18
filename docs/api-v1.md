@@ -488,7 +488,7 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
-Every user must have at least one role and one team when created or imported.
+Every user must have at least one role and one team when created or imported. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way.
 
 ### RBAC and sessions
 
@@ -502,6 +502,108 @@ Every user must have at least one role and one team when created or imported.
 | PUT | `/admin/users/{userId}/rbac` | Replace a user's role and team bindings |
 | GET | `/admin/sessions` | List user sessions and heartbeat state |
 | POST | `/admin/sessions/{sessionId}/revoke` | Revoke one user session |
+
+Teams form a forest. `POST /admin/teams` accepts an optional `parentId`, and
+every team carries a `path` and `depth` that are fixed at creation; parents
+never move afterwards, so cyclic hierarchies are impossible. Deleting a team
+that is still referenced returns `TEAM_HAS_CHILDREN` (409) when it has child
+teams, `TEAM_HAS_AGENTS` (409) when it is the home team of digital employees,
+or `TEAM_IN_USE` (409) for any other reference.
+
+### Digital employees
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET, POST | `/admin/agents` | List or create digital employee accounts |
+| PUT | `/admin/agents/{agentId}/profile` | Update the profile of one digital employee |
+
+Reads require the `users.read` permission and writes require `users.write`;
+full administrators always qualify. A digital employee is a platform account
+with a home team, a display title, an optional description, and an optional
+prompt Skill. The home team is always granted in addition to `teamIds`, and
+the caller must be allowed to grant every requested role and team.
+
+`password` must contain at least 8 characters and is stored only as an
+Argon2id hash. `GET /admin/agents` paginates with `cursor` and `limit`
+(1-200, default 50) and returns `agents` plus a `nextCursor` that is `null`
+on the last page.
+
+Profile updates accept `displayTitle`, `description`, `homeTeamId`, and
+`promptSkillId`; each field may be set to null to clear the stored value.
+
+Error codes:
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_AGENT` | 400 | Invalid username, display name, password, home team, prompt Skill, or unknown role or team |
+| `USER_RBAC_REQUIRED` | 400 | At least one role and one team (including the home team) are required |
+| `INVALID_ROLE`, `INVALID_TEAM` | 400 | Invalid role or team binding |
+| `ROLE_GRANT_FORBIDDEN`, `TEAM_GRANT_FORBIDDEN` | 403 | The caller cannot grant a requested role or team |
+| `AGENT_EXISTS` | 409 | The username already exists |
+
+### Identity sources
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET, POST | `/admin/identity-sources` | List or register external identity sources |
+| GET, PUT | `/admin/identity-sources/{sourceId}/mappings` | List or upsert subject mappings |
+| DELETE | `/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}` | Remove one mapping |
+
+Reads require the `identity.read` permission and writes require
+`identity.write`. `kind` is a protocol category only (`ldap`, `oidc`, or
+`directory`); product-specific connector flavors are expressed inside
+`config` on the deployment side and are not protocol vocabulary. `config`
+must be a plain JSON object and must not contain secret keys such as
+`password`, `secret`, `token`, `apikey`, `clientsecret`, or `bindpassword`;
+secret material may only be expressed as credential store references. Stored
+`config` is never echoed by reads.
+
+Both list endpoints paginate with `cursor` and `limit`; mapping lists also
+accept an optional `subjectType` filter (`user` or `team`). List responses
+return a `nextCursor` that is `null` on the last page.
+
+Error codes:
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_IDENTITY_SOURCE` | 400 | Invalid id, kind, or display name; or a `config` that is not a JSON object or contains secret keys |
+| `IDENTITY_SOURCE_EXISTS` | 409 | The identity source id already exists |
+| `INVALID_IDENTITY_MAPPING` | 400 | Missing or invalid subject type, external id, or local subject id |
+| `RESOURCE_NOT_FOUND` | 404 | The identity source was not found |
+
+### Data scope
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET, POST | `/admin/data-scope-rules` | List or create data scope rules |
+| GET, DELETE | `/admin/data-scope-rules/{ruleId}` | Read or delete one rule |
+| GET | `/admin/data-scope/context` | Resolve the retrieval context of one user |
+
+Reads require the `data_scope.read` permission and writes require
+`data_scope.write`. A rule binds a subject (`user`, `role`, or `team`) to a
+resource with the rule kind `management_scope`, `exception_grant`, or
+`explicit_deny`. `resourceKind` is either the protocol-defined `team` or a
+deployment-defined lowercase identifier; the protocol does not enumerate
+deployment kinds and treats them as opaque references. `startsAt` and
+`expiresAt` mark a temporary window, and an expired rule stops authorizing.
+
+`GET /admin/data-scope/context?userId=...` derives the retrieval context of
+one user from stored bindings and rules: `orgScope` is the subtree of the
+user's teams, `allowedResources` and `deniedResources` are `(kind, id)`
+references where every non-`team` kind is deployment-defined, and an explicit
+deny wins over an allow.
+
+Rule lists paginate with `cursor` and `limit` and return a `nextCursor` that
+is `null` on the last page.
+
+Error codes:
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_DATA_SCOPE_RULE` | 400 | Invalid id, rule kind, subject, or resource |
+| `DATA_SCOPE_RULE_EXISTS` | 409 | The rule id already exists |
+| `USER_REQUIRED` | 400 | The `userId` query parameter is required |
+| `RESOURCE_NOT_FOUND` | 404 | The rule or user was not found |
 
 ### Skills
 

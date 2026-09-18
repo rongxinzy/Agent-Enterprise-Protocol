@@ -301,6 +301,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 			Type string `json:"type"`
 			ID   string `json:"id"`
 		} `json:"subject"`
+		ExpiresAt *time.Time `json:"expiresAt"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
@@ -320,7 +321,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,deployment_id,skill_id,subject_type,subject_id) VALUES ($1,$2,$3,$4,$5)`, id, claims.DeploymentID, input.SkillID, input.Subject.Type, input.Subject.ID)
+	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,deployment_id,skill_id,subject_type,subject_id,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`, id, claims.DeploymentID, input.SkillID, input.Subject.Type, input.Subject.ID, input.ExpiresAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The assignment already exists.")
@@ -405,7 +406,7 @@ SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes
 FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
 JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
 JOIN users u ON u.id=$2
-WHERE sk.enabled=true AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
+WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
 ), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,version DESC)
 SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.DeploymentID, claims.Subject)
 	if err != nil {
@@ -442,7 +443,7 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 		return
 	}
 	var objectKey string
-	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusForbidden, "SKILL_NOT_ASSIGNED", "The Skill version is not assigned.")
 		return

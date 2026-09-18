@@ -237,6 +237,63 @@ export class MockAepServer {
     if (path === '/aep/v1/admin/licenses/lic-1') return json(response, 200, license());
     if (path === '/aep/v1/admin/licenses/import') return json(response, 201, license());
     if (path === '/aep/v1/admin/licenses/lic-1/revoke') return json(response, 200, {licenseId: 'lic-1', status: 'revoked'});
+    if (path === '/aep/v1/admin/agents') {
+      if (request.method === 'POST') {
+        const input = await readJson(request);
+        if (typeof input.username !== 'string' || !/^[A-Za-z0-9._-]+$/.test(input.username)) {
+          return json(response, 400, problem(400, 'INVALID_AGENT'));
+        }
+        return json(response, 201, agentResponse());
+      }
+      return json(response, 200, {agents: [agentDirectoryEntry()], nextCursor: null});
+    }
+    if (path === '/aep/v1/admin/agents/agent-1/profile' && request.method === 'PUT') {
+      const input = await readJson(request);
+      return json(response, 200, {
+        id: 'agent-1',
+        homeTeamId: typeof input.homeTeamId === 'string' ? input.homeTeamId : 'team-1',
+        displayTitle: typeof input.displayTitle === 'string' ? input.displayTitle : 'Reviewer',
+      });
+    }
+    if (path === '/aep/v1/admin/identity-sources') {
+      if (request.method === 'POST') {
+        const input = await readJson(request);
+        return json(response, 201, {
+          id: typeof input.id === 'string' ? input.id : 'ldap-1',
+          kind: input.kind ?? 'ldap',
+          displayName: typeof input.displayName === 'string' ? input.displayName : 'Corporate LDAP',
+          enabled: true,
+        });
+      }
+      return json(response, 200, {identitySources: [identitySource()], nextCursor: null});
+    }
+    if (path === '/aep/v1/admin/identity-sources/ldap-1/mappings') {
+      if (request.method === 'PUT') {
+        const input = await readJson(request);
+        return json(response, 201, {
+          sourceId: 'ldap-1',
+          externalId: typeof input.externalId === 'string' ? input.externalId : 'ext-user-1',
+          localSubjectId: typeof input.localSubjectId === 'string' ? input.localSubjectId : 'user-1',
+        });
+      }
+      return json(response, 200, {mappings: [identityMapping()], nextCursor: null});
+    }
+    if (path === '/aep/v1/admin/identity-sources/ldap-1/mappings/user/ext-user-1' && request.method === 'DELETE') {
+      return empty(response, 204);
+    }
+    if (path === '/aep/v1/admin/data-scope-rules') {
+      if (request.method === 'POST') return json(response, 201, dataScopeRule());
+      return json(response, 200, {rules: [dataScopeRule()], nextCursor: null});
+    }
+    if (path === '/aep/v1/admin/data-scope-rules/rule-1') {
+      if (request.method === 'DELETE') return empty(response, 204);
+      return json(response, 200, dataScopeRule());
+    }
+    if (path === '/aep/v1/admin/data-scope/context') {
+      const userId = parsedURL.searchParams.get('userId');
+      if (!userId) return json(response, 400, problem(400, 'USER_REQUIRED'));
+      return json(response, 200, retrievalContext());
+    }
     if (path.startsWith('/aep/v1/admin/')) return json(response, 200, {items: [], nextCursor: null});
 
     return json(response, 404, problem(404, 'RESOURCE_NOT_FOUND'));
@@ -333,6 +390,67 @@ function dataPlaneDesiredState(revision: string): object {
 
 function problem(status: number, code: string): object {
   return {type: `https://aep.example/problems/${code.toLowerCase()}`, title: code, status, code, requestId: 'req-mock'};
+}
+
+function agentDirectoryEntry(): object {
+  return {
+    id: 'agent-1',
+    username: 'review-agent',
+    displayName: 'Review Agent',
+    status: 'active',
+    online: true,
+    lastHeartbeatAt: '2026-09-01T00:00:00Z',
+    homeTeamId: 'team-1',
+    displayTitle: 'Reviewer',
+    description: null,
+    promptSkillId: null,
+  };
+}
+
+function agentResponse(): object {
+  return {id: 'agent-1', username: 'review-agent', displayName: 'Review Agent', homeTeamId: 'team-1', displayTitle: 'Reviewer'};
+}
+
+function identitySource(): object {
+  return {id: 'ldap-1', kind: 'ldap', displayName: 'Corporate LDAP', enabled: true};
+}
+
+function identityMapping(): object {
+  return {sourceId: 'ldap-1', externalSubjectType: 'user', externalId: 'ext-user-1', localSubjectId: 'user-1', status: 'active'};
+}
+
+function dataScopeRule(): object {
+  return {
+    id: 'rule-1',
+    ruleKind: 'exception_grant',
+    subjectType: 'user',
+    subjectId: 'user-1',
+    resourceKind: 'team',
+    resourceId: 'team-9',
+    startsAt: null,
+    expiresAt: '2027-01-01T00:00:00Z',
+    reason: 'Cross-department review',
+  };
+}
+
+function retrievalContext(): object {
+  return {
+    principalId: 'user-1',
+    deploymentId: 'ent-1',
+    orgScope: ['team-1'],
+    ownTeamIds: ['team-1'],
+    roleScope: ['operator'],
+    allowedResources: [{kind: 'team', id: 'team-9'}],
+    deniedResources: [],
+    crossDepartmentReason: 'Cross-department review',
+  };
+}
+
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(chunk as Buffer);
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
 }
 
 function json(response: ServerResponse, status: number, body: object): void {

@@ -19,6 +19,9 @@ tags:
   - name: User Runtime
   - name: User Control Events
   - name: Admin Users
+  - name: Admin Agents
+  - name: Admin Identity
+  - name: Admin Data Scope
   - name: Admin Skills
   - name: Admin Control Events
   - name: Admin Models
@@ -950,6 +953,334 @@ paths:
       responses:
         '204':
           description: Session revoked
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/agents:
+    get:
+      tags:
+        - Admin Agents
+      operationId: listAgents
+      description: 'Requires the users.read permission (or a full administrator). Returns the digital employee directory page by page. Cursor pagination follows the admin users convention: pass nextCursor back as cursor until it is null. Problem codes: TOKEN_INVALID, ACCESS_DENIED.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Digital employee directory page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentDirectoryPage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags:
+        - Admin Agents
+      operationId: createAgent
+      description: 'Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, or INVALID_TEAM; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS.'
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+      responses:
+        '201':
+          description: Digital employee created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/agents/{agentId}/profile:
+    put:
+      tags:
+        - Admin Agents
+      operationId: updateAgentProfile
+      description: 'Requires the users.write permission (or a full administrator). Updates the digital employee profile. Every field is optional; a null value clears the stored field. Changing homeTeamId requires the same team grant rights as creation. Problem codes: 400 INVALID_AGENT; 404 RESOURCE_NOT_FOUND.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentProfileRequest'
+      responses:
+        '200':
+          description: Updated digital employee profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateAgentProfileResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/identity-sources:
+    get:
+      tags:
+        - Admin Identity
+      operationId: listIdentitySources
+      description: 'Requires the identity.read permission (or a full administrator). Returns the configured external identity sources page by page. The stored connector config is never echoed. Problem codes: TOKEN_INVALID, ACCESS_DENIED.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Identity source page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentitySourcePage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags:
+        - Admin Identity
+      operationId: createIdentitySource
+      description: 'Requires the identity.write permission (or a full administrator). Registers an external identity source. kind is a protocol category only (ldap, oidc, or directory); product-specific connector flavors belong inside config on the deployment side. config MUST be a JSON object and MUST NOT contain secret keys; secret material may only be expressed as credential store references. Problem codes: 400 INVALID_IDENTITY_SOURCE; 409 IDENTITY_SOURCE_EXISTS.'
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIdentitySourceRequest'
+      responses:
+        '201':
+          description: Identity source registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentitySource'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/identity-sources/{sourceId}/mappings:
+    get:
+      tags:
+        - Admin Identity
+      operationId: listIdentityMappings
+      description: 'Requires the identity.read permission (or a full administrator). Returns the subject mappings of one identity source page by page. Problem codes: TOKEN_INVALID, ACCESS_DENIED.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: subjectType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - user
+              - team
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Identity mapping page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityMappingPage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    put:
+      tags:
+        - Admin Identity
+      operationId: upsertIdentityMapping
+      description: 'Requires the identity.write permission (or a full administrator). Creates or replaces the mapping of one external subject to one local user or team. Problem codes: 400 INVALID_IDENTITY_MAPPING; 404 RESOURCE_NOT_FOUND.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertIdentityMappingRequest'
+      responses:
+        '201':
+          description: Mapping stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityMappingResult'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}:
+    delete:
+      tags:
+        - Admin Identity
+      operationId: deleteIdentityMapping
+      description: Requires the identity.write permission (or a full administrator). Removes one external subject mapping. Deleting an unknown mapping is idempotent and still returns 204.
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/ExternalSubjectType'
+        - $ref: '#/components/parameters/ExternalId'
+      responses:
+        '204':
+          description: Mapping removed
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/data-scope-rules:
+    get:
+      tags:
+        - Admin Data Scope
+      operationId: listDataScopeRules
+      description: 'Requires the data_scope.read permission (or a full administrator). Returns the deployment data scope rules page by page. Problem codes: TOKEN_INVALID, ACCESS_DENIED.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Data scope rule page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataScopeRulePage'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+    post:
+      tags:
+        - Admin Data Scope
+      operationId: createDataScopeRule
+      description: 'Requires the data_scope.write permission (or a full administrator). Creates a data scope rule. resourceKind is the protocol-defined team or a deployment-defined lowercase identifier; the control plane treats every non-team kind as an opaque reference. Problem codes: 400 INVALID_DATA_SCOPE_RULE; 409 DATA_SCOPE_RULE_EXISTS.'
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDataScopeRuleRequest'
+      responses:
+        '201':
+          description: Data scope rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataScopeRule'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/data-scope-rules/{ruleId}:
+    parameters:
+      - $ref: '#/components/parameters/RuleId'
+    get:
+      tags:
+        - Admin Data Scope
+      operationId: getDataScopeRule
+      description: 'Requires the data_scope.read permission (or a full administrator). Returns one data scope rule. Problem codes: RESOURCE_NOT_FOUND.'
+      security:
+        - aepBearerAuth: []
+      responses:
+        '200':
+          description: Data scope rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataScopeRule'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags:
+        - Admin Data Scope
+      operationId: deleteDataScopeRule
+      description: Requires the data_scope.write permission (or a full administrator). Deletes one data scope rule. Deleting an unknown rule is idempotent and still returns 204.
+      security:
+        - aepBearerAuth: []
+      responses:
+        '204':
+          description: Data scope rule deleted
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/data-scope/context:
+    get:
+      tags:
+        - Admin Data Scope
+      operationId: getDataScopeContext
+      description: 'Requires the data_scope.read permission (or a full administrator). Returns the derived retrieval authorization context for one user. The organization scope is the subtree of the user''s teams. allowed and denied resources are (kind, id) references; kind team is protocol-defined and every other kind is deployment-defined and opaque to the control plane. Problem codes: 400 USER_REQUIRED; 404 RESOURCE_NOT_FOUND.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Derived retrieval context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalContext'
+        '400':
+          $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
         '403':
@@ -2112,6 +2443,7 @@ components:
       required:
         - id
         - displayName
+        - kind
       properties:
         id:
           type: string
@@ -2122,6 +2454,12 @@ components:
             - string
             - 'null'
           format: email
+        kind:
+          type: string
+          enum:
+            - human
+            - agent
+          description: Account category of the authenticated principal.
     CurrentIdentity:
       type: object
       required:
@@ -2815,6 +3153,7 @@ components:
         - deploymentId
         - username
         - displayName
+        - kind
         - status
         - createdAt
         - updatedAt
@@ -2832,6 +3171,12 @@ components:
             - string
             - 'null'
           format: email
+        kind:
+          type: string
+          enum:
+            - human
+            - agent
+          description: Account category. Digital employees are users with kind=agent; the platform user listing returns human accounts only.
         status:
           type: string
           enum:
@@ -3150,6 +3495,8 @@ components:
         - builtIn
         - enabled
         - memberCount
+        - path
+        - depth
       properties:
         id:
           type: string
@@ -3164,6 +3511,18 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        parentId:
+          type:
+            - string
+            - 'null'
+          description: Parent team. Omitted for root teams.
+        path:
+          type: string
+          description: Materialized team path, for example /hq/engineering.
+        depth:
+          type: integer
+          minimum: 0
+          description: Distance from the team forest root.
     TeamPage:
       type: object
       required:
@@ -3196,6 +3555,12 @@ components:
         description:
           type: string
           maxLength: 1024
+        parentId:
+          type:
+            - string
+            - 'null'
+          maxLength: 100
+          description: Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible.
     UpdateTeamRequest:
       type: object
       minProperties: 1
@@ -3248,6 +3613,482 @@ components:
           type: array
           items:
             type: string
+    AgentDirectoryEntry:
+      type: object
+      required:
+        - id
+        - username
+        - displayName
+        - kind
+        - status
+        - online
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        kind:
+          type: string
+          enum:
+            - agent
+          description: Always agent; the directory lists digital employees only.
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+        online:
+          type: boolean
+        lastHeartbeatAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        homeTeamId:
+          type:
+            - string
+            - 'null'
+        displayTitle:
+          type:
+            - string
+            - 'null'
+        description:
+          type:
+            - string
+            - 'null'
+        promptSkillId:
+          type:
+            - string
+            - 'null'
+    AgentDirectoryPage:
+      type: object
+      required:
+        - agents
+        - nextCursor
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentDirectoryEntry'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    AgentIdentifier:
+      description: Digital employee account identifier with RBAC identifier syntax.
+      type: string
+      minLength: 1
+      maxLength: 100
+      pattern: ^[A-Za-z0-9._-]+$
+    CreateAgentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - username
+        - displayName
+        - password
+        - roleIds
+        - homeTeamId
+      properties:
+        username:
+          $ref: '#/components/schemas/AgentIdentifier'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        password:
+          type: string
+          minLength: 8
+          maxLength: 1024
+          writeOnly: true
+          description: Initial password of at least 8 characters. Stored only as an Argon2id hash under the deployment password policy.
+        roleIds:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: string
+          uniqueItems: true
+        teamIds:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+          uniqueItems: true
+        homeTeamId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Primary team of the digital employee. Always granted in addition to teamIds.
+        displayTitle:
+          type:
+            - string
+            - 'null'
+          maxLength: 256
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2048
+        promptSkillId:
+          type:
+            - string
+            - 'null'
+          maxLength: 64
+          description: Identifier of the Skill that carries the digital employee prompt. Optional.
+    AgentResponse:
+      type: object
+      required:
+        - id
+        - username
+        - displayName
+        - homeTeamId
+        - displayTitle
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        homeTeamId:
+          type: string
+        displayTitle:
+          type: string
+    UpdateAgentProfileRequest:
+      type: object
+      additionalProperties: false
+      description: 'Patch semantics: an absent field leaves the stored value unchanged. Unlike a JSON merge patch, an explicit null is indistinguishable from an absent field on the wire for this operation.'
+      properties:
+        displayTitle:
+          type: string
+          maxLength: 256
+          description: New display title; an empty string clears the stored title.
+        description:
+          type: string
+          maxLength: 2048
+          description: New description; an empty string clears the stored description.
+        homeTeamId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: New home team. Must exist and be grantable by the caller.
+        promptSkillId:
+          type: string
+          maxLength: 64
+          description: Identifier of the prompt Skill; an empty string clears the binding.
+    UpdateAgentProfileResponse:
+      type: object
+      required:
+        - id
+        - homeTeamId
+        - displayTitle
+      properties:
+        id:
+          type: string
+        homeTeamId:
+          type: string
+        displayTitle:
+          type: string
+    IdentitySourceKind:
+      type: string
+      enum:
+        - ldap
+        - oidc
+        - directory
+      description: Protocol identity source category. Product-specific connector flavors are deployment config, not protocol vocabulary.
+    IdentitySource:
+      type: object
+      required:
+        - id
+        - kind
+        - displayName
+        - enabled
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/IdentitySourceKind'
+        displayName:
+          type: string
+        enabled:
+          type: boolean
+    IdentitySourcePage:
+      type: object
+      required:
+        - identitySources
+        - nextCursor
+      properties:
+        identitySources:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdentitySource'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    CreateIdentitySourceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - displayName
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9._-]+$
+        kind:
+          $ref: '#/components/schemas/IdentitySourceKind'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        config:
+          type: object
+          additionalProperties: true
+          default: {}
+          description: Connector settings as a plain JSON object. MUST NOT contain secret keys such as password, secret, token, apikey, clientsecret, or bindpassword; secret material may only be expressed as credential store references.
+    IdentityMapping:
+      type: object
+      required:
+        - sourceId
+        - externalSubjectType
+        - externalId
+        - localSubjectId
+        - status
+      properties:
+        sourceId:
+          type: string
+        externalSubjectType:
+          type: string
+          enum:
+            - user
+            - team
+        externalId:
+          type: string
+        localSubjectId:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+    IdentityMappingPage:
+      type: object
+      required:
+        - mappings
+        - nextCursor
+      properties:
+        mappings:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdentityMapping'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    UpsertIdentityMappingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - externalSubjectType
+        - externalId
+        - localSubjectId
+      properties:
+        externalSubjectType:
+          type: string
+          enum:
+            - user
+            - team
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        localSubjectId:
+          type: string
+          minLength: 1
+          maxLength: 256
+    IdentityMappingResult:
+      type: object
+      required:
+        - sourceId
+        - externalId
+        - localSubjectId
+      properties:
+        sourceId:
+          type: string
+        externalId:
+          type: string
+        localSubjectId:
+          type: string
+    DataScopeRuleKind:
+      type: string
+      enum:
+        - management_scope
+        - exception_grant
+        - explicit_deny
+    DataScopeResourceKind:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z][a-z0-9_-]*$
+      description: The protocol-defined team kind, or a deployment-defined lowercase identifier. The protocol does not enumerate deployment kinds and treats them as opaque references.
+    DataScopeRule:
+      type: object
+      required:
+        - id
+        - ruleKind
+        - subjectType
+        - subjectId
+        - resourceKind
+        - resourceId
+        - reason
+      properties:
+        id:
+          type: string
+        ruleKind:
+          $ref: '#/components/schemas/DataScopeRuleKind'
+        subjectType:
+          type: string
+          enum:
+            - user
+            - role
+            - team
+        subjectId:
+          type: string
+        resourceKind:
+          $ref: '#/components/schemas/DataScopeResourceKind'
+        resourceId:
+          type: string
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        reason:
+          type: string
+    DataScopeRulePage:
+      type: object
+      required:
+        - rules
+        - nextCursor
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataScopeRule'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    CreateDataScopeRuleRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - ruleKind
+        - subjectType
+        - subjectId
+        - resourceKind
+        - resourceId
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9._-]+$
+        ruleKind:
+          $ref: '#/components/schemas/DataScopeRuleKind'
+        subjectType:
+          type: string
+          enum:
+            - user
+            - role
+            - team
+        subjectId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        resourceKind:
+          $ref: '#/components/schemas/DataScopeResourceKind'
+        resourceId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        startsAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Temporary grant that stops authorizing at this time.
+        reason:
+          type:
+            - string
+            - 'null'
+          maxLength: 1024
+    DataScopeResourceRef:
+      type: object
+      required:
+        - kind
+        - id
+      properties:
+        kind:
+          $ref: '#/components/schemas/DataScopeResourceKind'
+        id:
+          type: string
+    RetrievalContext:
+      type: object
+      required:
+        - principalId
+        - deploymentId
+        - orgScope
+        - roleScope
+      properties:
+        principalId:
+          type: string
+        deploymentId:
+          type: string
+        orgScope:
+          type: array
+          items:
+            type: string
+          description: Team subtree identifiers the principal may retrieve.
+        ownTeamIds:
+          type: array
+          items:
+            type: string
+        roleScope:
+          type: array
+          items:
+            type: string
+        allowedResources:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataScopeResourceRef'
+          description: Explicitly granted (kind, id) references.
+        deniedResources:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataScopeResourceRef'
+          description: Explicitly denied (kind, id) references. Deny wins over allow.
+        crossDepartmentReason:
+          type: string
+          description: Reason recorded when a rule extends scope beyond the principal's own team subtree.
     SkillVersion:
       type: object
       required:
@@ -3405,6 +4246,12 @@ components:
           $ref: '#/components/schemas/SkillIdentifier'
         subject:
           $ref: '#/components/schemas/Subject'
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Temporary grant that stops authorizing at this time.
     ControlEventScopeType:
       type: string
       enum:
@@ -3893,6 +4740,12 @@ components:
           type: string
         subject:
           $ref: '#/components/schemas/CredentialSubject'
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Temporary grant that stops authorizing at this time.
     AdminModel:
       allOf:
         - $ref: '#/components/schemas/UserModel'
@@ -4011,6 +4864,12 @@ components:
           type: string
         subject:
           $ref: '#/components/schemas/ModelSubject'
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Temporary grant that stops authorizing at this time.
   responses:
     Problem:
       description: AEP Problem Details
@@ -4177,6 +5036,39 @@ components:
         type: string
     TeamId:
       name: teamId
+      in: path
+      required: true
+      schema:
+        type: string
+    AgentId:
+      name: agentId
+      in: path
+      required: true
+      schema:
+        type: string
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    ExternalSubjectType:
+      name: subjectType
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - user
+          - team
+    ExternalId:
+      name: externalId
+      in: path
+      required: true
+      schema:
+        type: string
+    RuleId:
+      name: ruleId
       in: path
       required: true
       schema:

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -428,6 +429,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 			Type string `json:"type"`
 			ID   string `json:"id"`
 		} `json:"subject"`
+		ExpiresAt *time.Time `json:"expiresAt"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
@@ -449,6 +451,7 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 	id := uuid.NewString()
 	assignment, err := s.app.Store.Deployment(tenant).CreateModelAssignment(request.Context(), repository.ModelAssignment{
 		ID: id, ModelID: input.ModelID, SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
+		ExpiresAt: input.ExpiresAt,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {

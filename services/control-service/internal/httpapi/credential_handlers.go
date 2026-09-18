@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,7 @@ type credentialAssignmentInput struct {
 		Type string `json:"type"`
 		ID   string `json:"id"`
 	} `json:"subject"`
+	ExpiresAt *time.Time `json:"expiresAt"`
 }
 
 func scanCredential(row rowScanner) (credentialRecord, error) {
@@ -95,7 +97,8 @@ JOIN users u ON u.id=$2 AND u.deployment_id=$1
 WHERE c.deployment_id=$1 AND c.enabled=true AND c.delivery_mode='client'
 AND EXISTS (
   SELECT 1 FROM credential_assignments ca
-  WHERE ca.deployment_id=c.deployment_id AND ca.credential_id=c.id AND (
+  WHERE ca.deployment_id=c.deployment_id AND ca.credential_id=c.id
+    AND (ca.expires_at IS NULL OR ca.expires_at>now()) AND (
     (ca.subject_type='user' AND ca.subject_id=$2)
     OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
     OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
@@ -168,7 +171,8 @@ func (s *Server) resolveAgentCredential(response http.ResponseWriter, request *h
 		err = tx.QueryRow(request.Context(), `SELECT EXISTS (
 SELECT 1 FROM credential_assignments ca
 JOIN users u ON u.id=$2 AND u.deployment_id=$1
-WHERE ca.deployment_id=$1 AND ca.credential_id=$3 AND (
+WHERE ca.deployment_id=$1 AND ca.credential_id=$3
+  AND (ca.expires_at IS NULL OR ca.expires_at>now()) AND (
   (ca.subject_type='user' AND ca.subject_id=$2)
   OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
   OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
@@ -406,6 +410,16 @@ func isForeignKeyViolation(err error) bool {
 	return errors.As(err, &pgError) && pgError.Code == "23503"
 }
 
+// foreignKeyConstraint returns the constraint name of a foreign key
+// violation, or an empty string when the error is not one.
+func foreignKeyConstraint(err error) string {
+	var pgError *pgconn.PgError
+	if errors.As(err, &pgError) && pgError.Code == "23503" {
+		return pgError.ConstraintName
+	}
+	return ""
+}
+
 func (s *Server) listCredentialAssignments(response http.ResponseWriter, request *http.Request) {
 	if !s.requireCredentialService(response, request) {
 		return
@@ -450,6 +464,7 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 	id := uuid.NewString()
 	assignment, err := s.app.Store.Deployment(tenant).CreateCredentialAssignment(request.Context(), repository.CredentialAssignment{
 		ID: id, CredentialID: input.CredentialID, SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
+		ExpiresAt: input.ExpiresAt,
 	})
 	if isUniqueViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The credential assignment already exists.")

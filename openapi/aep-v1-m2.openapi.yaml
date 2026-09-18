@@ -22,6 +22,9 @@ tags:
   - {name: User Runtime}
   - {name: User Control Events}
   - {name: Admin Users}
+  - {name: Admin Agents}
+  - {name: Admin Identity}
+  - {name: Admin Data Scope}
   - {name: Admin Skills}
   - {name: Admin Control Events}
   - {name: Admin Models}
@@ -176,6 +179,22 @@ paths:
         '401': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
         '403': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
         '404': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/agents:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1agents'
+  /aep/v1/admin/agents/{agentId}/profile:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1agents~1{agentId}~1profile'
+  /aep/v1/admin/identity-sources:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1identity-sources'
+  /aep/v1/admin/identity-sources/{sourceId}/mappings:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1identity-sources~1{sourceId}~1mappings'
+  /aep/v1/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1identity-sources~1{sourceId}~1mappings~1{subjectType}~1{externalId}'
+  /aep/v1/admin/data-scope-rules:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1data-scope-rules'
+  /aep/v1/admin/data-scope-rules/{ruleId}:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1data-scope-rules~1{ruleId}'
+  /aep/v1/admin/data-scope/context:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1data-scope~1context'
   /aep/v1/admin/skills:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills'
   /aep/v1/admin/skills/{skillId}:
