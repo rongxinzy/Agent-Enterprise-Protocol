@@ -81,6 +81,9 @@ async function runScenario() {
   const listedUser = users.items.find(item => item.id === user.id);
   assert(listedUser?.roleIds?.includes(roleId), 'User list omitted the assigned Role');
   assert(listedUser?.teamIds?.includes(teamId), 'User list omitted the assigned Team');
+  assert(listedUser?.kind === 'human', 'Platform user list did not label the account kind');
+  const identity = await admin.getCurrentIdentity();
+  assert(identity?.user?.kind === 'human', 'Current identity did not label the account kind');
   const roles = await adminGet('/aep/v1/admin/roles', adminStore);
   const listedRole = roles.roles.find(item => item.id === roleId);
   assert(listedRole?.permissions?.includes('credentials.read') && listedRole.permissions.includes('licenses.read'), 'Role list omitted the assigned permissions');
@@ -420,7 +423,7 @@ async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
   }), 400, 'INVALID_AGENT');
   const directory = await admin.listAgents();
   const listedAgent = directory.agents.find(item => item.id === agent.id);
-  assert(listedAgent?.online === false && listedAgent?.homeTeamId === childTeamId, 'Agent directory omitted the created digital employee');
+  assert(listedAgent?.kind === 'agent' && listedAgent?.online === false && listedAgent?.homeTeamId === childTeamId, 'Agent directory omitted the created digital employee');
   const profile = await admin.updateAgentProfile(agent.id, {displayTitle: 'Senior Assistant'});
   assert(profile?.displayTitle === 'Senior Assistant', 'Agent profile update was not persisted');
 

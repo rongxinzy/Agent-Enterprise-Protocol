@@ -323,7 +323,7 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": user.Email},
+		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": user.Email, "kind": user.Kind},
 		"deployment":             map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 		"deploymentId":           s.app.DeploymentID(),
 		"sessionId":              claims.SessionID,

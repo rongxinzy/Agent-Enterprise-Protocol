@@ -488,7 +488,7 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
-Every user must have at least one role and one team when created or imported.
+Every user must have at least one role and one team when created or imported. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way.
 
 ### RBAC and sessions
 

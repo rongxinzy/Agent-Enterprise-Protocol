@@ -1336,6 +1336,11 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
+            /**
+             * @description Account category of the authenticated principal.
+             * @enum {string}
+             */
+            kind: "human" | "agent";
         };
         CurrentIdentity: {
             user: components["schemas"]["User"];
@@ -1622,6 +1627,11 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
+            /**
+             * @description Account category. Digital employees are users with kind=agent; the platform user listing returns human accounts only.
+             * @enum {string}
+             */
+            kind: "human" | "agent";
             /** @enum {string} */
             status: "active" | "disabled";
             teamIds?: string[];
@@ -1760,6 +1770,11 @@ export interface components {
             id: string;
             username: string;
             displayName: string;
+            /**
+             * @description Always agent; the directory lists digital employees only.
+             * @enum {string}
+             */
+            kind: "agent";
             /** @enum {string} */
             status: "active" | "disabled";
             online: boolean;

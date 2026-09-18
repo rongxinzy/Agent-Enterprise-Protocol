@@ -135,7 +135,7 @@ func (s *Server) listAgents(response http.ResponseWriter, request *http.Request)
 	for _, entry := range entries {
 		item := map[string]any{
 			"id": entry.User.ID, "username": entry.User.Username,
-			"displayName": entry.User.DisplayName, "status": entry.User.Status,
+			"displayName": entry.User.DisplayName, "kind": entry.User.Kind, "status": entry.User.Status,
 			"online": entry.Online,
 		}
 		if entry.LastHeartbeatAt != nil {

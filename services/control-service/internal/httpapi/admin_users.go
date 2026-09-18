@@ -245,7 +245,7 @@ func publicUser(record repository.UserRecord) map[string]any {
 	user := record.User
 	return map[string]any{
 		"id": user.ID, "deploymentId": user.DeploymentID, "username": user.Username,
-		"displayName": user.DisplayName, "email": user.Email, "status": user.Status,
+		"displayName": user.DisplayName, "email": user.Email, "kind": user.Kind, "status": user.Status,
 		"teamIds": record.TeamIDs, "roleIds": record.RoleIDs,
 		"createdAt": user.CreatedAt, "updatedAt": user.UpdatedAt,
 	}

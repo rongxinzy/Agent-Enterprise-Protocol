@@ -120,7 +120,7 @@ func TestListAgentsPaginatesByCursor(t *testing.T) {
 	response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/agents?limit=2", "")
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `"nextCursor":"agent-b"`) ||
-		!strings.Contains(body, `"online":true`) || !strings.Contains(body, `"lastHeartbeatAt"`) {
+		!strings.Contains(body, `"kind":"agent"`) || !strings.Contains(body, `"online":true`) || !strings.Contains(body, `"lastHeartbeatAt"`) {
 		t.Fatalf("agent list = %d %s", response.Code, body)
 	}
 }

@@ -48,7 +48,7 @@ func TestAdminUserListAndCreate(t *testing.T) {
 		WithArgs("deployment-a", "user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id", "team_id", "is_primary", "created_at"}).AddRow("deployment-a", "user-a", "engineering", true, now))
 	listed := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/users?cursor=user-0&limit=1", "")
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"nextCursor":"user-a"`) || !strings.Contains(listed.Body.String(), `"roleIds":["member"]`) || strings.Contains(listed.Body.String(), "secret-hash") {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"nextCursor":"user-a"`) || !strings.Contains(listed.Body.String(), `"kind":"human"`) || !strings.Contains(listed.Body.String(), `"roleIds":["member"]`) || strings.Contains(listed.Body.String(), "secret-hash") {
 		t.Fatalf("user list = %d %s", listed.Code, listed.Body.String())
 	}
 

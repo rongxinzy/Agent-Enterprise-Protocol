@@ -955,13 +955,14 @@ components:
         requirePasswordChange: {type: boolean, default: true}
     PlatformUser:
       type: object
-      required: [id, deploymentId, username, displayName, status, createdAt, updatedAt]
+      required: [id, deploymentId, username, displayName, kind, status, createdAt, updatedAt]
       properties:
         id: {type: string}
         deploymentId: {type: string}
         username: {type: string}
         displayName: {type: string}
         email: {type: [string, 'null'], format: email}
+        kind: {type: string, enum: [human, agent], description: Account category. Digital employees are users with kind=agent; the platform user listing returns human accounts only.}
         status: {type: string, enum: [active, disabled]}
         teamIds: {type: array, items: {type: string}}
         roleIds: {type: array, items: {type: string}}
@@ -1107,11 +1108,12 @@ components:
         displayTitle: {type: string}
     AgentDirectoryEntry:
       type: object
-      required: [id, username, displayName, status, online]
+      required: [id, username, displayName, kind, status, online]
       properties:
         id: {type: string}
         username: {type: string}
         displayName: {type: string}
+        kind: {type: string, enum: [agent], description: Always agent; the directory lists digital employees only.}
         status: {type: string, enum: [active, disabled]}
         online: {type: boolean}
         lastHeartbeatAt: {type: [string, 'null'], format: date-time}

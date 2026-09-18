@@ -464,7 +464,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。
 
 ### RBAC 与会话
 

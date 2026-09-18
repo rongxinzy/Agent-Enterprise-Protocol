@@ -687,11 +687,12 @@ components:
         passwordChangeRequired: {type: boolean}
     User:
       type: object
-      required: [id, displayName]
+      required: [id, displayName, kind]
       properties:
         id: {type: string}
         displayName: {type: string}
         email: {type: [string, 'null'], format: email}
+        kind: {type: string, enum: [human, agent], description: Account category of the authenticated principal.}
     Deployment:
       type: object
       required: [id, name]

@@ -2443,6 +2443,7 @@ components:
       required:
         - id
         - displayName
+        - kind
       properties:
         id:
           type: string
@@ -2453,6 +2454,12 @@ components:
             - string
             - 'null'
           format: email
+        kind:
+          type: string
+          enum:
+            - human
+            - agent
+          description: Account category of the authenticated principal.
     CurrentIdentity:
       type: object
       required:
@@ -3146,6 +3153,7 @@ components:
         - deploymentId
         - username
         - displayName
+        - kind
         - status
         - createdAt
         - updatedAt
@@ -3163,6 +3171,12 @@ components:
             - string
             - 'null'
           format: email
+        kind:
+          type: string
+          enum:
+            - human
+            - agent
+          description: Account category. Digital employees are users with kind=agent; the platform user listing returns human accounts only.
         status:
           type: string
           enum:
@@ -3605,6 +3619,7 @@ components:
         - id
         - username
         - displayName
+        - kind
         - status
         - online
       properties:
@@ -3614,6 +3629,11 @@ components:
           type: string
         displayName:
           type: string
+        kind:
+          type: string
+          enum:
+            - agent
+          description: Always agent; the directory lists digital employees only.
         status:
           type: string
           enum:
