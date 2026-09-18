@@ -165,8 +165,8 @@ func TestRefreshAndLogoutHTTPLifecycle(t *testing.T) {
 
 	pool.ExpectBeginTx(pgx.TxOptions{})
 	pool.ExpectQuery(`SELECT t.session_id,s.user_id`).WithArgs(auth.HashRefreshToken(rawRefresh)).WillReturnRows(
-		pgxmock.NewRows([]string{"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin"}).
-			AddRow("session-user", "user-a", "deployment-a", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", false, false),
+		pgxmock.NewRows([]string{"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin", "kind"}).
+			AddRow("session-user", "user-a", "deployment-a", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", false, false, "human"),
 	)
 	expectHTTPModelScopes(pool, "deployment-a", "user-a", "chat-a")
 	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member")

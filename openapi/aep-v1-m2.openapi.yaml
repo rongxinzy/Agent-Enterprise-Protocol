@@ -181,6 +181,8 @@ paths:
         '404': {$ref: './aep-v1-authentication.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/agents:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1agents'
+  /aep/v1/admin/agents/{agentId}:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1agents~1{agentId}'
   /aep/v1/admin/agents/{agentId}/profile:
     $ref: './aep-v1-authentication.openapi.yaml#/paths/~1admin~1agents~1{agentId}~1profile'
   /aep/v1/admin/identity-sources:

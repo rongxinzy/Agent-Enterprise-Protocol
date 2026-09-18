@@ -458,9 +458,13 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
   avatar_object_key text,
   home_team_id text NOT NULL,
   prompt_skill_id text,
+  ephemeral boolean NOT NULL DEFAULT false,
+  expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (deployment_id, user_id),
+  CONSTRAINT agent_profiles_ephemeral_expiry_ck
+    CHECK ((ephemeral AND expires_at IS NOT NULL) OR (NOT ephemeral AND expires_at IS NULL)),
   CONSTRAINT agent_profiles_home_team_fk
     FOREIGN KEY (deployment_id, home_team_id)
     REFERENCES teams (deployment_id, id) ON DELETE RESTRICT,

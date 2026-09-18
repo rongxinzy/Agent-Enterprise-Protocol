@@ -3,23 +3,27 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // AgentProfile carries digital-employee presentation metadata for a user with
 // kind='agent'. Presence is never stored here; it derives from user_sessions.
 type AgentProfile struct {
-	DeploymentID    string    `gorm:"column:deployment_id;primaryKey"`
-	UserID          string    `gorm:"column:user_id;primaryKey"`
-	DisplayTitle    string    `gorm:"column:display_title;not null"`
-	Description     string    `gorm:"column:description;not null"`
-	AvatarObjectKey *string   `gorm:"column:avatar_object_key"`
-	HomeTeamID      string    `gorm:"column:home_team_id;not null"`
-	PromptSkillID   *string   `gorm:"column:prompt_skill_id"`
-	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	DeploymentID    string     `gorm:"column:deployment_id;primaryKey"`
+	UserID          string     `gorm:"column:user_id;primaryKey"`
+	DisplayTitle    string     `gorm:"column:display_title;not null"`
+	Description     string     `gorm:"column:description;not null"`
+	AvatarObjectKey *string    `gorm:"column:avatar_object_key"`
+	HomeTeamID      string     `gorm:"column:home_team_id;not null"`
+	PromptSkillID   *string    `gorm:"column:prompt_skill_id"`
+	Ephemeral       bool       `gorm:"column:ephemeral;not null"`
+	ExpiresAt       *time.Time `gorm:"column:expires_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (AgentProfile) TableName() string { return "agent_profiles" }
@@ -93,11 +97,11 @@ func (s *DeploymentStore) GetAgentProfile(ctx context.Context, userID string) (A
 // ListAgentDirectory joins service accounts (kind='agent') with their profile
 // and the freshest active-session heartbeat for presence projection. Pages by
 // user id after the optional cursor.
-func (s *DeploymentStore) ListAgentDirectory(ctx context.Context, cursor string, fetchLimit int32) ([]AgentDirectoryEntry, error) {
+func (s *DeploymentStore) ListAgentDirectory(ctx context.Context, cursor string, fetchLimit int32, includeEphemeral bool) ([]AgentDirectoryEntry, error) {
 	rows, err := s.db.WithContext(ctx).Raw(`
 SELECT u.id, u.username, u.display_name, u.status, u.kind,
        p.display_title, p.description, p.avatar_object_key, p.home_team_id, p.prompt_skill_id,
-       p.created_at, p.updated_at,
+       p.ephemeral, p.expires_at, p.created_at, p.updated_at,
        presence.last_seen_at
 FROM users u
 LEFT JOIN agent_profiles p ON p.deployment_id = u.deployment_id AND p.user_id = u.id
@@ -106,9 +110,11 @@ LEFT JOIN LATERAL (
   FROM user_sessions s2
   WHERE s2.deployment_id = u.deployment_id AND s2.user_id = u.id AND s2.revoked_at IS NULL
 ) presence ON true
-WHERE u.deployment_id = ? AND u.kind = 'agent' AND (? = '' OR u.id > ?)
+WHERE u.deployment_id = ? AND u.kind = 'agent'
+  AND (? = '' OR u.id > ?)
+  AND (? OR COALESCE(p.ephemeral, false) = false)
 ORDER BY u.id
-LIMIT ?`, s.deploymentID, cursor, cursor, fetchLimit).Rows()
+LIMIT ?`, s.deploymentID, cursor, cursor, includeEphemeral, fetchLimit).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -119,10 +125,12 @@ LIMIT ?`, s.deploymentID, cursor, cursor, fetchLimit).Rows()
 		var displayName, profileTitle, profileDescription *string
 		var avatarObjectKey, promptSkillID, homeTeamID *string
 		var profileCreatedAt, profileUpdatedAt *time.Time
+		var ephemeral *bool
+		var expiresAt *time.Time
 		if err := rows.Scan(
 			&entry.User.ID, &entry.User.Username, &displayName, &entry.User.Status, &entry.User.Kind,
 			&profileTitle, &profileDescription, &avatarObjectKey, &homeTeamID, &promptSkillID,
-			&profileCreatedAt, &profileUpdatedAt,
+			&ephemeral, &expiresAt, &profileCreatedAt, &profileUpdatedAt,
 			&entry.LastHeartbeatAt,
 		); err != nil {
 			return nil, err
@@ -136,6 +144,7 @@ LIMIT ?`, s.deploymentID, cursor, cursor, fetchLimit).Rows()
 				DeploymentID: s.deploymentID, UserID: entry.User.ID,
 				DisplayTitle: deref(profileTitle), Description: deref(profileDescription),
 				AvatarObjectKey: avatarObjectKey, HomeTeamID: *homeTeamID, PromptSkillID: promptSkillID,
+				Ephemeral: derefBool(ephemeral), ExpiresAt: expiresAt,
 				CreatedAt: derefTime(profileCreatedAt), UpdatedAt: derefTime(profileUpdatedAt),
 			}
 		}
@@ -274,4 +283,52 @@ func (s *DeploymentStore) DeleteDataScopeRule(ctx context.Context, id string) er
 	return s.db.WithContext(ctx).
 		Where("deployment_id = ? AND id = ?", s.deploymentID, id).
 		Delete(&DataScopeRule{}).Error
+}
+
+func derefBool(v *bool) bool { return v != nil && *v }
+
+// GetUserByID loads one user of the deployment by id.
+func (s *DeploymentStore) GetUserByID(ctx context.Context, userID string) (User, error) {
+	var user User
+	err := s.db.WithContext(ctx).
+		Where("deployment_id = ? AND id = ?", s.deploymentID, userID).
+		Take(&user).Error
+	return user, err
+}
+
+// ErrAgentHasSessions blocks deleting a digital employee with live sessions.
+var ErrAgentHasSessions = errors.New("agent still has active sessions")
+
+// DeleteAgent removes a digital employee account and everything bound to it:
+// role/team bindings, subject assignments, data-scope rules, the profile, and
+// the user row (cascading sessions and tokens). Live, non-revoked sessions
+// refuse the deletion with ErrAgentHasSessions; revoke them first.
+func (s *DeploymentStore) DeleteAgent(ctx context.Context, userID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var activeSessions int64
+		if err := tx.Raw(`SELECT count(*) FROM user_sessions
+WHERE deployment_id = ? AND user_id = ? AND revoked_at IS NULL`, s.deploymentID, userID).
+			Scan(&activeSessions).Error; err != nil {
+			return err
+		}
+		if activeSessions > 0 {
+			return ErrAgentHasSessions
+		}
+		stmts := []string{
+			`DELETE FROM user_role_bindings WHERE deployment_id = ? AND user_id = ?`,
+			`DELETE FROM user_team_bindings WHERE deployment_id = ? AND user_id = ?`,
+			`DELETE FROM model_assignments WHERE deployment_id = ? AND subject_type = 'user' AND subject_id = ?`,
+			`DELETE FROM skill_assignments WHERE deployment_id = ? AND subject_type = 'user' AND subject_id = ?`,
+			`DELETE FROM credential_assignments WHERE deployment_id = ? AND subject_type = 'user' AND subject_id = ?`,
+			`DELETE FROM data_scope_rules WHERE deployment_id = ? AND subject_type = 'user' AND subject_id = ?`,
+			`DELETE FROM agent_profiles WHERE deployment_id = ? AND user_id = ?`,
+			`DELETE FROM users WHERE deployment_id = ? AND id = ?`,
+		}
+		for _, stmt := range stmts {
+			if err := tx.Exec(stmt, s.deploymentID, userID).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

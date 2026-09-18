@@ -144,6 +144,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Delete("/aep/v1/admin/credential-assignments/{assignmentId}", server.deleteCredentialAssignment)
 			admin.Get("/aep/v1/admin/agents", server.listAgents)
 			admin.Post("/aep/v1/admin/agents", server.createAgent)
+			admin.Delete("/aep/v1/admin/agents/{agentId}", server.deleteAgent)
 			admin.Put("/aep/v1/admin/agents/{agentId}/profile", server.updateAgentProfile)
 			admin.Get("/aep/v1/admin/identity-sources", server.listIdentitySources)
 			admin.Post("/aep/v1/admin/identity-sources", server.createIdentitySource)

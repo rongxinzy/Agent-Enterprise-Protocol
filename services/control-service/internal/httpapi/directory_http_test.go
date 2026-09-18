@@ -110,17 +110,18 @@ func TestListAgentsPaginatesByCursor(t *testing.T) {
 	now := time.Now().UTC()
 	seen := time.Now().UTC().Add(-time.Minute)
 	mock.ExpectQuery(`SELECT u\.id, u\.username, u\.display_name, u\.status, u\.kind`).
-		WithArgs("deployment-a", "", "", 2).
+		WithArgs("deployment-a", "", "", false, 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "display_name", "status", "kind",
 			"display_title", "description", "avatar_object_key", "home_team_id", "prompt_skill_id",
-			"created_at", "updated_at", "last_seen_at"}).
-			AddRow("agent-a", "helper-1", "Helper", "active", "agent", "Assistant", "", nil, "eng", nil, now, now, &seen).
-			AddRow("agent-b", "helper-2", "Helper 2", "active", "agent", nil, nil, nil, nil, nil, now, now, nil))
+			"ephemeral", "expires_at", "created_at", "updated_at", "last_seen_at"}).
+			AddRow("agent-a", "helper-1", "Helper", "active", "agent", "Assistant", "", nil, "eng", nil, false, nil, now, now, &seen).
+			AddRow("agent-b", "helper-2", "Helper 2", "active", "agent", nil, nil, nil, "eng", nil, true, now.Add(time.Hour), now, now, nil))
 
 	response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/agents?limit=2", "")
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `"nextCursor":"agent-b"`) ||
-		!strings.Contains(body, `"kind":"agent"`) || !strings.Contains(body, `"online":true`) || !strings.Contains(body, `"lastHeartbeatAt"`) {
+		!strings.Contains(body, `"kind":"agent"`) || !strings.Contains(body, `"online":true`) || !strings.Contains(body, `"lastHeartbeatAt"`) ||
+		!strings.Contains(body, `"ephemeral":false`) || !strings.Contains(body, `"ephemeral":true`) {
 		t.Fatalf("agent list = %d %s", response.Code, body)
 	}
 }
@@ -188,4 +189,69 @@ func TestListDataScopeRulesPaginatesByCursor(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(body, `"nextCursor":"rule-b"`) || strings.Contains(body, "priority") {
 		t.Fatalf("rule list = %d %s", response.Code, body)
 	}
+}
+
+func TestCreateAgentEphemeralLifecycleValidation(t *testing.T) {
+	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
+	handler := New(application).Handler()
+	const path = "/aep/v1/admin/agents"
+	base := `"displayName":"Ephemeral Helper","password":"long-password-123","roleIds":["member"],"teamIds":[],"homeTeamId":"eng"`
+	now := time.Now().UTC()
+
+	// Pure payload coupling is validated before any database access.
+	missing := adminRequest(handler, adminToken, http.MethodPost, path,
+		`{"username":"ephemeral-1",`+base+`,"ephemeral":true}`)
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "INVALID_AGENT") {
+		t.Fatalf("ephemeral without expiry = %d %s", missing.Code, missing.Body.String())
+	}
+	resident := adminRequest(handler, adminToken, http.MethodPost, path,
+		`{"username":"ephemeral-2",`+base+`,"expiresAt":"2030-01-01T00:00:00Z"}`)
+	if resident.Code != http.StatusBadRequest || !strings.Contains(resident.Body.String(), "INVALID_AGENT") {
+		t.Fatalf("resident with expiry = %d %s", resident.Code, resident.Body.String())
+	}
+	past := adminRequest(handler, adminToken, http.MethodPost, path,
+		`{"username":"ephemeral-3",`+base+`,"ephemeral":true,"expiresAt":"2020-01-01T00:00:00Z"}`)
+	if past.Code != http.StatusBadRequest {
+		t.Fatalf("past expiry = %d %s", past.Code, past.Body.String())
+	}
+
+	// Unknown model: reference checks run before account creation.
+	expectTeamRecord(mock, "eng", "Engineering", "", true, 3, now)
+	expectRoleRecord(mock, "member", "Member", "", true, nil, now)
+	mock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "missing-model", 1).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	unknownModel := adminRequest(handler, adminToken, http.MethodPost, path,
+		`{"username":"ephemeral-5",`+base+`,"ephemeral":true,"expiresAt":"2030-01-01T00:00:00Z","modelIds":["missing-model"]}`)
+	if unknownModel.Code != http.StatusBadRequest || !strings.Contains(unknownModel.Body.String(), "UNKNOWN_MODEL") {
+		t.Fatalf("unknown model = %d %s", unknownModel.Code, unknownModel.Body.String())
+	}
+}
+
+func TestDeleteAgentGuards(t *testing.T) {
+	application, mock, pool, adminToken, _ := newDirectoryHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	// Missing profile → 404.
+	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).WithArgs("deployment-a", "ghost", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id"}))
+	missing := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/agents/ghost", "")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing agent delete = %d %s", missing.Code, missing.Body.String())
+	}
+
+	// Existing profile with live sessions → 409 AGENT_HAS_SESSIONS.
+	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).WithArgs("deployment-a", "agent-a", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id", "display_title", "description",
+			"avatar_object_key", "home_team_id", "prompt_skill_id", "ephemeral", "expires_at", "created_at", "updated_at"}).
+			AddRow("deployment-a", "agent-a", "Assistant", "", nil, "eng", nil, true, now.Add(time.Hour), now, now))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT count\(\*\) FROM user_sessions`).WithArgs("deployment-a", "agent-a").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectRollback()
+	blocked := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/agents/agent-a", "")
+	if blocked.Code != http.StatusConflict || !strings.Contains(blocked.Body.String(), "AGENT_HAS_SESSIONS") {
+		t.Fatalf("session-blocked delete = %d %s", blocked.Code, blocked.Body.String())
+	}
+	_ = pool
 }

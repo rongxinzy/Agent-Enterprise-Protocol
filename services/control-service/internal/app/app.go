@@ -402,10 +402,33 @@ func (a *App) UserRoleIDs(ctx context.Context, deploymentID, userID string) ([]s
 
 // IssueUserSession creates a refreshable terminal session that is scoped to a
 // user topic. It does not create or touch a legacy Agent record.
+// ErrAgentExpired rejects sessions for expired ephemeral digital employees.
+var ErrAgentExpired = errors.New("the ephemeral digital employee has expired")
+
+// agentExpired reports whether the account is an ephemeral digital employee
+// whose hard expiry has passed. Accounts without a profile are never
+// ephemeral; lookup failures fail open for non-agent accounts only.
+func (a *App) agentExpired(ctx context.Context, user repository.User) bool {
+	if user.Kind != "agent" {
+		return false
+	}
+	profile, err := a.Store.Deployment(user.DeploymentID).GetAgentProfile(ctx, user.ID)
+	if err != nil {
+		return false
+	}
+	if !profile.Ephemeral || profile.ExpiresAt == nil {
+		return false
+	}
+	return !time.Now().UTC().Before(*profile.ExpiresAt)
+}
+
 func (a *App) IssueUserSession(ctx context.Context, user repository.User) (TokenResponse, error) {
 	database := a.database()
 	if database == nil {
 		return TokenResponse{}, errors.New("database is unavailable")
+	}
+	if a.agentExpired(ctx, user) {
+		return TokenResponse{}, ErrAgentExpired
 	}
 	sessionID := uuid.NewString()
 	topic := fmt.Sprintf("user:%s:%s", a.DeploymentID(), user.ID)
@@ -478,13 +501,13 @@ func (a *App) RefreshUserSession(ctx context.Context, rawToken, requestedSession
 	var expires time.Time
 	var revokedAt, sessionRevokedAt *time.Time
 	var user repository.User
-	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.deployment_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at,u.status,u.require_password_change,u.is_admin
+	err = tx.QueryRow(ctx, `SELECT t.session_id,s.user_id,u.deployment_id,s.deployment_id,t.expires_at,t.revoked_at,s.revoked_at,u.status,u.require_password_change,u.is_admin,u.kind
 FROM user_session_tokens t
 JOIN user_sessions s ON s.session_id=t.session_id
 JOIN users u ON u.id=s.user_id
 	WHERE t.token_hash=$1 FOR UPDATE`, hash).Scan(
 		&sessionID, &userID, &userDeploymentID, &deploymentID, &expires, &revokedAt, &sessionRevokedAt,
-		&user.Status, &user.RequirePasswordChange, &user.IsAdmin,
+		&user.Status, &user.RequirePasswordChange, &user.IsAdmin, &user.Kind,
 	)
 	if err != nil || revokedAt != nil || sessionRevokedAt != nil || time.Now().After(expires) || (requestedSessionID != "" && requestedSessionID != sessionID) {
 		return TokenResponse{}, ErrRefreshTokenInvalid
@@ -493,6 +516,9 @@ JOIN users u ON u.id=s.user_id
 	user.DeploymentID = userDeploymentID
 	if user.Status != "active" {
 		return TokenResponse{}, ErrRefreshTokenInvalid
+	}
+	if a.agentExpired(ctx, user) {
+		return TokenResponse{}, ErrAgentExpired
 	}
 	modelScopes, err := a.ModelScopes(ctx, userDeploymentID, user.ID)
 	if err != nil {

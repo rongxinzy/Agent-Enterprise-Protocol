@@ -496,12 +496,16 @@ export class AepClient {
     return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/users/${segment(userId)}/rbac`, body: asJson(input)});
   }
 
-  listAgents(filters: {cursor?: string; limit?: number} = {}): Promise<AgentDirectoryPage> {
+  listAgents(filters: {cursor?: string; limit?: number; includeEphemeral?: boolean} = {}): Promise<AgentDirectoryPage> {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/agents?${query(filters)}`});
   }
 
   createAgent(input: CreateAgentRequest): Promise<AgentResponse> {
     return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/agents', body: asJson(input)});
+  }
+
+  deleteAgent(agentId: string): Promise<void> {
+    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/agents/${segment(agentId)}`, responseType: 'empty'});
   }
 
   updateAgentProfile(agentId: string, input: UpdateAgentProfileRequest): Promise<UpdateAgentProfileResponse> {

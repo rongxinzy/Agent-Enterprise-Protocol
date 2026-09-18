@@ -489,6 +489,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET, POST | `/admin/agents` | 查询或创建数字员工账号 |
+| DELETE | `/admin/agents/{agentId}` | 删除数字员工账号 |
 | PUT | `/admin/agents/{agentId}/profile` | 更新单个数字员工的档案 |
 
 读取需要 `users.read` 权限，写入需要 `users.write` 权限，完整管理员始终满足。数字员工是
@@ -501,6 +502,13 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 档案更新接受 `displayTitle`、`description`、`homeTeamId` 和 `promptSkillId`；每个字段都可
 传 null 清除已存储的值。
 
+临时会话级实例：`ephemeral: true` 必须携带未来的 `expiresAt`；过期后登录与刷新以
+`AGENT_EXPIRED`（403）拒绝。`scopeFromUserId` 把所指用户当前的数据范围快照冻结到该账号
+（可见团队子树生成 management_scope 规则，显式拒绝原样复制），且请求的团队必须已落在该
+范围之内。`modelIds` 随账号一并创建模型授权。目录默认隐藏临时实例，传
+`includeEphemeral=true` 才会列出。`DELETE /admin/agents/{agentId}` 连同绑定、授权与规则
+一并删除账号；存在未撤销会话时以 `AGENT_HAS_SESSIONS`（409）拒绝，需先撤销会话。
+
 错误码：
 
 | 错误码 | 状态 | 含义 |
@@ -510,6 +518,10 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | `INVALID_ROLE`、`INVALID_TEAM` | 400 | 角色或团队绑定无效 |
 | `ROLE_GRANT_FORBIDDEN`、`TEAM_GRANT_FORBIDDEN` | 403 | 调用方无权授予请求的角色或团队 |
 | `AGENT_EXISTS` | 409 | 用户名已存在 |
+| `INVALID_SCOPE_SOURCE` | 400 | 范围来源用户不存在，或请求的团队超出来源用户的可见范围 |
+| `UNKNOWN_MODEL` | 400 | 请求的模型授权引用了不存在的模型 |
+| `AGENT_HAS_SESSIONS` | 409 | 存在活跃会话阻止删除，请先撤销会话 |
+| `AGENT_EXPIRED` | 403 | 临时账号已过期 |
 
 ### 身份源
 

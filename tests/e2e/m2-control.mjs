@@ -96,6 +96,7 @@ async function runScenario() {
   assert(allUsersTeam?.name === 'All users' && allUsersTeam.builtIn === true, 'Built-in All users Team label was not normalized');
   await assertDelegatedRoleBoundaries(admin, runId);
   await assertDigitalEmployeeFoundations(admin, adminStore, runId);
+  await assertEphemeralDigitalEmployees(admin, adminStore, runId, user, teamId, roleId);
   await assertBuiltinRbacLabelsSurviveUpgrade(adminStore);
   const userStore = new MemoryTokenStore();
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
@@ -478,6 +479,53 @@ async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
   assert(homeTeamDelete.status === 409 && homeTeamDelete.body?.code === 'TEAM_HAS_AGENTS', 'Home team delete was not rejected with TEAM_HAS_AGENTS');
   const parentDelete = await adminDelete('/aep/v1/admin/teams/' + parentTeamId, adminStore);
   assert(parentDelete.status === 409 && parentDelete.body?.code === 'TEAM_HAS_CHILDREN', 'Parent team delete was not rejected with TEAM_HAS_CHILDREN');
+}
+
+// Ephemeral conversation-scoped digital employees: frozen scope snapshots,
+// directory hygiene, hard expiry, and lifecycle close-out.
+async function assertEphemeralDigitalEmployees(admin, adminStore, suffix, user, userTeamId, roleId) {
+  const outsideTeamId = 'm2-eph-outside-' + suffix;
+  await adminRequest('/aep/v1/admin/teams', {id: outsideTeamId, name: 'M2 Ephemeral Outside Team'}, adminStore);
+
+  // The confinement guard: a home team outside the scope source's visible
+  // teams must be rejected before anything is created.
+  await expectProblem(admin.createAgent({
+    username: 'm2-eph-escape-' + suffix, displayName: 'Escape attempt', password: 'agent-password-123',
+    roleIds: [roleId], teamIds: [], homeTeamId: outsideTeamId,
+    ephemeral: true, expiresAt: '2030-01-01T00:00:00Z', scopeFromUserId: user.id,
+  }), 400, 'INVALID_SCOPE_SOURCE');
+
+  // A legitimate ephemeral fork of the department persona for this employee.
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const ephemeral = await admin.createAgent({
+    username: 'm2-eph-' + suffix, displayName: 'M2 Ephemeral Fork ' + suffix,
+    password: 'agent-password-123', roleIds: [roleId], teamIds: [], homeTeamId: userTeamId,
+    ephemeral: true, expiresAt, scopeFromUserId: user.id,
+  });
+  assert(ephemeral?.ephemeral === true && ephemeral?.expiresAt === expiresAt, 'Ephemeral creation did not echo the lifecycle');
+
+  // The directory hides ephemeral instances by default and lists them on demand.
+  const hidden = await admin.listAgents();
+  assert(!hidden.agents.some(item => item.id === ephemeral.id), 'Directory leaked an ephemeral instance by default');
+  const shown = await admin.listAgents({includeEphemeral: true});
+  const entry = shown.agents.find(item => item.id === ephemeral.id);
+  assert(entry?.ephemeral === true && entry?.expiresAt === expiresAt, 'includeEphemeral did not list the instance with its lifecycle');
+
+  // The frozen snapshot mirrors the source user's visible subtree.
+  const context = await admin.getDataScopeContext(ephemeral.id);
+  assert(context.orgScope.includes(userTeamId), 'Frozen snapshot lost the source user team');
+
+  // Hard expiry: once the moment passes, login and refresh are refused.
+  await postgres(`UPDATE agent_profiles SET expires_at=now() - interval '1 minute' WHERE user_id='${ephemeral.id}'`);
+  const expiredClient = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  await expectProblem(expiredClient.loginWithPassword({
+    deploymentId: 'demo', username: 'm2-eph-' + suffix, password: 'agent-password-123',
+  }), 403, 'AGENT_EXPIRED');
+
+  // Lifecycle close-out: deletion removes the account and its snapshot rules.
+  await admin.deleteAgent(ephemeral.id);
+  const afterDelete = await admin.listAgents({includeEphemeral: true});
+  assert(!afterDelete.agents.some(item => item.id === ephemeral.id), 'Deleted ephemeral instance still listed');
 }
 
 async function expectProblem(promise, status, code) {
