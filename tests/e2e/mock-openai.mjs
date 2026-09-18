@@ -92,9 +92,11 @@ const server = http.createServer(async (request, response) => {
       }
       return;
     }
+    const teamMatch = lastUserText.match(/AEP_DEPT_REPORT_TEAM:([a-zA-Z0-9_-]+)/);
+    const teamArg = teamMatch ? `,"team":"${teamMatch[1]}"` : '';
     const toolCall = {
       index: 0, id: 'call-dept-data-1', type: 'function',
-      function: {name: 'dept_data', arguments: '{"dataset":"monthly_sales"}'},
+      function: {name: 'dept_data', arguments: `{"dataset":"monthly_sales"${teamArg}}`},
     };
     if (body.stream === true) {
       streamNamedToolCall(response, toolCall, 'Fetch the department dataset.');
