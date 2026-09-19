@@ -330,12 +330,18 @@ func (s *Server) currentIdentity(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
+	permissions, err := s.app.Store.Deployment(deploymentID).UserPermissionIDs(request.Context(), user.ID)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"user":                   map[string]any{"id": user.ID, "displayName": user.DisplayName, "email": user.Email, "kind": user.Kind},
 		"deployment":             map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 		"deploymentId":           s.app.DeploymentID(),
 		"sessionId":              claims.SessionID,
 		"roles":                  roles,
+		"permissions":            permissions,
 		"sessionExpiresAt":       claims.ExpiresAt.Time,
 		"passwordChangeRequired": claims.PasswordChangeRequired,
 	})
