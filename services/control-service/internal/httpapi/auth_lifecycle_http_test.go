@@ -233,8 +233,9 @@ func TestChangePasswordAndCurrentIdentity(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
 		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
 	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member", "operator")
+	expectHTTPUserPermissions(mock, "deployment-a", "user-a", "models.read", "users.read")
 	identity := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/me", "")
-	if identity.Code != http.StatusOK || !strings.Contains(identity.Body.String(), `"sessionId":"session-user"`) || !strings.Contains(identity.Body.String(), `"roles":["member","operator"]`) || strings.Contains(identity.Body.String(), passwordHash) {
+	if identity.Code != http.StatusOK || !strings.Contains(identity.Body.String(), `"sessionId":"session-user"`) || !strings.Contains(identity.Body.String(), `"roles":["member","operator"]`) || !strings.Contains(identity.Body.String(), `"permissions":["models.read","users.read"]`) || strings.Contains(identity.Body.String(), passwordHash) {
 		t.Fatalf("current identity = %d %s", identity.Code, identity.Body.String())
 	}
 }
@@ -273,4 +274,13 @@ func TestMockFederatedStartAndExchange(t *testing.T) {
 	if reused.Code != http.StatusUnauthorized || !strings.Contains(reused.Body.String(), `"code":"AUTHORIZATION_CODE_INVALID"`) {
 		t.Fatalf("reused federated transaction = %d %s", reused.Code, reused.Body.String())
 	}
+}
+
+func expectHTTPUserPermissions(mock sqlmock.Sqlmock, deploymentID, userID string, permissions ...string) {
+	rows := sqlmock.NewRows([]string{"permission_id"})
+	for _, permission := range permissions {
+		rows.AddRow(permission)
+	}
+	mock.ExpectQuery(`SELECT DISTINCT rp\.permission_id FROM role_permissions AS rp`).
+		WithArgs(deploymentID, userID).WillReturnRows(rows)
 }

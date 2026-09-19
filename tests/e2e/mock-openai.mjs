@@ -141,6 +141,46 @@ const server = http.createServer(async (request, response) => {
     }
     return;
   }
+  if (lastUserText.includes('A2A_INVOKE')) {
+    // Scripted agent-to-agent delegation: the model calls invoke_agent with
+    // the peer and message extracted from the prompt, then relays the peer's
+    // (act-as scoped) answer as the final reply.
+    const toolResult = body.messages?.find(
+      message => message.role === 'tool' && message.tool_call_id === 'call-a2a-1',
+    );
+    if (toolResult) {
+      const report = `A2A_OK ${String(toolResult.content)}`;
+      if (body.stream === true) {
+        streamCompletion(response, report, 'Peer answered.');
+      } else {
+        response.setHeader('X-Mock-Provider-Auth', 'accepted');
+        sendJSON(response, 200, {
+          id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+          choices: [{index: 0, message: {role: 'assistant', content: report, reasoning_content: 'Peer answered.'}, finish_reason: 'stop'}],
+          usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+        });
+      }
+      return;
+    }
+    const peerMatch = lastUserText.match(/A2A_PEER:([a-zA-Z0-9_-]+)/);
+    const msgMatch = lastUserText.match(/A2A_MSG:([\s\S]*?)A2A_END/);
+    const args = {peer: peerMatch ? peerMatch[1] : 'agentB', message: (msgMatch ? msgMatch[1] : 'AEP_DEPT_REPORT').trim()};
+    const toolCall = {
+      index: 0, id: 'call-a2a-1', type: 'function',
+      function: {name: 'invoke_agent', arguments: JSON.stringify(args)},
+    };
+    if (body.stream === true) {
+      streamNamedToolCall(response, toolCall, 'Delegate to the peer agent.');
+    } else {
+      response.setHeader('X-Mock-Provider-Auth', 'accepted');
+      sendJSON(response, 200, {
+        id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+        choices: [{index: 0, message: {role: 'assistant', content: '', tool_calls: [toolCall]}, finish_reason: 'tool_calls'}],
+        usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+      });
+    }
+    return;
+  }
   if (lastUserText.includes('AEP_DEPT_REPORT')) {
     // Scripted department-report flow for digital-employee E2E: the model
     // first calls the dept_data tool, then relays the (scope-filtered)
