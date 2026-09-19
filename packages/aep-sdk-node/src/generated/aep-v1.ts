@@ -565,12 +565,29 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Requires the users.read permission (or a full administrator). Returns the digital employee directory page by page. Cursor pagination follows the admin users convention: pass nextCursor back as cursor until it is null. Problem codes: TOKEN_INVALID, ACCESS_DENIED. */
+        /** @description Requires the users.read permission (or a full administrator). Returns the digital employee directory page by page. Ephemeral conversation-scoped instances are excluded unless includeEphemeral is true. Cursor pagination follows the admin users convention: pass nextCursor back as cursor until it is null. Problem codes: TOKEN_INVALID, ACCESS_DENIED. */
         get: operations["listAgents"];
         put?: never;
-        /** @description Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, or INVALID_TEAM; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS. */
+        /** @description Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Ephemeral accounts additionally require expiresAt and may carry scopeFromUserId plus modelIds to assemble a conversation-scoped instance in one call. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, INVALID_TEAM, INVALID_SCOPE_SOURCE, or UNKNOWN_MODEL; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS. */
         post: operations["createAgent"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/agents/{agentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Requires the users.write permission (or a full administrator). Removes a digital employee account together with its profile, role and team bindings, assignments, and data-scope rules. Active (non-revoked) sessions block the deletion; revoke the sessions first. Primarily the lifecycle close-out for ephemeral conversation-scoped instances. Problem codes: 404 RESOURCE_NOT_FOUND; 409 AGENT_HAS_SESSIONS. */
+        delete: operations["deleteAgent"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1784,6 +1801,10 @@ export interface components {
             displayTitle?: string | null;
             description?: string | null;
             promptSkillId?: string | null;
+            /** @description Conversation-scoped instances are excluded unless includeEphemeral is set. */
+            ephemeral: boolean;
+            /** Format: date-time */
+            expiresAt: string | null;
         };
         AgentDirectoryPage: {
             agents: components["schemas"]["AgentDirectoryEntry"][];
@@ -1804,6 +1825,20 @@ export interface components {
             description?: string | null;
             /** @description Identifier of the Skill that carries the digital employee prompt. Optional. */
             promptSkillId?: string | null;
+            /**
+             * @description Marks a conversation-scoped ephemeral instance. Ephemeral accounts are hidden from the directory by default and require expiresAt.
+             * @default false
+             */
+            ephemeral: boolean;
+            /**
+             * Format: date-time
+             * @description Hard expiry of an ephemeral account. Required when ephemeral is true and rejected otherwise. Login and refresh stop accepting the account once the moment has passed.
+             */
+            expiresAt?: string | null;
+            /** @description Copies the referenced user's current data-scope snapshot (visible team subtrees as management_scope rules, explicit denies as explicit_deny rules) onto the new account. The snapshot is frozen at creation; later changes to the source user do not propagate. */
+            scopeFromUserId?: string | null;
+            /** @description Optional model assignments created together with the account. */
+            modelIds?: string[];
         };
         AgentResponse: {
             id: string;
@@ -1811,6 +1846,9 @@ export interface components {
             displayName: string;
             homeTeamId: string;
             displayTitle: string;
+            ephemeral: boolean;
+            /** Format: date-time */
+            expiresAt: string | null;
         };
         /** @description Patch semantics: an absent field leaves the stored value unchanged. Unlike a JSON merge patch, an explicit null is indistinguishable from an absent field on the wire for this operation. */
         UpdateAgentProfileRequest: {
@@ -3440,6 +3478,8 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit-2"];
+                /** @description Include conversation-scoped ephemeral instances in the page. */
+                includeEphemeral?: boolean;
             };
             header?: never;
             path?: never;
@@ -3485,6 +3525,30 @@ export interface operations {
             400: components["responses"]["Problem"];
             401: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    deleteAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Digital employee deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
         };
     };

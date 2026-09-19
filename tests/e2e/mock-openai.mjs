@@ -4,9 +4,41 @@ const port = Number(process.env.MOCK_OPENAI_PORT ?? '8080');
 const apiKey = process.env.MOCK_OPENAI_API_KEY ?? 'm1-e2e-provider-secret';
 const expectedModel = process.env.MOCK_OPENAI_MODEL ?? 'mock-upstream-chat';
 
+function embeddingVector(text, dims) {
+  // Deterministic pseudo-embedding: FNV-1a hash chain over the text. Good
+  // enough for E2E wiring: same text -> same vector, different text ->
+  // different vector.
+  const out = new Array(dims).fill(0);
+  let h = 2166136261;
+  for (const ch of Buffer.from(text, 'utf8')) {
+    h ^= ch;
+    h = Math.imul(h, 16777619) >>> 0;
+    out[h % dims] += ((h >>> 16) % 21) - 10;
+  }
+  return out.map(v => v / 64);
+}
+
 const server = http.createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/healthz') {
     sendJSON(response, 200, {status: 'ok'});
+    return;
+  }
+  if (request.method === 'POST' && request.url === '/v1/embeddings') {
+    const body = await readJSON(request);
+    if (request.headers.authorization !== `Bearer ${apiKey}`) {
+      sendJSON(response, 401, {error: {message: 'bad key'}});
+      return;
+    }
+    const input = Array.isArray(body.input) ? body.input : [body.input];
+    const dims = Number(body.dimensions) || 1024;
+    sendJSON(response, 200, {
+      object: 'list',
+      data: input.map((text, index) => ({
+        object: 'embedding', index, embedding: embeddingVector(String(text), dims),
+      })),
+      model: body.model ?? 'mock-embedding',
+      usage: {prompt_tokens: 1, total_tokens: 1},
+    });
     return;
   }
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
@@ -69,6 +101,44 @@ const server = http.createServer(async (request, response) => {
   }
   if (lastUserText.includes('AEP_CANCEL_SLOW')) {
     streamSlowCompletion(request, response);
+    return;
+  }
+  if (lastUserText.includes('AEP_KNOWLEDGE_SEARCH')) {
+    // Scripted knowledge-search flow: the model calls the knowledge_search
+    // tool, then relays the PEP-filtered passages as the final answer.
+    const toolResult = body.messages?.find(
+      message => message.role === 'tool' && message.tool_call_id === 'call-kn-1',
+    );
+    if (toolResult) {
+      const report = `AEP_KNOWLEDGE_OK ${String(toolResult.content)}`;
+      if (body.stream === true) {
+        streamCompletion(response, report, 'Knowledge compiled.');
+      } else {
+        response.setHeader('X-Mock-Provider-Auth', 'accepted');
+        sendJSON(response, 200, {
+          id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+          choices: [{index: 0, message: {role: 'assistant', content: report, reasoning_content: 'Knowledge compiled.'}, finish_reason: 'stop'}],
+          usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+        });
+      }
+      return;
+    }
+    const queryMatch = lastUserText.match(/KNQ:([^\s]+)/);
+    const query = queryMatch ? queryMatch[1] : 'department handbook';
+    const toolCall = {
+      index: 0, id: 'call-kn-1', type: 'function',
+      function: {name: 'knowledge_search', arguments: JSON.stringify({query})},
+    };
+    if (body.stream === true) {
+      streamNamedToolCall(response, toolCall, 'Search the knowledge base.');
+    } else {
+      response.setHeader('X-Mock-Provider-Auth', 'accepted');
+      sendJSON(response, 200, {
+        id: 'chatcmpl-aep-m1', object: 'chat.completion', created: 1, model: expectedModel,
+        choices: [{index: 0, message: {role: 'assistant', content: '', tool_calls: [toolCall]}, finish_reason: 'tool_calls'}],
+        usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3},
+      });
+    }
     return;
   }
   if (lastUserText.includes('AEP_DEPT_REPORT')) {

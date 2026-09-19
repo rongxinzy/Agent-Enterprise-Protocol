@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
@@ -27,6 +28,10 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		DisplayTitle  string   `json:"displayTitle"`
 		Description   string   `json:"description"`
 		PromptSkillID string   `json:"promptSkillId"`
+		Ephemeral     bool     `json:"ephemeral"`
+		ExpiresAt     *string  `json:"expiresAt"`
+		ScopeFrom     string   `json:"scopeFromUserId"`
+		ModelIDs      []string `json:"modelIds"`
 	}
 	if !decodeJSON(response, request, &input) || !validRBACID(input.Username) || strings.TrimSpace(input.DisplayName) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent username and display name are invalid.")
@@ -38,6 +43,28 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 	}
 	if input.HomeTeamID == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent home team is required.")
+		return
+	}
+	// Ephemeral lifecycle coupling: expiry is mandatory exactly when the
+	// account is conversation-scoped, and it must lie in the future.
+	var expiresAt *time.Time
+	if input.Ephemeral {
+		if input.ExpiresAt == nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "Ephemeral agents require expiresAt.")
+			return
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, *input.ExpiresAt)
+		if err != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "expiresAt must be an RFC 3339 timestamp.")
+			return
+		}
+		if !parsed.After(time.Now().UTC()) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "expiresAt must lie in the future.")
+			return
+		}
+		expiresAt = &parsed
+	} else if input.ExpiresAt != nil {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "expiresAt requires ephemeral=true.")
 		return
 	}
 	// The home team always counts as a granted team, so delegated admins are
@@ -89,6 +116,42 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 			return
 		}
 	}
+	// A frozen scope snapshot: every requested team must already be inside
+	// the source user's visible scope, otherwise the ephemeral instance
+	// would carry a wider org subtree than the requester it serves.
+	var snapshot *app.RetrievalContext
+	if input.ScopeFrom != "" {
+		resolved, err := s.app.DataScopeContext(request.Context(), claimsFrom(request).DeploymentID, input.ScopeFrom)
+		if err != nil || resolved.PrincipalID == "" {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE_SOURCE", "The scope source user does not exist.")
+			return
+		}
+		visible := make(map[string]bool, len(resolved.OrgScope))
+		for _, team := range resolved.OrgScope {
+			visible[team] = true
+		}
+		for _, ref := range resolved.DeniedResources {
+			if ref.Kind == "team" {
+				delete(visible, ref.ID)
+			}
+		}
+		for _, team := range teams {
+			if !visible[team] {
+				writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE_SOURCE", "homeTeamId and teamIds must lie inside the scope source user's visible teams.")
+				return
+			}
+		}
+		snapshot = &resolved
+	}
+	for _, modelID := range input.ModelIDs {
+		if _, err := store.GetModel(request.Context(), modelID); errors.Is(err, repository.ErrNotFound) {
+			writeProblem(response, request, http.StatusBadRequest, "UNKNOWN_MODEL", "The model assignment references an unknown model.")
+			return
+		} else if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
 	passwordHash, err := auth.HashPassword(input.Password)
 	if err != nil {
 		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 12 to 1024 characters.")
@@ -109,7 +172,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 	}
 	profile := repository.AgentProfile{
 		UserID: record.User.ID, DisplayTitle: input.DisplayTitle, Description: input.Description,
-		HomeTeamID: input.HomeTeamID,
+		HomeTeamID: input.HomeTeamID, Ephemeral: input.Ephemeral, ExpiresAt: expiresAt,
 	}
 	if input.PromptSkillID != "" {
 		profile.PromptSkillID = &input.PromptSkillID
@@ -118,15 +181,67 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{
+	if snapshot != nil {
+		// Freeze the source user's evaluation: visible subtrees become
+		// management_scope grants, explicit denies are copied verbatim. The
+		// rules are detached from the source; later source changes never
+		// propagate into a running conversation.
+		denied := make(map[string]bool)
+		for _, ref := range snapshot.DeniedResources {
+			if ref.Kind == "team" {
+				denied[ref.ID] = true
+			}
+		}
+		for _, team := range snapshot.OrgScope {
+			rule := repository.DataScopeRule{
+				ID: uuid.NewString(), RuleKind: "management_scope",
+				SubjectType: "user", SubjectID: record.User.ID,
+				ResourceKind: "team", ResourceID: team,
+				Reason:    "ephemeral snapshot from " + input.ScopeFrom,
+				CreatedBy: claimsFrom(request).Subject,
+			}
+			if _, err := store.CreateDataScopeRule(request.Context(), rule); err != nil {
+				databaseFailure(response, request, err)
+				return
+			}
+		}
+		for team := range denied {
+			rule := repository.DataScopeRule{
+				ID: uuid.NewString(), RuleKind: "explicit_deny",
+				SubjectType: "user", SubjectID: record.User.ID,
+				ResourceKind: "team", ResourceID: team,
+				Reason:    "ephemeral snapshot deny from " + input.ScopeFrom,
+				CreatedBy: claimsFrom(request).Subject,
+			}
+			if _, err := store.CreateDataScopeRule(request.Context(), rule); err != nil {
+				databaseFailure(response, request, err)
+				return
+			}
+		}
+	}
+	for _, modelID := range input.ModelIDs {
+		if _, err := store.CreateModelAssignment(request.Context(), repository.ModelAssignment{
+			ID: uuid.NewString(), DeploymentID: claimsFrom(request).DeploymentID,
+			ModelID: modelID, SubjectType: "user", SubjectID: record.User.ID,
+		}); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	payload := map[string]any{
 		"id": record.User.ID, "username": record.User.Username, "displayName": record.User.DisplayName,
 		"homeTeamId": input.HomeTeamID, "displayTitle": input.DisplayTitle,
-	})
+		"ephemeral": input.Ephemeral, "expiresAt": nil,
+	}
+	if expiresAt != nil {
+		payload["expiresAt"] = expiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(response, http.StatusCreated, payload)
 }
 
 func (s *Server) listAgents(response http.ResponseWriter, request *http.Request) {
 	entries, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		ListAgentDirectory(request.Context(), request.URL.Query().Get("cursor"), limit(request))
+		ListAgentDirectory(request.Context(), request.URL.Query().Get("cursor"), limit(request), request.URL.Query().Get("includeEphemeral") == "true")
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -141,10 +256,16 @@ func (s *Server) listAgents(response http.ResponseWriter, request *http.Request)
 		if entry.LastHeartbeatAt != nil {
 			item["lastHeartbeatAt"] = entry.LastHeartbeatAt.UTC().Format(time.RFC3339Nano)
 		}
+		item["ephemeral"] = false
+		item["expiresAt"] = nil
 		if entry.Profile != nil {
 			item["homeTeamId"] = entry.Profile.HomeTeamID
 			item["displayTitle"] = entry.Profile.DisplayTitle
 			item["description"] = entry.Profile.Description
+			item["ephemeral"] = entry.Profile.Ephemeral
+			if entry.Profile.ExpiresAt != nil {
+				item["expiresAt"] = entry.Profile.ExpiresAt.UTC().Format(time.RFC3339Nano)
+			}
 			if entry.Profile.PromptSkillID != nil {
 				item["promptSkillId"] = *entry.Profile.PromptSkillID
 			}
@@ -505,4 +626,25 @@ func (s *Server) dataScopeContext(response http.ResponseWriter, request *http.Re
 		return
 	}
 	writeJSON(response, http.StatusOK, context)
+}
+
+func (s *Server) deleteAgent(response http.ResponseWriter, request *http.Request) {
+	userID := chi.URLParam(request, "agentId")
+	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
+	if _, err := store.GetAgentProfile(request.Context(), userID); errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The agent profile was not found.")
+		return
+	} else if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := store.DeleteAgent(request.Context(), userID); err != nil {
+		if errors.Is(err, repository.ErrAgentHasSessions) {
+			writeProblem(response, request, http.StatusConflict, "AGENT_HAS_SESSIONS", "Revoke the agent sessions before deleting the account.")
+			return
+		}
+		databaseFailure(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }

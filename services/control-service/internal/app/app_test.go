@@ -305,8 +305,8 @@ func TestRefreshUserSessionRotatesTokenAndPreservesSession(t *testing.T) {
 		WithArgs(auth.HashRefreshToken(rawRefresh)).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at",
-			"revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin",
-		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", false, false))
+			"revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin", "kind",
+		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", false, false, "human"))
 	expectModelScopes(pool, "chat-a")
 	expectUserRoles(sqlMock, "member")
 	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).
@@ -338,8 +338,8 @@ func TestRefreshUserSessionRejectsSessionMismatch(t *testing.T) {
 		WithArgs(auth.HashRefreshToken(rawRefresh)).
 		WillReturnRows(pgxmock.NewRows([]string{
 			"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at",
-			"revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin",
-		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", false, false))
+			"revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin", "kind",
+		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", false, false, "human"))
 	pool.ExpectRollback()
 	if _, err := application.RefreshUserSession(context.Background(), rawRefresh, "session-other"); !errors.Is(err, ErrRefreshTokenInvalid) {
 		t.Fatalf("RefreshUserSession() error = %v", err)
@@ -662,8 +662,8 @@ func TestRefreshUserSessionPasswordChangeSuppressesModelScopes(t *testing.T) {
 	rawRefresh := "old-refresh-token"
 	pool.ExpectBeginTx(pgx.TxOptions{})
 	pool.ExpectQuery(`SELECT t\.session_id,s\.user_id`).WithArgs(auth.HashRefreshToken(rawRefresh)).WillReturnRows(pgxmock.NewRows([]string{
-		"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin",
-	}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", true, false))
+		"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin", "kind",
+	}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", time.Now().Add(time.Hour), nil, nil, "active", true, false, "human"))
 	expectModelScopes(pool, "chat-a")
 	expectUserRoles(sqlMock, "member")
 	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs(auth.HashRefreshToken(rawRefresh)).WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
@@ -698,8 +698,8 @@ func TestRefreshUserSessionRejectsInvalidAndPropagatesFailures(t *testing.T) {
 		raw := "old-refresh-token"
 		pool.ExpectBeginTx(pgx.TxOptions{})
 		pool.ExpectQuery(`SELECT t\.session_id,s\.user_id`).WithArgs(auth.HashRefreshToken(raw)).WillReturnRows(pgxmock.NewRows([]string{
-			"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin",
-		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", state.expires, state.revokedToken, state.revokedSession, state.status, false, false))
+			"session_id", "user_id", "user_deployment_id", "deployment_id", "expires_at", "revoked_at", "session_revoked_at", "status", "require_password_change", "is_admin", "kind",
+		}).AddRow("session-a", "user-a", "deployment-storage", "deployment-a", state.expires, state.revokedToken, state.revokedSession, state.status, false, false, "human"))
 		after(pool, application, sqlMock)
 		pool.ExpectRollback()
 		if _, err := application.RefreshUserSession(context.Background(), raw, "session-a"); (wantErr == nil && err == nil) || (wantErr != nil && !errors.Is(err, wantErr)) {

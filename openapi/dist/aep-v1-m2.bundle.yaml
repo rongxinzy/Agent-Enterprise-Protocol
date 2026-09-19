@@ -964,12 +964,19 @@ paths:
       tags:
         - Admin Agents
       operationId: listAgents
-      description: 'Requires the users.read permission (or a full administrator). Returns the digital employee directory page by page. Cursor pagination follows the admin users convention: pass nextCursor back as cursor until it is null. Problem codes: TOKEN_INVALID, ACCESS_DENIED.'
+      description: 'Requires the users.read permission (or a full administrator). Returns the digital employee directory page by page. Ephemeral conversation-scoped instances are excluded unless includeEphemeral is true. Cursor pagination follows the admin users convention: pass nextCursor back as cursor until it is null. Problem codes: TOKEN_INVALID, ACCESS_DENIED.'
       security:
         - aepBearerAuth: []
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit-2'
+        - name: includeEphemeral
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Include conversation-scoped ephemeral instances in the page.
       responses:
         '200':
           description: Digital employee directory page
@@ -985,7 +992,7 @@ paths:
       tags:
         - Admin Agents
       operationId: createAgent
-      description: 'Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, or INVALID_TEAM; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS.'
+      description: 'Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Ephemeral accounts additionally require expiresAt and may carry scopeFromUserId plus modelIds to assemble a conversation-scoped instance in one call. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, INVALID_TEAM, INVALID_SCOPE_SOURCE, or UNKNOWN_MODEL; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS.'
       security:
         - aepBearerAuth: []
       requestBody:
@@ -1006,6 +1013,27 @@ paths:
         '401':
           $ref: '#/components/responses/Problem'
         '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/admin/agents/{agentId}:
+    delete:
+      tags:
+        - Admin Agents
+      operationId: deleteAgent
+      description: 'Requires the users.write permission (or a full administrator). Removes a digital employee account together with its profile, role and team bindings, assignments, and data-scope rules. Active (non-revoked) sessions block the deletion; revoke the sessions first. Primarily the lifecycle close-out for ephemeral conversation-scoped instances. Problem codes: 404 RESOURCE_NOT_FOUND; 409 AGENT_HAS_SESSIONS.'
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '204':
+          description: Digital employee deleted
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
@@ -3622,6 +3650,8 @@ components:
         - kind
         - status
         - online
+        - ephemeral
+        - expiresAt
       properties:
         id:
           type: string
@@ -3662,6 +3692,14 @@ components:
           type:
             - string
             - 'null'
+        ephemeral:
+          type: boolean
+          description: Conversation-scoped instances are excluded unless includeEphemeral is set.
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
     AgentDirectoryPage:
       type: object
       required:
@@ -3738,6 +3776,31 @@ components:
             - 'null'
           maxLength: 64
           description: Identifier of the Skill that carries the digital employee prompt. Optional.
+        ephemeral:
+          type: boolean
+          default: false
+          description: Marks a conversation-scoped ephemeral instance. Ephemeral accounts are hidden from the directory by default and require expiresAt.
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          writeOnly: true
+          description: Hard expiry of an ephemeral account. Required when ephemeral is true and rejected otherwise. Login and refresh stop accepting the account once the moment has passed.
+        scopeFromUserId:
+          type:
+            - string
+            - 'null'
+          maxLength: 100
+          writeOnly: true
+          description: Copies the referenced user's current data-scope snapshot (visible team subtrees as management_scope rules, explicit denies as explicit_deny rules) onto the new account. The snapshot is frozen at creation; later changes to the source user do not propagate.
+        modelIds:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+          uniqueItems: true
+          description: Optional model assignments created together with the account.
     AgentResponse:
       type: object
       required:
@@ -3746,6 +3809,8 @@ components:
         - displayName
         - homeTeamId
         - displayTitle
+        - ephemeral
+        - expiresAt
       properties:
         id:
           type: string
@@ -3757,6 +3822,13 @@ components:
           type: string
         displayTitle:
           type: string
+        ephemeral:
+          type: boolean
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
     UpdateAgentProfileRequest:
       type: object
       additionalProperties: false

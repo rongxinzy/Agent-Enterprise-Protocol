@@ -116,6 +116,10 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 	}
 	tokens, err := s.app.IssueUserSession(request.Context(), user)
 	if err != nil {
+		if errors.Is(err, app.ErrAgentExpired) {
+			writeProblem(response, request, http.StatusForbidden, "AGENT_EXPIRED", "The ephemeral digital employee has expired.")
+			return
+		}
 		databaseFailure(response, request, err)
 		return
 	}
@@ -232,6 +236,10 @@ func (s *Server) refreshSession(response http.ResponseWriter, request *http.Requ
 	tokens, err := s.app.RefreshUserSession(request.Context(), input.RefreshToken, input.SessionID)
 	if errors.Is(err, app.ErrRefreshTokenInvalid) {
 		writeProblem(response, request, http.StatusUnauthorized, "REFRESH_TOKEN_INVALID", err.Error())
+		return
+	}
+	if errors.Is(err, app.ErrAgentExpired) {
+		writeProblem(response, request, http.StatusForbidden, "AGENT_EXPIRED", "The ephemeral digital employee has expired.")
 		return
 	}
 	if err != nil {

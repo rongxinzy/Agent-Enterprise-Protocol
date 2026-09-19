@@ -243,9 +243,14 @@ export class MockAepServer {
         if (typeof input.username !== 'string' || !/^[A-Za-z0-9._-]+$/.test(input.username)) {
           return json(response, 400, problem(400, 'INVALID_AGENT'));
         }
-        return json(response, 201, agentResponse());
+        return json(response, 201, {...agentResponse(), ephemeral: input.ephemeral === true, expiresAt: input.expiresAt ?? null});
       }
       return json(response, 200, {agents: [agentDirectoryEntry()], nextCursor: null});
+    }
+    if (path === '/aep/v1/admin/agents/agent-1' && request.method === 'DELETE') {
+      response.writeHead(204);
+      response.end();
+      return;
     }
     if (path === '/aep/v1/admin/agents/agent-1/profile' && request.method === 'PUT') {
       const input = await readJson(request);
@@ -403,12 +408,17 @@ function agentDirectoryEntry(): object {
     homeTeamId: 'team-1',
     displayTitle: 'Reviewer',
     description: null,
+    ephemeral: false,
+    expiresAt: null,
     promptSkillId: null,
   };
 }
 
 function agentResponse(): object {
-  return {id: 'agent-1', username: 'review-agent', displayName: 'Review Agent', homeTeamId: 'team-1', displayTitle: 'Reviewer'};
+  return {
+    id: 'agent-1', username: 'review-agent', displayName: 'Review Agent',
+    homeTeamId: 'team-1', displayTitle: 'Reviewer', ephemeral: false, expiresAt: null,
+  };
 }
 
 function identitySource(): object {

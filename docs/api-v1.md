@@ -515,6 +515,7 @@ or `TEAM_IN_USE` (409) for any other reference.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET, POST | `/admin/agents` | List or create digital employee accounts |
+| DELETE | `/admin/agents/{agentId}` | Delete a digital employee account |
 | PUT | `/admin/agents/{agentId}/profile` | Update the profile of one digital employee |
 
 Reads require the `users.read` permission and writes require `users.write`;
@@ -531,6 +532,17 @@ on the last page.
 Profile updates accept `displayTitle`, `description`, `homeTeamId`, and
 `promptSkillId`; each field may be set to null to clear the stored value.
 
+Ephemeral conversation-scoped instances: `ephemeral: true` requires a future
+`expiresAt`; once it passes, login and refresh reject the account with
+`AGENT_EXPIRED` (403). `scopeFromUserId` freezes the referenced user's
+data-scope snapshot onto the account (visible team subtrees become
+management_scope rules, explicit denies are copied), and the requested teams
+must already lie inside that scope. `modelIds` creates model assignments
+together with the account. The directory hides ephemeral instances unless
+`includeEphemeral=true` is passed. `DELETE /admin/agents/{agentId}` removes
+the account with its bindings, assignments, and rules; live sessions block
+the deletion with `AGENT_HAS_SESSIONS` (409) until revoked.
+
 Error codes:
 
 | Code | Status | Meaning |
@@ -540,6 +552,10 @@ Error codes:
 | `INVALID_ROLE`, `INVALID_TEAM` | 400 | Invalid role or team binding |
 | `ROLE_GRANT_FORBIDDEN`, `TEAM_GRANT_FORBIDDEN` | 403 | The caller cannot grant a requested role or team |
 | `AGENT_EXISTS` | 409 | The username already exists |
+| `INVALID_SCOPE_SOURCE` | 400 | The scope source user is unknown, or the requested teams lie outside the source's visible scope |
+| `UNKNOWN_MODEL` | 400 | A requested model assignment references an unknown model |
+| `AGENT_HAS_SESSIONS` | 409 | Deletion is blocked by live sessions; revoke them first |
+| `AGENT_EXPIRED` | 403 | The ephemeral account's expiry has passed |
 
 ### Identity sources
 

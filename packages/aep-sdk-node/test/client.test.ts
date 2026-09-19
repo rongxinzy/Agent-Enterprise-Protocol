@@ -362,11 +362,30 @@ describe('AepClient SDK gate', () => {
     await expect(client.updateAgentProfile('agent-1', {displayTitle: 'Senior Reviewer', homeTeamId: 'team-2'}))
       .resolves.toMatchObject({id: 'agent-1', homeTeamId: 'team-2', displayTitle: 'Senior Reviewer'});
 
+    await client.listAgents({includeEphemeral: true});
+    expect(server.requests.at(-1)?.search).toBe('?includeEphemeral=true');
+
+    await expect(client.createAgent({
+      username: 'ephemeral-agent',
+      displayName: 'Ephemeral Agent',
+      password: 'initial-password',
+      roleIds: ['operator'],
+      homeTeamId: 'team-1',
+      ephemeral: true,
+      expiresAt: '2027-01-01T00:00:00Z',
+      scopeFromUserId: 'user-1',
+      modelIds: ['model-1'],
+    })).resolves.toMatchObject({id: 'agent-1', ephemeral: true});
+
+    await client.deleteAgent('agent-1');
+    expect(server.requests.at(-1)).toMatchObject({method: 'DELETE', path: '/aep/v1/admin/agents/agent-1'});
+
     const paths = server.requests.map(request => `${request.method} ${request.path}`);
     expect(paths).toEqual(expect.arrayContaining([
       'GET /aep/v1/admin/agents',
       'POST /aep/v1/admin/agents',
       'PUT /aep/v1/admin/agents/agent-1/profile',
+      'DELETE /aep/v1/admin/agents/agent-1',
     ]));
   });
 
