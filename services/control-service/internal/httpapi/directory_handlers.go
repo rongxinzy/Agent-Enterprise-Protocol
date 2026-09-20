@@ -152,6 +152,20 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 			return
 		}
 	}
+	// The deployment quota bounds resident digital employees; ephemeral
+	// conversation forks are exempt because their TTL reclaims them.
+	if !input.Ephemeral && s.app.Config.MaxResidentAgents > 0 {
+		resident, err := store.CountResidentAgents(request.Context())
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		if resident >= int64(s.app.Config.MaxResidentAgents) {
+			writeProblem(response, request, http.StatusConflict, "AGENT_QUOTA_EXCEEDED",
+				"The deployment resident digital-employee quota is exhausted; delete a resident account or raise the limit.")
+			return
+		}
+	}
 	passwordHash, err := auth.HashPassword(input.Password)
 	if err != nil {
 		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 12 to 1024 characters.")

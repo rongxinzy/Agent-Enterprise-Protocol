@@ -296,6 +296,16 @@ func (s *DeploymentStore) GetUserByID(ctx context.Context, userID string) (User,
 	return user, err
 }
 
+// CountResidentAgents returns the number of non-ephemeral digital employees,
+// the figure deployment quotas bound.
+func (s *DeploymentStore) CountResidentAgents(ctx context.Context) (int64, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Raw(`SELECT count(*) FROM agent_profiles WHERE deployment_id = ? AND ephemeral = false`, s.deploymentID).
+		Scan(&count).Error
+	return count, err
+}
+
 // ErrAgentHasSessions blocks deleting a digital employee with live sessions.
 var ErrAgentHasSessions = errors.New("agent still has active sessions")
 

@@ -247,17 +247,18 @@ func TestRequiredAdminPermissionForLicenseLifecycle(t *testing.T) {
 		{http.MethodPost, "/aep/v1/admin/licenses/lic-1/revoke", "licenses.revoke"},
 	}
 	for _, test := range tests {
-		if got := requiredAdminPermission(test.method, test.path); got != test.want {
-			t.Errorf("requiredAdminPermission(%s, %s) = %q, want %q", test.method, test.path, got, test.want)
+		got := requiredAdminPermission(test.method, test.path)
+		if len(got) != 1 || got[0] != test.want {
+			t.Errorf("requiredAdminPermission(%s, %s) = %v, want [%s]", test.method, test.path, got, test.want)
 		}
 	}
 }
 
 func TestRequiredAdminPermissionForSessionLifecycle(t *testing.T) {
-	if got := requiredAdminPermission(http.MethodGet, "/aep/v1/admin/sessions"); got != "users.read" {
-		t.Fatalf("session list permission = %q, want users.read", got)
+	if got := requiredAdminPermission(http.MethodGet, "/aep/v1/admin/sessions"); len(got) != 1 || got[0] != "users.read" {
+		t.Fatalf("session list permission = %v, want [users.read]", got)
 	}
-	if got := requiredAdminPermission(http.MethodPost, "/aep/v1/admin/sessions/session-1/revoke"); got != "sessions.write" {
+	if got := requiredAdminPermission(http.MethodPost, "/aep/v1/admin/sessions/session-1/revoke"); len(got) != 1 || got[0] != "sessions.write" {
 		t.Fatalf("session revoke permission = %q, want sessions.write", got)
 	}
 }

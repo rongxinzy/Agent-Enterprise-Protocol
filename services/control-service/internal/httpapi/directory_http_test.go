@@ -83,7 +83,10 @@ func TestCreateAgentDelegatedAdminCannotEscalateThroughAgent(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
-	// The delegated admin holds users.write, so the route is reachable.
+	// The OR gate probes agents.write first (denied), then users.write.
+	pool.ExpectQuery(`SELECT EXISTS`).
+		WithArgs("deployment-a", "user-a", "agents.write").
+		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
 	pool.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("deployment-a", "user-a", "users.write").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
@@ -254,4 +257,56 @@ func TestDeleteAgentGuards(t *testing.T) {
 		t.Fatalf("session-blocked delete = %d %s", blocked.Code, blocked.Body.String())
 	}
 	_ = pool
+}
+
+func TestAgentsWriteIsDelegableIndependentlyOfUsersWrite(t *testing.T) {
+	// requiredAdminPermission returns the OR set for agent writes and
+	// single-permission sets elsewhere; the route gate honors any one.
+	if got := requiredAdminPermission(http.MethodPost, "/aep/v1/admin/agents"); len(got) != 2 ||
+		got[0] != "agents.write" || got[1] != "users.write" {
+		t.Fatalf("agent write gate = %v", got)
+	}
+	if got := requiredAdminPermission(http.MethodGet, "/aep/v1/admin/agents"); len(got) != 1 || got[0] != "users.read" {
+		t.Fatalf("agent read gate = %v", got)
+	}
+	if got := requiredAdminPermission(http.MethodPost, "/aep/v1/admin/users"); len(got) != 1 || got[0] != "users.write" {
+		t.Fatalf("human write gate = %v", got)
+	}
+	if got := requiredAdminPermission(http.MethodGet, "/aep/v1/admin/nothing"); got != nil {
+		t.Fatalf("unknown route = %v", got)
+	}
+}
+
+func TestCreateAgentEnforcesResidentQuota(t *testing.T) {
+	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
+	application.Config.MaxResidentAgents = 1
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	// One resident agent already exists: a second is rejected with 409.
+	expectTeamRecord(mock, "eng", "Engineering", "", true, 3, now)
+	expectRoleRecord(mock, "member", "Member", "", true, nil, now)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM agent_profiles`).
+		WithArgs("deployment-a").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	quota := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/agents",
+		`{"username":"over-quota","displayName":"Over","password":"long-password-123","roleIds":["member"],"teamIds":[],"homeTeamId":"eng"}`)
+	if quota.Code != http.StatusConflict || !strings.Contains(quota.Body.String(), "AGENT_QUOTA_EXCEEDED") {
+		t.Fatalf("quota = %d %s", quota.Code, quota.Body.String())
+	}
+
+	// Ephemeral accounts bypass the quota: the count query is never issued
+	// (sqlmock fails any unexpected query with a 500), so reaching the
+	// validation error below proves the quota check was skipped.
+	application.Config.MaxResidentAgents = 1
+	expectTeamRecord(mock, "eng", "Engineering", "", true, 3, now)
+	expectRoleRecord(mock, "member", "Member", "", true, nil, now)
+	mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1 LIMIT \$2`).
+		WithArgs("ghost-skill", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "created_at", "updated_at"}))
+	ephemeral := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/agents",
+		`{"username":"fork-quota","displayName":"Fork","password":"long-password-123","roleIds":["member"],"teamIds":[],"homeTeamId":"eng","ephemeral":true,"expiresAt":"2030-01-01T00:00:00Z","promptSkillId":"ghost-skill"}`)
+	if ephemeral.Code != http.StatusBadRequest || !strings.Contains(ephemeral.Body.String(), "INVALID_AGENT") {
+		t.Fatalf("ephemeral over quota = %d %s", ephemeral.Code, ephemeral.Body.String())
+	}
 }
