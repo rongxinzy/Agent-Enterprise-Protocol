@@ -518,8 +518,11 @@ or `TEAM_IN_USE` (409) for any other reference.
 | DELETE | `/admin/agents/{agentId}` | Delete a digital employee account |
 | PUT | `/admin/agents/{agentId}/profile` | Update the profile of one digital employee |
 
-Reads require the `users.read` permission and writes require `users.write`;
-full administrators always qualify. A digital employee is a platform account
+Reads require the `users.read` permission; writes accept `agents.write` (the
+delegable digital-employee lifecycle grant that cannot touch human accounts)
+or `users.write`. Full administrators always qualify. The deployment may cap
+resident (non-ephemeral) digital employees via `AEP_MAX_RESIDENT_AGENTS`;
+exceeding it returns `AGENT_QUOTA_EXCEEDED` (409). A digital employee is a platform account
 with a home team, a display title, an optional description, and an optional
 prompt Skill. The home team is always granted in addition to `teamIds`, and
 the caller must be allowed to grant every requested role and team.

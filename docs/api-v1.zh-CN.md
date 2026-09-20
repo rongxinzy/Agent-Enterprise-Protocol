@@ -492,7 +492,10 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | DELETE | `/admin/agents/{agentId}` | 删除数字员工账号 |
 | PUT | `/admin/agents/{agentId}/profile` | 更新单个数字员工的档案 |
 
-读取需要 `users.read` 权限，写入需要 `users.write` 权限，完整管理员始终满足。数字员工是
+读取需要 `users.read` 权限；写入接受 `agents.write`（可下放的数字员工生命周期权限，
+不能触碰人类账号）或 `users.write`，完整管理员始终满足。部署可通过
+`AEP_MAX_RESIDENT_AGENTS` 限制常驻（非临时）数字员工数量，超出返回
+`AGENT_QUOTA_EXCEEDED`（409）。数字员工是
 带主团队、展示头衔、可选描述和可选提示 Skill 的平台账号。主团队总会与 `teamIds` 一并授权，
 且调用方必须有权授予请求的每个角色和团队。
 

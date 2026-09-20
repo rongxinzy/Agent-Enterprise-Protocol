@@ -51,6 +51,7 @@ type Config struct {
 	DeploymentName            string
 	DataPlaneReconcilerToken  string
 	GatewayLicenseStatusToken string
+	MaxResidentAgents         int
 	CredentialMasterKeyBase64 string
 	CredentialMasterKeyFile   string
 	LicenseTrustedKeys        map[string]string
@@ -176,6 +177,9 @@ func Load() (Config, error) {
 	}
 	if cfg.HTTPMaxHeaderBytes, err = integer("AEP_HTTP_MAX_HEADER_BYTES", 1<<20); err != nil {
 		return Config{}, err
+	}
+	if cfg.MaxResidentAgents, err = integer("AEP_MAX_RESIDENT_AGENTS", 0); err != nil {
+		return cfg, err
 	}
 	if cfg.LoginFailureLimit, err = integer("AEP_LOGIN_FAILURE_LIMIT", 5); err != nil {
 		return Config{}, err

@@ -255,15 +255,22 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 			next.ServeHTTP(response, request)
 			return
 		}
-		permission := requiredAdminPermission(request.Method, request.URL.Path)
-		if permission == "" {
+		permissions := requiredAdminPermission(request.Method, request.URL.Path)
+		if len(permissions) == 0 {
 			writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "The authenticated user lacks the required management permission.")
 			return
 		}
-		allowed, err := s.userHasPermission(request, permission)
-		if err != nil {
-			databaseFailure(response, request, err)
-			return
+		allowed := false
+		for _, permission := range permissions {
+			permitted, err := s.userHasPermission(request, permission)
+			if err != nil {
+				databaseFailure(response, request, err)
+				return
+			}
+			if permitted {
+				allowed = true
+				break
+			}
 		}
 		if !allowed {
 			writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "The authenticated user lacks the required management permission.")
@@ -288,86 +295,88 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 	return allowed, err
 }
 
-func requiredAdminPermission(method, path string) string {
+func requiredAdminPermission(method, path string) []string {
 	switch {
 	case strings.HasPrefix(path, "/aep/v1/admin/permissions") || strings.HasPrefix(path, "/aep/v1/admin/roles"):
 		if method == http.MethodGet {
-			return "roles.read"
+			return []string{"roles.read"}
 		}
-		return "roles.write"
+		return []string{"roles.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/teams"):
 		if method == http.MethodGet {
-			return "teams.read"
+			return []string{"teams.read"}
 		}
-		return "teams.write"
+		return []string{"teams.write"}
 	case strings.HasSuffix(path, "/rbac"):
-		return "users.write"
+		return []string{"users.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/users"):
 		if method == http.MethodGet {
-			return "users.read"
+			return []string{"users.read"}
 		}
-		return "users.write"
+		return []string{"users.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/sessions"):
 		if strings.HasSuffix(path, "/revoke") {
-			return "sessions.write"
+			return []string{"sessions.write"}
 		}
-		return "users.read"
+		return []string{"users.read"}
 	case strings.HasPrefix(path, "/aep/v1/admin/models"):
 		if strings.Contains(path, "assignment") {
-			return "models.assign"
+			return []string{"models.assign"}
 		}
 		if method == http.MethodGet {
-			return "models.read"
+			return []string{"models.read"}
 		}
-		return "models.write"
+		return []string{"models.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/skills"):
 		if strings.Contains(path, "assignment") {
-			return "skills.assign"
+			return []string{"skills.assign"}
 		}
 		if method == http.MethodGet {
-			return "skills.read"
+			return []string{"skills.read"}
 		}
-		return "skills.write"
+		return []string{"skills.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/credentials"):
 		if strings.Contains(path, "assignment") {
-			return "credentials.assign"
+			return []string{"credentials.assign"}
 		}
 		if method == http.MethodGet {
-			return "credentials.read"
+			return []string{"credentials.read"}
 		}
-		return "credentials.write"
+		return []string{"credentials.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/licenses"):
 		if strings.HasSuffix(path, "/revoke") {
-			return "licenses.revoke"
+			return []string{"licenses.revoke"}
 		}
 		if method != http.MethodGet {
-			return "licenses.write"
+			return []string{"licenses.write"}
 		}
-		return "licenses.read"
+		return []string{"licenses.read"}
 	case strings.HasPrefix(path, "/aep/v1/admin/events") || strings.HasPrefix(path, "/aep/v1/admin/control-events"):
 		if method == http.MethodGet {
-			return "events.read"
+			return []string{"events.read"}
 		}
-		return "events.write"
+		return []string{"events.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/data-plane"):
-		return "data_plane.write"
+		return []string{"data_plane.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/agents"):
 		if method == http.MethodGet {
-			return "users.read"
+			return []string{"users.read"}
 		}
-		return "users.write"
+		// agents.write is the delegable digital-employee lifecycle grant;
+		// users.write keeps working so administrators migrate transparently.
+		return []string{"agents.write", "users.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/identity-sources"):
 		if method == http.MethodGet {
-			return "identity.read"
+			return []string{"identity.read"}
 		}
-		return "identity.write"
+		return []string{"identity.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/data-scope"):
 		if method == http.MethodGet {
-			return "data_scope.read"
+			return []string{"data_scope.read"}
 		}
-		return "data_scope.write"
+		return []string{"data_scope.write"}
 	}
-	return ""
+	return nil
 }
 
 func (s *Server) requirePermission(permission string) func(http.Handler) http.Handler {

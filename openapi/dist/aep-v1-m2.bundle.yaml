@@ -992,7 +992,7 @@ paths:
       tags:
         - Admin Agents
       operationId: createAgent
-      description: 'Requires the users.write permission (or a full administrator). Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Ephemeral accounts additionally require expiresAt and may carry scopeFromUserId plus modelIds to assemble a conversation-scoped instance in one call. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, INVALID_TEAM, INVALID_SCOPE_SOURCE, or UNKNOWN_MODEL; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS.'
+      description: 'Requires the agents.write or users.write permission (or a full administrator) — agents.write is the delegable lifecycle grant that cannot touch human accounts. Creates a digital employee platform account. The home team is always granted in addition to teamIds. The password must be at least 8 characters and is stored only as an Argon2id hash. Ephemeral accounts additionally require expiresAt and may carry scopeFromUserId plus modelIds to assemble a conversation-scoped instance in one call. Problem codes: 400 INVALID_AGENT, USER_RBAC_REQUIRED, INVALID_ROLE, INVALID_TEAM, INVALID_SCOPE_SOURCE, or UNKNOWN_MODEL; 403 ROLE_GRANT_FORBIDDEN or TEAM_GRANT_FORBIDDEN; 409 AGENT_EXISTS.'
       security:
         - aepBearerAuth: []
       requestBody:
@@ -1021,7 +1021,7 @@ paths:
       tags:
         - Admin Agents
       operationId: deleteAgent
-      description: 'Requires the users.write permission (or a full administrator). Removes a digital employee account together with its profile, role and team bindings, assignments, and data-scope rules. Active (non-revoked) sessions block the deletion; revoke the sessions first. Primarily the lifecycle close-out for ephemeral conversation-scoped instances. Problem codes: 404 RESOURCE_NOT_FOUND; 409 AGENT_HAS_SESSIONS.'
+      description: 'Requires the agents.write or users.write permission (or a full administrator). Removes a digital employee account together with its profile, role and team bindings, assignments, and data-scope rules. Active (non-revoked) sessions block the deletion; revoke the sessions first. Primarily the lifecycle close-out for ephemeral conversation-scoped instances. Problem codes: 404 RESOURCE_NOT_FOUND; 409 AGENT_HAS_SESSIONS.'
       security:
         - aepBearerAuth: []
       parameters:
@@ -1042,7 +1042,7 @@ paths:
       tags:
         - Admin Agents
       operationId: updateAgentProfile
-      description: 'Requires the users.write permission (or a full administrator). Updates the digital employee profile. Every field is optional; a null value clears the stored field. Changing homeTeamId requires the same team grant rights as creation. Problem codes: 400 INVALID_AGENT; 404 RESOURCE_NOT_FOUND.'
+      description: 'Requires the agents.write or users.write permission (or a full administrator). Updates the digital employee profile. Every field is optional; a null value clears the stored field. Changing homeTeamId requires the same team grant rights as creation. Problem codes: 400 INVALID_AGENT; 404 RESOURCE_NOT_FOUND.'
       security:
         - aepBearerAuth: []
       parameters:
