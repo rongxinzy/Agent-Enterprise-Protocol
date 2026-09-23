@@ -1,0 +1,274 @@
+# AEP control plane on a local k3s cluster (development shape).
+#
+# Self-contained development-flavored variant of deploy/kubernetes/production:
+# in-cluster postgres + minio (local-path PVCs), plain Secret instead of
+# ExternalSecret, plain env instead of *_FILE secrets, no ingress-TLS /
+# network-policies / disruption budgets. Higress is installed separately via
+# the higress helm chart (see README); the reconciler server-side-applies
+# Higress CRs through the k8s API — the real desired-state routing path.
+#
+# Images come from the internal registry (REG placeholder): aep-control-service,
+# aep-gateway-authorizer, aep-gateway-reconciler 0.1.0; postgres 17.6-alpine;
+# minio RELEASE.2025-09-07T16-13-09Z.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aep-system
+---
+# ---------------------------------------------------------------- postgres
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: aep-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: 172.18.5.251:8081/zhiyuan/postgres:17.6-alpine
+          env:
+            - {name: POSTGRES_DB, value: aep}
+            - {name: POSTGRES_USER, value: aep}
+            - {name: POSTGRES_PASSWORD, value: aep}
+          ports: [{containerPort: 5432}]
+          readinessProbe: {exec: {command: [pg_isready, -U, aep, -d, aep]}, initialDelaySeconds: 5, periodSeconds: 5}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-data}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: aep-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: aep-system}
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+# ---------------------------------------------------------------- minio
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: aep-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: minio}}
+  template:
+    metadata: {labels: {app: minio}}
+    spec:
+      containers:
+        - name: minio
+          image: 172.18.5.251:8081/zhiyuan/minio:RELEASE.2025-09-07T16-13-09Z
+          args: [server, /data, --console-address, ":9001"]
+          env:
+            - {name: MINIO_ROOT_USER, value: minioadmin}
+            - {name: MINIO_ROOT_PASSWORD, value: minioadmin}
+          ports: [{containerPort: 9000}, {containerPort: 9001}]
+          readinessProbe: {httpGet: {path: /minio/health/ready, port: 9000}, initialDelaySeconds: 5, periodSeconds: 5}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: minio-data}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: aep-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: minio, namespace: aep-system}
+spec:
+  selector: {app: minio}
+  ports: [{name: api, port: 9000, targetPort: 9000}, {name: console, port: 9001, targetPort: 9001}]
+---
+# ---------------------------------------------------------------- control-service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aep-control-service-config
+  namespace: aep-system
+data:
+  AEP_ENVIRONMENT: development
+  AEP_LOG_FORMAT: text
+  AEP_LOG_LEVEL: info
+  AEP_ADDRESS: ":8080"
+  AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
+  AEP_MINIO_ENDPOINT: minio:9000
+  AEP_MINIO_ACCESS_KEY: minioadmin
+  AEP_MINIO_SECRET_KEY: minioadmin
+  AEP_MINIO_BUCKET: aep-skills
+  AEP_ISSUER: http://aep-control-service.aep-system.svc.cluster.local:8080
+  AEP_SIGNING_KEY_BASE64: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+  AEP_CREDENTIAL_MASTER_KEY_BASE64: QUVQLU0yLWNyZWRlbnRpYWwta2V5LTMyLWJ5dGVzISE=
+  AEP_MODEL_GATEWAY_BASE_URL: http://aep-gateway-authorizer:8090/v1
+  AEP_MODEL_ACCESS_TTL: 15m
+  AEP_MAX_RESIDENT_AGENTS: "100"
+  AEP_DEPLOYMENT_ID: demo
+  AEP_DEPLOYMENT_NAME: Demo Deployment
+  AEP_BOOTSTRAP_ENTERPRISE_ID: demo
+  AEP_BOOTSTRAP_ENTERPRISE_NAME: Demo Enterprise
+  AEP_BOOTSTRAP_ADMIN_USERNAME: admin
+  AEP_BOOTSTRAP_ADMIN_PASSWORD: change-this-admin-password
+  AEP_DATA_PLANE_RECONCILER_TOKEN: m3-local-reconciler-token
+  AEP_GATEWAY_LICENSE_STATUS_TOKEN: m1-local-license-status-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-control-service
+  namespace: aep-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: aep-control-service}}
+  template:
+    metadata: {labels: {app: aep-control-service}}
+    spec:
+      containers:
+        - name: control
+          image: 172.18.5.251:8081/zhiyuan/aep-control-service:0.1.0
+          envFrom: [{configMapRef: {name: aep-control-service-config}}]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /readyz, port: 8080}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 24}
+      serviceAccountName: aep-control-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: aep-control-service, namespace: aep-system}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata: {name: aep-control-service, namespace: aep-system}
+spec:
+  type: NodePort
+  selector: {app: aep-control-service}
+  ports: [{port: 8080, targetPort: 8080, nodePort: 30180}]
+---
+# ---------------------------------------------------------------- authorizer
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aep-gateway-authorizer-config
+  namespace: aep-system
+data:
+  AEP_ENVIRONMENT: development
+  AEP_LOG_FORMAT: text
+  AEP_LOG_LEVEL: info
+  AEP_GATEWAY_ADDRESS: ":8090"
+  AEP_GATEWAY_UPSTREAM_URL: http://higress-gateway.higress-system.svc.cluster.local:80
+  AEP_GATEWAY_JWKS_URL: http://aep-control-service.aep-system.svc.cluster.local:8080/.well-known/jwks.json
+  AEP_GATEWAY_ISSUER: http://aep-control-service.aep-system.svc.cluster.local:8080
+  AEP_GATEWAY_JWKS_TTL: 5m
+  AEP_GATEWAY_JWKS_TIMEOUT: 2s
+  AEP_GATEWAY_UPSTREAM_HEADER_TIMEOUT: 15s
+  AEP_GATEWAY_REQUEST_LIMIT: "2097152"
+  AEP_GATEWAY_REQUIRE_ENTITLEMENT: "false"
+  AEP_GATEWAY_LICENSE_STATUS_URL: http://aep-control-service.aep-system.svc.cluster.local:8080/internal/gateway/licenses
+  AEP_GATEWAY_LICENSE_STATUS_TOKEN: m1-local-license-status-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-gateway-authorizer
+  namespace: aep-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: aep-gateway-authorizer}}
+  template:
+    metadata: {labels: {app: aep-gateway-authorizer}}
+    spec:
+      containers:
+        - name: authorizer
+          image: 172.18.5.251:8081/zhiyuan/aep-gateway-authorizer:0.1.0
+          envFrom: [{configMapRef: {name: aep-gateway-authorizer-config}}]
+          ports: [{containerPort: 8090}]
+          readinessProbe: {httpGet: {path: /readyz, port: 8090}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 24}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: aep-gateway-authorizer, namespace: aep-system}
+spec:
+  selector: {app: aep-gateway-authorizer}
+  ports: [{port: 8090, targetPort: 8090}]
+---
+# ---------------------------------------------------------------- reconciler
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aep-gateway-reconciler-config
+  namespace: aep-system
+data:
+  AEP_RECONCILER_CONTROL_URL: http://aep-control-service.aep-system.svc.cluster.local:8080
+  AEP_RECONCILER_TENANTS: demo
+  AEP_RECONCILER_ADDRESS: ":8091"
+  AEP_RECONCILER_OUTPUT_DIR: /var/lib/aep-reconciler
+  AEP_RECONCILER_INTERVAL: 15s
+  AEP_DATA_PLANE_RECONCILER_TOKEN: m3-local-reconciler-token
+  AEP_RECONCILER_KUBERNETES_URL: https://kubernetes.default.svc
+  AEP_RECONCILER_KUBERNETES_TOKEN_FILE: /var/run/secrets/kubernetes.io/serviceaccount/token
+  AEP_RECONCILER_KUBERNETES_CA_FILE: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-gateway-reconciler
+  namespace: aep-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: aep-gateway-reconciler}}
+  template:
+    metadata: {labels: {app: aep-gateway-reconciler}}
+    spec:
+      serviceAccountName: aep-gateway-reconciler
+      containers:
+        - name: reconciler
+          image: 172.18.5.251:8081/zhiyuan/aep-gateway-reconciler:0.1.2
+          envFrom: [{configMapRef: {name: aep-gateway-reconciler-config}}]
+          ports: [{name: health, containerPort: 8091}]
+          readinessProbe: {httpGet: {path: /readyz, port: 8091}, initialDelaySeconds: 8, periodSeconds: 5, failureThreshold: 24}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: aep-gateway-reconciler, namespace: aep-system}
+spec:
+  selector: {app: aep-gateway-reconciler}
+  ports: [{name: health, port: 8091, targetPort: health}]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: aep-gateway-reconciler, namespace: aep-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: aep-gateway-reconciler, namespace: higress-system}
+rules:
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch, create, patch, update, delete]
+  - apiGroups: [extensions.higress.io]
+    resources: [wasmplugins]
+    verbs: [get, list, watch, create, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: aep-gateway-reconciler, namespace: higress-system}
+subjects: [{kind: ServiceAccount, name: aep-gateway-reconciler, namespace: aep-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: aep-gateway-reconciler}
