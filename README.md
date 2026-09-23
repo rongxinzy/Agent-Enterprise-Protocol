@@ -46,6 +46,11 @@ The protocol specification remains an initial draft and may still receive breaki
 The M3 enterprise-foundation implementation is a 95% release candidate for independent
 integration and controlled pilots; it is not a general-availability release.
 
+## Related repositories
+
+- **Zhiyuan digital-employee platform docs** (private): [rongxinzy/zhiyuan-docs](https://github.com/rongxinzy/zhiyuan-docs) — product design, governance whitepaper, requirements, architecture, API guides, and the k3s bring-up runbook for deployments built on AEP.
+- **AEP DeerFlow governance middleware** (private): [rongxinzy/aep-deerflow-governance](https://github.com/rongxinzy/aep-deerflow-governance) — reference runtime adapter applying AEP identity/data-scope semantics on the DeerFlow agent runtime.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
