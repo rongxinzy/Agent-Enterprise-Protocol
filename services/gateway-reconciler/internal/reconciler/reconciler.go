@@ -9,12 +9,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 )
+
+// aiProxyPluginVersion pins the Higress built-in ai-proxy wasm build the
+// rendered WasmPlugin references (oci:// tag).
+const aiProxyPluginVersion = "2.0.1"
 
 type Config struct {
 	ControlURL string
@@ -198,17 +203,23 @@ func Render(desired DesiredState) (string, string, error) {
 	if len(enabled) > 0 {
 		document.WriteString("  rules:\n    - http:\n        paths:\n")
 		for _, route := range enabled {
-			document.WriteString("          - path: " + yamlScalar(route.Endpoint) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
+			document.WriteString("          - path: " + yamlScalar(ingressPath(route.Endpoint)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
 		}
 	}
-	document.WriteString("---\napiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
+	document.WriteString("---\napiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar("oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-proxy:"+aiProxyPluginVersion) + "\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
 	if len(enabled) == 0 {
 		document.WriteString("  matchRules: []\n")
 	} else {
 		document.WriteString("  matchRules:\n")
 	}
 	for _, route := range enabled {
-		document.WriteString("    - config:\n        provider:\n          type: " + yamlScalar(route.ProviderType) + "\n          modelMapping:\n            " + yamlScalar(route.ModelID) + ": " + yamlScalar(route.UpstreamModel) + "\n")
+		document.WriteString("    - config:\n        provider:\n          type: " + yamlScalar(route.ProviderType) + "\n")
+		if custom, ok := upstreamURL(route.Endpoint); ok {
+			// A full URL endpoint routes the provider at that base; without
+			// one the provider type's default upstream applies.
+			document.WriteString("          openaiCustomUrl: " + yamlScalar(custom) + "\n")
+		}
+		document.WriteString("          modelMapping:\n            " + yamlScalar(route.ModelID) + ": " + yamlScalar(route.UpstreamModel) + "\n")
 		if route.CredentialRef != nil {
 			document.WriteString("        credentialRef:\n          name: " + yamlScalar(route.CredentialRef.Name) + "\n          key: " + yamlScalar(route.CredentialRef.Key) + "\n")
 			if route.CredentialRef.Namespace != nil {
@@ -236,6 +247,33 @@ func canonicalHash(desired DesiredState) string {
 func yamlScalar(value string) string {
 	value = strings.ReplaceAll(value, "'", "''")
 	return "'" + value + "'"
+}
+
+// ingressPath maps a route endpoint to the Ingress path prefix. Endpoints
+// carry either an absolute URL (http://host/v1) or a bare path (/v1): the
+// URL form contributes its path (defaulting to /v1), the bare form is used
+// verbatim.
+func ingressPath(endpoint string) string {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return endpoint
+	}
+	if parsed.Path != "" {
+		return parsed.Path
+	}
+	return "/v1"
+}
+
+// upstreamURL returns the endpoint's absolute base URL (scheme://host plus
+// path — ai-proxy's openaiCustomUrl appends the API route to it) when the
+// endpoint carries one.
+func upstreamURL(endpoint string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", false
+	}
+	base := parsed.Scheme + "://" + parsed.Host + parsed.Path
+	return strings.TrimSuffix(base, "/"), true
 }
 
 func resourceSuffix(value string) string {
