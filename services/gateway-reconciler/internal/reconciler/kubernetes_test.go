@@ -39,7 +39,7 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := DesiredState{DeploymentID: "Demo Tenant", Revision: "rev-1", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "upstream", Protocol: "openai-compatible"}}}
-	document, _, err := Render(desired)
+	document, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestKubernetesApplierHandlesDeletedAndRejectedIngress(t *testing.T) {
 				t.Fatal(err)
 			}
 			desired := DesiredState{DeploymentID: "demo", Revision: "rev-1"}
-			document, _, err := Render(desired)
+			document, _, err := Render(desired, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +148,7 @@ func TestKubernetesApplierStopsAfterPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible"}}}
-	document, _, err := Render(desired)
+	document, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestKubernetesApplierDeletesIngressWhenAllRoutesAreDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-disabled", Routes: []Route{{ModelID: "chat", Enabled: false, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible"}}}
-	document, _, err := Render(desired)
+	document, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

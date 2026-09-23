@@ -24,24 +24,34 @@ func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ string) er
 
 func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", ContentHash: "ignored", Routes: []Route{{ModelID: "model-b", Enabled: true, Endpoint: "/b", UpstreamModel: "up-b", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-b"}}, {ModelID: "model-a", Enabled: true, Endpoint: "/a", UpstreamModel: "up-a", Protocol: "openai-compatible"}}}
-	first, firstHash, err := Render(desired)
+	first, firstHash, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, secondHash, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}})
+	second, secondHash, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first != second || firstHash != secondHash {
 		t.Fatal("render output is not deterministic")
 	}
-	if strings.Contains(first, "provider-secret-value") || !strings.Contains(first, "provider-secrets") {
-		t.Fatal("Secret value policy was not preserved")
+	// With nil credential values the render omits apiTokens entirely; the
+	// credentialRef name stays a lookup key and never reaches the document.
+	if strings.Contains(first, "provider-secret-value") {
+		t.Fatal("secret value leaked into render without credential fetcher")
+	}
+	// With the value resolved, it inlines as an apiToken for ai-proxy.
+	withCredentials, _, err := Render(desired, map[string]string{"provider-secrets/model-b": "provider-secret-value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(withCredentials, "provider-secret-value") {
+		t.Fatal("resolved credential was not inlined as an apiToken")
 	}
 }
 
 func TestRenderRejectsMissingRevision(t *testing.T) {
-	if _, _, err := Render(DesiredState{DeploymentID: "demo"}); err == nil {
+	if _, _, err := Render(DesiredState{DeploymentID: "demo"}, nil); err == nil {
 		t.Fatal("missing revision was accepted")
 	}
 }
@@ -50,7 +60,7 @@ func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-deepseek", Routes: []Route{{
 		ModelID: "reasoner", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Protocol: "openai-compatible", ProviderType: "deepseek",
 	}}}
-	document, _, err := Render(desired)
+	document, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +68,7 @@ func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
 		t.Fatalf("DeepSeek provider was not rendered: %s", document)
 	}
 	desired.Routes[0].ProviderType = "unknown"
-	if _, _, err := Render(desired); err == nil {
+	if _, _, err := Render(desired, nil); err == nil {
 		t.Fatal("unsupported provider type was accepted")
 	}
 }
@@ -99,8 +109,10 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "provider-secrets") || strings.Contains(string(content), "provider-secret-value") {
-		t.Fatalf("unexpected rendered resource: %s", content)
+	// Without a CredentialFetcher the render omits apiTokens (no value leak);
+	// the credentialRef name stays a lookup key internal to the reconciler.
+	if strings.Contains(string(content), "provider-secret-value") {
+		t.Fatalf("secret value leaked without credential fetcher: %s", content)
 	}
 	if len(statuses) != 2 || statuses[0].State != "applying" || statuses[1].State != "ready" {
 		t.Fatalf("unexpected status transitions: %#v", statuses)

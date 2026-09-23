@@ -28,6 +28,11 @@ type Config struct {
 	Tenants    []string
 	HTTPClient *http.Client
 	Applier    Applier
+	// CredentialFetcher resolves credentialRef values for the rendered
+	// WasmPlugin (ai-proxy requires inline apiTokens). When nil, routes with
+	// credentialRefs render without tokens — ai-proxy then rejects requests
+	// to those providers.
+	CredentialFetcher func(ctx context.Context, ref SecretReference) (string, error)
 }
 
 type SecretReference struct {
@@ -95,7 +100,8 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 	if err := r.writeStatus(ctx, tenant, Status{State: "applying", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, ResourceCount: len(desired.Routes)}); err != nil {
 		return err
 	}
-	document, _, err := Render(desired)
+	credentials := r.fetchCredentials(ctx, desired)
+	document, _, err := Render(desired, credentials)
 	if err != nil {
 		return r.writeFailure(ctx, tenant, "RENDER_FAILED", err)
 	}
@@ -169,13 +175,38 @@ func (r *Reconciler) writeFailure(ctx context.Context, tenant, code string, caus
 	return fmt.Errorf("%s: %w", code, cause)
 }
 
+// fetchCredentials resolves every route's credentialRef to its value via the
+// configured CredentialFetcher. Unresolvable refs are logged and skipped —
+// the route renders without an apiToken and ai-proxy rejects its requests.
+func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState) map[string]string {
+	if r.config.CredentialFetcher == nil {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, route := range desired.Routes {
+		if route.CredentialRef == nil || !route.Enabled {
+			continue
+		}
+		key := route.CredentialRef.Name + "/" + route.CredentialRef.Key
+		if _, done := out[key]; done {
+			continue
+		}
+		value, err := r.config.CredentialFetcher(ctx, *route.CredentialRef)
+		if err != nil {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func (r *Reconciler) addHeaders(request *http.Request, tenant string) {
 	request.Header.Set("X-AEP-Data-Plane-Token", r.config.Token)
 	request.Header.Set("X-AEP-Deployment-ID", tenant)
 	request.Header.Set("X-AEP-Protocol-Version", "1.0")
 }
 
-func Render(desired DesiredState) (string, string, error) {
+func Render(desired DesiredState, credentialValues map[string]string) (string, string, error) {
 	routes := append([]Route(nil), desired.Routes...)
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ModelID < routes[j].ModelID })
 	if desired.Revision == "" {
@@ -215,16 +246,15 @@ func Render(desired DesiredState) (string, string, error) {
 	for _, route := range enabled {
 		document.WriteString("    - config:\n        provider:\n          type: " + yamlScalar(route.ProviderType) + "\n")
 		if custom, ok := upstreamURL(route.Endpoint); ok {
-			// A full URL endpoint routes the provider at that base; without
-			// one the provider type's default upstream applies.
 			document.WriteString("          openaiCustomUrl: " + yamlScalar(custom) + "\n")
 		}
 		document.WriteString("          modelMapping:\n            " + yamlScalar(route.ModelID) + ": " + yamlScalar(route.UpstreamModel) + "\n")
 		if route.CredentialRef != nil {
-			document.WriteString("        credentialRef:\n          name: " + yamlScalar(route.CredentialRef.Name) + "\n          key: " + yamlScalar(route.CredentialRef.Key) + "\n")
-			if route.CredentialRef.Namespace != nil {
-				document.WriteString("          namespace: " + yamlScalar(*route.CredentialRef.Namespace) + "\n")
+			if value, ok := credentialValues[route.CredentialRef.Name+"/"+route.CredentialRef.Key]; ok && value != "" {
+				document.WriteString("          apiTokens:\n            - " + yamlScalar(value) + "\n")
 			}
+		}
+		if route.CredentialRef != nil {
 		}
 		document.WriteString("      ingress:\n        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
 	}

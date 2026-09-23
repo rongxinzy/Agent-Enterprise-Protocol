@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -135,4 +137,44 @@ func (a *KubernetesApplier) delete(ctx context.Context, path string) error {
 		return fmt.Errorf("Kubernetes delete %s returned %d: %s", path, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+// ReadSecret reads one key from a Kubernetes Secret in higress-system and
+// returns the value. Serves as the CredentialFetcher for routes whose
+// credentialRef names a Secret there.
+func (a *KubernetesApplier) ReadSecret(ctx context.Context, name, key string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		a.baseURL+"/api/v1/namespaces/higress-system/secrets/"+name, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+a.token)
+	request.Header.Set("Accept", "application/json")
+	response, err := a.client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	_ = response.Body.Close()
+	if readErr != nil {
+		return "", readErr
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("read secret %s returned %d", name, response.StatusCode)
+	}
+	var secret struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(body, &secret); err != nil {
+		return "", err
+	}
+	encoded, ok := secret.Data[key]
+	if !ok {
+		return "", fmt.Errorf("secret %s has no key %s", name, key)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("secret %s key %s is not valid base64: %w", name, key, err)
+	}
+	return string(decoded), nil
 }

@@ -76,6 +76,11 @@ func loadConfig() (serverConfig, error) {
 		if err != nil {
 			return serverConfig{}, err
 		}
+		if applier, ok := workerConfig.Applier.(*reconciler.KubernetesApplier); ok {
+			workerConfig.CredentialFetcher = func(ctx context.Context, ref reconciler.SecretReference) (string, error) {
+				return applier.ReadSecret(ctx, ref.Name, ref.Key)
+			}
+		}
 	}
 	return serverConfig{worker: workerConfig, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
 }
