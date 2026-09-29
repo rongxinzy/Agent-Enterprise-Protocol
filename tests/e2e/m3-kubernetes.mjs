@@ -16,6 +16,7 @@ const controlUrl = `http://127.0.0.1:${controlPort}`;
 const kubeUrl = `http://127.0.0.1:${proxyPort}`;
 const work = await mkdtemp(path.join(tmpdir(), 'aep-m3-kind-'));
 const binary = path.join(work, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
+const providerSecretValue = 'kind-e2e-provider-secret-value';
 let desired = state('rev-kind-1', [{modelId: 'chat', enabled: true, endpoint: '/v1/chat', upstreamModel: 'kind-upstream', protocol: 'openai-compatible', providerType: 'deepseek', credentialRef: {name: 'provider-secrets', key: 'api-key', namespace: 'higress-system'}}]);
 let observed = {};
 let controlAvailable = true;
@@ -47,6 +48,7 @@ try {
   await command('kubectl', ['--context', context, 'create', 'namespace', 'higress-system']);
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-wasmplugin-crd.yaml')]);
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'service', 'clusterip', 'aep-model-gateway', '--tcp=80:8080']);
+  await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'secret', 'generic', 'provider-secrets', `--from-literal=api-key=${providerSecretValue}`]);
   await listen(control, controlPort);
   proxy = spawn('kubectl', ['--context', context, 'proxy', '--port', String(proxyPort), '--accept-hosts=.*'], {cwd: root, stdio: 'ignore', shell: false});
   await waitFor(async () => assert((await fetch(`${kubeUrl}/version`)).ok, 'kubectl proxy is not ready'));
@@ -60,8 +62,9 @@ try {
   const ingress = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'ingress', ingressName, '-o', 'json']));
   assert(ingress.spec.rules[0].http.paths[0].path === '/v1/chat', 'real Kubernetes Ingress route was incorrect');
   const plugin = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', pluginName, '-o', 'json']));
-  assert(plugin.spec.matchRules[0].config.credentialRef.name === 'provider-secrets', 'Higress resource omitted the Secret reference');
   assert(plugin.spec.matchRules[0].config.provider.type === 'deepseek', 'Higress resource did not select the DeepSeek provider');
+  assert(plugin.spec.matchRules[0].config.provider.apiTokens?.[0] === providerSecretValue, 'resolved Secret value was not inlined as an ai-proxy apiToken');
+  assert(!('credentialRef' in plugin.spec.matchRules[0].config), 'credentialRef leaked into the rendered Higress resource');
 
   controlAvailable = false;
   await waitForHealth('/readyz', 503);
