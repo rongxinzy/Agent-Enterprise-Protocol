@@ -118,7 +118,11 @@ data:
   AEP_ISSUER: http://aep-control-service.aep-system.svc.cluster.local:8080
   AEP_SIGNING_KEY_BASE64: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
   AEP_CREDENTIAL_MASTER_KEY_BASE64: QUVQLU0yLWNyZWRlbnRpYWwta2V5LTMyLWJ5dGVzISE=
-  AEP_MODEL_GATEWAY_BASE_URL: http://aep-gateway-authorizer:8090/v1
+  # This URL is delivered verbatim to clients through /aep/v1/metadata, so it
+  # must be reachable from outside the cluster. localhost works when clients
+  # run on the k3s node itself; replace it with the node address (for example
+  # http://<node-ip>:30181/v1) when clients connect from other machines.
+  AEP_MODEL_GATEWAY_BASE_URL: http://localhost:30181/v1
   AEP_MODEL_ACCESS_TTL: 15m
   AEP_MAX_RESIDENT_AGENTS: "100"
   AEP_DEPLOYMENT_ID: demo
@@ -206,8 +210,11 @@ apiVersion: v1
 kind: Service
 metadata: {name: aep-gateway-authorizer, namespace: aep-system}
 spec:
+  # NodePort so model inference from agents outside the cluster can reach the
+  # gateway; keep in sync with AEP_MODEL_GATEWAY_BASE_URL above.
+  type: NodePort
   selector: {app: aep-gateway-authorizer}
-  ports: [{port: 8090, targetPort: 8090}]
+  ports: [{port: 8090, targetPort: 8090, nodePort: 30181}]
 ---
 # ---------------------------------------------------------------- reconciler
 apiVersion: v1

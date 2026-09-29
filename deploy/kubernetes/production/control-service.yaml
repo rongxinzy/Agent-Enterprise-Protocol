@@ -10,6 +10,9 @@ data:
   AEP_LOG_LEVEL: info
   AEP_ADDRESS: ":8080"
   AEP_ISSUER: https://aep.example.com
+  # Client-facing model gateway URL, delivered through /aep/v1/metadata. Must
+  # match the aep-model-api ingress host in ingress-tls.yaml.
+  AEP_MODEL_GATEWAY_BASE_URL: https://models.aep.example.com/v1
   AEP_MINIO_ENDPOINT: minio.example.internal:9000
   AEP_MINIO_BUCKET: aep-skills
   AEP_MINIO_SECURE: "true"
