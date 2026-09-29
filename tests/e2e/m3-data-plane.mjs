@@ -20,6 +20,12 @@ const composeEnv = {AEP_PORT: port, AEP_MINIO_CONSOLE_PORT: process.env.AEP_M3_M
 const outputDir = await mkdtemp(path.join(tmpdir(), 'aep-m3-reconciler-'));
 const reconcilerBinary = path.join(outputDir, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
 const resources = new Map();
+// Fixture Secret store the mock Kubernetes API serves to the reconciler's
+// credentialRef reads (KubernetesApplier.ReadSecret GETs these).
+const kubeSecrets = new Map([
+  ['provider-secrets', {'api-key-a': 'provider-secret-value-a', 'api-key-c': 'provider-secret-value-c', 'api-key-d': 'provider-secret-value-d'}],
+  ['provider-secrets-v2', {'api-key-b': 'provider-secret-value-b'}],
+]);
 let kubeAvailable = true;
 let failWasm = false;
 let applyCount = 0;
@@ -39,6 +45,19 @@ const kubeServer = createServer(async (request, response) => {
     return;
   }
   const target = new URL(request.url, kubeUrl);
+  if (request.method === 'GET') {
+    const match = /^\/api\/v1\/namespaces\/higress-system\/secrets\/([^/]+)$/.exec(target.pathname);
+    assert(match, `unexpected Kubernetes GET path ${target.pathname}`);
+    assert(request.headers.authorization === 'Bearer m3-kubernetes-service-account', 'Kubernetes bearer token was missing on the Secret read');
+    const data = kubeSecrets.get(match[1]);
+    if (!data) {
+      response.writeHead(404, {'content-type': 'application/json'}).end('{"message":"Secret not found"}');
+      return;
+    }
+    const encoded = Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Buffer.from(value, 'utf8').toString('base64')]));
+    response.writeHead(200, {'content-type': 'application/json'}).end(JSON.stringify({data: encoded}));
+    return;
+  }
   if (request.method === 'DELETE') {
     resources.delete(target.pathname);
     applyCount++;
@@ -72,6 +91,10 @@ try {
   const firstCount = applyCount;
   const firstResources = snapshot();
   assert(firstResources.includes("type: 'deepseek'"), 'DeepSeek provider type was not rendered');
+  assert(firstResources.includes("apiTokens:\n            - 'provider-secret-value-a'"), 'resolved Secret value was not inlined as an ai-proxy apiToken');
+  assert(!firstResources.includes('credentialRef'), 'credentialRef leaked into the rendered Higress resources');
+  assert(!JSON.stringify(first).includes('provider-secret-value-a'), 'Secret value leaked into the desired-state response');
+  assert(!JSON.stringify(await admin.getDataPlaneStatus()).includes('provider-secret-value-a'), 'Secret value leaked into the data-plane status');
 
   const repeated = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
   assert(repeated.contentHash === first.contentHash, 'same revision was not idempotent');
@@ -81,8 +104,9 @@ try {
   await admin.putDataPlaneDesiredState({revision: 'rev-2', routes: [route('chat', '/v1/responses', 'provider-b', 'api-key-b', 'provider-secrets-v2')]});
   await waitForReady(admin, 'rev-2');
   assert(snapshot().includes('/v1/responses'), 'route update was not applied');
-  assert(snapshot().includes('provider-secrets-v2') && snapshot().includes('api-key-b'), 'Secret reference rotation was not applied');
-  assert(!snapshot().includes('provider-secret-value'), 'provider Secret value leaked into Kubernetes resources');
+  assert(snapshot().includes("apiTokens:\n            - 'provider-secret-value-b'"), 'rotated Secret value was not inlined as an ai-proxy apiToken');
+  assert(!snapshot().includes('provider-secret-value-a'), 'previous Secret value remained after Secret rotation');
+  assert(!snapshot().includes('credentialRef') && !snapshot().includes('provider-secrets-v2'), 'Secret reference leaked into the rendered Higress resources');
 
   for (const key of resources.keys()) resources.set(key, 'drifted-by-operator');
   await waitFor(() => assert(!snapshot().includes('drifted-by-operator'), 'drift was not corrected'));
