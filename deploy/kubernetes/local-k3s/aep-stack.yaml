@@ -71,7 +71,9 @@ spec:
     spec:
       containers:
         - name: minio
-          image: 172.18.5.251:8081/zhiyuan/minio:RELEASE.2025-09-07T16-13-09Z
+          # MinIO-compatible Silo fork; mirror docker.io/pgsty/silo:RELEASE.2026-08-06T00-00-00Z
+          # into the internal registry under this name before applying.
+          image: 172.18.5.251:8081/zhiyuan/silo:RELEASE.2026-08-06T00-00-00Z
           args: [server, /data, --console-address, ":9001"]
           env:
             - {name: MINIO_ROOT_USER, value: minioadmin}
