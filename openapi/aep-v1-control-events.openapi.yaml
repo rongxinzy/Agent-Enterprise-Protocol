@@ -223,6 +223,13 @@ components:
       properties:
         lastControlEventCursor: {type: [string, 'null']}
         status: {type: string, enum: [online, idle, busy]}
+        client:
+          description: >-
+            Optional client identity refresh. When present, the server replaces
+            the client identity recorded on the session, so client version
+            upgrades become visible without a new login. No User-Agent fallback
+            is applied here.
+          $ref: './aep-v1-authentication.openapi.yaml#/components/schemas/ClientIdentity'
     HeartbeatResponse:
       type: object
       required: [serverTime, controlEvents, nextHeartbeatAfterSeconds]

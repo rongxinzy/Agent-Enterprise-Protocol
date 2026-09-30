@@ -1330,11 +1330,22 @@ export interface components {
             code: string;
             requestId?: string;
         };
+        /** @description Self-reported client software identity recorded on a user session, for example the Admin Console browser or a managed desktop client. These values are administrative hints; they are not verified claims. */
+        ClientIdentity: {
+            /** @description Client software name, for example zhiyuan-desktop or zhiyuan-admin-console. */
+            name: string;
+            /** @description Client software version. */
+            version?: string;
+            /** @description Stable installation or device identifier chosen by the client. */
+            deviceId?: string;
+        };
         PasswordLoginRequest: {
             deploymentId: string;
             sessionId?: string;
             username: string;
             password: string;
+            /** @description Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent. */
+            client?: components["schemas"]["ClientIdentity"];
         };
         TokenResponse: {
             /** @description Bearer token for AEP management APIs. */
@@ -1438,6 +1449,8 @@ export interface components {
             lastControlEventCursor?: string | null;
             /** @enum {string} */
             status: "online" | "idle" | "busy";
+            /** @description Optional client identity refresh. When present, the server replaces the client identity recorded on the session, so client version upgrades become visible without a new login. No User-Agent fallback is applied here. */
+            client?: components["schemas"]["ClientIdentity"];
         };
         HeartbeatResponse: {
             /** Format: date-time */
@@ -3518,6 +3531,8 @@ export interface operations {
                             lastSeenAt: string;
                             /** Format: date-time */
                             revokedAt?: string | null;
+                            /** @description Client identity recorded when the session was issued (self-reported or derived from User-Agent), or null when no identity is known. */
+                            client?: components["schemas"]["ClientIdentity"] | null;
                         }[];
                         nextCursor?: string | null;
                     };

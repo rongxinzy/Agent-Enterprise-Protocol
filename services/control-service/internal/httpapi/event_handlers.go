@@ -20,6 +20,9 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 	var input struct {
 		Status                 string  `json:"status"`
 		LastControlEventCursor *string `json:"lastControlEventCursor"`
+		// Optional client identity refresh; applied to the session as-is with no
+		// User-Agent fallback, so version upgrades can overwrite a stale label.
+		Client *sessionClientInput `json:"client"`
 		// Legacy fields are accepted during the SDK/RBAC identity cutover.
 		AgentVersion         string   `json:"agentVersion"`
 		Platform             string   `json:"platform"`
@@ -29,10 +32,21 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	if input.Client != nil && !input.Client.valid() {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The client identity is invalid.")
+		return
+	}
 	claims := claimsFrom(request)
 	if claims.SessionID == "" {
 		writeProblem(response, request, http.StatusUnauthorized, "SESSION_REQUIRED", "A user session is required.")
 		return
+	}
+	if input.Client != nil {
+		clientName, clientVersion, clientDeviceID := input.Client.identity().NullableArgs()
+		if _, err := s.app.Database().Exec(request.Context(), `UPDATE user_sessions SET client_name=$2,client_version=$3,client_device_id=$4 WHERE session_id=$1`, claims.SessionID, clientName, clientVersion, clientDeviceID); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
 	}
 	s.heartbeatUserSession(response, request, claims.SessionID, input.LastControlEventCursor)
 }

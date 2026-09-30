@@ -103,13 +103,20 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
   "deploymentId": "deployment_001",
   "sessionId": "terminal_01",
   "username": "liming",
-  "password": "user-entered-password"
+  "password": "user-entered-password",
+  "client": {"name": "zhiyuan-desktop", "version": "1.4.0", "deviceId": "device_42"}
 }
 ```
 
 账号由管理员手动创建或批量导入，不代表开放自助注册。任何部署阶段的密码登录都可以使用
 HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token，因此在可信内网之外
 强烈建议使用 HTTPS。
+
+`client` 为可选字段。提供时会记录到签发的会话上，并通过 `GET /admin/sessions` 暴露，
+便于管理员在撤销会话前区分不同终端。`name` 必填（1-64 字符）；`version`（最多 64 字符）
+和 `deviceId`（最多 128 字符）可选。未提供该字段时，服务端从 User-Agent
+推导一个粗粒度标签（`browser`、`electron`、`node` 或 `curl`），无法识别则不记录。
+这些值是客户端自报的管理提示，不是经过验证的声明。
 
 ### `POST /auth/password/change`
 
@@ -307,6 +314,10 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 }
 ```
 
+可选的 `client` 对象（形状与密码登录一致）会替换会话上记录的客户端标识，客户端升级
+版本号后无需重新登录即可在 `GET /admin/sessions` 中体现。与登录不同，心跳不做
+User-Agent 回退；未提供该字段时会话保留已记录的标识。
+
 ```json
 {
   "serverTime": "2026-08-19T08:00:00Z",
@@ -478,6 +489,11 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PUT | `/admin/users/{userId}/rbac` | 替换用户的角色和团队绑定 |
 | GET | `/admin/sessions` | 查询用户会话及心跳状态 |
 | POST | `/admin/sessions/{sessionId}/revoke` | 撤销一个用户会话 |
+
+`GET /admin/sessions` 的每一项带有可选的 `client` 对象
+（如 `{"name": "zhiyuan-desktop", "version": "1.4.0", "deviceId": "device_42"}`），
+未知时为 `null`。它用于区分同一账号的不同终端（例如 Admin Console 浏览器登录与企业
+桌面客户端），避免管理员撤销错误的会话行。
 
 团队构成一个森林。`POST /admin/teams` 接受可选的 `parentId`，每个团队都带有创建时即固定的
 `path` 和 `depth`；父团队创建后不可变更，因此不可能出现环形层级。删除仍被引用的团队时，

@@ -33,6 +33,7 @@ import type {
   AepTransport,
   UserModelList,
   AuthenticationMethods,
+  ClientIdentity,
   ControlEventPage,
   CredentialAssignment,
   CredentialAssignmentList,
@@ -120,6 +121,12 @@ export class AepClient {
     sessionId?: string;
     username: string;
     password: string;
+    /**
+     * Optional client identity recorded on the issued session. Servers that
+     * predate the field reject the unknown key, so only send it to
+     * deployments that advertise session client identity support.
+     */
+    client?: ClientIdentity;
   }): Promise<AepTokens> {
     const tokens = await this.#send<AepTokens>(
       {
@@ -130,6 +137,7 @@ export class AepClient {
           username: input.username,
           password: input.password,
           sessionId: input.sessionId ?? this.#sessionId,
+          ...(input.client ? {client: input.client} : {}),
         }),
       },
       false,

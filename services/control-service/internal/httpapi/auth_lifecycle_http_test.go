@@ -64,8 +64,12 @@ func expectHTTPUserRoles(mock sqlmock.Sqlmock, deploymentID, userID string, role
 }
 
 func expectHTTPSessionIssue(pool pgxmock.PgxPoolIface, deploymentID, userID string) {
+	expectHTTPSessionIssueWithClient(pool, deploymentID, userID, nil, nil, nil)
+}
+
+func expectHTTPSessionIssueWithClient(pool pgxmock.PgxPoolIface, deploymentID, userID string, clientName, clientVersion, clientDeviceID any) {
 	pool.ExpectBegin()
-	pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), deploymentID, userID, "user:"+deploymentID+":"+userID).
+	pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), deploymentID, userID, "user:"+deploymentID+":"+userID, clientName, clientVersion, clientDeviceID).
 		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 	pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))

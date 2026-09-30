@@ -268,7 +268,7 @@ func TestModelScopesAndIssueUserSession(t *testing.T) {
 	expectUserRoles(sqlMock, "member", "operator")
 	pool.ExpectBegin()
 	pool.ExpectExec(`INSERT INTO user_sessions`).
-		WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").
+		WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a", nil, nil, nil).
 		WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 	pool.ExpectExec(`INSERT INTO user_session_tokens`).
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
@@ -280,7 +280,7 @@ func TestModelScopesAndIssueUserSession(t *testing.T) {
 
 	result, err := application.IssueUserSession(context.Background(), repository.User{
 		ID: "user-a", DeploymentID: "deployment-storage", Status: "active",
-	})
+	}, SessionClient{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestDatabaseUnavailableContracts(t *testing.T) {
 	if _, err := application.ModelScopes(context.Background(), "deployment-a", "user-a"); err == nil {
 		t.Fatal("ModelScopes accepted an unavailable database")
 	}
-	if _, err := application.IssueUserSession(context.Background(), repository.User{}); err == nil {
+	if _, err := application.IssueUserSession(context.Background(), repository.User{}, SessionClient{}); err == nil {
 		t.Fatal("IssueUserSession accepted an unavailable database")
 	}
 	if _, err := application.RefreshUserSession(context.Background(), "refresh", "session-a"); err == nil {
@@ -575,11 +575,11 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 		expectModelScopes(pool)
 		expectUserRoles(sqlMock, "member")
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+		pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a", nil, nil, nil).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 		pool.ExpectExec(`INSERT INTO user_session_tokens`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 		pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 0"))
 		pool.ExpectCommit()
-		result, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage", Status: "active", RequirePasswordChange: true})
+		result, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage", Status: "active", RequirePasswordChange: true}, SessionClient{})
 		if err != nil || !result.PasswordChangeRequired {
 			t.Fatalf("IssueUserSession() = %#v, %v", result, err)
 		}
@@ -591,7 +591,7 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 	t.Run("model scope error", func(t *testing.T) {
 		application, pool, _ := newMockApplication(t)
 		pool.ExpectQuery(`SELECT DISTINCT m\.id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("scope failed"))
-		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}, SessionClient{}); err == nil {
 			t.Fatal("IssueUserSession accepted a model scope failure")
 		}
 	})
@@ -599,7 +599,7 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 		application, pool, sqlMock := newMockApplication(t)
 		expectModelScopes(pool)
 		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role lookup failed"))
-		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}, SessionClient{}); err == nil {
 			t.Fatal("IssueUserSession accepted a role lookup failure")
 		}
 	})
@@ -608,7 +608,7 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 		expectModelScopes(pool)
 		expectUserRoles(sqlMock, "member")
 		pool.ExpectBegin().WillReturnError(errors.New("begin failed"))
-		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}, SessionClient{}); err == nil {
 			t.Fatal("IssueUserSession accepted a transaction failure")
 		}
 	})
@@ -617,9 +617,9 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 		expectModelScopes(pool)
 		expectUserRoles(sqlMock, "member")
 		pool.ExpectBegin()
-		pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").WillReturnError(errors.New("insert failed"))
+		pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a", nil, nil, nil).WillReturnError(errors.New("insert failed"))
 		pool.ExpectRollback()
-		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}); err == nil {
+		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}, SessionClient{}); err == nil {
 			t.Fatal("IssueUserSession accepted a session insert failure")
 		}
 	})
@@ -647,9 +647,9 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 			expectModelScopes(pool, "chat-a")
 			expectUserRoles(sqlMock, "member")
 			pool.ExpectBegin()
-			pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a").WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+			pool.ExpectExec(`INSERT INTO user_sessions`).WithArgs(pgxmock.AnyArg(), "deployment-a", "user-a", "user:deployment-a:user-a", nil, nil, nil).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
 			test.configure(pool)
-			result, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"})
+			result, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}, SessionClient{})
 			if err == nil || result.AccessToken != "" || result.RefreshToken != "" {
 				t.Fatalf("IssueUserSession() = %#v, %v; failed transaction exposed tokens", result, err)
 			}

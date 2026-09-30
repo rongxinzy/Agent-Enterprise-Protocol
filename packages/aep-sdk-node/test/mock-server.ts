@@ -14,6 +14,7 @@ export class MockAepServer {
   #dataPlaneRevision = 'rev-1';
   #modelGatewayOverride: string | null = null;
   readonly requests: Array<{method: string; path: string; search: string; headers: IncomingMessage['headers']}> = [];
+  readonly loginBodies: Record<string, unknown>[] = [];
   refreshCount = 0;
   baseUrl = '';
 
@@ -87,6 +88,7 @@ export class MockAepServer {
       });
     }
     if (path === '/aep/v1/auth/password/login') {
+      this.loginBodies.push(await readJson(request));
       this.#expireAccess = false;
       return json(response, 200, tokens(this.#validAccessToken, this.#validRefreshToken));
     }

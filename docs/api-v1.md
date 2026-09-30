@@ -105,7 +105,8 @@ Example: `GET /auth/methods?deploymentHint=deployment_001`
   "deploymentId": "deployment_001",
   "sessionId": "terminal_01",
   "username": "liming",
-  "password": "user-entered-password"
+  "password": "user-entered-password",
+  "client": {"name": "zhiyuan-desktop", "version": "1.4.0", "deviceId": "device_42"}
 }
 ```
 
@@ -113,6 +114,14 @@ The account is created or batch-imported by an administrator. Public
 registration is not implied. Password login may use HTTP or HTTPS in every
 deployment stage. HTTPS is strongly recommended outside a trusted private
 network because plain HTTP exposes credentials and bearer tokens in transit.
+
+`client` is optional. When present it is recorded on the issued session and
+surfaced by `GET /admin/sessions` so administrators can tell terminals apart
+before revoking one. `name` is required (1-64 characters); `version` (up to 64
+characters) and `deviceId` (up to 128 characters) are optional. When the field
+is omitted the server derives a coarse label from User-Agent (`browser`,
+`electron`, `node`, or `curl`) and otherwise leaves the identity unknown.
+These values are self-reported administrative hints, not verified claims.
 
 ### `POST /auth/password/change`
 
@@ -321,6 +330,12 @@ The heartbeat reports liveness and returns only control-event discovery metadata
 }
 ```
 
+An optional `client` object (same shape as on password login) replaces the
+client identity recorded on the session, so a client version upgrade becomes
+visible in `GET /admin/sessions` without a new login. Unlike login, no
+User-Agent fallback is applied here; sessions keep their stored identity when
+the field is absent.
+
 ```json
 {
   "serverTime": "2026-08-19T08:00:00Z",
@@ -502,6 +517,12 @@ Every user must have at least one role and one team when created or imported. Ev
 | PUT | `/admin/users/{userId}/rbac` | Replace a user's role and team bindings |
 | GET | `/admin/sessions` | List user sessions and heartbeat state |
 | POST | `/admin/sessions/{sessionId}/revoke` | Revoke one user session |
+
+`GET /admin/sessions` includes an optional `client` object per item
+(`{"name": "zhiyuan-desktop", "version": "1.4.0", "deviceId": "device_42"}`),
+which is `null` when no client identity is known. It distinguishes terminals of
+the same account — for example an Admin Console browser login from a managed
+desktop client — before an administrator revokes one.
 
 Teams form a forest. `POST /admin/teams` accepts an optional `parentId`, and
 every team carries a `path` and `depth` that are fixed at creation; parents

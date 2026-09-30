@@ -52,6 +52,29 @@ type AccessSessionState struct {
 	PasswordChangeRequired bool
 }
 
+// SessionClient is the client software identity recorded on a user session.
+// Nil fields stay NULL in storage and mean "no identity is known"; values are
+// self-reported or derived from User-Agent and are administrative hints, not
+// verified claims.
+type SessionClient struct {
+	Name     *string
+	Version  *string
+	DeviceID *string
+}
+
+// NullableArgs returns the client fields as SQL arguments, replacing absent
+// values with nil the way the authentication audit columns do.
+func (client SessionClient) NullableArgs() (name, version, deviceID any) {
+	return nullableString(client.Name), nullableString(client.Version), nullableString(client.DeviceID)
+}
+
+func nullableString(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
 type AccessSessionValidator interface {
 	ValidateAccessSession(context.Context, string, string, string) (AccessSessionState, error)
 }
@@ -422,7 +445,7 @@ func (a *App) agentExpired(ctx context.Context, user repository.User) bool {
 	return !time.Now().UTC().Before(*profile.ExpiresAt)
 }
 
-func (a *App) IssueUserSession(ctx context.Context, user repository.User) (TokenResponse, error) {
+func (a *App) IssueUserSession(ctx context.Context, user repository.User, client SessionClient) (TokenResponse, error) {
 	database := a.database()
 	if database == nil {
 		return TokenResponse{}, errors.New("database is unavailable")
@@ -457,7 +480,8 @@ func (a *App) IssueUserSession(ctx context.Context, user repository.User) (Token
 		return TokenResponse{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO user_sessions (session_id,deployment_id,user_id,topic) VALUES ($1,$2,$3,$4)`, sessionID, a.DeploymentID(), user.ID, topic); err != nil {
+	clientName, clientVersion, clientDeviceID := client.NullableArgs()
+	if _, err := tx.Exec(ctx, `INSERT INTO user_sessions (session_id,deployment_id,user_id,topic,client_name,client_version,client_device_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`, sessionID, a.DeploymentID(), user.ID, topic, clientName, clientVersion, clientDeviceID); err != nil {
 		return TokenResponse{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO user_session_tokens (token_hash,session_id,expires_at) VALUES ($1,$2,$3)`, refreshHash, sessionID, expires); err != nil {
