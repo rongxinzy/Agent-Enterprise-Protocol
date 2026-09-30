@@ -59,6 +59,22 @@ describe('AepClient SDK gate', () => {
     expect(server.requests.at(-1)?.path).toBe('/aep/v1/auth/password/login');
   });
 
+  test('sends the client identity on password login only when provided', async () => {
+    await client.loginWithPassword({
+      deploymentId: 'ent-1',
+      username: 'demo',
+      password: 'password',
+      client: {name: 'zhiyuan-desktop', version: '1.4.0', deviceId: 'device-42'},
+    });
+    expect(server.loginBodies.at(-1)).toMatchObject({
+      username: 'demo',
+      client: {name: 'zhiyuan-desktop', version: '1.4.0', deviceId: 'device-42'},
+    });
+
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    expect(server.loginBodies.at(-1)).not.toHaveProperty('client');
+  });
+
   test('supports user-session clients without Agent headers', async () => {
     const sessionClient = new AepClient({
       baseUrl: server.baseUrl,

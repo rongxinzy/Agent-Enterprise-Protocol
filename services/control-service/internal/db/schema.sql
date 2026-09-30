@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   topic text NOT NULL,
+  client_name text,
+  client_version text,
+  client_device_id text,
   created_at timestamptz NOT NULL DEFAULT now(),
   last_seen_at timestamptz NOT NULL DEFAULT now(),
   revoked_at timestamptz

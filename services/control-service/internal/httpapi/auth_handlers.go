@@ -15,10 +15,11 @@ import (
 )
 
 type passwordLoginRequest struct {
-	DeploymentID string `json:"deploymentId"`
-	SessionID    string `json:"sessionId"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
+	DeploymentID string              `json:"deploymentId"`
+	SessionID    string              `json:"sessionId"`
+	Username     string              `json:"username"`
+	Password     string              `json:"password"`
+	Client       *sessionClientInput `json:"client"`
 }
 
 const zhiYuanPasswordMethodID = "zhiyuan-password"
@@ -60,6 +61,10 @@ func (s *Server) authenticationMethods(response http.ResponseWriter, request *ht
 func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Request) {
 	var input passwordLoginRequest
 	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Client != nil && !input.Client.valid() {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The client identity is invalid.")
 		return
 	}
 	deploymentID, validDeployment := s.resolveTenant(input.DeploymentID)
@@ -114,7 +119,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The username or password is invalid.")
 		return
 	}
-	tokens, err := s.app.IssueUserSession(request.Context(), user)
+	tokens, err := s.app.IssueUserSession(request.Context(), user, sessionClient(input.Client, request.UserAgent()))
 	if err != nil {
 		if errors.Is(err, app.ErrAgentExpired) {
 			writeProblem(response, request, http.StatusForbidden, "AGENT_EXPIRED", "The ephemeral digital employee has expired.")
@@ -217,7 +222,7 @@ func (s *Server) federatedExchange(response http.ResponseWriter, request *http.R
 		databaseFailure(response, request, err)
 		return
 	}
-	tokens, err := s.app.IssueUserSession(request.Context(), user)
+	tokens, err := s.app.IssueUserSession(request.Context(), user, userAgentClient(request.UserAgent()))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -302,7 +307,7 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	user.RequirePasswordChange = false
-	tokens, err := s.app.IssueUserSession(request.Context(), user)
+	tokens, err := s.app.IssueUserSession(request.Context(), user, userAgentClient(request.UserAgent()))
 	if err != nil {
 		databaseFailure(response, request, err)
 		return

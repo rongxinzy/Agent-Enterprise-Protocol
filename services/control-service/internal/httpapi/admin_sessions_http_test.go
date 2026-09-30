@@ -16,11 +16,16 @@ func TestAdminSessionListAndRevoke(t *testing.T) {
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT session_id,user_id,topic,created_at,last_seen_at,revoked_at`).
 		WithArgs("deployment-a", "user-a", int32(2)).
-		WillReturnRows(pgxmock.NewRows([]string{"session_id", "user_id", "topic", "created_at", "last_seen_at", "revoked_at"}).
-			AddRow("session-a", "user-a", "aep:user-a", now, now, nil))
+		WillReturnRows(pgxmock.NewRows([]string{"session_id", "user_id", "topic", "created_at", "last_seen_at", "revoked_at", "client_name", "client_version", "client_device_id"}).
+			AddRow("session-a", "user-a", "aep:user-a", now, now, nil, "zhiyuan-desktop", "1.4.0", nil).
+			AddRow("session-b", "user-a", "aep:user-a", now, now, nil, nil, nil, nil))
 	response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/sessions?userId=user-a&limit=2", "")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"sessionId":"session-a"`) || !strings.Contains(response.Body.String(), `"topic":"aep:user-a"`) {
-		t.Fatalf("session list = %d %s", response.Code, response.Body.String())
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"sessionId":"session-a"`) || !strings.Contains(body, `"topic":"aep:user-a"`) {
+		t.Fatalf("session list = %d %s", response.Code, body)
+	}
+	if !strings.Contains(body, `"client":{"name":"zhiyuan-desktop","version":"1.4.0"}`) || !strings.Contains(body, `"client":null`) {
+		t.Fatalf("session list client identity = %s", body)
 	}
 
 	pool.ExpectBegin()

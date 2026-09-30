@@ -1477,6 +1477,26 @@ components:
           type: string
         requestId:
           type: string
+    ClientIdentity:
+      type: object
+      description: Self-reported client software identity recorded on a user session, for example the Admin Console browser or a managed desktop client. These values are administrative hints; they are not verified claims.
+      required:
+        - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Client software name, for example zhiyuan-desktop or zhiyuan-admin-console.
+        version:
+          type: string
+          maxLength: 64
+          description: Client software version.
+        deviceId:
+          type: string
+          maxLength: 128
+          description: Stable installation or device identifier chosen by the client.
     PasswordLoginRequest:
       type: object
       required:
@@ -1499,6 +1519,9 @@ components:
           minLength: 1
           maxLength: 1024
           writeOnly: true
+        client:
+          description: Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent.
+          $ref: '#/components/schemas/ClientIdentity'
     TokenResponse:
       type: object
       required:
@@ -1769,6 +1792,9 @@ components:
             - online
             - idle
             - busy
+        client:
+          description: Optional client identity refresh. When present, the server replaces the client identity recorded on the session, so client version upgrades become visible without a new login. No User-Agent fallback is applied here.
+          $ref: '#/components/schemas/ClientIdentity'
     HeartbeatResponse:
       type: object
       required:
