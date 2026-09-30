@@ -62,6 +62,13 @@ override the Go module proxy used by the image build.
 Prefer `AEPCTL_PASSWORD` over the `--password` flag outside a disposable demo.
 The examples below show the flag to remain shell-independent.
 
+`aepctl` resolves the deployment identifier from the unauthenticated
+`GET /aep/v1/metadata` endpoint of `--base-url` before logging in, so no
+`--deployment` value is required. Set `--deployment` or `AEPCTL_DEPLOYMENT`
+only to override discovery, for example against a multi-deployment test
+fixture; license issuance is the remaining flow that still deals with a
+deployment ID directly.
+
 ```bash
 go run ./cmd/aepctl --password change-this-admin-password metadata
 go run ./cmd/aepctl --password change-this-admin-password user create --user agent-user --display-name "Agent User" --temporary-password change-this-user-password --require-password-change=false

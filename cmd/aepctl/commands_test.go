@@ -73,7 +73,18 @@ func TestManagementCommandsMapFlagsToRequests(t *testing.T) {
 			calls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				if r.URL.Path == "/aep/v1/metadata" {
+					if r.Method != http.MethodGet || r.Header.Get("Authorization") != "" {
+						t.Errorf("metadata request must be an unauthenticated GET: %s", r.Method)
+					}
+					_, _ = io.WriteString(w, `{"deploymentId":"deployment-a","deployment":{"id":"deployment-a","name":"Deployment A"}}`)
+					return
+				}
 				if r.URL.Path == "/aep/v1/auth/password/login" {
+					var login map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&login); err != nil || login["deploymentId"] != "deployment-a" {
+						t.Errorf("login did not use the metadata deployment ID: %#v, %v", login, err)
+					}
 					_, _ = io.WriteString(w, `{"accessToken":"access-a"}`)
 					return
 				}
@@ -94,7 +105,7 @@ func TestManagementCommandsMapFlagsToRequests(t *testing.T) {
 			command.SetErr(io.Discard)
 			args := []string{"--base-url", server.URL, "--password", "test-only"}
 			command.SetArgs(append(args, test.args...))
-			if err := command.Execute(); err != nil || calls != 2 {
+			if err := command.Execute(); err != nil || calls != 3 {
 				t.Fatalf("command calls = %d, error = %v", calls, err)
 			}
 		})

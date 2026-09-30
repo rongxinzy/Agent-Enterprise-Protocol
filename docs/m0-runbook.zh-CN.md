@@ -58,6 +58,11 @@ Kubernetes 基线和部署 Secret 系统。
 非一次性演示环境应优先使用 `AEPCTL_PASSWORD`，不要把密码放进命令行。下面
 为兼容不同 shell，示例仍使用 `--password`。
 
+`aepctl` 登录前会从 `--base-url` 指向的免认证 `GET /aep/v1/metadata` 端点
+自动解析部署标识，无需再提供 `--deployment`。只有需要覆盖解析结果时（例如
+多部署测试环境）才设置 `--deployment` 或 `AEPCTL_DEPLOYMENT`；此后仅 license
+签发流程仍直接涉及部署标识。
+
 ```bash
 go run ./cmd/aepctl --password change-this-admin-password metadata
 go run ./cmd/aepctl --password change-this-admin-password user create --user agent-user --display-name "Agent User" --temporary-password change-this-user-password --require-password-change=false
