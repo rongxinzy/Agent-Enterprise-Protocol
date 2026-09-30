@@ -182,6 +182,26 @@ describe('AepClient SDK gate', () => {
     expect(JSON.stringify(status)).not.toContain('provider-secret-value');
   });
 
+  test('covers deployment settings administration', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await expect(client.getDeploymentSettings()).resolves.toEqual({
+      modelGatewayBaseUrl: {override: null, effectiveValue: '/openai/v1', source: 'env'},
+    });
+    await expect(client.updateDeploymentSettings({modelGatewayBaseUrl: 'https://gateway.example.com/v1'})).resolves.toEqual({
+      modelGatewayBaseUrl: {override: 'https://gateway.example.com/v1', effectiveValue: 'https://gateway.example.com/v1', source: 'override'},
+    });
+    expect(server.requests.at(-1)?.method).toBe('PUT');
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/admin/deployment/settings');
+    await expect(client.updateDeploymentSettings({})).resolves.toMatchObject({modelGatewayBaseUrl: {override: 'https://gateway.example.com/v1', source: 'override'}});
+    await expect(client.updateDeploymentSettings({modelGatewayBaseUrl: null})).resolves.toEqual({
+      modelGatewayBaseUrl: {override: null, effectiveValue: '/openai/v1', source: 'env'},
+    });
+    await expect(client.updateDeploymentSettings({modelGatewayBaseUrl: 'http://higress.svc.cluster.local/v1'})).rejects.toMatchObject({
+      status: 422,
+      code: 'INVALID_DEPLOYMENT_SETTINGS',
+    });
+  });
+
   test('covers Credential delivery and administration without caching secrets', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
 

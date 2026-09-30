@@ -40,6 +40,7 @@ async function runScenario() {
   const connection = await admin.getModelConnection();
   assert(connection.baseUrl === gatewayBaseUrl, 'SDK received the wrong model gateway URL');
   assert(connection.protocol === 'openai-compatible', 'SDK received the wrong model gateway protocol');
+  await assertDeploymentSettings(admin);
 
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
@@ -145,6 +146,32 @@ async function runScenario() {
     'model', 'list',
   ]);
   assert(JSON.parse(cliModels).models.length === 2, 'aepctl model list did not return the administrator catalog');
+}
+
+async function assertDeploymentSettings(admin) {
+  const initial = await admin.getDeploymentSettings();
+  assert(initial.modelGatewayBaseUrl.override === null
+    && initial.modelGatewayBaseUrl.effectiveValue === gatewayBaseUrl
+    && initial.modelGatewayBaseUrl.source === 'env', 'Deployment settings did not resolve the environment gateway URL');
+
+  const overrideUrl = 'https://runtime-gateway.example.com/v1';
+  const updated = await admin.updateDeploymentSettings({modelGatewayBaseUrl: overrideUrl});
+  assert(updated.modelGatewayBaseUrl.override === overrideUrl
+    && updated.modelGatewayBaseUrl.effectiveValue === overrideUrl
+    && updated.modelGatewayBaseUrl.source === 'override', 'Deployment settings update did not store the runtime override');
+  assert((await admin.getMetadata()).modelGateway?.baseUrl === overrideUrl, 'Metadata did not advertise the runtime gateway override');
+
+  await expectProblem(
+    admin.updateDeploymentSettings({modelGatewayBaseUrl: 'http://higress.svc.cluster.local/v1'}),
+    422,
+    'INVALID_DEPLOYMENT_SETTINGS',
+  );
+
+  const cleared = await admin.updateDeploymentSettings({modelGatewayBaseUrl: null});
+  assert(cleared.modelGatewayBaseUrl.override === null
+    && cleared.modelGatewayBaseUrl.effectiveValue === gatewayBaseUrl
+    && cleared.modelGatewayBaseUrl.source === 'env', 'Clearing the runtime override did not restore the environment value');
+  assert((await admin.getMetadata()).modelGateway?.baseUrl === gatewayBaseUrl, 'Metadata did not fall back to the environment gateway URL');
 }
 
 async function assertModelToken(store, expectedScopes) {

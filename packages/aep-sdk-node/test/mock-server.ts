@@ -12,6 +12,7 @@ export class MockAepServer {
   #modelGatewayEnabled = true;
   #credentialNoStore = true;
   #dataPlaneRevision = 'rev-1';
+  #modelGatewayOverride: string | null = null;
   readonly requests: Array<{method: string; path: string; search: string; headers: IncomingMessage['headers']}> = [];
   refreshCount = 0;
   baseUrl = '';
@@ -231,6 +232,22 @@ export class MockAepServer {
     if (path === '/aep/v1/admin/data-plane/status') {
       return json(response, 200, {state: 'ready', observedRevision: this.#dataPlaneRevision, contentHash: 'a'.repeat(64), lastAppliedAt: '2026-08-24T00:00:00Z', errorCode: null, message: null, resourceCount: 1, catalogComparison: {missing: [], extra: [], mismatched: []}});
     }
+    if (path === '/aep/v1/admin/deployment/settings') {
+      if (request.method === 'PUT') {
+        const input = await readJson(request);
+        if (Object.hasOwn(input, 'modelGatewayBaseUrl')) {
+          const value = input.modelGatewayBaseUrl;
+          if (value === null) {
+            this.#modelGatewayOverride = null;
+          } else if (typeof value === 'string' && validGatewayOverride(value)) {
+            this.#modelGatewayOverride = value;
+          } else {
+            return json(response, 422, problem(422, 'INVALID_DEPLOYMENT_SETTINGS'));
+          }
+        }
+      }
+      return json(response, 200, deploymentSettings(this.#modelGatewayOverride));
+    }
     if (path === '/aep/v1/admin/control-events') return json(response, 200, {items: [], nextCursor: null});
     if (path === '/aep/v1/admin/control-events/event-1') {
       if (request.method === 'POST') return json(response, 200, adminEvent());
@@ -395,6 +412,34 @@ function dataPlaneDesiredState(revision: string): object {
     contentHash: 'a'.repeat(64),
     routes: [{modelId: 'model-1', enabled: true, endpoint: '/v1', upstreamModel: 'qwen3-32b', protocol: 'openai-compatible', providerType: 'deepseek', credentialRef: {name: 'provider-secrets', key: 'model-1'}}],
   };
+}
+
+const mockEnvironmentGatewayBaseUrl = '/openai/v1';
+
+function deploymentSettings(override: string | null): object {
+  const effectiveValue = override ?? mockEnvironmentGatewayBaseUrl;
+  return {
+    modelGatewayBaseUrl: {
+      override,
+      effectiveValue,
+      source: override !== null ? 'override' : 'env',
+    },
+  };
+}
+
+function validGatewayOverride(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      hostname.includes('.') &&
+      hostname !== 'svc.cluster.local' &&
+      !hostname.endsWith('.svc.cluster.local')
+    );
+  } catch {
+    return false;
+  }
 }
 
 function problem(status: number, code: string): object {

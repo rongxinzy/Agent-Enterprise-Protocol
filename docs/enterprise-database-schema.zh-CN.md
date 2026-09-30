@@ -320,6 +320,20 @@ UQ：`(event_id, session_id)`。
 | `resource_count` | `integer` | NN, DF `0`, CK `>= 0` |
 | `updated_at` | `timestamptz` | NN, DF `now()` |
 
+## 部署设置
+
+### `deployment_settings`
+
+每个部署一行的运行时设置，由管理端 API 维护。每个设置项是一个可空列：
+`NULL` 表示没有运行时覆盖，回落到启动期环境变量值。
+
+| 字段 | 类型 | 约束/说明 |
+| --- | --- | --- |
+| `deployment_id` | `text` | PK, FK |
+| `model_gateway_base_url` | `text` | 可空；模型网关运行时覆盖地址，写入前经 API 校验 |
+| `created_at` | `timestamptz` | NN, DF `now()` |
+| `updated_at` | `timestamptz` | NN, DF `now()` |
+
 ## License
 
 License 用于离线验证并激活客户购买的企业版服务端。数据库保存验签后的摘要、

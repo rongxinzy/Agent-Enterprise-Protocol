@@ -476,3 +476,10 @@ CREATE INDEX IF NOT EXISTS idx_users_kind_agent
   ON users (deployment_id, kind) WHERE kind = 'agent';
 CREATE INDEX IF NOT EXISTS idx_agent_profiles_home_team
   ON agent_profiles (deployment_id, home_team_id);
+
+CREATE TABLE IF NOT EXISTS deployment_settings (
+  deployment_id text PRIMARY KEY REFERENCES deployments(id) ON DELETE CASCADE,
+  model_gateway_base_url text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

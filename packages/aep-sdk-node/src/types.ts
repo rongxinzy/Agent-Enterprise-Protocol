@@ -148,6 +148,9 @@ export type DataPlaneDesiredState = components['schemas']['DataPlaneDesiredState
 export type DataPlanePublishRequest = components['schemas']['DataPlanePublishRequest'];
 export type DataPlaneCatalogComparison = components['schemas']['DataPlaneCatalogComparison'];
 export type DataPlaneStatus = components['schemas']['DataPlaneStatus'];
+export type DeploymentSettingValue = components['schemas']['DeploymentSettingValue'];
+export type DeploymentSettings = components['schemas']['DeploymentSettings'];
+export type DeploymentSettingsUpdate = components['schemas']['DeploymentSettingsUpdate'];
 
 export interface ModelConnection extends ModelGatewayMetadata {
   apiKey: string;
