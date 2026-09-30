@@ -216,7 +216,11 @@ func (cfg Config) Validate() error {
 		return err
 	}
 	if cfg.ModelGatewayBaseURL != "" {
-		if _, err := absoluteURL("AEP_MODEL_GATEWAY_BASE_URL", cfg.ModelGatewayBaseURL, "http", "https"); err != nil {
+		gatewayURL, err := absoluteURL("AEP_MODEL_GATEWAY_BASE_URL", cfg.ModelGatewayBaseURL, "http", "https")
+		if err != nil {
+			return err
+		}
+		if err := clientReachableGatewayHost(gatewayURL.Hostname(), cfg.Environment); err != nil {
 			return err
 		}
 	}
@@ -395,4 +399,26 @@ func absoluteURL(key, raw string, schemes ...string) (*url.URL, error) {
 		}
 	}
 	return nil, fmt.Errorf("%s must use one of these schemes: %s", key, strings.Join(schemes, ", "))
+}
+
+// clientReachableGatewayHost rejects model gateway hosts that clients outside
+// the cluster can never resolve. The base URL is published verbatim in
+// /aep/v1/metadata, so a cluster-internal or production loopback address only
+// surfaces as an opaque client failure; refuse to start instead.
+func clientReachableGatewayHost(host, environment string) error {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	addr, addrErr := netip.ParseAddr(host)
+	if host == "localhost" || (addrErr == nil && addr.IsLoopback()) {
+		if environment == "production" {
+			return fmt.Errorf("AEP_MODEL_GATEWAY_BASE_URL host %q is only reachable from the control-service host itself, not by clients; set a client-reachable address", host)
+		}
+		return nil
+	}
+	if strings.HasSuffix(host, ".svc.cluster.local") {
+		return fmt.Errorf("AEP_MODEL_GATEWAY_BASE_URL host %q is a cluster-internal service name that clients outside the cluster cannot resolve; set a client-reachable address", host)
+	}
+	if addrErr != nil && !strings.Contains(host, ".") {
+		return fmt.Errorf("AEP_MODEL_GATEWAY_BASE_URL host %q is a single-label cluster-internal name that clients outside the cluster cannot resolve; set a client-reachable address", host)
+	}
+	return nil
 }

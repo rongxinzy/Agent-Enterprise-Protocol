@@ -113,6 +113,57 @@ func TestMetadataAdvertisesMockFederatedAuthOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestMetadataAdvertisesModelGatewayOnlyWhenConfigured(t *testing.T) {
+	requestMetadata := func(gatewayBaseURL string) map[string]any {
+		t.Helper()
+		application := &app.App{Config: config.Config{ModelGatewayBaseURL: gatewayBaseURL}}
+		request := httptest.NewRequest(http.MethodGet, "/aep/v1/metadata", nil)
+		response := httptest.NewRecorder()
+		New(application).Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("metadata status = %d", response.Code)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		return document
+	}
+	capabilitiesOf := func(document map[string]any) []string {
+		t.Helper()
+		raw, ok := document["capabilities"].([]any)
+		if !ok {
+			t.Fatalf("metadata capabilities = %#v", document["capabilities"])
+		}
+		capabilities := make([]string, 0, len(raw))
+		for _, value := range raw {
+			capability, ok := value.(string)
+			if !ok {
+				t.Fatalf("metadata capability = %#v", value)
+			}
+			capabilities = append(capabilities, capability)
+		}
+		return capabilities
+	}
+
+	without := requestMetadata("")
+	if contains(capabilitiesOf(without), "model_gateway") {
+		t.Fatal("metadata advertised model_gateway without a configured gateway")
+	}
+	if _, present := without["modelGateway"]; present {
+		t.Fatalf("metadata emitted modelGateway without a configured gateway: %#v", without["modelGateway"])
+	}
+
+	with := requestMetadata("https://models.example.com/v1")
+	if !contains(capabilitiesOf(with), "model_gateway") {
+		t.Fatal("metadata omitted model_gateway with a configured gateway")
+	}
+	gateway, ok := with["modelGateway"].(map[string]any)
+	if !ok || gateway["baseUrl"] != "https://models.example.com/v1" || gateway["protocol"] != "openai-compatible" || gateway["apiVersion"] != "v1" {
+		t.Fatalf("metadata modelGateway = %#v", with["modelGateway"])
+	}
+}
+
 func TestMetadataAdvertisesDeploymentIdentity(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/aep/v1/metadata", nil)
 	response := httptest.NewRecorder()

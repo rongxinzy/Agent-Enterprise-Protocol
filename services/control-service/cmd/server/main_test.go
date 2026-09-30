@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -140,6 +141,43 @@ func TestRunWithDependenciesInitializationFailures(t *testing.T) {
 			t.Fatalf("runWithDependencies() error = %v", err)
 		}
 	})
+}
+
+func TestRunWithDependenciesLogsModelGatewayAddress(t *testing.T) {
+	tests := []struct {
+		name        string
+		gatewayURL  string
+		wantLevel   string
+		wantMessage string
+	}{
+		{name: "configured", gatewayURL: "https://models.example.com/v1", wantLevel: "level=INFO", wantMessage: `base_url=https://models.example.com/v1`},
+		{name: "unset", wantLevel: "level=WARN", wantMessage: "AEP_MODEL_GATEWAY_BASE_URL is not configured"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			cfg := testServerConfig()
+			cfg.ModelGatewayBaseURL = test.gatewayURL
+			dependencies := serverDependencies{
+				loadConfig:      func() (config.Config, error) { return cfg, nil },
+				configureLogger: func(string, string, string, string) error { return nil },
+				openApplication: func(_ context.Context, received config.Config) (*app.App, error) {
+					return &app.App{Config: received}, nil
+				},
+				listenAndServe: func(*http.Server) error { return http.ErrServerClosed },
+				shutdown:       func(*http.Server, context.Context) error { return nil },
+			}
+			if err := runWithDependencies(dependencies); err != nil {
+				t.Fatalf("runWithDependencies() error = %v", err)
+			}
+			if !strings.Contains(logs.String(), test.wantLevel) || !strings.Contains(logs.String(), test.wantMessage) {
+				t.Fatalf("startup logs = %q, want %s with %q", logs.String(), test.wantLevel, test.wantMessage)
+			}
+		})
+	}
 }
 
 func TestRunWithDependenciesServerLifecycle(t *testing.T) {

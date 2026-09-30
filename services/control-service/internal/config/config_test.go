@@ -19,6 +19,7 @@ var environmentKeys = []string{
 	"AEP_DATA_PLANE_RECONCILER_TOKEN", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE",
 	"AEP_GATEWAY_LICENSE_STATUS_TOKEN", "AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE",
 	"AEP_DEPLOYMENT_ID", "AEP_DEPLOYMENT_NAME",
+	"AEP_MODEL_GATEWAY_BASE_URL",
 	"AEP_HTTP_READ_TIMEOUT", "AEP_HTTP_MAX_HEADER_BYTES",
 	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_SOURCE_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
 	"AEP_RETENTION_CLEANUP_INTERVAL", "AEP_OPERATIONAL_RETENTION", "AEP_TELEMETRY_RETENTION", "AEP_AUDIT_RETENTION", "AEP_RETENTION_CLEANUP_BATCH_SIZE",
@@ -108,6 +109,54 @@ func TestLoadAllowsRetentionCleanupToBeDisabled(t *testing.T) {
 	}
 	if cfg.RetentionCleanupInterval != 0 || cfg.OperationalRetention != 0 || cfg.TelemetryRetention != 0 || cfg.AuditRetention != 0 {
 		t.Fatalf("retention disablement was not preserved: %#v", cfg)
+	}
+}
+
+func TestLoadValidatesModelGatewayBaseURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment string
+		value       string
+		match       string
+	}{
+		{name: "cluster service domain", value: "http://aep-gateway-authorizer.aep.svc.cluster.local:8090/v1", match: "clients outside the cluster cannot resolve"},
+		{name: "cluster service domain trailing dot", value: "http://aep-gateway-authorizer.aep.svc.cluster.local.:8090/v1", match: "clients outside the cluster cannot resolve"},
+		{name: "single-label host", value: "http://aep-gateway-authorizer:8090/v1", match: "clients outside the cluster cannot resolve"},
+		{name: "single-label uppercase host", value: "http://AEP-GATEWAY-AUTHORIZER:8090/v1", match: "clients outside the cluster cannot resolve"},
+		{name: "production localhost", environment: "production", value: "http://localhost:8090/v1", match: "not by clients"},
+		{name: "production loopback IPv4", environment: "production", value: "http://127.0.0.1:8090/v1", match: "not by clients"},
+		{name: "production loopback IPv6", environment: "production", value: "http://[::1]:8090/v1", match: "not by clients"},
+		{name: "development localhost", environment: "development", value: "http://localhost:8090/v1"},
+		{name: "test loopback IPv4", environment: "test", value: "http://127.0.0.1:8090/v1"},
+		{name: "unset", value: ""},
+		{name: "client-reachable production gateway", environment: "production", value: "https://models.example.com/v1"},
+		{name: "public IPv4 development gateway", environment: "development", value: "http://203.0.113.10:8090/v1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.environment == "production" {
+				validProductionEnvironment(t)
+			} else {
+				clearEnvironment(t)
+				if test.environment != "" {
+					t.Setenv("AEP_ENVIRONMENT", test.environment)
+				}
+			}
+			t.Setenv("AEP_MODEL_GATEWAY_BASE_URL", test.value)
+			cfg, err := Load()
+			if test.match != "" {
+				if err == nil || !strings.Contains(err.Error(), "AEP_MODEL_GATEWAY_BASE_URL") || !strings.Contains(err.Error(), test.match) {
+					t.Fatalf("Load() error = %v, want detail %q", err, test.match)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.ModelGatewayBaseURL != test.value {
+				t.Fatalf("ModelGatewayBaseURL = %q", cfg.ModelGatewayBaseURL)
+			}
+		})
 	}
 }
 
@@ -231,6 +280,8 @@ func TestValidateRejectsInvalidRuntimeFields(t *testing.T) {
 		{name: "database scheme", mutate: func(cfg *Config) { cfg.DatabaseURL = "https://postgres.internal/aep" }, match: "must use one of these schemes"},
 		{name: "issuer", mutate: func(cfg *Config) { cfg.Issuer = "://invalid" }, match: "AEP_ISSUER"},
 		{name: "model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "ftp://gateway.internal" }, match: "AEP_MODEL_GATEWAY_BASE_URL"},
+		{name: "cluster service model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "http://aep-gateway-authorizer.aep.svc.cluster.local:8090/v1" }, match: "clients outside the cluster cannot resolve"},
+		{name: "single-label model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "http://aep-gateway-authorizer:8090/v1" }, match: "clients outside the cluster cannot resolve"},
 		{name: "MinIO endpoint", mutate: func(cfg *Config) { cfg.MinioEndpoint = " " }, match: "AEP_MINIO_ENDPOINT"},
 		{name: "deployment identity", mutate: func(cfg *Config) { cfg.DeploymentID = "" }, match: "AEP_DEPLOYMENT_ID"},
 		{name: "login backoff", mutate: func(cfg *Config) { cfg.LoginBackoffMax = 0 }, match: "AEP_LOGIN_BACKOFF_MAX"},
