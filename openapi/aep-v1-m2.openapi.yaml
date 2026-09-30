@@ -261,7 +261,12 @@ paths:
     put:
       tags: [Admin Data Plane]
       operationId: putDataPlaneDesiredState
-      description: Publishes an idempotent desired state. Secret references identify external Secret material and never contain values.
+      deprecated: true
+      description: >-
+        Manual escape hatch that publishes an operator-authored desired state.
+        Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived
+        from the model catalog, which is the single source of truth. Secret
+        references identify external Secret material and never contain values.
       requestBody:
         required: true
         content:
@@ -275,11 +280,38 @@ paths:
               schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
         '400': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
         '409': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/data-plane/publish:
+    post:
+      tags: [Admin Data Plane]
+      operationId: publishDataPlaneRoutes
+      description: >-
+        Derives gateway routes from the model catalog (enabled gateway models
+        with an OpenAI-compatible protocol and a complete endpoint and upstream
+        model) and atomically replaces the tenant's desired state. Routes for
+        models bound to a Credential refer to the conventional Secret
+        aep-credential-{credentialId} key api-key in higress-system; Secret
+        values are provisioned by the deployment Secret system and are never
+        accepted or returned by this API. When the derived state is unchanged
+        the publish is a no-op and the stored revision and content hash are
+        returned; otherwise the server assigns a content-addressed
+        catalog-prefixed revision unless the request carries an explicit one.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DataPlanePublishRequest'}
+      responses:
+        '200':
+          description: Catalog-derived desired state stored for reconciliation.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
+        '400': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/data-plane/status:
     get:
       tags: [Admin Data Plane]
       operationId: getDataPlaneStatus
-      description: Returns the latest observed gateway reconciliation state.
+      description: Returns the latest observed gateway reconciliation state and the drift between the catalog-publishable route set and the current desired routes.
       responses:
         '200':
           description: Data plane observation.
@@ -353,6 +385,15 @@ components:
           type: array
           maxItems: 500
           items: {$ref: '#/components/schemas/DataPlaneRoute'}
+    DataPlanePublishRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        revision:
+          description: Optional explicit revision. When omitted the server assigns a content-addressed catalog-prefixed revision, making unchanged catalogs idempotent.
+          type: string
+          minLength: 1
+          maxLength: 200
     DataPlaneDesiredState:
       allOf:
         - {$ref: '#/components/schemas/DataPlaneDesiredStateWrite'}
@@ -374,6 +415,37 @@ components:
         errorCode: {type: [string, 'null']}
         message: {type: [string, 'null'], maxLength: 2000}
         resourceCount: {type: integer, minimum: 0}
+        catalogComparison:
+          description: Drift between the route set the model catalog would publish and the current desired routes. Absent only in responses predating this field.
+          $ref: '#/components/schemas/DataPlaneCatalogComparison'
+    DataPlaneCatalogComparison:
+      type: object
+      required: [missing, extra, mismatched]
+      additionalProperties: false
+      properties:
+        missing:
+          description: Catalog-publishable model identifiers with no desired route.
+          type: array
+          items: {type: string}
+        extra:
+          description: Desired-route model identifiers the catalog would not publish.
+          type: array
+          items: {type: string}
+        mismatched:
+          description: Models present in both sets whose route fields differ from the catalog-derived route.
+          type: array
+          items:
+            type: object
+            required: [modelId, fields]
+            additionalProperties: false
+            properties:
+              modelId: {type: string}
+              fields:
+                type: array
+                minItems: 1
+                items:
+                  type: string
+                  enum: [enabled, endpoint, upstreamModel, providerType, credentialRef]
     JsonWebKeySet:
       type: object
       required: [keys]

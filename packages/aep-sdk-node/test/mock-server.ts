@@ -224,8 +224,12 @@ export class MockAepServer {
       }
       return json(response, 200, dataPlaneDesiredState(this.#dataPlaneRevision));
     }
+    if (path === '/aep/v1/admin/data-plane/publish') {
+      this.#dataPlaneRevision = 'catalog-published';
+      return json(response, 200, dataPlaneDesiredState(this.#dataPlaneRevision));
+    }
     if (path === '/aep/v1/admin/data-plane/status') {
-      return json(response, 200, {state: 'ready', observedRevision: this.#dataPlaneRevision, contentHash: 'a'.repeat(64), lastAppliedAt: '2026-08-24T00:00:00Z', errorCode: null, message: null, resourceCount: 1});
+      return json(response, 200, {state: 'ready', observedRevision: this.#dataPlaneRevision, contentHash: 'a'.repeat(64), lastAppliedAt: '2026-08-24T00:00:00Z', errorCode: null, message: null, resourceCount: 1, catalogComparison: {missing: [], extra: [], mismatched: []}});
     }
     if (path === '/aep/v1/admin/control-events') return json(response, 200, {items: [], nextCursor: null});
     if (path === '/aep/v1/admin/control-events/event-1') {

@@ -133,16 +133,19 @@ RETURNING published_at`, tenant, normalized.Revision, normalized.Routes, hash).S
 func (s *Server) getDataPlaneStatus(response http.ResponseWriter, request *http.Request) {
 	var status dataPlaneStatus
 	err := s.app.Database().QueryRow(request.Context(), `SELECT state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count FROM data_plane_statuses WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&status.State, &status.ObservedRevision, &status.ContentHash, &status.LastAppliedAt, &status.ErrorCode, &status.Message, &status.ResourceCount)
-	if errors.Is(err, pgx.ErrNoRows) {
-		status.State = "pending"
-		writeJSON(response, http.StatusOK, status)
-		return
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		status.State = "pending"
+	}
+	comparison, comparisonErr := s.catalogComparison(request)
+	if comparisonErr != nil {
+		databaseFailure(response, request, comparisonErr)
+		return
+	}
+	writeJSON(response, http.StatusOK, dataPlaneStatusView{dataPlaneStatus: status, CatalogComparison: comparison})
 }
 
 func (s *Server) putInternalDataPlaneStatus(response http.ResponseWriter, request *http.Request) {

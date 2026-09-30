@@ -704,11 +704,14 @@ must never be sent to the service.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET, PUT | `/admin/data-plane/desired-state` | Read or publish model-gateway desired state |
-| GET | `/admin/data-plane/status` | Read the latest reconciliation observation |
+| POST | `/admin/data-plane/publish` | Derive gateway routes from the model catalog and atomically replace desired state |
+| GET, PUT | `/admin/data-plane/desired-state` | Read desired state; PUT is the deprecated manual escape hatch for operator-authored states |
+| GET | `/admin/data-plane/status` | Read the latest reconciliation observation and the catalog drift comparison |
 
 Desired state refers to external Secret names and keys only; it never includes
-provider secret values.
+provider secret values. Catalog-derived routes for Credential-bound models
+reference the conventional Secret `aep-credential-<credentialId>` (key
+`api-key`) in `higress-system`, which the deployment Secret system provisions.
 
 ### Control Events
 

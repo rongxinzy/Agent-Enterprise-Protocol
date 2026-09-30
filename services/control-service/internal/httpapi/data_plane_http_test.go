@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
 )
 
@@ -37,7 +38,8 @@ func TestAdminDataPlaneDesiredStateLifecycle(t *testing.T) {
 }
 
 func TestAdminDataPlaneReadsDefaultStates(t *testing.T) {
-	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	application, storeMock, adminToken := newStoreBackedHTTPApplication(t)
+	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
 
 	pool.ExpectQuery(`SELECT deployment_id,revision,routes,content_hash,published_at FROM data_plane_desired_states`).
@@ -49,8 +51,12 @@ func TestAdminDataPlaneReadsDefaultStates(t *testing.T) {
 
 	pool.ExpectQuery(`SELECT state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count FROM data_plane_statuses`).
 		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"state", "observed_revision", "content_hash", "last_applied_at", "error_code", "message", "resource_count"}))
+	storeMock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 ORDER BY id`).
+		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(modelHTTPColumns()))
+	pool.ExpectQuery(`SELECT routes FROM data_plane_desired_states`).
+		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"routes"}))
 	status := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/data-plane/status", "")
-	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"state":"pending"`) || !strings.Contains(status.Body.String(), `"resourceCount":0`) {
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"state":"pending"`) || !strings.Contains(status.Body.String(), `"resourceCount":0`) || !strings.Contains(status.Body.String(), `"catalogComparison":{"missing":[],"extra":[],"mismatched":[]}`) {
 		t.Fatalf("default data-plane status = %d %s", status.Code, status.Body.String())
 	}
 }

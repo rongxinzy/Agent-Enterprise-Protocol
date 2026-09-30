@@ -132,6 +132,7 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Delete("/aep/v1/admin/model-assignments/{assignmentId}", server.deleteModelAssignment)
 			admin.Get("/aep/v1/admin/data-plane/desired-state", server.getDataPlaneDesiredState)
 			admin.Put("/aep/v1/admin/data-plane/desired-state", server.putDataPlaneDesiredState)
+			admin.Post("/aep/v1/admin/data-plane/publish", server.publishDataPlaneRoutes)
 			admin.Get("/aep/v1/admin/data-plane/status", server.getDataPlaneStatus)
 			admin.Get("/aep/v1/admin/credentials", server.listCredentials)
 			admin.Post("/aep/v1/admin/credentials", server.createCredential)
