@@ -27,6 +27,7 @@ tags:
   - name: Admin Models
   - name: Admin Credentials
   - name: Admin Data Plane
+  - name: Admin Deployment
 paths:
   /.well-known/jwks.json:
     get:
@@ -1971,6 +1972,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DataPlaneStatus'
+  /aep/v1/admin/deployment/settings:
+    get:
+      tags:
+        - Admin Deployment
+      operationId: getDeploymentSettings
+      description: Returns the deployment-level runtime settings. Every setting reports its stored runtime override, the effective value after environment fallbacks, and the source of that effective value.
+      responses:
+        '200':
+          description: Current deployment runtime settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSettings'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+    put:
+      tags:
+        - Admin Deployment
+      operationId: updateDeploymentSettings
+      description: Partially updates deployment runtime settings. An omitted field stays unchanged, while an explicit null clears the runtime override so the environment-configured value applies again. Values are validated before they are stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentSettingsUpdate'
+      responses:
+        '200':
+          description: Deployment runtime settings after the update
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentSettings'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '422':
+          $ref: '#/components/responses/Problem-2'
 components:
   securitySchemes:
     bearerAuth:
@@ -5017,6 +5057,52 @@ components:
             - 'null'
           format: date-time
           description: Temporary grant that stops authorizing at this time.
+    DeploymentSettingValue:
+      description: One deployment-level runtime setting with its override and resolution state.
+      type: object
+      required:
+        - override
+        - effectiveValue
+        - source
+      properties:
+        override:
+          description: Runtime override stored in the control plane; null when no override is set.
+          type:
+            - string
+            - 'null'
+        effectiveValue:
+          description: Value currently in effect — the runtime override when set, otherwise the environment-configured value; null when neither exists.
+          type:
+            - string
+            - 'null'
+        source:
+          description: Origin of the effective value.
+          type: string
+          enum:
+            - override
+            - env
+            - unset
+    DeploymentSettings:
+      description: Deployment-level runtime settings maintained through the administration API.
+      type: object
+      required:
+        - modelGatewayBaseUrl
+      properties:
+        modelGatewayBaseUrl:
+          $ref: '#/components/schemas/DeploymentSettingValue'
+          description: Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata.
+    DeploymentSettingsUpdate:
+      description: Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback.
+      type: object
+      additionalProperties: false
+      properties:
+        modelGatewayBaseUrl:
+          description: New model gateway runtime override. It must be an absolute http or https URL whose hostname is not cluster-internal; production deployments additionally reject loopback addresses. Null clears the override so the AEP_MODEL_GATEWAY_BASE_URL environment value applies again.
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 2048
   responses:
     Problem:
       description: AEP Problem Details

@@ -134,6 +134,8 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Put("/aep/v1/admin/data-plane/desired-state", server.putDataPlaneDesiredState)
 			admin.Post("/aep/v1/admin/data-plane/publish", server.publishDataPlaneRoutes)
 			admin.Get("/aep/v1/admin/data-plane/status", server.getDataPlaneStatus)
+			admin.Get("/aep/v1/admin/deployment/settings", server.getDeploymentSettings)
+			admin.Put("/aep/v1/admin/deployment/settings", server.updateDeploymentSettings)
 			admin.Get("/aep/v1/admin/credentials", server.listCredentials)
 			admin.Post("/aep/v1/admin/credentials", server.createCredential)
 			admin.Get("/aep/v1/admin/credentials/{credentialId}", server.getCredential)
@@ -359,6 +361,11 @@ func requiredAdminPermission(method, path string) []string {
 		return []string{"events.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/data-plane"):
 		return []string{"data_plane.write"}
+	case strings.HasPrefix(path, "/aep/v1/admin/deployment"):
+		if method == http.MethodGet {
+			return []string{"deployment.read"}
+		}
+		return []string{"deployment.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/agents"):
 		if method == http.MethodGet {
 			return []string{"users.read"}
@@ -498,7 +505,7 @@ func (s *Server) getJWKS(response http.ResponseWriter, _ *http.Request) {
 	writeJSON(response, http.StatusOK, s.app.Tokens.JWKS())
 }
 
-func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
+func (s *Server) metadata(response http.ResponseWriter, request *http.Request) {
 	capabilities := []string{"password_auth"}
 	if mockFederatedAuthEnabled(s.app.Config) {
 		capabilities = append(capabilities, "federated_auth")
@@ -510,11 +517,11 @@ func (s *Server) metadata(response http.ResponseWriter, _ *http.Request) {
 		"deploymentId": s.app.DeploymentID(),
 		"deployment":   map[string]string{"id": s.app.DeploymentID(), "name": s.app.DeploymentName()},
 	}
-	if s.app.Config.ModelGatewayBaseURL != "" {
+	if baseURL := effectiveModelGatewayBaseURL(s.app, request); baseURL != "" {
 		capabilities = append(capabilities, "model_gateway")
 		metadata["capabilities"] = capabilities
 		metadata["modelGateway"] = map[string]string{
-			"baseUrl": s.app.Config.ModelGatewayBaseURL, "protocol": "openai-compatible", "apiVersion": "v1",
+			"baseUrl": baseURL, "protocol": "openai-compatible", "apiVersion": "v1",
 		}
 	}
 	if s.app.Credentials != nil {

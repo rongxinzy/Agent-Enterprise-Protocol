@@ -1183,6 +1183,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/deployment/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the deployment-level runtime settings. Every setting reports its stored runtime override, the effective value after environment fallbacks, and the source of that effective value. */
+        get: operations["getDeploymentSettings"];
+        /** @description Partially updates deployment runtime settings. An omitted field stays unchanged, while an explicit null clears the runtime override so the environment-configured value applies again. Values are validated before they are stored. */
+        put: operations["updateDeploymentSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2303,6 +2321,28 @@ export interface components {
              * @description Temporary grant that stops authorizing at this time.
              */
             expiresAt?: string | null;
+        };
+        /** @description One deployment-level runtime setting with its override and resolution state. */
+        DeploymentSettingValue: {
+            /** @description Runtime override stored in the control plane; null when no override is set. */
+            override: string | null;
+            /** @description Value currently in effect — the runtime override when set, otherwise the environment-configured value; null when neither exists. */
+            effectiveValue: string | null;
+            /**
+             * @description Origin of the effective value.
+             * @enum {string}
+             */
+            source: "override" | "env" | "unset";
+        };
+        /** @description Deployment-level runtime settings maintained through the administration API. */
+        DeploymentSettings: {
+            /** @description Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata. */
+            modelGatewayBaseUrl: components["schemas"]["DeploymentSettingValue"];
+        };
+        /** @description Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback. */
+        DeploymentSettingsUpdate: {
+            /** @description New model gateway runtime override. It must be an absolute http or https URL whose hostname is not cluster-internal; production deployments additionally reject loopback addresses. Null clears the override so the AEP_MODEL_GATEWAY_BASE_URL environment value applies again. */
+            modelGatewayBaseUrl?: string | null;
         };
     };
     responses: {
@@ -4714,6 +4754,54 @@ export interface operations {
                     "application/json": components["schemas"]["DataPlaneStatus"];
                 };
             };
+        };
+    };
+    getDeploymentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current deployment runtime settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentSettings"];
+                };
+            };
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    updateDeploymentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Deployment runtime settings after the update */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentSettings"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            422: components["responses"]["Problem-2"];
         };
     };
 }

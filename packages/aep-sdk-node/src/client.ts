@@ -47,6 +47,8 @@ import type {
   DataPlaneDesiredStateWrite,
   DataPlanePublishRequest,
   DataPlaneStatus,
+  DeploymentSettings,
+  DeploymentSettingsUpdate,
   EntitlementTokenResponse,
   HeartbeatResponse,
   JsonObject,
@@ -780,6 +782,18 @@ export class AepClient {
 
   getDataPlaneStatus(): Promise<DataPlaneStatus> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/status'});
+  }
+
+  getDeploymentSettings(): Promise<DeploymentSettings> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/deployment/settings'});
+  }
+
+  updateDeploymentSettings(input: DeploymentSettingsUpdate): Promise<DeploymentSettings> {
+    return this.#send({
+      method: HttpMethod.Put,
+      path: '/aep/v1/admin/deployment/settings',
+      body: asJson(input),
+    });
   }
 
   createControlEvent(input: JsonObject): Promise<JsonObject> {

@@ -92,6 +92,7 @@ func TestMalformedJSONIsRejectedAcrossWriteRoutes(t *testing.T) {
 		{name: "assign model", method: http.MethodPost, path: "/aep/v1/admin/model-assignments", token: adminToken},
 		{name: "put data plane", method: http.MethodPut, path: "/aep/v1/admin/data-plane/desired-state", token: adminToken},
 		{name: "publish data plane routes", method: http.MethodPost, path: "/aep/v1/admin/data-plane/publish", token: adminToken},
+		{name: "update deployment settings", method: http.MethodPut, path: "/aep/v1/admin/deployment/settings", token: adminToken},
 		{name: "create Credential", method: http.MethodPost, path: "/aep/v1/admin/credentials", token: adminToken},
 		{name: "update Credential", method: http.MethodPatch, path: "/aep/v1/admin/credentials/credential-a", token: adminToken},
 		{name: "rotate Credential", method: http.MethodPost, path: "/aep/v1/admin/credentials/credential-a/rotate", token: adminToken},

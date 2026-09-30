@@ -713,6 +713,30 @@ provider secret values. Catalog-derived routes for Credential-bound models
 reference the conventional Secret `aep-credential-<credentialId>` (key
 `api-key`) in `higress-system`, which the deployment Secret system provisions.
 
+### Deployment settings
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/deployment/settings` | Read deployment-level runtime settings |
+| PUT | `/admin/deployment/settings` | Partially update runtime settings |
+
+`GET` requires the `deployment.read` permission and `PUT` requires
+`deployment.write`; the built-in administrator role carries both. Each setting
+reports its stored `override`, the `effectiveValue` after environment
+fallbacks, and the `source` of the effective value (`override`, `env`, or
+`unset`).
+
+The first managed setting is `modelGatewayBaseUrl`, the OpenAI-compatible model
+gateway URL that service metadata advertises to clients. A `PUT` body of
+`{"modelGatewayBaseUrl": "https://gateway.example.com/v1"}` stores a runtime
+override that wins over `AEP_MODEL_GATEWAY_BASE_URL`; sending
+`{"modelGatewayBaseUrl": null}` clears the override and restores the
+environment value, and omitting the field leaves it unchanged. Values must be
+absolute `http`/`https` URLs with a client-reachable hostname: cluster-internal
+hosts (`*.svc.cluster.local` or single-label names) are rejected, and
+production deployments additionally reject loopback addresses. Invalid values
+return `422` with code `INVALID_DEPLOYMENT_SETTINGS`.
+
 ### Control Events
 
 | Method | Path | Purpose |
@@ -760,7 +784,8 @@ deliveries as `superseded`.
 
 Common codes are `INVALID_REQUEST`, `TOKEN_INVALID`, `ACCESS_DENIED`,
 `SKILL_NOT_ASSIGNED`, `CREDENTIAL_NOT_DELIVERABLE`, `MODEL_NOT_ALLOWED`,
-`RESOURCE_NOT_FOUND`, `VERSION_CONFLICT`, `RATE_LIMITED`, and `INTERNAL_ERROR`.
+`RESOURCE_NOT_FOUND`, `VERSION_CONFLICT`, `RATE_LIMITED`,
+`INVALID_DEPLOYMENT_SETTINGS`, and `INTERNAL_ERROR`.
 
 Retry safe reads with exponential backoff. Event batches are idempotent by
 `eventId`. Do not blindly retry authorization-code exchange or credential

@@ -30,6 +30,7 @@ tags:
   - {name: Admin Models}
   - {name: Admin Credentials}
   - {name: Admin Data Plane}
+  - {name: Admin Deployment}
 paths:
   /.well-known/jwks.json:
     get:
@@ -318,6 +319,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneStatus'}
+  /aep/v1/admin/deployment/settings:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1deployment~1settings'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

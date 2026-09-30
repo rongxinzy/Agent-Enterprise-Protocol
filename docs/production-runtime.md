@@ -12,6 +12,8 @@ Mock federated authentication is a development and test fixture. Production defa
 
 Use [control-service.env.example](../deploy/production/control-service.env.example) and [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example) as deployment inputs. Sensitive values support `VARIABLE_FILE` paths. A direct value and its `_FILE` form are mutually exclusive. The Credential keyring continues to use `AEP_CREDENTIAL_MASTER_KEY_FILE` so old decryption keys can remain available during controlled rotation. The data-plane reconciler token and gateway License status token also support the file form. The Kubernetes baseline mounts trusted License public keys, the signed License, and the shared status token through External Secrets; delivery overlays must replace the example customer and deployment IDs with the values bound into that License.
 
+`AEP_MODEL_GATEWAY_BASE_URL` is the startup-configured fallback for the model gateway URL that service metadata advertises to clients. Administrators can replace it at runtime through `PUT /aep/v1/admin/deployment/settings` (see [api-v1.md](api-v1.md)); the validated override is stored in PostgreSQL, wins over the environment value until it is cleared with an explicit null, and is rejected when it points at a cluster-internal hostname or, in production, a loopback address. Clients converge on the new value through their normal metadata polling without a control-service restart or a kubectl rollout.
+
 The signing seed, Credential keyring, database credentials, object-store credentials, and bootstrap password must come from the orchestrator's Secret provider. Do not place them in images, ConfigMaps, Git, Helm values, or shell history.
 
 ## Password Authentication

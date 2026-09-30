@@ -666,6 +666,25 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key`，命名空间
 `higress-system`），该 Secret 由部署侧 Secret 系统负责供给。
 
+### 部署设置
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/admin/deployment/settings` | 读取部署级运行时设置 |
+| PUT | `/admin/deployment/settings` | 部分更新运行时设置 |
+
+`GET` 需要 `deployment.read` 权限，`PUT` 需要 `deployment.write` 权限；内置管理员角色
+同时具备两者。每个设置项都会返回已存储的 `override`、经环境变量回落后的
+`effectiveValue`，以及生效值来源 `source`（`override`、`env` 或 `unset`）。
+
+首个受管理的设置项是 `modelGatewayBaseUrl`，即服务 metadata 向客户端下发的
+OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://gateway.example.com/v1"}`
+会写入优先于 `AEP_MODEL_GATEWAY_BASE_URL` 的运行时覆盖；发送
+`{"modelGatewayBaseUrl": null}` 会清除覆盖并回落到环境变量值；省略该字段则保持不变。
+取值必须是主机名可被客户端访问的绝对 `http`/`https` URL：集群内部主机
+（`*.svc.cluster.local` 或无 `.` 的单段裸主机名）会被拒绝，生产部署还会
+禁止 localhost 等回环地址。非法取值返回 `422`，错误码为 `INVALID_DEPLOYMENT_SETTINGS`。
+
 ### 管控事件
 
 | 方法 | 路径 | 用途 |
@@ -713,7 +732,8 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 
 通用错误码包括 `INVALID_REQUEST`、`TOKEN_INVALID`、`ACCESS_DENIED`、
 `SKILL_NOT_ASSIGNED`、`CREDENTIAL_NOT_DELIVERABLE`、`MODEL_NOT_ALLOWED`、
-`RESOURCE_NOT_FOUND`、`VERSION_CONFLICT`、`RATE_LIMITED` 和 `INTERNAL_ERROR`。
+`RESOURCE_NOT_FOUND`、`VERSION_CONFLICT`、`RATE_LIMITED`、`INVALID_DEPLOYMENT_SETTINGS`
+和 `INTERNAL_ERROR`。
 
 安全的读取请求采用指数退避重试。事件批次依据 `eventId` 幂等。授权码交换和凭证获取不得
 盲目重试。收到 `429` 或 `503` 时遵守 `Retry-After`。
