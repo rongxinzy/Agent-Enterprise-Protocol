@@ -658,10 +658,13 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET, PUT | `/admin/data-plane/desired-state` | 读取或发布模型网关期望状态 |
-| GET | `/admin/data-plane/status` | 读取最近一次调和观测状态 |
+| POST | `/admin/data-plane/publish` | 从模型目录派生网关路由并原子替换期望状态 |
+| GET, PUT | `/admin/data-plane/desired-state` | 读取期望状态；PUT 是已弃用的手工逃生口，用于运维手工编写的状态 |
+| GET | `/admin/data-plane/status` | 读取最近一次调和观测状态及目录漂移比对结果 |
 
-期望状态只引用外部 Secret 名称和键，不包含模型服务商凭证明文。
+期望状态只引用外部 Secret 名称和键，不包含模型服务商凭证明文。目录派生路由在模型绑定
+Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key`，命名空间
+`higress-system`），该 Secret 由部署侧 Secret 系统负责供给。
 
 ### 管控事件
 

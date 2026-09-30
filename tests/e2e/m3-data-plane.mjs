@@ -143,6 +143,37 @@ try {
   await admin.putDataPlaneDesiredState({revision: 'rev-5', routes: [{...route('chat', '/v1/chat', 'provider-d', 'api-key-d'), enabled: false}]});
   await waitForReady(admin, 'rev-5');
   assert(!snapshot().includes("path: '/v1/chat'"), 'disabled route remained in Ingress');
+
+  // Catalog-derived publication: the model catalog is the route source of truth.
+  const credential = await admin.createCredential({name: 'Provider catalog key', service: 'provider-catalog', type: 'api_key', deliveryMode: 'server_only', value: 'catalog-secret-value-a', enabled: true});
+  kubeSecrets.set(`aep-credential-${credential.id}`, {'api-key': 'catalog-secret-value-a'});
+  await admin.createModel({id: 'catalog-chat', displayName: 'Catalog Chat', sourceType: 'gateway', protocol: 'openai-compatible', endpoint: 'http://provider-catalog/v1', upstreamModel: 'provider-catalog-chat', credentialId: credential.id, capabilities: ['text'], isDefault: false, enabled: true});
+  await admin.createModel({id: 'catalog-disabled', displayName: 'Catalog Disabled', sourceType: 'gateway', protocol: 'openai-compatible', endpoint: 'http://provider-catalog/v1', upstreamModel: 'provider-catalog-disabled', capabilities: ['text'], isDefault: false, enabled: false});
+  await admin.createModel({id: 'catalog-local', displayName: 'Catalog Local', sourceType: 'local', protocol: 'openai-compatible', localModelRef: 'local-gguf', capabilities: ['text'], isDefault: false, enabled: true});
+
+  const published = await admin.publishDataPlaneRoutes();
+  assert(published.revision.startsWith('catalog-'), 'publish did not assign a catalog revision');
+  assert(published.routes.length === 1 && published.routes[0].modelId === 'catalog-chat', 'publish derived the wrong route set');
+  assert(published.routes[0].credentialRef?.name === `aep-credential-${credential.id}` && published.routes[0].credentialRef?.key === 'api-key', 'publish did not map the Credential to the conventional Secret');
+  assert(!JSON.stringify(published).includes('catalog-secret-value-a'), 'Secret value leaked into the publish response');
+  await waitForReady(admin, published.revision);
+  assert(snapshot().includes("'catalog-chat': 'provider-catalog-chat'"), 'catalog modelMapping was not rendered');
+  assert(snapshot().includes("apiTokens:\n            - 'catalog-secret-value-a'"), 'derived credentialRef was not resolved and inlined');
+  assert(!snapshot().includes('catalog-disabled') && !snapshot().includes('catalog-local'), 'non-publishable catalog models leaked into the gateway');
+  let comparison = (await admin.getDataPlaneStatus()).catalogComparison;
+  assert(comparison && comparison.missing.length === 0 && comparison.extra.length === 0 && comparison.mismatched.length === 0, `published catalog still drifted: ${JSON.stringify(comparison)}`);
+  assert(!JSON.stringify(await admin.getDataPlaneStatus()).includes('catalog-secret-value-a'), 'Secret value leaked into the data-plane status comparison');
+
+  const republished = await admin.publishDataPlaneRoutes();
+  assert(republished.revision === published.revision && republished.contentHash === published.contentHash, 'republishing an unchanged catalog was not idempotent');
+
+  await admin.putDataPlaneDesiredState({revision: 'rev-drift', routes: [route('ghost', '/v1/ghost', 'provider-ghost', 'api-key-a')]});
+  comparison = (await admin.getDataPlaneStatus()).catalogComparison;
+  assert(comparison.extra.includes('ghost') && comparison.missing.includes('catalog-chat'), `manual drift was not reported: ${JSON.stringify(comparison)}`);
+  const corrected = await admin.publishDataPlaneRoutes();
+  assert(corrected.revision === published.revision, 'republishing the catalog did not restore the derived state');
+  await waitForReady(admin, published.revision);
+  assert(!snapshot().includes('ghost'), 'ghost route survived catalog publication');
   console.log('AEP M3 live data-plane automation scenario passed.');
 } catch (error) {
   if (reconcilerErrors) console.error(reconcilerErrors);

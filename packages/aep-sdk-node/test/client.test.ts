@@ -170,6 +170,18 @@ describe('AepClient SDK gate', () => {
     await expect(client.getDataPlaneStatus()).resolves.toMatchObject({state: 'ready', observedRevision: 'rev-published', resourceCount: 1});
   });
 
+  test('publishes catalog-derived data-plane routes and reads the drift comparison', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    const published = await client.publishDataPlaneRoutes();
+    expect(published.revision).toBe('catalog-published');
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/admin/data-plane/publish');
+    expect(server.requests.at(-1)?.method).toBe('POST');
+    expect(server.requests.at(-1)?.headers['content-type']).toContain('application/json');
+    const status = await client.getDataPlaneStatus();
+    expect(status.catalogComparison).toEqual({missing: [], extra: [], mismatched: []});
+    expect(JSON.stringify(status)).not.toContain('provider-secret-value');
+  });
+
   test('covers Credential delivery and administration without caching secrets', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
 

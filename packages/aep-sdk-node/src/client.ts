@@ -45,6 +45,7 @@ import type {
   CurrentIdentity,
   DataPlaneDesiredState,
   DataPlaneDesiredStateWrite,
+  DataPlanePublishRequest,
   DataPlaneStatus,
   EntitlementTokenResponse,
   HeartbeatResponse,
@@ -765,6 +766,14 @@ export class AepClient {
     return this.#send({
       method: HttpMethod.Put,
       path: '/aep/v1/admin/data-plane/desired-state',
+      body: asJson(input),
+    });
+  }
+
+  publishDataPlaneRoutes(input: DataPlanePublishRequest = {}): Promise<DataPlaneDesiredState> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/data-plane/publish',
       body: asJson(input),
     });
   }

@@ -1137,9 +1137,29 @@ export interface paths {
         };
         /** @description Returns the tenant-scoped model gateway state intended for reconciliation. Secret values are never returned. */
         get: operations["getDataPlaneDesiredState"];
-        /** @description Publishes an idempotent desired state. Secret references identify external Secret material and never contain values. */
+        /**
+         * @deprecated
+         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.
+         */
         put: operations["putDataPlaneDesiredState"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/data-plane/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in higress-system; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. */
+        post: operations["publishDataPlaneRoutes"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1153,7 +1173,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the latest observed gateway reconciliation state. */
+        /** @description Returns the latest observed gateway reconciliation state and the drift between the catalog-publishable route set and the current desired routes. */
         get: operations["getDataPlaneStatus"];
         put?: never;
         post?: never;
@@ -1213,6 +1233,10 @@ export interface components {
             revision: string;
             routes: components["schemas"]["DataPlaneRoute"][];
         };
+        DataPlanePublishRequest: {
+            /** @description Optional explicit revision. When omitted the server assigns a content-addressed catalog-prefixed revision, making unchanged catalogs idempotent. */
+            revision?: string;
+        };
         DataPlaneDesiredState: components["schemas"]["DataPlaneDesiredStateWrite"] & {
             deploymentId: string;
             /** Format: date-time */
@@ -1229,6 +1253,19 @@ export interface components {
             errorCode?: string | null;
             message?: string | null;
             resourceCount?: number;
+            /** @description Drift between the route set the model catalog would publish and the current desired routes. Absent only in responses predating this field. */
+            catalogComparison?: components["schemas"]["DataPlaneCatalogComparison"];
+        };
+        DataPlaneCatalogComparison: {
+            /** @description Catalog-publishable model identifiers with no desired route. */
+            missing: string[];
+            /** @description Desired-route model identifiers the catalog would not publish. */
+            extra: string[];
+            /** @description Models present in both sets whose route fields differ from the catalog-derived route. */
+            mismatched: {
+                modelId: string;
+                fields: ("enabled" | "endpoint" | "upstreamModel" | "providerType" | "credentialRef")[];
+            }[];
         };
         JsonWebKeySet: {
             keys: {
@@ -4632,6 +4669,31 @@ export interface operations {
             };
             400: components["responses"]["Problem-2"];
             409: components["responses"]["Problem-2"];
+        };
+    };
+    publishDataPlaneRoutes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DataPlanePublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Catalog-derived desired state stored for reconciliation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlaneDesiredState"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
         };
     };
     getDataPlaneStatus: {

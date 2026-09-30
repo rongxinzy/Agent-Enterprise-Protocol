@@ -145,6 +145,8 @@ export type DataPlaneSecretReference = components['schemas']['DataPlaneSecretRef
 export type DataPlaneRoute = components['schemas']['DataPlaneRoute'];
 export type DataPlaneDesiredStateWrite = components['schemas']['DataPlaneDesiredStateWrite'];
 export type DataPlaneDesiredState = components['schemas']['DataPlaneDesiredState'];
+export type DataPlanePublishRequest = components['schemas']['DataPlanePublishRequest'];
+export type DataPlaneCatalogComparison = components['schemas']['DataPlaneCatalogComparison'];
 export type DataPlaneStatus = components['schemas']['DataPlaneStatus'];
 
 export interface ModelConnection extends ModelGatewayMetadata {

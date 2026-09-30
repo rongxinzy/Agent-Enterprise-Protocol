@@ -35,9 +35,17 @@ The reconciler Role and RoleBinding are deliberately scoped to Ingress and `exte
 
 Run `npm run test:e2e:m3-data-plane` for control-plane and fault convergence, and `npm run test:e2e:m3-kubernetes` for the real Kubernetes API Server and Higress-compatible CRD gate.
 
+## Catalog-Derived Publication
+
+Prefer `POST /aep/v1/admin/data-plane/publish` over hand-written desired states. The model catalog is the single source of truth: the control service derives one route per enabled `gateway` model with an OpenAI-compatible protocol and a complete endpoint and upstream model, and atomically replaces the desired state. This eliminates the structural drift where the catalog advertises a model but the gateway WasmPlugin has no matching `modelMapping`. Republishing an unchanged catalog is a no-op; any catalog change produces a new content-addressed revision.
+
+Credential mapping is by convention. When a published model binds a Credential, its route references the Secret `aep-credential-<credentialId>` key `api-key` in `higress-system`. Provision one such Secret per referenced Credential through the deployment Secret system (for example an External Secret), with the provider key as the `api-key` value. The control service never writes Kubernetes and never emits Credential values; the reconciler reads the Secret at sync time and inlines the value into the rendered WasmPlugin. To rotate, rotate the Credential in the control plane and update the corresponding Secret; the next reconciliation picks up the new value. A route whose Secret is missing renders without an `apiToken`, and ai-proxy rejects its requests fail-closed.
+
+`GET /aep/v1/admin/data-plane/status` includes `catalogComparison`: catalog-publishable models missing from the desired routes (`missing`), desired routes the catalog would not publish (`extra`), and per-field mismatches (`mismatched`). Treat a non-empty comparison as drift to review; publish resolves it, or the manual `PUT` escape hatch intentionally maintains it (for example the native `deepseek` provider type below).
+
 ## DeepSeek Reasoning Routes
 
-Set `providerType` explicitly in desired state when a route uses Higress' native DeepSeek provider. Legacy routes that omit it continue to use `openai`.
+Set `providerType` explicitly in desired state when a route uses Higress' native DeepSeek provider. Legacy routes that omit it continue to use `openai`. Catalog-derived routes always use `openai`, so a native DeepSeek route requires the manual escape hatch and will appear under `mismatched` until the catalog gains provider-type metadata.
 
 ~~~json
 {
