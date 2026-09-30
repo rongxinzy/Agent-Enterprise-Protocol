@@ -196,3 +196,118 @@ func TestUserCreateCommandLogsInAndCallsManagementAPI(t *testing.T) {
 		t.Fatalf("user create command: requests = %d, error = %v", requests, err)
 	}
 }
+
+func TestResolveDeploymentIDPrefersExplicitConfiguration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("metadata endpoint must not be called when the deployment is explicit: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	api := &client{baseURL: server.URL, http: server.Client()}
+	id, err := resolveDeploymentID(api, "deployment-explicit")
+	if err != nil || id != "deployment-explicit" {
+		t.Fatalf("resolveDeploymentID() = %q, %v", id, err)
+	}
+}
+
+func TestResolveDeploymentIDFromMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{name: "deploymentId field", response: `{"deploymentId":"deployment-a","deployment":{"id":"deployment-b","name":"Deployment B"}}`, want: "deployment-a"},
+		{name: "deployment.id fallback", response: `{"deployment":{"id":"deployment-b","name":"Deployment B"}}`, want: "deployment-b"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/aep/v1/metadata" || r.Header.Get("Authorization") != "" {
+					t.Errorf("unexpected metadata request: %s %s", r.Method, r.URL.Path)
+				}
+				_, _ = io.WriteString(w, test.response)
+			}))
+			defer server.Close()
+			api := &client{baseURL: server.URL, http: server.Client()}
+			id, err := resolveDeploymentID(api, "")
+			if err != nil || id != test.want {
+				t.Fatalf("resolveDeploymentID() = %q, %v", id, err)
+			}
+		})
+	}
+}
+
+func TestResolveDeploymentIDFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		response string
+		match    string
+	}{
+		{name: "missing deployment fields", response: `{"service":"aep-control-service"}`, match: "deploymentId"},
+		{name: "empty deployment fields", response: `{"deploymentId":"","deployment":{"id":""}}`, match: "deploymentId"},
+		{name: "metadata is not an object", response: `[]`, match: "not a JSON object"},
+		{name: "http failure", status: http.StatusInternalServerError, response: `{"code":"INTERNAL"}`, match: "500"},
+		{name: "malformed json", response: `not json`, match: "resolve deployment ID"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if test.status != 0 {
+					w.WriteHeader(test.status)
+				}
+				_, _ = io.WriteString(w, test.response)
+			}))
+			defer server.Close()
+			api := &client{baseURL: server.URL, http: server.Client()}
+			id, err := resolveDeploymentID(api, "")
+			if err == nil || id != "" || !strings.Contains(err.Error(), server.URL+"/aep/v1/metadata") || !strings.Contains(err.Error(), test.match) {
+				t.Fatalf("resolveDeploymentID() = %q, %v; want an error containing the metadata URL and %q", id, err, test.match)
+			}
+		})
+	}
+}
+
+func TestResolveDeploymentIDNetworkFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.Close()
+	api := &client{baseURL: server.URL, http: server.Client()}
+	id, err := resolveDeploymentID(api, "")
+	if err == nil || id != "" || !strings.Contains(err.Error(), server.URL+"/aep/v1/metadata") {
+		t.Fatalf("resolveDeploymentID() = %q, %v; want an error containing the metadata URL", id, err)
+	}
+}
+
+func TestCommandResolvesDeploymentFromMetadataWhenUnset(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch r.URL.Path {
+		case "/aep/v1/metadata":
+			if requests != 1 || r.Method != http.MethodGet || r.Header.Get("Authorization") != "" {
+				t.Errorf("metadata discovery must be the first, unauthenticated request: %s %s", r.Method, r.URL.Path)
+			}
+			_, _ = io.WriteString(w, `{"deployment":{"id":"deployment-from-metadata","name":"Metadata Deployment"}}`)
+		case "/aep/v1/auth/password/login":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["deploymentId"] != "deployment-from-metadata" {
+				t.Errorf("login did not use the metadata deployment ID: %#v, %v", body, err)
+			}
+			_, _ = io.WriteString(w, `{"accessToken":"access-a"}`)
+		case "/aep/v1/admin/users":
+			if r.Header.Get("Authorization") != "Bearer access-a" {
+				t.Error("management request lacks the login bearer token")
+			}
+			_, _ = io.WriteString(w, `{"users":[]}`)
+		default:
+			t.Errorf("unexpected API path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	command := newRootCommand()
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"--base-url", server.URL, "--username", "admin", "--password", "secret", "user", "list"})
+	if err := command.Execute(); err != nil || requests != 3 {
+		t.Fatalf("user list without --deployment: requests = %d, error = %v", requests, err)
+	}
+}

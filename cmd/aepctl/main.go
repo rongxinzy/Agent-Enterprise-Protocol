@@ -42,7 +42,7 @@ func newRootCommand() *cobra.Command {
 	opts := &options{}
 	root := &cobra.Command{Use: "aepctl", Short: "Manage an AEP deployment", SilenceUsage: true}
 	root.PersistentFlags().StringVar(&opts.baseURL, "base-url", env("AEPCTL_BASE_URL", "http://localhost:8080"), "AEP service origin")
-	root.PersistentFlags().StringVar(&opts.deploymentID, "deployment", env("AEPCTL_DEPLOYMENT", "demo"), "deployment identifier")
+	root.PersistentFlags().StringVar(&opts.deploymentID, "deployment", env("AEPCTL_DEPLOYMENT", ""), "deployment identifier (default: resolve from the server metadata endpoint)")
 	root.PersistentFlags().StringVar(&opts.username, "username", env("AEPCTL_USERNAME", "admin"), "administrator username")
 	root.PersistentFlags().StringVar(&opts.password, "password", os.Getenv("AEPCTL_PASSWORD"), "administrator password (prefer AEPCTL_PASSWORD)")
 	root.AddCommand(userCommand(opts), skillCommand(opts), credentialCommand(opts), modelCommand(opts), licenseCommand(opts), dataPlaneCommand(opts), eventCommand(opts), sessionCommand(opts), auditCommand(opts), metadataCommand(opts))
@@ -253,11 +253,43 @@ func authenticated(opts *options, run func(*client, *cobra.Command, []string) er
 			return errors.New("administrator password is required through --password or AEPCTL_PASSWORD")
 		}
 		api := &client{baseURL: strings.TrimRight(opts.baseURL, "/"), http: &http.Client{Timeout: 30 * time.Second}}
+		deploymentID, err := resolveDeploymentID(api, opts.deploymentID)
+		if err != nil {
+			return err
+		}
+		opts.deploymentID = deploymentID
 		if err := api.login(opts); err != nil {
 			return err
 		}
 		return run(api, command, args)
 	}
+}
+
+// resolveDeploymentID returns the explicitly configured deployment identifier,
+// or discovers it from the unauthenticated server metadata endpoint when the
+// flag and environment variable are both unset.
+func resolveDeploymentID(api *client, configured string) (string, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	const path = "/aep/v1/metadata"
+	value, err := api.request(http.MethodGet, path, nil, false)
+	if err != nil {
+		return "", fmt.Errorf("resolve deployment ID from %s%s: %w", api.baseURL, path, err)
+	}
+	metadata, ok := value.(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("resolve deployment ID from %s%s: metadata response is not a JSON object", api.baseURL, path)
+	}
+	if id, _ := metadata["deploymentId"].(string); id != "" {
+		return id, nil
+	}
+	if deployment, _ := metadata["deployment"].(map[string]any); deployment != nil {
+		if id, _ := deployment["id"].(string); id != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("resolve deployment ID from %s%s: metadata did not include deploymentId", api.baseURL, path)
 }
 func (c *client) login(opts *options) error {
 	value, err := c.request(http.MethodPost, "/aep/v1/auth/password/login", map[string]any{"deploymentId": opts.deploymentID, "username": opts.username, "password": opts.password}, false)
