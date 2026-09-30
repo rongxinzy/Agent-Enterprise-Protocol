@@ -76,6 +76,11 @@ func runWithDependencies(dependencies serverDependencies) error {
 	if err := dependencies.configureLogger(cfg.LogFormat, cfg.LogLevel, "aep-control-service", cfg.Environment); err != nil {
 		return fmt.Errorf("configure logger: %w", err)
 	}
+	if cfg.ModelGatewayBaseURL == "" {
+		slog.Warn("AEP_MODEL_GATEWAY_BASE_URL is not configured; metadata omits the model_gateway capability")
+	} else {
+		slog.Info("model gateway configured", "base_url", cfg.ModelGatewayBaseURL)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	application, err := dependencies.openApplication(ctx, cfg)
