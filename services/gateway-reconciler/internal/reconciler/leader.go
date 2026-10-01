@@ -108,10 +108,12 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 				RenewTime:            now,
 			},
 		})
-		_, _, err := l.request(ctx, http.MethodPost,
+		_, code, err := l.request(ctx, http.MethodPost,
 			fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases", l.namespace), body)
-		if err != nil {
-			// Someone else created it first — we're the follower.
+		if err != nil || code != http.StatusCreated {
+			if err != nil {
+				slog.Warn("leader election: create lease failed", "error", err, "code", code)
+			}
 			return nil
 		}
 		l.isLeader = true
@@ -136,8 +138,11 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 		current.Spec.AcquireTime = now
 	}
 	body, _ := json.Marshal(current)
-	_, _, err = l.request(ctx, http.MethodPut, l.leasePath(), body)
-	return err
+	_, code, err = l.request(ctx, http.MethodPut, l.leasePath(), body)
+	if err != nil || code != http.StatusOK {
+		return fmt.Errorf("renew lease: code=%d err=%w", code, err)
+	}
+	return nil
 }
 
 func (l *LeaderElector) release() {

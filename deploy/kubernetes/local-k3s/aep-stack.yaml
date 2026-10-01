@@ -247,7 +247,7 @@ spec:
       serviceAccountName: aep-gateway-reconciler
       containers:
         - name: reconciler
-          image: 172.18.5.251:8081/zhiyuan/aep-gateway-reconciler:0.3.0
+          image: 172.18.5.251:8081/zhiyuan/aep-gateway-reconciler:0.3.1
           envFrom: [{configMapRef: {name: aep-gateway-reconciler-config}}]
           ports: [{name: health, containerPort: 8091}]
           readinessProbe: {httpGet: {path: /readyz, port: 8091}, initialDelaySeconds: 8, periodSeconds: 5, failureThreshold: 24}
