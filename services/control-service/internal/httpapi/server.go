@@ -97,6 +97,8 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 			admin.Get("/aep/v1/admin/users", server.listUsers)
 			admin.Post("/aep/v1/admin/users", server.createUser)
 			admin.Post("/aep/v1/admin/users/import", server.importUsers)
+			admin.Get("/aep/v1/admin/users/{userId}", server.getUser)
+			admin.Delete("/aep/v1/admin/users/{userId}", server.deleteUser)
 			admin.Patch("/aep/v1/admin/users/{userId}", server.updateUser)
 			admin.Post("/aep/v1/admin/users/{userId}/reset-password", server.resetUserPassword)
 			admin.Get("/aep/v1/admin/skills", server.listSkills)

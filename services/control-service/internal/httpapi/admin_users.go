@@ -255,3 +255,47 @@ func isUniqueViolation(err error) bool {
 	var pgError *pgconn.PgError
 	return errors.As(err, &pgError) && pgError.Code == "23505"
 }
+
+// getUser returns a single platform user by ID with roles and teams.
+func (s *Server) getUser(response http.ResponseWriter, request *http.Request) {
+	user, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		GetUserRecord(request.Context(), chi.URLParam(request, "userId"))
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, publicUser(user))
+}
+
+// deleteUser removes a platform user and their bindings, revoking all
+// active sessions first. The bootstrap admin cannot be deleted.
+func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request) {
+	userID := chi.URLParam(request, "userId")
+	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
+	user, err := store.GetUser(request.Context(), userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if user.Username == "admin" {
+		writeProblem(response, request, http.StatusForbidden, "FORBIDDEN", "The bootstrap admin user cannot be deleted.")
+		return
+	}
+	if err := s.app.RevokeUserSessionSet(request.Context(), userID); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := store.DeleteUser(request.Context(), userID); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}

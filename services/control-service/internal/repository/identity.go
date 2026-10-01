@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type CreateUserParams struct {
@@ -173,6 +175,31 @@ func (s *DeploymentStore) UpdatePassword(ctx context.Context, id, passwordHash s
 		return ErrNotFound
 	}
 	return nil
+}
+
+
+// DeleteUser removes a user and their role/team bindings in a transaction.
+// Returns ErrNotFound when the user does not exist in this deployment.
+func (s *DeploymentStore) DeleteUser(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("deployment_id = ? AND id = ?", s.deploymentID, id).
+			Delete(&User{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if err := tx.Where("deployment_id = ? AND user_id = ?", s.deploymentID, id).
+			Delete(&UserRoleBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("deployment_id = ? AND user_id = ?", s.deploymentID, id).
+			Delete(&UserTeamBinding{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *DeploymentStore) UserRoleIDs(ctx context.Context, userID string) ([]string, error) {
