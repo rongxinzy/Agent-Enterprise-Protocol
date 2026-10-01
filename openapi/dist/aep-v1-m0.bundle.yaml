@@ -485,6 +485,40 @@ paths:
         '403':
           $ref: '#/components/responses/Problem'
   /aep/v1/admin/users/{userId}:
+    get:
+      tags:
+        - Admin Users
+      operationId: getPlatformUser
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Platform user details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformUser'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags:
+        - Admin Users
+      operationId: deletePlatformUser
+      security:
+        - aepBearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: User and their bindings deleted; sessions revoked
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
     patch:
       tags:
         - Admin Users
