@@ -63,6 +63,15 @@ func expectHTTPUserRoles(mock sqlmock.Sqlmock, deploymentID, userID string, role
 		WithArgs(deploymentID, userID).WillReturnRows(rows)
 }
 
+func expectHTTPUserTeams(mock sqlmock.Sqlmock, deploymentID, userID string, teamIDs ...string) {
+	rows := sqlmock.NewRows([]string{"team_id"})
+	for _, teamID := range teamIDs {
+		rows.AddRow(teamID)
+	}
+	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY team_id`).
+		WithArgs(deploymentID, userID).WillReturnRows(rows)
+}
+
 func expectHTTPSessionIssue(pool pgxmock.PgxPoolIface, deploymentID, userID string) {
 	expectHTTPSessionIssueWithClient(pool, deploymentID, userID, nil, nil, nil)
 }
@@ -237,6 +246,7 @@ func TestChangePasswordAndCurrentIdentity(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
 		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
 	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member", "operator")
+	expectHTTPUserTeams(mock, "deployment-a", "user-a")
 	expectHTTPUserPermissions(mock, "deployment-a", "user-a", "models.read", "users.read")
 	identity := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/me", "")
 	if identity.Code != http.StatusOK || !strings.Contains(identity.Body.String(), `"sessionId":"session-user"`) || !strings.Contains(identity.Body.String(), `"roles":["member","operator"]`) || !strings.Contains(identity.Body.String(), `"permissions":["models.read","users.read"]`) || strings.Contains(identity.Body.String(), passwordHash) {
