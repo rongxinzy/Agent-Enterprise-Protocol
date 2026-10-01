@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"context"
 	"errors"
 	"log/slog"
@@ -44,8 +45,25 @@ func main() {
 	defer stop()
 	readiness := newReadinessState(config.worker.Tenants)
 	go serveHealth(ctx, config.address, readiness)
+
+	// Leader election: when multiple replicas run, only the lease holder
+	// executes the reconcile loop; followers idle (but stay ready) for
+	// fast failover. Disabled (nil) when no KubernetesApplier is configured.
+	var elector *reconciler.LeaderElector
+	if applier, ok := config.worker.Applier.(*reconciler.KubernetesApplier); ok {
+		identity := os.Getenv("POD_NAME")
+		if identity == "" {
+			identity = fmt.Sprintf("reconciler-%d", os.Getpid())
+		}
+		elector = reconciler.NewLeaderElector(applier, "aep-system", "gateway-reconciler-leader", identity)
+		go elector.Run(ctx)
+		slog.Info("leader election enabled", "identity", identity)
+	} else {
+		slog.Info("leader election disabled (no Kubernetes applier)")
+	}
+
 	for _, tenant := range config.worker.Tenants {
-		go runTenant(ctx, worker, tenant, config.interval, readiness)
+		go runTenant(ctx, worker, tenant, config.interval, readiness, elector)
 	}
 	<-ctx.Done()
 }
@@ -85,9 +103,21 @@ func loadConfig() (serverConfig, error) {
 	return serverConfig{worker: workerConfig, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
 }
 
-func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration, readiness *readinessState) {
+func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration, readiness *readinessState, elector *reconciler.LeaderElector) {
 	backoff := time.Second
 	for {
+		// Only the lease holder reconciles; followers skip and mark ready.
+		if elector != nil && !elector.IsLeader() {
+			readiness.record(tenant, nil)
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			continue
+		}
 		err := worker.Sync(ctx, tenant)
 		readiness.record(tenant, err)
 		if err != nil {

@@ -1,0 +1,196 @@
+package reconciler
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// LeaderElector uses a Kubernetes Lease (coordination.k8s.io/v1) to ensure
+// only one reconciler instance runs the reconcile loop at a time. Followers
+// stay idle but healthy (the readiness endpoint keeps responding), so a
+// pod failure triggers a fast failover without split-brain applies.
+type LeaderElector struct {
+	baseURL    string
+	token      string
+	client     *http.Client
+	namespace  string
+	leaseName  string
+	identity   string
+	leaseDur   time.Duration
+	renewDur   time.Duration
+	isLeader   bool
+}
+
+// NewLeaderElector creates a Lease-based elector reusing the applier's HTTP
+// client and credentials (same ServiceAccount, same token).
+func NewLeaderElector(applier *KubernetesApplier, namespace, leaseName, identity string) *LeaderElector {
+	return &LeaderElector{
+		baseURL:   applier.baseURL,
+		token:     applier.token,
+		client:    applier.client,
+		namespace: namespace,
+		leaseName: leaseName,
+		identity:  identity,
+		leaseDur:  15 * time.Second,
+		renewDur:  5 * time.Second,
+	}
+}
+
+// Run blocks until the context is cancelled, continuously acquiring or
+// renewing the lease. Call IsLeader() from the reconcile loop to gate work.
+func (l *LeaderElector) Run(ctx context.Context) {
+	ticker := time.NewTicker(l.renewDur)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			l.release()
+			return
+		case <-ticker.C:
+			if err := l.acquireOrRenew(ctx); err != nil {
+				if l.isLeader {
+					slog.Warn("leader election: lost lease", "error", err)
+				}
+				l.isLeader = false
+			} else if !l.isLeader {
+				slog.Info("leader election: acquired lease", "identity", l.identity)
+				l.isLeader = true
+			}
+		}
+	}
+}
+
+// IsLeader reports whether this instance holds the lease.
+func (l *LeaderElector) IsLeader() bool { return l.isLeader }
+
+type leaseSpec struct {
+	HolderIdentity       string `json:"holderIdentity"`
+	LeaseDurationSeconds int    `json:"leaseDurationSeconds"`
+	AcquireTime          string `json:"acquireTime,omitempty"`
+	RenewTime            string `json:"renewTime"`
+}
+
+type lease struct {
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
+	Metadata   map[string]string `json:"metadata"`
+	Spec       leaseSpec         `json:"spec"`
+}
+
+func (l *LeaderElector) leasePath() string {
+	return fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases/%s", l.namespace, l.leaseName)
+}
+
+func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// Read the current lease (if any).
+	current, code, err := l.get(ctx)
+	if err != nil && code != http.StatusNotFound {
+		return fmt.Errorf("read lease: %w", err)
+	}
+
+	if code == http.StatusNotFound {
+		// Create the lease.
+		body, _ := json.Marshal(lease{
+			APIVersion: "coordination.k8s.io/v1",
+			Kind:       "Lease",
+			Metadata:   map[string]string{"name": l.leaseName, "namespace": l.namespace},
+			Spec: leaseSpec{
+				HolderIdentity:       l.identity,
+				LeaseDurationSeconds: int(l.leaseDur.Seconds()),
+				AcquireTime:          now,
+				RenewTime:            now,
+			},
+		})
+		_, _, err := l.request(ctx, http.MethodPost,
+			fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases", l.namespace), body)
+		if err != nil {
+			// Someone else created it first — we're the follower.
+			return nil
+		}
+		l.isLeader = true
+		return nil
+	}
+
+	// Check if the lease is expired or held by us.
+	if current.Spec.HolderIdentity != l.identity {
+		renewTime, err := time.Parse(time.RFC3339Nano, current.Spec.RenewTime)
+		if err == nil && time.Since(renewTime) < l.leaseDur {
+			// Someone else holds a valid lease.
+			return nil
+		}
+		// Lease expired — take over.
+		slog.Info("leader election: lease expired, taking over", "previous", current.Spec.HolderIdentity)
+	}
+
+	// Renew (or take over) the lease.
+	current.Spec.HolderIdentity = l.identity
+	current.Spec.RenewTime = now
+	if current.Spec.AcquireTime == "" {
+		current.Spec.AcquireTime = now
+	}
+	body, _ := json.Marshal(current)
+	_, _, err = l.request(ctx, http.MethodPut, l.leasePath(), body)
+	return err
+}
+
+func (l *LeaderElector) release() {
+	if !l.isLeader {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// Best-effort: clear the holder so the follower can acquire immediately.
+	current, code, err := l.get(ctx)
+	if err != nil || code != http.StatusOK {
+		return
+	}
+	current.Spec.HolderIdentity = ""
+	body, _ := json.Marshal(current)
+	_, _, _ = l.request(ctx, http.MethodPut, l.leasePath(), body)
+	l.isLeader = false
+}
+
+func (l *LeaderElector) get(ctx context.Context) (*lease, int, error) {
+	body, code, err := l.request(ctx, http.MethodGet, l.leasePath(), nil)
+	if err != nil {
+		return nil, code, err
+	}
+	if code != http.StatusOK {
+		return nil, code, nil
+	}
+	var result lease
+	if err := json.NewDecoder(strings.NewReader(string(body))).Decode(&result); err != nil {
+		return nil, code, fmt.Errorf("decode lease: %w", err)
+	}
+	return &result, code, nil
+}
+
+func (l *LeaderElector) request(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
+	var reader *strings.Reader
+	if body != nil {
+		reader = strings.NewReader(string(body))
+	} else {
+		reader = strings.NewReader("")
+	}
+	req, err := http.NewRequestWithContext(ctx, method, l.baseURL+path, reader)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+l.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := l.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 4096)
+	n, _ := resp.Body.Read(buf)
+	return buf[:n], resp.StatusCode, nil
+}
