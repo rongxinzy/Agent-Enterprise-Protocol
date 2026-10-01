@@ -43,7 +43,12 @@ jobs:
         with:
           go-version: 1.26.6
           cache: true
-      - run: go test ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          args: --timeout=5m
+      - name: Coverage floor
+        run: scripts/check-coverage.sh 76.5
       - run: go test -race ./...
       - run: go vet ./...
       - run: go build ./...
@@ -146,3 +151,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "AEP 95% release gate passed."
+
+  coverage-ratchet:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache: true
+      - name: Compare head vs base
+        run: |
+          measure() {
+            rev="$1"
+            git checkout --quiet "$rev"
+            go test ./... -coverpkg=./... -coverprofile=/tmp/c.cov >/dev/null
+            python3 scripts/merge-coverprofile.py /tmp/c.cov /tmp/c.merged
+            go tool cover -func=/tmp/c.merged | awk '/^total:/ {sub(/%/, "", $3); print $3}'
+          }
+          base="$(git rev-parse origin/${{ github.base_ref }})"
+          head_pct=$(measure HEAD)
+          base_pct=$(measure "$base")
+          echo "main=${base_pct}% PR=${head_pct}%"
+          if awk "BEGIN{exit !($head_pct < $base_pct)}"; then
+            echo "::error::coverage dropped from ${base_pct}% to ${head_pct}%"
+            exit 1
+          fi

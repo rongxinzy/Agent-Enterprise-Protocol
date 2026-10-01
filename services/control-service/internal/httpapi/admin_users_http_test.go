@@ -9,6 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jackc/pgx/v5/pgconn"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"gorm.io/gorm"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 )
@@ -150,4 +151,38 @@ func TestAdminUserCreateErrorsAreStable(t *testing.T) {
 	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), `"code":"USER_ALREADY_EXISTS"`) {
 		t.Fatalf("duplicate user = %d %s", duplicate.Code, duplicate.Body.String())
 	}
+}
+
+func TestGetUserByIDRoutes(t *testing.T) {
+	application, mock, _, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	t.Run("found returns the public user", func(t *testing.T) {
+		rows := sqlmock.NewRows(userColumns()).
+			AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", "hash", "active", false, false, "human", now, now)
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "user-a", 1).WillReturnRows(rows)
+		// Role/team reads for the record shape.
+		mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+			WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("member"))
+		mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).
+			WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"team_id"}))
+
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/users/user-a", "")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"user-a"`) {
+			t.Fatalf("getUser = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("missing user is a 404 problem", func(t *testing.T) {
+		// GORM translates driver no-rows into ErrRecordNotFound; sqlmock
+		// injects the mapped form directly.
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "user-a", 1).WillReturnError(gorm.ErrRecordNotFound)
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/users/user-a", "")
+		if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "RESOURCE_NOT_FOUND") {
+			t.Fatalf("getUser missing = %d %s", response.Code, response.Body.String())
+		}
+	})
 }

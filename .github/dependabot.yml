@@ -1,0 +1,47 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ['*']
+    ignore:
+      # The SDK is released as a tarball and pinned deliberately.
+      - dependency-name: '@aep/sdk-node'
+  - package-ecosystem: gomod
+    directory: /services/control-service
+    schedule:
+      interval: weekly
+    groups:
+      control-service:
+        patterns: ['*']
+  - package-ecosystem: gomod
+    directory: /services/gateway-authorizer
+    schedule:
+      interval: weekly
+    groups:
+      gateway-authorizer:
+        patterns: ['*']
+  - package-ecosystem: gomod
+    directory: /services/gateway-reconciler
+    schedule:
+      interval: weekly
+    groups:
+      gateway-reconciler:
+        patterns: ['*']
+  - package-ecosystem: gomod
+    directory: /cmd/aepctl
+    schedule:
+      interval: weekly
+    groups:
+      aepctl:
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
