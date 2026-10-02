@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"

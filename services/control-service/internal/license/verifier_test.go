@@ -167,9 +167,9 @@ func TestValidClaimsShapes(t *testing.T) {
 		t.Fatal("baseline claims must be valid")
 	}
 	invalid := []Claims{
-		{CustomerID: "c1", DeploymentID: "d1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z"},   // no license id
-		{LicenseID: "l1", DeploymentID: "d1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z"},   // no customer
-		{LicenseID: "l1", CustomerID: "c1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z"},     // no deployment
+		{CustomerID: "c1", DeploymentID: "d1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z"}, // no license id
+		{LicenseID: "l1", DeploymentID: "d1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z"},  // no customer
+		{LicenseID: "l1", CustomerID: "c1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z"},    // no deployment
 		{LicenseID: "l1", CustomerID: "c1", DeploymentID: "d1", Edition: "community", IssuedAt: "2026-01-01T00:00:00.000Z"},
 		{LicenseID: "l1", CustomerID: "c1", DeploymentID: "d1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00"},
 		{LicenseID: "l1", CustomerID: "c1", DeploymentID: "d1", Edition: "enterprise", IssuedAt: "2026-01-01T00:00:00.000Z", GraceDays: -1},

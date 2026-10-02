@@ -47,8 +47,10 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           args: --timeout=5m
+      - name: Format check (gofmt)
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo '::error::run gofmt -w on the files above'; exit 1; }
       - name: Coverage floor
-        run: scripts/check-coverage.sh 76.5
+        run: scripts/check-coverage.sh 80
       - run: go test -race ./...
       - run: go vet ./...
       - run: go build ./...

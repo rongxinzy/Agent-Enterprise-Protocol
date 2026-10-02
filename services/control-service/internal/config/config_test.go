@@ -280,7 +280,9 @@ func TestValidateRejectsInvalidRuntimeFields(t *testing.T) {
 		{name: "database scheme", mutate: func(cfg *Config) { cfg.DatabaseURL = "https://postgres.internal/aep" }, match: "must use one of these schemes"},
 		{name: "issuer", mutate: func(cfg *Config) { cfg.Issuer = "://invalid" }, match: "AEP_ISSUER"},
 		{name: "model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "ftp://gateway.internal" }, match: "AEP_MODEL_GATEWAY_BASE_URL"},
-		{name: "cluster service model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "http://aep-gateway-authorizer.aep.svc.cluster.local:8090/v1" }, match: "clients outside the cluster cannot resolve"},
+		{name: "cluster service model gateway", mutate: func(cfg *Config) {
+			cfg.ModelGatewayBaseURL = "http://aep-gateway-authorizer.aep.svc.cluster.local:8090/v1"
+		}, match: "clients outside the cluster cannot resolve"},
 		{name: "single-label model gateway", mutate: func(cfg *Config) { cfg.ModelGatewayBaseURL = "http://aep-gateway-authorizer:8090/v1" }, match: "clients outside the cluster cannot resolve"},
 		{name: "MinIO endpoint", mutate: func(cfg *Config) { cfg.MinioEndpoint = " " }, match: "AEP_MINIO_ENDPOINT"},
 		{name: "deployment identity", mutate: func(cfg *Config) { cfg.DeploymentID = "" }, match: "AEP_DEPLOYMENT_ID"},

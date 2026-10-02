@@ -15,15 +15,15 @@ import (
 // stay idle but healthy (the readiness endpoint keeps responding), so a
 // pod failure triggers a fast failover without split-brain applies.
 type LeaderElector struct {
-	baseURL    string
-	token      string
-	client     *http.Client
-	namespace  string
-	leaseName  string
-	identity   string
-	leaseDur   time.Duration
-	renewDur   time.Duration
-	isLeader   bool
+	baseURL   string
+	token     string
+	client    *http.Client
+	namespace string
+	leaseName string
+	identity  string
+	leaseDur  time.Duration
+	renewDur  time.Duration
+	isLeader  bool
 }
 
 // NewLeaderElector creates a Lease-based elector reusing the applier's HTTP
