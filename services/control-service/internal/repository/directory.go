@@ -118,7 +118,7 @@ LIMIT ?`, s.deploymentID, cursor, cursor, includeEphemeral, fetchLimit).Rows()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	entries := make([]AgentDirectoryEntry, 0)
 	for rows.Next() {
 		var entry AgentDirectoryEntry

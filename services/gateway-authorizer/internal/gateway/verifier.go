@@ -107,7 +107,7 @@ func (v *Verifier) CheckEntitlement(ctx context.Context, claims *ModelClaims, mo
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("license status endpoint returned %d", response.StatusCode)
 	}
@@ -216,7 +216,7 @@ func (v *Verifier) refresh(ctx context.Context, force bool) error {
 	if err != nil {
 		return fmt.Errorf("fetch JWKS: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("fetch JWKS: unexpected status %d", response.StatusCode)
 	}

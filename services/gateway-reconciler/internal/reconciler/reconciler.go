@@ -130,7 +130,7 @@ func (r *Reconciler) fetchDesired(ctx context.Context, tenant string) (DesiredSt
 	if err != nil {
 		return DesiredState{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return DesiredState{}, fmt.Errorf("desired state request returned %d", response.StatusCode)
 	}
@@ -156,7 +156,7 @@ func (r *Reconciler) writeStatus(ctx context.Context, tenant string, status Stat
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("status update returned %d", response.StatusCode)
 	}
@@ -254,8 +254,6 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, s
 				document.WriteString("          apiTokens:\n            - " + yamlScalar(value) + "\n")
 			}
 		}
-		if route.CredentialRef != nil {
-		}
 		document.WriteString("      ingress:\n        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
 	}
 	canonical := strings.TrimSpace(document.String()) + "\n"
@@ -335,7 +333,7 @@ func writeAtomic(path string, content []byte) error {
 		return err
 	}
 	temporaryName := temporary.Name()
-	defer os.Remove(temporaryName)
+	defer func() { _ = os.Remove(temporaryName) }()
 	if err := temporary.Chmod(0o640); err != nil {
 		_ = temporary.Close()
 		return err

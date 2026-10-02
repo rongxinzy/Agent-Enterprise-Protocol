@@ -177,7 +177,6 @@ func (s *DeploymentStore) UpdatePassword(ctx context.Context, id, passwordHash s
 	return nil
 }
 
-
 // DeleteUser removes a user and their role/team bindings in a transaction.
 // Returns ErrNotFound when the user does not exist in this deployment.
 func (s *DeploymentStore) DeleteUser(ctx context.Context, id string) error {

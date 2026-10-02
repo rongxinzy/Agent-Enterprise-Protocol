@@ -23,7 +23,7 @@ func TestRunReportsListenerFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	t.Setenv("AEP_ENVIRONMENT", "development")
 	t.Setenv("AEP_GATEWAY_REQUIRE_ENTITLEMENT", "false")
 	t.Setenv("AEP_GATEWAY_UPSTREAM_URL", "http://127.0.0.1:8080")

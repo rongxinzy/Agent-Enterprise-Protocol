@@ -38,11 +38,11 @@ type KubernetesApplier struct {
 func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 	baseURL := strings.TrimRight(config.URL, "/")
 	if baseURL == "" || config.Token == "" {
-		return nil, errors.New("Kubernetes URL and service-account token are required")
+		return nil, errors.New("kubernetes URL and service-account token are required")
 	}
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, errors.New("Kubernetes URL must be an absolute HTTP(S) URL")
+		return nil, errors.New("kubernetes URL must be an absolute HTTP(S) URL")
 	}
 	client := config.HTTPClient
 	if client == nil {
@@ -57,7 +57,7 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 				pool = x509.NewCertPool()
 			}
 			if !pool.AppendCertsFromPEM(certificate) {
-				return nil, errors.New("Kubernetes CA file contains no certificates")
+				return nil, errors.New("kubernetes CA file contains no certificates")
 			}
 			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
 		}
@@ -111,7 +111,7 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, doc
 			return readErr
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("Kubernetes apply %s returned %d: %s", resource.path, response.StatusCode, strings.TrimSpace(string(body)))
+			return fmt.Errorf("kubernetes apply %s returned %d: %s", resource.path, response.StatusCode, strings.TrimSpace(string(body)))
 		}
 	}
 	return nil
@@ -134,7 +134,7 @@ func (a *KubernetesApplier) delete(ctx context.Context, path string) error {
 		return readErr
 	}
 	if (response.StatusCode < 200 || response.StatusCode >= 300) && response.StatusCode != http.StatusNotFound {
-		return fmt.Errorf("Kubernetes delete %s returned %d: %s", path, response.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("kubernetes delete %s returned %d: %s", path, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

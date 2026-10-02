@@ -190,9 +190,10 @@ WHERE ca.deployment_id=$1 AND ca.credential_id=$3
 			return
 		}
 		code, detail := "ACCESS_DENIED", "The credential is not assigned to this user."
-		if reason == "disabled" {
+		switch reason {
+		case "disabled":
 			code, detail = "CREDENTIAL_DISABLED", "The credential is disabled."
-		} else if reason == "server_only" {
+		case "server_only":
 			code, detail = "CREDENTIAL_SERVER_ONLY", "The credential is restricted to server-side use."
 		}
 		writeProblem(response, request, http.StatusForbidden, code, detail)

@@ -198,8 +198,8 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
-	if user.User.Status == "disabled" {
-		if err := s.app.RevokeUserSessionSet(request.Context(), user.User.ID); err != nil {
+	if user.Status == "disabled" {
+		if err := s.app.RevokeUserSessionSet(request.Context(), user.ID); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}

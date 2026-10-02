@@ -207,7 +207,7 @@ func (s *DeploymentStore) ListTeamsPage(ctx context.Context, cursor string, fetc
 	}
 	items := make([]TeamRecord, 0, len(rows))
 	for _, item := range rows {
-		items = append(items, TeamRecord{Team: item.Team, MemberCount: item.MemberCount})
+		items = append(items, TeamRecord(item))
 	}
 	return items, nil
 }

@@ -310,3 +310,54 @@ func TestCreateAgentEnforcesResidentQuota(t *testing.T) {
 		t.Fatalf("ephemeral over quota = %d %s", ephemeral.Code, ephemeral.Body.String())
 	}
 }
+
+func TestCreateAgentHappyPathPersistsEverything(t *testing.T) {
+	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	// Validation reads: home team (join), role record, team record again.
+	teamJoin := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "parent_team_id", "path", "depth", "created_at", "updated_at", "member_count"}).
+			AddRow("deployment-a", "rd", "研发", "", true, true, nil, "/rd", 0, now, now, 0)
+	}
+	mock.ExpectQuery(`FROM "teams"`).
+		WithArgs("deployment-a").WillReturnRows(teamJoin())
+	roleRead := func() *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at"}).
+			AddRow("deployment-a", "agent", "Agent", "Agent role", true, true, now, now)
+	}
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "agent", 1).WillReturnRows(roleRead())
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 ORDER BY id`).
+		WithArgs("deployment-a").WillReturnRows(roleRead())
+	mock.ExpectQuery(`SELECT \* FROM "role_permissions" WHERE deployment_id = \$1 AND role_id IN`).
+		WithArgs("deployment-a", "agent").
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "role_id", "permission_id"}))
+	mock.ExpectQuery(`FROM "teams"`).
+		WithArgs("deployment-a").WillReturnRows(teamJoin())
+
+	// MaxResidentAgents is 0 in the test app config, so no quota read runs.
+
+	// CreateUser transaction: user row + role binding + team binding.
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	// Profile upsert (no scopeFromUserId in the payload, so no retrieval
+	// context resolution happens).
+	mock.ExpectBegin()
+	mock.ExpectExec(`.*"agent_profiles".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	payload := `{"username":"research-helper","displayName":"研究助理","password":"a-long-agent-password","roleIds":["agent"],"teamIds":["rd"],"homeTeamId":"rd","displayTitle":"研究助理","description":"帮助研究员"}`
+	response := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/agents", payload)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create agent = %d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "research-helper") {
+		t.Fatalf("response should name the agent: %s", response.Body.String())
+	}
+}

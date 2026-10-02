@@ -34,3 +34,21 @@ func TestAdminControlEventGetAndNotFound(t *testing.T) {
 		t.Fatalf("missing control event = %d %s", missing.Code, missing.Body.String())
 	}
 }
+
+func TestControlEventDeliveriesRoute(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	// The route sweeps expired deliveries before listing them.
+	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).
+		WithArgs("evt-1", "deployment-a").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT d.delivery_id,d.event_id,d.session_id`).
+		WithArgs("evt-1", "deployment-a", int32(50)).
+		WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "session_id", "state", "attempt_count", "received_at", "completed_at", "updated_at", "error_code", "message"}).
+			AddRow("delivery-1", "evt-1", "session-user", "pending", int64(1), nil, nil, now, nil, nil))
+	got := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/control-events/evt-1/deliveries", "")
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"deliveryId":"delivery-1"`) || !strings.Contains(got.Body.String(), `"state":"pending"`) {
+		t.Fatalf("deliveries = %d %s", got.Code, got.Body.String())
+	}
+}

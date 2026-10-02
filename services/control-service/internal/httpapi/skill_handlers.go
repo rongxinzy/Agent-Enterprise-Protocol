@@ -170,10 +170,10 @@ func skillEnabledFromPatch(state *string, enabled *bool) (*bool, error) {
 	case "withdrawn":
 		value = false
 	default:
-		return nil, errors.New("Skill state must be active or withdrawn.")
+		return nil, errors.New("skill state must be active or withdrawn")
 	}
 	if enabled != nil && *enabled != value {
-		return nil, errors.New("Skill state and enabled fields conflict.")
+		return nil, errors.New("skill state and enabled fields conflict")
 	}
 	return &value, nil
 }
@@ -208,7 +208,7 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "Version and package are required.")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	skillID := chi.URLParam(request, "skillId")
 	if !requireSkillIdentifier(response, request, skillID) || !requireSkillVersionIdentifier(response, request, version) {
 		return
@@ -457,7 +457,7 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 		databaseFailure(response, request, err)
 		return
 	}
-	defer object.Close()
+	defer func() { _ = object.Close() }()
 	response.Header().Set("Content-Type", "application/zip")
 	response.Header().Set("Cache-Control", "private, no-store")
 	_, _ = io.Copy(response, object)

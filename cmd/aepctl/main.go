@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -332,7 +331,7 @@ func (c *client) request(method, path string, body any, authenticated bool) (any
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	content, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
@@ -378,7 +377,7 @@ func (c *client) uploadSkill(skillID, version, path string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	contentResponse, _ := io.ReadAll(response.Body)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("upload failed (%d): %s", response.StatusCode, contentResponse)
@@ -408,10 +407,4 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-func platform() string {
-	if runtime.GOOS == "darwin" {
-		return "macos"
-	}
-	return runtime.GOOS
 }

@@ -55,7 +55,7 @@ func TestLoadConfigRejectsInvalidSources(t *testing.T) {
 		{"invalid interval", "AEP_RECONCILER_INTERVAL", "invalid", "INTERVAL"},
 		{"zero interval", "AEP_RECONCILER_INTERVAL", "0s", "INTERVAL"},
 		{"missing token file", "AEP_DATA_PLANE_RECONCILER_TOKEN_FILE", "missing-file", "missing-file"},
-		{"invalid Kubernetes URL", "AEP_RECONCILER_KUBERNETES_URL", "://invalid", "Kubernetes URL"},
+		{"invalid Kubernetes URL", "AEP_RECONCILER_KUBERNETES_URL", "://invalid", "kubernetes URL"},
 		{"missing Kubernetes token", "AEP_RECONCILER_KUBERNETES_URL", "https://kubernetes.example", "service-account token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

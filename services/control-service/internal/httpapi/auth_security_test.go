@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,4 +100,83 @@ func TestRetryAfterRoundsUp(t *testing.T) {
 	if retryAfterSeconds(time.Millisecond) != 1 || retryAfterSeconds(1500*time.Millisecond) != 2 {
 		t.Fatal("Retry-After did not round up to whole seconds")
 	}
+}
+
+func TestParseRemoteAddressShapes(t *testing.T) {
+	if address, ok := parseRemoteAddress("10.0.0.1:5678"); !ok || address.String() != "10.0.0.1" {
+		t.Fatalf("addr:port = %v, %v", address, ok)
+	}
+	if address, ok := parseRemoteAddress("2001:db8::1"); !ok || address.String() != "2001:db8::1" {
+		t.Fatalf("bare v6 = %v, %v", address, ok)
+	}
+	// IPv4-mapped v6 needs brackets as an addr:port literal; the bare form
+	// parses as an address and unmaps to plain v4.
+	if address, ok := parseRemoteAddress("[::ffff:10.0.0.2]:80"); !ok || address.String() != "10.0.0.2" {
+		t.Fatalf("mapped v6 = %v, %v", address, ok)
+	}
+	if _, ok := parseRemoteAddress("not-an-address"); ok {
+		t.Fatal("garbage must not parse")
+	}
+}
+
+func TestBoundedAuditID(t *testing.T) {
+	if boundedAuditID("short") != "short" {
+		t.Fatal("short ids pass through unchanged")
+	}
+	long := strings.Repeat("x", 300)
+	hashed := boundedAuditID(long)
+	if !strings.HasPrefix(hashed, "sha256:") || len(hashed) >= len(long) {
+		t.Fatalf("long id must collapse to a hash, got %d chars", len(hashed))
+	}
+}
+
+func TestRequiredAdminPermission(t *testing.T) {
+	cases := []struct {
+		method, path string
+		want         string
+	}{
+		{"GET", "/aep/v1/admin/roles", "roles.read"},
+		{"POST", "/aep/v1/admin/roles", "roles.write"},
+		{"GET", "/aep/v1/admin/permissions", "roles.read"},
+		{"GET", "/aep/v1/admin/teams", "teams.read"},
+		{"DELETE", "/aep/v1/admin/teams/x", "teams.write"},
+		{"PUT", "/aep/v1/admin/users/u/rbac", "users.write"},
+		{"GET", "/aep/v1/admin/users", "users.read"},
+		{"GET", "/aep/v1/admin/sessions/u/revoke", "sessions.write"},
+		{"GET", "/aep/v1/admin/sessions", "users.read"},
+		{"POST", "/aep/v1/admin/models/x/assignment", "models.assign"},
+		{"GET", "/aep/v1/admin/models", "models.read"},
+		{"PUT", "/aep/v1/admin/models", "models.write"},
+		{"POST", "/aep/v1/admin/skills/x/assignment", "skills.assign"},
+		{"GET", "/aep/v1/admin/skills", "skills.read"},
+		{"DELETE", "/aep/v1/admin/skills/s", "skills.write"},
+		{"POST", "/aep/v1/admin/credentials", "credentials.write"},
+		{"GET", "/aep/v1/admin/credentials", "credentials.read"},
+		{"PUT", "/aep/v1/admin/credentials/c/rotate", "credentials.write"},
+		{"GET", "/aep/v1/admin/agents", "users.read"},
+		{"GET", "/aep/v1/admin/identity-sources", "identity.read"},
+		{"GET", "/aep/v1/admin/events", "events.read"},
+		{"GET", "/aep/v1/admin/nothing", ""},
+	}
+	for _, tc := range cases {
+		got := requiredAdminPermission(tc.method, tc.path)
+		if len(got) == 0 && tc.want != "" {
+			t.Fatalf("%s %s: expected %q, got none", tc.method, tc.path, tc.want)
+		}
+		if len(got) > 0 && got[0] != tc.want {
+			t.Fatalf("%s %s: expected %q, got %q", tc.method, tc.path, tc.want, got[0])
+		}
+	}
+}
+
+func TestReadinessProbes(t *testing.T) {
+	t.Run("missing dependencies report unavailable", func(t *testing.T) {
+		application, _, _ := newStoreBackedHTTPApplication(t)
+		handler := New(application).Handler()
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("readyz = %d", response.Code)
+		}
+	})
 }
