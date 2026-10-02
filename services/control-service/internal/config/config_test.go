@@ -334,3 +334,29 @@ func TestValidateRejectsMissingProductionLicenseBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestNonNegativeInteger(t *testing.T) {
+	t.Setenv("TEST_NNI_ABSENT", "")
+	value, err := nonNegativeInteger("TEST_NNI_ABSENT", 42)
+	if err != nil || value != 42 {
+		t.Fatalf("absent = %d, %v", value, err)
+	}
+	t.Setenv("TEST_NNI_VALID", "7")
+	value, err = nonNegativeInteger("TEST_NNI_VALID", 42)
+	if err != nil || value != 7 {
+		t.Fatalf("valid = %d, %v", value, err)
+	}
+	t.Setenv("TEST_NNI_ZERO", "0")
+	value, err = nonNegativeInteger("TEST_NNI_ZERO", 42)
+	if err != nil || value != 0 {
+		t.Fatalf("zero = %d, %v", value, err)
+	}
+	t.Setenv("TEST_NNI_NEGATIVE", "-1")
+	if _, err = nonNegativeInteger("TEST_NNI_NEGATIVE", 42); err == nil {
+		t.Fatal("negative must be rejected")
+	}
+	t.Setenv("TEST_NNI_GARBAGE", "abc")
+	if _, err = nonNegativeInteger("TEST_NNI_GARBAGE", 42); err == nil {
+		t.Fatal("garbage must be rejected")
+	}
+}

@@ -186,3 +186,79 @@ func TestGetUserByIDRoutes(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteUserRoutes(t *testing.T) {
+	application, mock, pool, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	userRows := func(username string) *sqlmock.Rows {
+		return sqlmock.NewRows(userColumns()).
+			AddRow("u1", "deployment-a", username, username, nil, "hash", "active", false, false, "human", now, now)
+	}
+
+	t.Run("missing user is a 404", func(t *testing.T) {
+		mock.ExpectQuery(`SELECT \* FROM "users"`).
+			WithArgs("deployment-a", "u1", 1).WillReturnError(gorm.ErrRecordNotFound)
+		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/users/u1", "")
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("delete missing = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("bootstrap admin cannot be deleted", func(t *testing.T) {
+		mock.ExpectQuery(`SELECT \* FROM "users"`).
+			WithArgs("deployment-a", "u1", 1).WillReturnRows(userRows("admin"))
+		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/users/u1", "")
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "bootstrap admin") {
+			t.Fatalf("delete admin = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("deletion revokes sessions then removes the user", func(t *testing.T) {
+		mock.ExpectQuery(`SELECT \* FROM "users"`).
+			WithArgs("deployment-a", "u1", 1).WillReturnRows(userRows("bob"))
+		pool.ExpectExec(`UPDATE user_session_tokens`).
+			WithArgs("u1").WillReturnResult(pgconn.NewCommandTag("UPDATE 0"))
+		pool.ExpectExec(`UPDATE user_sessions`).
+			WithArgs("u1").WillReturnResult(pgconn.NewCommandTag("UPDATE 0"))
+		mock.ExpectBegin()
+		mock.ExpectExec(`DELETE FROM "users"`).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`DELETE FROM "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`DELETE FROM "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/users/u1", "")
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("delete = %d %s", response.Code, response.Body.String())
+		}
+	})
+}
+
+func TestTelemetryEventSearchRoute(t *testing.T) {
+	application, _, pool, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+
+	t.Run("happy path returns telemetry rows", func(t *testing.T) {
+		pool.ExpectQuery(`FROM telemetry_events`).WithArgs("deployment-a", 51).
+			WillReturnRows(pgxmock.NewRows([]string{"event_id", "user_id", "session_id", "type", "resource_type", "resource_id", "result", "payload", "occurred_at", "received_at"}).
+				AddRow("evt-1", "user-a", "sess-1", "model.call", "model", "bench-glm", "success", nil, time.Now(), time.Now()))
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/events", "")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"items"`) {
+			t.Fatalf("search = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("bad result filter is rejected", func(t *testing.T) {
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/events?result=nonsense", "")
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("bad filter = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("bad time filter is rejected", func(t *testing.T) {
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/events?occurredAfter=not-a-time", "")
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("bad time = %d %s", response.Code, response.Body.String())
+		}
+	})
+}

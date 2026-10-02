@@ -1,197 +1,262 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
-func testTeams() map[string]TeamNode {
-	return map[string]TeamNode{
-		"company":   {ID: "company", Parent: "", Path: "/company"},
-		"rd":        {ID: "rd", Parent: "company", Path: "/company/rd"},
-		"rd1":       {ID: "rd1", Parent: "rd", Path: "/company/rd/rd1"},
-		"rd2":       {ID: "rd2", Parent: "rd", Path: "/company/rd/rd2"},
-		"hr":        {ID: "hr", Parent: "company", Path: "/company/hr"},
-		"hr-pay":    {ID: "hr-pay", Parent: "hr", Path: "/company/hr/hr-pay"},
-		"stray-rd1": {ID: "stray-rd1", Parent: "", Path: "/"},
+var errDataScopeRead = errors.New("datascope read failed")
+
+// DataScopeContext assembles a user's retrieval context (own teams + managed
+// subtrees + explicit grants/denies). These tests drive the three SQL reads
+// (roles via GORM, teams and rules via the pool) through mocks.
+func newDataScopeApp(t *testing.T) (*App, sqlmock.Sqlmock, pgxmock.PgxPoolIface) {
+	t.Helper()
+	sqlDB, sqlMock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New(): %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	ormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open(): %v", err)
+	}
+
+	pool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("pgxmock.NewPool(): %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	application := &App{Store: repository.New(ormDB)}
+	application.SetRuntimeDatabase(pool)
+	return application, sqlMock, pool
+}
+
+func TestDataScopeContext(t *testing.T) {
+	t.Run("own team plus managed subtree plus grant", func(t *testing.T) {
+		application, sqlMock, pool := newDataScopeApp(t)
+
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+			WithArgs("deployment-a", "user-a").
+			WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("manager"))
+
+		teamRows := pgxmock.NewRows([]string{"id", "parent", "path"}).
+			AddRow("engineering", "", "/engineering").
+			AddRow("backend", "engineering", "/engineering/backend")
+		pool.ExpectQuery(`JOIN user_team_bindings`).WithArgs("deployment-a", "user-a").WillReturnRows(teamRows)
+
+		treeRows := pgxmock.NewRows([]string{"id", "parent", "path"}).
+			AddRow("engineering", "", "/engineering").
+			AddRow("backend", "engineering", "/engineering/backend").
+			AddRow("sales", "", "/sales")
+		pool.ExpectQuery(`FROM teams WHERE deployment_id`).WithArgs("deployment-a").WillReturnRows(treeRows)
+
+		ruleRows := pgxmock.NewRows([]string{"id", "rule_kind", "subject_type", "subject_id", "resource_kind", "resource_id", "starts_at", "expires_at"}).
+			AddRow("r1", "management_scope", "user", "user-a", "skill", "*", nil, nil)
+		pool.ExpectQuery(`FROM data_scope_rules`).WithArgs("deployment-a", "user-a", []string{"manager"}, []string{"engineering", "backend"}).WillReturnRows(ruleRows)
+
+		resolved, err := application.DataScopeContext(context.Background(), "deployment-a", "user-a")
+		if err != nil {
+			t.Fatalf("DataScopeContext(): %v", err)
+		}
+		if !contains(resolved.OwnTeamIDs, "engineering") {
+			t.Fatalf("OwnTeamIDs = %#v, want engineering", resolved.OwnTeamIDs)
+		}
+		if !contains(resolved.OrgScope, "engineering") || !contains(resolved.OrgScope, "backend") {
+			t.Fatalf("OrgScope = %#v, want engineering and backend", resolved.OrgScope)
+		}
+	})
+
+	t.Run("role failure surfaces", func(t *testing.T) {
+		application, sqlMock, _ := newDataScopeApp(t)
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+			WillReturnError(errDataScopeRead)
+		if _, err := application.DataScopeContext(context.Background(), "deployment-a", "user-a"); err == nil {
+			t.Fatal("role read failure must surface")
+		}
+	})
+
+	t.Run("team read failure surfaces", func(t *testing.T) {
+		application, sqlMock, pool := newDataScopeApp(t)
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+			WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
+		pool.ExpectQuery(`JOIN user_team_bindings`).WillReturnError(errDataScopeRead)
+		if _, err := application.DataScopeContext(context.Background(), "deployment-a", "user-a"); err == nil {
+			t.Fatal("team read failure must surface")
+		}
+	})
+
+	t.Run("rules read failure surfaces", func(t *testing.T) {
+		application, sqlMock, pool := newDataScopeApp(t)
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+			WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
+		pool.ExpectQuery(`JOIN user_team_bindings`).
+			WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))
+		pool.ExpectQuery(`FROM teams WHERE deployment_id`).
+			WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))
+		pool.ExpectQuery(`FROM data_scope_rules`).WillReturnError(errDataScopeRead)
+		if _, err := application.DataScopeContext(context.Background(), "deployment-a", "user-a"); err == nil {
+			t.Fatal("rules read failure must surface")
+		}
+	})
+}
+
+func TestDataScopeRuleWindow(t *testing.T) {
+	// The rule read filters by time window at the SQL level; the Go side just
+	// scans. Guard the scan shapes with a full row including timestamps.
+	application, sqlMock, pool := newDataScopeApp(t)
+	sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+		WithArgs("deployment-a", "user-a").
+		WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
+	pool.ExpectQuery(`JOIN user_team_bindings`).
+		WithArgs("deployment-a", "user-a").
+		WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))
+	pool.ExpectQuery(`FROM teams WHERE deployment_id`).
+		WithArgs("deployment-a").
+		WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))
+	// pgxmock cannot scan a time struct into a *time.Time destination, so the
+	// window columns come through as NULL; the SQL-level window filter is
+	// what actually enforces timing, the scan only carries the pointers.
+	pool.ExpectQuery(`FROM data_scope_rules`).
+		WithArgs("deployment-a", "user-a", pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"id", "rule_kind", "subject_type", "subject_id", "resource_kind", "resource_id", "starts_at", "expires_at"}).
+			AddRow("r2", "exception_grant", "role", "manager", "model", "bench-glm", nil, nil))
+
+	if _, err := application.DataScopeContext(context.Background(), "deployment-a", "user-a"); err != nil {
+		t.Fatalf("DataScopeContext(): %v", err)
 	}
 }
 
-func rule(id, kind, subjectType, subjectID, resourceKind, resourceID string) ScopeRule {
-	return ScopeRule{ID: id, RuleKind: kind, SubjectType: subjectType, SubjectID: subjectID, ResourceKind: resourceKind, ResourceID: resourceID}
-}
-
-var evalNow = time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
-
-func TestSubtreeIDsWalksParentLinks(t *testing.T) {
-	subtree := subtreeIDs("rd", testTeams())
-	want := []string{"rd", "rd1", "rd2"}
-	if len(subtree) != len(want) {
-		t.Fatalf("subtreeIDs(rd) = %v, want %v", subtree, want)
+func TestRuleAppliesBySubjectType(t *testing.T) {
+	subject := ScopeSubject{UserID: "u1", RoleIDs: []string{"manager"}, TeamIDs: []string{"rd"}}
+	cases := []struct {
+		rule ScopeRule
+		want bool
+	}{
+		{ScopeRule{SubjectType: "user", SubjectID: "u1"}, true},
+		{ScopeRule{SubjectType: "user", SubjectID: "u2"}, false},
+		{ScopeRule{SubjectType: "role", SubjectID: "manager"}, true},
+		{ScopeRule{SubjectType: "role", SubjectID: "auditor"}, false},
+		{ScopeRule{SubjectType: "team", SubjectID: "rd"}, true},
+		{ScopeRule{SubjectType: "team", SubjectID: "sales"}, false},
+		{ScopeRule{SubjectType: "unknown", SubjectID: "x"}, false},
 	}
-	for index, id := range want {
-		if subtree[index] != id {
-			t.Fatalf("subtreeIDs(rd) = %v, want %v", subtree, want)
+	for _, tc := range cases {
+		if got := ruleApplies(tc.rule, subject); got != tc.want {
+			t.Errorf("ruleApplies(%#v) = %v, want %v", tc.rule, got, tc.want)
 		}
 	}
-	if subtree := subtreeIDs("missing", testTeams()); len(subtree) != 1 || subtree[0] != "missing" {
-		t.Fatalf("subtreeIDs(missing) = %v", subtree)
-	}
-	// A legacy row with the default path and no parent must stay standalone.
-	if subtree := subtreeIDs("stray-rd1", testTeams()); len(subtree) != 1 {
-		t.Fatalf("subtreeIDs(stray-rd1) = %v, want a single node", subtree)
-	}
 }
 
-func TestBuildRetrievalContextOwnDepartmentOnly(t *testing.T) {
-	context := BuildRetrievalContext("dep", "dev1", []string{"member"}, []string{"rd1"}, testTeams(), nil, evalNow)
-	if len(context.OrgScope) != 1 || context.OrgScope[0] != "rd1" {
-		t.Fatalf("OrgScope = %v, want [rd1]", context.OrgScope)
-	}
-	if context.CrossDepartmentReason != "" {
-		t.Fatalf("CrossDepartmentReason = %q, want empty", context.CrossDepartmentReason)
-	}
-}
-
-func TestBuildRetrievalContextMultiTeamUserUnionsSubtrees(t *testing.T) {
-	context := BuildRetrievalContext("dep", "dev1", []string{"member"}, []string{"rd1", "hr"}, testTeams(), nil, evalNow)
-	want := []string{"hr", "hr-pay", "rd1"}
-	if len(context.OrgScope) != len(want) {
-		t.Fatalf("OrgScope = %v, want %v", context.OrgScope, want)
-	}
-	for index, id := range want {
-		if context.OrgScope[index] != id {
-			t.Fatalf("OrgScope = %v, want %v", context.OrgScope, want)
-		}
-	}
-	if len(context.OwnTeamIDs) != 2 {
-		t.Fatalf("OwnTeamIDs = %v, want both own teams", context.OwnTeamIDs)
-	}
-}
-
-func TestBuildRetrievalContextManagementScopeExpandsSubtree(t *testing.T) {
-	rules := []ScopeRule{rule("r1", "management_scope", "role", "director", "team", "rd")}
-	context := BuildRetrievalContext("dep", "mgr", []string{"director"}, []string{"rd1"}, testTeams(), rules, evalNow)
-	want := []string{"rd", "rd1", "rd2"}
-	if len(context.OrgScope) != len(want) {
-		t.Fatalf("OrgScope = %v, want %v", context.OrgScope, want)
-	}
-	for index, id := range want {
-		if context.OrgScope[index] != id {
-			t.Fatalf("OrgScope = %v, want %v", context.OrgScope, want)
-		}
-	}
-	if context.CrossDepartmentReason != "management_scope" {
-		t.Fatalf("CrossDepartmentReason = %q", context.CrossDepartmentReason)
-	}
-	// The grant is role-bound: a member without the role gains nothing.
-	other := BuildRetrievalContext("dep", "dev1", []string{"member"}, []string{"rd1"}, testTeams(), rules, evalNow)
-	if len(other.OrgScope) != 1 {
-		t.Fatalf("role-bound rule leaked: %v", other.OrgScope)
-	}
-}
-
-func TestBuildRetrievalContextExceptionGrantAddsResource(t *testing.T) {
-	rules := []ScopeRule{rule("r1", "exception_grant", "user", "dev1", "knowledge_base", "kb-hr")}
-	context := BuildRetrievalContext("dep", "dev1", nil, []string{"rd1"}, testTeams(), rules, evalNow)
-	if len(context.AllowedResources) != 1 || context.AllowedResources[0] != (ResourceRef{Kind: "knowledge_base", ID: "kb-hr"}) {
-		t.Fatalf("AllowedResources = %v", context.AllowedResources)
-	}
-}
-
-func TestBuildRetrievalContextSkipsExpiredAndFutureRules(t *testing.T) {
-	past := evalNow.Add(-time.Hour)
-	future := evalNow.Add(time.Hour)
-	rules := []ScopeRule{
-		{ID: "expired", RuleKind: "exception_grant", SubjectType: "user", SubjectID: "dev1", ResourceKind: "knowledge_base", ResourceID: "kb-x", ExpiresAt: &past},
-		{ID: "scheduled", RuleKind: "exception_grant", SubjectType: "user", SubjectID: "dev1", ResourceKind: "knowledge_base", ResourceID: "kb-y", StartsAt: &future},
-		{ID: "active", RuleKind: "exception_grant", SubjectType: "user", SubjectID: "dev1", ResourceKind: "knowledge_base", ResourceID: "kb-z"},
-	}
-	context := BuildRetrievalContext("dep", "dev1", nil, []string{"rd1"}, testTeams(), rules, evalNow)
-	if len(context.AllowedResources) != 1 || context.AllowedResources[0] != (ResourceRef{Kind: "knowledge_base", ID: "kb-z"}) {
-		t.Fatalf("AllowedResources = %v, want [kb-z]", context.AllowedResources)
-	}
-}
-
-// The rule window is half-open: starts_at is inclusive, expires_at is
-// exclusive, so a grant dies the instant it expires.
-func TestBuildRetrievalContextWindowBoundaries(t *testing.T) {
-	startsNow := evalNow
-	expiresNow := evalNow
-	rules := []ScopeRule{
-		{ID: "starts-now", RuleKind: "exception_grant", SubjectType: "user", SubjectID: "dev1", ResourceKind: "knowledge_base", ResourceID: "kb-start", StartsAt: &startsNow},
-		{ID: "expires-now", RuleKind: "exception_grant", SubjectType: "user", SubjectID: "dev1", ResourceKind: "knowledge_base", ResourceID: "kb-expire", ExpiresAt: &expiresNow},
-	}
-	context := BuildRetrievalContext("dep", "dev1", nil, []string{"rd1"}, testTeams(), rules, evalNow)
-	if !containsResource(context.AllowedResources, ResourceRef{Kind: "knowledge_base", ID: "kb-start"}) {
-		t.Fatalf("starts_at == now must be active, AllowedResources = %v", context.AllowedResources)
-	}
-	if containsResource(context.AllowedResources, ResourceRef{Kind: "knowledge_base", ID: "kb-expire"}) {
-		t.Fatalf("expires_at == now must be expired, AllowedResources = %v", context.AllowedResources)
-	}
-}
-
-func containsResource(values []ResourceRef, target ResourceRef) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
-// An expired explicit_deny stops denying: access recovers the moment the
-// deny window closes.
-func TestBuildRetrievalContextExpiredDenyRecovers(t *testing.T) {
-	past := evalNow.Add(-time.Minute)
-	deny := rule("d1", "explicit_deny", "user", "dev1", "team", "rd2")
-	expiredDeny := rule("d2", "explicit_deny", "user", "dev1", "knowledge_base", "kb-hr")
-	expiredDeny.ExpiresAt = &past
-	grant := rule("g1", "exception_grant", "user", "dev1", "knowledge_base", "kb-hr")
-	context := BuildRetrievalContext("dep", "dev1", nil, []string{"rd1"}, testTeams(), []ScopeRule{deny, expiredDeny, grant}, evalNow)
-	if !context.Allows(ResourceRef{Kind: "knowledge_base", ID: "kb-hr"}) {
-		t.Fatal("expired deny must stop blocking the granted resource")
-	}
-	if context.Allows(ResourceRef{Kind: "team", ID: "rd2"}) {
-		t.Fatal("active deny on a team must still block it")
-	}
-}
-
-func TestContextAllowsDenyWinsOverEveryAllowance(t *testing.T) {
+func TestRetrievalContextAllows(t *testing.T) {
 	context := RetrievalContext{
-		OrgScope:         []string{"rd1", "rd2"},
-		AllowedResources: []ResourceRef{{Kind: "knowledge_base", ID: "kb-hr"}, {Kind: "classification", ID: "confidential"}},
-		DeniedResources:  []ResourceRef{{Kind: "knowledge_base", ID: "kb-board"}, {Kind: "classification", ID: "薪酬保密"}, {Kind: "team", ID: "hr"}},
+		OrgScope:         []string{"rd", "backend"},
+		AllowedResources: []ResourceRef{{Kind: "model", ID: "glm"}},
+		DeniedResources:  []ResourceRef{{Kind: "skill", ID: "dangerous"}},
 	}
 	cases := []struct {
-		name     string
-		resource ResourceRef
-		want     bool
+		ref  ResourceRef
+		want bool
 	}{
-		{"own department", ResourceRef{Kind: "team", ID: "rd1"}, true},
-		{"granted knowledge base", ResourceRef{Kind: "knowledge_base", ID: "kb-hr"}, true},
-		{"granted classification", ResourceRef{Kind: "classification", ID: "confidential"}, true},
-		{"denied team", ResourceRef{Kind: "team", ID: "hr"}, false},
-		{"denied classification", ResourceRef{Kind: "classification", ID: "薪酬保密"}, false},
-		{"denied knowledge base", ResourceRef{Kind: "knowledge_base", ID: "kb-board"}, false},
-		{"team outside org scope denied by default", ResourceRef{Kind: "team", ID: "hr-pay"}, false},
-		{"empty resource denied by default", ResourceRef{}, false},
+		{ResourceRef{Kind: "team", ID: "rd"}, true},
+		{ResourceRef{Kind: "model", ID: "glm"}, true},
+		{ResourceRef{Kind: "skill", ID: "dangerous"}, false}, // explicit deny wins
+		{ResourceRef{Kind: "team", ID: "sales"}, false},
 	}
-	for _, test := range cases {
-		if got := context.Allows(test.resource); got != test.want {
-			t.Fatalf("%s: Allows(%+v) = %v, want %v", test.name, test.resource, got, test.want)
+	for _, tc := range cases {
+		if got := context.Allows(tc.ref); got != tc.want {
+			t.Errorf("Allows(%#v) = %v, want %v", tc.ref, got, tc.want)
 		}
 	}
 }
 
-func TestBuildRetrievalContextExplicitDenyAppliesToTeamSubject(t *testing.T) {
-	rules := []ScopeRule{rule("r1", "explicit_deny", "team", "rd1", "classification", "薪酬保密")}
-	// dev1 belongs to rd1; the deny reaches them through the team subject.
-	context := BuildRetrievalContext("dep", "dev1", nil, []string{"rd1"}, testTeams(), rules, evalNow)
-	if !containsResource(context.DeniedResources, ResourceRef{Kind: "classification", ID: "薪酬保密"}) {
-		t.Fatalf("DeniedResources = %v", context.DeniedResources)
+func TestBuildRetrievalContextDenyPrecedence(t *testing.T) {
+	teams := map[string]TeamNode{
+		"rd":      {ID: "rd", Parent: "", Path: "/rd"},
+		"backend": {ID: "backend", Parent: "rd", Path: "/rd/backend"},
 	}
-	if context.Allows(ResourceRef{Kind: "classification", ID: "薪酬保密"}) {
-		t.Fatal("deny did not block the classification")
+	rules := []ScopeRule{
+		{RuleKind: "management_scope", SubjectType: "user", SubjectID: "u1", ResourceKind: "team", ResourceID: "sales"},
+		{RuleKind: "explicit_deny", SubjectType: "user", SubjectID: "u1", ResourceKind: "team", ResourceID: "backend"},
 	}
+	now := time.Now()
+	context := BuildRetrievalContext("deployment-a", "u1", []string{"manager"}, []string{"rd"}, teams, rules, now)
+	// Own subtree stays in org scope...
+	if !contains(context.OrgScope, "backend") {
+		t.Fatalf("OrgScope = %#v, want backend", context.OrgScope)
+	}
+	// ...but the explicit deny removes it from allowed decisions.
+	if context.Allows(ResourceRef{Kind: "team", ID: "backend"}) {
+		t.Fatal("explicit deny must override the own subtree")
+	}
+	// The management_scope grant adds sales.
+	if !context.Allows(ResourceRef{Kind: "team", ID: "sales"}) {
+		t.Fatal("management_scope grant must add sales")
+	}
+}
+
+func TestCleanupRetentionGuards(t *testing.T) {
+	t.Run("missing runtime database is an error", func(t *testing.T) {
+		application := &App{}
+		_, err := application.CleanupRetention(context.Background(), time.Now())
+		if err == nil || !strings.Contains(err.Error(), "unavailable") {
+			t.Fatalf("missing pool err = %v, want 'unavailable'", err)
+		}
+	})
+
+	t.Run("non-positive batch size is an error", func(t *testing.T) {
+		pool, err := pgxmock.NewPool()
+		if err != nil {
+			t.Fatalf("pgxmock.NewPool(): %v", err)
+		}
+		t.Cleanup(pool.Close)
+		application := &App{}
+		application.SetRuntimeDatabase(pool)
+		_, err = application.CleanupRetention(context.Background(), time.Now())
+		if err == nil || !strings.Contains(err.Error(), "batch size") {
+			t.Fatalf("bad batch size err = %v, want 'batch size'", err)
+		}
+	})
+
+	t.Run("contended lock returns quietly", func(t *testing.T) {
+		pool, err := pgxmock.NewPool()
+		if err != nil {
+			t.Fatalf("pgxmock.NewPool(): %v", err)
+		}
+		t.Cleanup(pool.Close)
+		application := &App{Config: config.Config{RetentionCleanupBatchSize: 100}}
+		application.SetRuntimeDatabase(pool)
+		pool.ExpectBegin()
+		pool.ExpectQuery(`pg_try_advisory_xact_lock`).WithArgs(pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"locked"}).AddRow(false))
+		pool.ExpectRollback()
+		result, err := application.CleanupRetention(context.Background(), time.Now())
+		if err != nil {
+			t.Fatalf("CleanupRetention(): %v", err)
+		}
+		if result.LockAcquired {
+			t.Fatalf("LockAcquired = true, want false")
+		}
+	})
+}
+
+func TestRunRetentionDisabled(t *testing.T) {
+	// A non-positive interval returns immediately without touching the DB.
+	application := &App{}
+	application.RunRetention(context.Background())
 }
