@@ -114,7 +114,7 @@ func TestUploadSkillMultipartAndFailure(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		content, err := io.ReadAll(file)
 		if err != nil || header.Filename != "skill.zip" || string(content) != "zip payload" {
 			t.Errorf("unexpected uploaded package: %v", err)

@@ -58,11 +58,11 @@ func runHealthcheck(arguments []string, stderr io.Writer, probe func(string, tim
 	if len(arguments) == 1 {
 		url = arguments[0]
 	} else if len(arguments) != 0 {
-		fmt.Fprintln(stderr, "usage: aep-control healthcheck [url]")
+		_, _ = fmt.Fprintln(stderr, "usage: aep-control healthcheck [url]")
 		return 2
 	}
 	if err := probe(url, 2*time.Second); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return 0

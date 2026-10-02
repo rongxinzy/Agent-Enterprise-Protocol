@@ -194,7 +194,7 @@ func (l *LeaderElector) request(ctx context.Context, method, path string, body [
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	buf := make([]byte, 4096)
 	n, _ := resp.Body.Read(buf)
 	return buf[:n], resp.StatusCode, nil

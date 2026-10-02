@@ -23,7 +23,7 @@ type contextKey string
 
 const (
 	claimsContextKey         contextKey = "aep-claims"
-	supportedProtocolVersion            = "1.0"
+	supportedProtocolVersion string     = "1.0"
 )
 
 type federatedTransaction struct {
@@ -387,28 +387,6 @@ func requiredAdminPermission(method, path string) []string {
 		return []string{"data_scope.write"}
 	}
 	return nil
-}
-
-func (s *Server) requirePermission(permission string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-			claims := claimsFrom(request)
-			if claims.Admin {
-				next.ServeHTTP(response, request)
-				return
-			}
-			allowed, err := s.userHasPermission(request, permission)
-			if err != nil {
-				databaseFailure(response, request, err)
-				return
-			}
-			if !allowed {
-				writeProblem(response, request, http.StatusForbidden, "ACCESS_DENIED", "The authenticated user lacks the required permission.")
-				return
-			}
-			next.ServeHTTP(response, request)
-		})
-	}
 }
 
 func (s *Server) internalDataPlane(next http.HandlerFunc) http.HandlerFunc {

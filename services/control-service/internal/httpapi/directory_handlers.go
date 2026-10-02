@@ -185,7 +185,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		return
 	}
 	profile := repository.AgentProfile{
-		UserID: record.User.ID, DisplayTitle: input.DisplayTitle, Description: input.Description,
+		UserID: record.ID, DisplayTitle: input.DisplayTitle, Description: input.Description,
 		HomeTeamID: input.HomeTeamID, Ephemeral: input.Ephemeral, ExpiresAt: expiresAt,
 	}
 	if input.PromptSkillID != "" {
@@ -209,7 +209,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		for _, team := range snapshot.OrgScope {
 			rule := repository.DataScopeRule{
 				ID: uuid.NewString(), RuleKind: "management_scope",
-				SubjectType: "user", SubjectID: record.User.ID,
+				SubjectType: "user", SubjectID: record.ID,
 				ResourceKind: "team", ResourceID: team,
 				Reason:    "ephemeral snapshot from " + input.ScopeFrom,
 				CreatedBy: claimsFrom(request).Subject,
@@ -222,7 +222,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		for team := range denied {
 			rule := repository.DataScopeRule{
 				ID: uuid.NewString(), RuleKind: "explicit_deny",
-				SubjectType: "user", SubjectID: record.User.ID,
+				SubjectType: "user", SubjectID: record.ID,
 				ResourceKind: "team", ResourceID: team,
 				Reason:    "ephemeral snapshot deny from " + input.ScopeFrom,
 				CreatedBy: claimsFrom(request).Subject,
@@ -236,14 +236,14 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 	for _, modelID := range input.ModelIDs {
 		if _, err := store.CreateModelAssignment(request.Context(), repository.ModelAssignment{
 			ID: uuid.NewString(), DeploymentID: claimsFrom(request).DeploymentID,
-			ModelID: modelID, SubjectType: "user", SubjectID: record.User.ID,
+			ModelID: modelID, SubjectType: "user", SubjectID: record.ID,
 		}); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
 	payload := map[string]any{
-		"id": record.User.ID, "username": record.User.Username, "displayName": record.User.DisplayName,
+		"id": record.ID, "username": record.Username, "displayName": record.DisplayName,
 		"homeTeamId": input.HomeTeamID, "displayTitle": input.DisplayTitle,
 		"ephemeral": input.Ephemeral, "expiresAt": nil,
 	}
