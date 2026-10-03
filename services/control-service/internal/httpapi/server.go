@@ -39,7 +39,44 @@ type Server struct {
 	transactionMu sync.Mutex
 }
 
+// New mounts every API surface on one router — the all-in-one deployment
+// shape used by compose, local k3s, and tests. Split deployments construct
+// NewEnterpriseAPI or NewAgentControlAPI instead.
 func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Handler) *Server {
+	server := newServer(application, runtimeMiddleware)
+	server.mountCommon(server.router)
+	server.mountAuth(server.router)
+	server.mountAgentUser(server.router)
+	server.mountInternal(server.router)
+	server.mountAdmin(server.router)
+	return server
+}
+
+// NewEnterpriseAPI mounts the enterprise management surface: admin APIs,
+// service-to-service internal endpoints, auth (sessions are shared across
+// surfaces — the console and portal log in here), and discovery metadata.
+func NewEnterpriseAPI(application *app.App, runtimeMiddleware ...func(http.Handler) http.Handler) *Server {
+	server := newServer(application, runtimeMiddleware)
+	server.mountCommon(server.router)
+	server.mountAuth(server.router)
+	server.mountInternal(server.router)
+	server.mountAdmin(server.router)
+	return server
+}
+
+// NewAgentControlAPI mounts the agent control protocol: the desktop-agent
+// runtime surface (/aep/v1/user/*), session auth, and discovery metadata.
+// The AEP participant model (docs/aep-v1.md) names this the Control, Event,
+// and Asset service; this binary actualizes it as its own process.
+func NewAgentControlAPI(application *app.App, runtimeMiddleware ...func(http.Handler) http.Handler) *Server {
+	server := newServer(application, runtimeMiddleware)
+	server.mountCommon(server.router)
+	server.mountAuth(server.router)
+	server.mountAgentUser(server.router)
+	return server
+}
+
+func newServer(application *app.App, runtimeMiddleware []func(http.Handler) http.Handler) *Server {
 	server := &Server{app: application, transactions: make(map[string]federatedTransaction)}
 	router := chi.NewRouter()
 	router.Use(server.requestID)
@@ -48,123 +85,156 @@ func New(application *app.App, runtimeMiddleware ...func(http.Handler) http.Hand
 	}
 	router.Use(server.protocolVersion)
 	router.Use(middleware.Recoverer)
-	router.Get("/.well-known/jwks.json", server.getJWKS)
-	router.Get("/livez", server.liveness)
-	router.Get("/readyz", server.readiness)
-	router.Get("/healthz", server.readiness)
-	router.Get("/aep/v1/metadata", server.metadata)
-	router.Get("/internal/data-plane/desired-state", server.internalDataPlane(server.getDataPlaneDesiredState))
-	router.Put("/internal/data-plane/status", server.internalDataPlane(server.putInternalDataPlaneStatus))
-	router.Get("/internal/gateway/licenses/{licenseId}", server.internalLicenseStatus)
-	router.Get("/aep/v1/auth/methods", server.authenticationMethods)
-	router.Post("/aep/v1/auth/password/login", server.passwordLogin)
-	router.Post("/aep/v1/auth/federated/start", server.federatedStart)
-	router.Post("/aep/v1/auth/exchange", server.federatedExchange)
-	router.Post("/aep/v1/auth/refresh", server.refreshSession)
-
-	router.Group(func(protected chi.Router) {
-		protected.Use(server.authenticate)
-		protected.Post("/aep/v1/auth/password/change", server.changePassword)
-		protected.Post("/aep/v1/auth/logout", server.logout)
-		protected.Post("/aep/v1/user/activation", server.activateLicense)
-		protected.Get("/aep/v1/user/me", server.currentIdentity)
-		protected.Get("/aep/v1/user/models", server.listAgentModels)
-		protected.Get("/aep/v1/user/credentials", server.listAgentCredentials)
-		protected.Post("/aep/v1/user/credentials/{credentialId}/resolve", server.resolveAgentCredential)
-		protected.Post("/aep/v1/user/heartbeat", server.heartbeat)
-		protected.Get("/aep/v1/user/control-events", server.listAgentControlEvents)
-		protected.Post("/aep/v1/user/control-events/{deliveryId}/acknowledge", server.acknowledgeControlEvent)
-		protected.Post("/aep/v1/user/control-events/{deliveryId}/result", server.reportControlEventResult)
-		protected.Get("/aep/v1/user/skills/manifest", server.skillManifest)
-		protected.Get("/aep/v1/user/skills/{skillId}/versions/{version}/package", server.downloadSkillPackage)
-		protected.Post("/aep/v1/user/skills/sync-results", server.reportSkillSyncResult)
-		protected.Post("/aep/v1/user/events/batch", server.uploadTelemetryBatch)
-
-		protected.Group(func(admin chi.Router) {
-			admin.Use(server.requireAdmin)
-			admin.Get("/aep/v1/admin/permissions", server.listPermissions)
-			admin.Get("/aep/v1/admin/roles", server.listRoles)
-			admin.Post("/aep/v1/admin/roles", server.createRole)
-			admin.Get("/aep/v1/admin/roles/{roleId}", server.getRole)
-			admin.Patch("/aep/v1/admin/roles/{roleId}", server.updateRole)
-			admin.Delete("/aep/v1/admin/roles/{roleId}", server.deleteRole)
-			admin.Get("/aep/v1/admin/teams", server.listTeams)
-			admin.Post("/aep/v1/admin/teams", server.createTeam)
-			admin.Get("/aep/v1/admin/teams/{teamId}", server.getTeam)
-			admin.Patch("/aep/v1/admin/teams/{teamId}", server.updateTeam)
-			admin.Delete("/aep/v1/admin/teams/{teamId}", server.deleteTeam)
-			admin.Put("/aep/v1/admin/users/{userId}/rbac", server.replaceUserRBAC)
-			admin.Get("/aep/v1/admin/users", server.listUsers)
-			admin.Post("/aep/v1/admin/users", server.createUser)
-			admin.Post("/aep/v1/admin/users/import", server.importUsers)
-			admin.Get("/aep/v1/admin/users/{userId}", server.getUser)
-			admin.Delete("/aep/v1/admin/users/{userId}", server.deleteUser)
-			admin.Patch("/aep/v1/admin/users/{userId}", server.updateUser)
-			admin.Post("/aep/v1/admin/users/{userId}/reset-password", server.resetUserPassword)
-			admin.Get("/aep/v1/admin/skills", server.listSkills)
-			admin.Post("/aep/v1/admin/skills", server.createSkill)
-			admin.Get("/aep/v1/admin/skills/{skillId}", server.getSkill)
-			admin.Patch("/aep/v1/admin/skills/{skillId}", server.updateSkill)
-			admin.Delete("/aep/v1/admin/skills/{skillId}", server.deleteSkill)
-			admin.Post("/aep/v1/admin/skills/{skillId}/versions", server.uploadSkillVersion)
-			admin.Post("/aep/v1/admin/skills/{skillId}/versions/{version}/publish", server.publishSkillVersion)
-			admin.Delete("/aep/v1/admin/skills/{skillId}/versions/{version}", server.deleteSkillVersion)
-			admin.Get("/aep/v1/admin/skill-assignments", server.listSkillAssignments)
-			admin.Post("/aep/v1/admin/skill-assignments", server.createSkillAssignment)
-			admin.Delete("/aep/v1/admin/skill-assignments/{assignmentId}", server.deleteSkillAssignment)
-			admin.Get("/aep/v1/admin/control-events", server.listAdminControlEvents)
-			admin.Post("/aep/v1/admin/control-events", server.createControlEvent)
-			admin.Get("/aep/v1/admin/control-events/{eventId}", server.getAdminControlEvent)
-			admin.Post("/aep/v1/admin/control-events/{eventId}/cancel", server.cancelControlEvent)
-			admin.Get("/aep/v1/admin/control-events/{eventId}/deliveries", server.listControlEventDeliveries)
-			admin.Get("/aep/v1/admin/sessions", server.listUserSessions)
-			admin.Post("/aep/v1/admin/sessions/{sessionId}/revoke", server.revokeUserSession)
-			admin.Get("/aep/v1/admin/licenses", server.listLicenses)
-			admin.Get("/aep/v1/admin/licenses/{licenseId}", server.getLicense)
-			admin.Post("/aep/v1/admin/licenses/import", server.importLicense)
-			admin.Post("/aep/v1/admin/licenses/{licenseId}/revoke", server.revokeLicense)
-			admin.Get("/aep/v1/admin/events", server.searchTelemetryEvents)
-			admin.Get("/aep/v1/admin/models", server.listModels)
-			admin.Post("/aep/v1/admin/models", server.createModel)
-			admin.Get("/aep/v1/admin/models/{modelId}", server.getModel)
-			admin.Patch("/aep/v1/admin/models/{modelId}", server.updateModel)
-			admin.Delete("/aep/v1/admin/models/{modelId}", server.deleteModel)
-			admin.Get("/aep/v1/admin/model-assignments", server.listModelAssignments)
-			admin.Post("/aep/v1/admin/model-assignments", server.createModelAssignment)
-			admin.Delete("/aep/v1/admin/model-assignments/{assignmentId}", server.deleteModelAssignment)
-			admin.Get("/aep/v1/admin/data-plane/desired-state", server.getDataPlaneDesiredState)
-			admin.Put("/aep/v1/admin/data-plane/desired-state", server.putDataPlaneDesiredState)
-			admin.Post("/aep/v1/admin/data-plane/publish", server.publishDataPlaneRoutes)
-			admin.Get("/aep/v1/admin/data-plane/status", server.getDataPlaneStatus)
-			admin.Get("/aep/v1/admin/deployment/settings", server.getDeploymentSettings)
-			admin.Put("/aep/v1/admin/deployment/settings", server.updateDeploymentSettings)
-			admin.Get("/aep/v1/admin/credentials", server.listCredentials)
-			admin.Post("/aep/v1/admin/credentials", server.createCredential)
-			admin.Get("/aep/v1/admin/credentials/{credentialId}", server.getCredential)
-			admin.Patch("/aep/v1/admin/credentials/{credentialId}", server.updateCredential)
-			admin.Delete("/aep/v1/admin/credentials/{credentialId}", server.deleteCredential)
-			admin.Post("/aep/v1/admin/credentials/{credentialId}/rotate", server.rotateCredential)
-			admin.Get("/aep/v1/admin/credential-assignments", server.listCredentialAssignments)
-			admin.Post("/aep/v1/admin/credential-assignments", server.createCredentialAssignment)
-			admin.Delete("/aep/v1/admin/credential-assignments/{assignmentId}", server.deleteCredentialAssignment)
-			admin.Get("/aep/v1/admin/agents", server.listAgents)
-			admin.Post("/aep/v1/admin/agents", server.createAgent)
-			admin.Delete("/aep/v1/admin/agents/{agentId}", server.deleteAgent)
-			admin.Put("/aep/v1/admin/agents/{agentId}/profile", server.updateAgentProfile)
-			admin.Get("/aep/v1/admin/identity-sources", server.listIdentitySources)
-			admin.Post("/aep/v1/admin/identity-sources", server.createIdentitySource)
-			admin.Get("/aep/v1/admin/identity-sources/{sourceId}/mappings", server.listIdentityMappings)
-			admin.Put("/aep/v1/admin/identity-sources/{sourceId}/mappings", server.upsertIdentityMapping)
-			admin.Delete("/aep/v1/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}", server.deleteIdentityMapping)
-			admin.Get("/aep/v1/admin/data-scope-rules", server.listDataScopeRules)
-			admin.Post("/aep/v1/admin/data-scope-rules", server.createDataScopeRule)
-			admin.Get("/aep/v1/admin/data-scope-rules/{ruleId}", server.getDataScopeRule)
-			admin.Delete("/aep/v1/admin/data-scope-rules/{ruleId}", server.deleteDataScopeRule)
-			admin.Get("/aep/v1/admin/data-scope/context", server.dataScopeContext)
-		})
-	})
 	server.router = router
 	return server
+}
+
+// mountCommon registers the discovery and health surface shared by every
+// API shape: JWKS (the only public verification surface), service metadata,
+// and probes.
+func (s *Server) mountCommon(router chi.Router) {
+	router.Get("/.well-known/jwks.json", s.getJWKS)
+	router.Get("/livez", s.liveness)
+	router.Get("/readyz", s.readiness)
+	router.Get("/healthz", s.readiness)
+	router.Get("/aep/v1/metadata", s.metadata)
+}
+
+// mountAuth registers the session surface. Access tokens and refresh tokens
+// are validated against the shared database and signing key, so both the
+// enterprise and agent surfaces can serve login and refresh interchangeably.
+func (s *Server) mountAuth(router chi.Router) {
+	router.Get("/aep/v1/auth/methods", s.authenticationMethods)
+	router.Post("/aep/v1/auth/password/login", s.passwordLogin)
+	router.Post("/aep/v1/auth/federated/start", s.federatedStart)
+	router.Post("/aep/v1/auth/exchange", s.federatedExchange)
+	router.Post("/aep/v1/auth/refresh", s.refreshSession)
+	router.Group(func(protected chi.Router) {
+		protected.Use(s.authenticate)
+		protected.Post("/aep/v1/auth/password/change", s.changePassword)
+		protected.Post("/aep/v1/auth/logout", s.logout)
+	})
+}
+
+// mountAgentUser registers the agent control protocol runtime surface:
+// heartbeat, control-event inbox, skill delivery, telemetry, model
+// connection, and credential resolution for the authenticated agent.
+func (s *Server) mountAgentUser(router chi.Router) {
+	router.Group(func(protected chi.Router) {
+		protected.Use(s.authenticate)
+		protected.Post("/aep/v1/user/activation", s.activateLicense)
+		protected.Get("/aep/v1/user/me", s.currentIdentity)
+		protected.Get("/aep/v1/user/models", s.listAgentModels)
+		protected.Get("/aep/v1/user/credentials", s.listAgentCredentials)
+		protected.Post("/aep/v1/user/credentials/{credentialId}/resolve", s.resolveAgentCredential)
+		protected.Post("/aep/v1/user/heartbeat", s.heartbeat)
+		protected.Get("/aep/v1/user/control-events", s.listAgentControlEvents)
+		protected.Post("/aep/v1/user/control-events/{deliveryId}/acknowledge", s.acknowledgeControlEvent)
+		protected.Post("/aep/v1/user/control-events/{deliveryId}/result", s.reportControlEventResult)
+		protected.Get("/aep/v1/user/skills/manifest", s.skillManifest)
+		protected.Get("/aep/v1/user/skills/{skillId}/versions/{version}/package", s.downloadSkillPackage)
+		protected.Post("/aep/v1/user/skills/sync-results", s.reportSkillSyncResult)
+		protected.Post("/aep/v1/user/events/batch", s.uploadTelemetryBatch)
+	})
+}
+
+// mountInternal registers the service-to-service endpoints consumed by the
+// gateway data plane (reconciler desired-state sync, authorizer license
+// status) behind their static shared secrets.
+func (s *Server) mountInternal(router chi.Router) {
+	router.Get("/internal/data-plane/desired-state", s.internalDataPlane(s.getDataPlaneDesiredState))
+	router.Put("/internal/data-plane/status", s.internalDataPlane(s.putInternalDataPlaneStatus))
+	router.Get("/internal/gateway/licenses/{licenseId}", s.internalLicenseStatus)
+}
+
+// mountAdmin registers the enterprise management API behind session auth
+// plus the admin permission check.
+func (s *Server) mountAdmin(router chi.Router) {
+	router.Group(func(protected chi.Router) {
+		protected.Use(s.authenticate)
+		protected.Group(func(admin chi.Router) {
+			admin.Use(s.requireAdmin)
+			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
+			admin.Get("/aep/v1/admin/roles", s.listRoles)
+			admin.Post("/aep/v1/admin/roles", s.createRole)
+			admin.Get("/aep/v1/admin/roles/{roleId}", s.getRole)
+			admin.Patch("/aep/v1/admin/roles/{roleId}", s.updateRole)
+			admin.Delete("/aep/v1/admin/roles/{roleId}", s.deleteRole)
+			admin.Get("/aep/v1/admin/teams", s.listTeams)
+			admin.Post("/aep/v1/admin/teams", s.createTeam)
+			admin.Get("/aep/v1/admin/teams/{teamId}", s.getTeam)
+			admin.Patch("/aep/v1/admin/teams/{teamId}", s.updateTeam)
+			admin.Delete("/aep/v1/admin/teams/{teamId}", s.deleteTeam)
+			admin.Put("/aep/v1/admin/users/{userId}/rbac", s.replaceUserRBAC)
+			admin.Get("/aep/v1/admin/users", s.listUsers)
+			admin.Post("/aep/v1/admin/users", s.createUser)
+			admin.Post("/aep/v1/admin/users/import", s.importUsers)
+			admin.Get("/aep/v1/admin/users/{userId}", s.getUser)
+			admin.Delete("/aep/v1/admin/users/{userId}", s.deleteUser)
+			admin.Patch("/aep/v1/admin/users/{userId}", s.updateUser)
+			admin.Post("/aep/v1/admin/users/{userId}/reset-password", s.resetUserPassword)
+			admin.Get("/aep/v1/admin/skills", s.listSkills)
+			admin.Post("/aep/v1/admin/skills", s.createSkill)
+			admin.Get("/aep/v1/admin/skills/{skillId}", s.getSkill)
+			admin.Patch("/aep/v1/admin/skills/{skillId}", s.updateSkill)
+			admin.Delete("/aep/v1/admin/skills/{skillId}", s.deleteSkill)
+			admin.Post("/aep/v1/admin/skills/{skillId}/versions", s.uploadSkillVersion)
+			admin.Post("/aep/v1/admin/skills/{skillId}/versions/{version}/publish", s.publishSkillVersion)
+			admin.Delete("/aep/v1/admin/skills/{skillId}/versions/{version}", s.deleteSkillVersion)
+			admin.Get("/aep/v1/admin/skill-assignments", s.listSkillAssignments)
+			admin.Post("/aep/v1/admin/skill-assignments", s.createSkillAssignment)
+			admin.Delete("/aep/v1/admin/skill-assignments/{assignmentId}", s.deleteSkillAssignment)
+			admin.Get("/aep/v1/admin/control-events", s.listAdminControlEvents)
+			admin.Post("/aep/v1/admin/control-events", s.createControlEvent)
+			admin.Get("/aep/v1/admin/control-events/{eventId}", s.getAdminControlEvent)
+			admin.Post("/aep/v1/admin/control-events/{eventId}/cancel", s.cancelControlEvent)
+			admin.Get("/aep/v1/admin/control-events/{eventId}/deliveries", s.listControlEventDeliveries)
+			admin.Get("/aep/v1/admin/sessions", s.listUserSessions)
+			admin.Post("/aep/v1/admin/sessions/{sessionId}/revoke", s.revokeUserSession)
+			admin.Get("/aep/v1/admin/licenses", s.listLicenses)
+			admin.Get("/aep/v1/admin/licenses/{licenseId}", s.getLicense)
+			admin.Post("/aep/v1/admin/licenses/import", s.importLicense)
+			admin.Post("/aep/v1/admin/licenses/{licenseId}/revoke", s.revokeLicense)
+			admin.Get("/aep/v1/admin/events", s.searchTelemetryEvents)
+			admin.Get("/aep/v1/admin/models", s.listModels)
+			admin.Post("/aep/v1/admin/models", s.createModel)
+			admin.Get("/aep/v1/admin/models/{modelId}", s.getModel)
+			admin.Patch("/aep/v1/admin/models/{modelId}", s.updateModel)
+			admin.Delete("/aep/v1/admin/models/{modelId}", s.deleteModel)
+			admin.Get("/aep/v1/admin/model-assignments", s.listModelAssignments)
+			admin.Post("/aep/v1/admin/model-assignments", s.createModelAssignment)
+			admin.Delete("/aep/v1/admin/model-assignments/{assignmentId}", s.deleteModelAssignment)
+			admin.Get("/aep/v1/admin/data-plane/desired-state", s.getDataPlaneDesiredState)
+			admin.Put("/aep/v1/admin/data-plane/desired-state", s.putDataPlaneDesiredState)
+			admin.Post("/aep/v1/admin/data-plane/publish", s.publishDataPlaneRoutes)
+			admin.Get("/aep/v1/admin/data-plane/status", s.getDataPlaneStatus)
+			admin.Get("/aep/v1/admin/deployment/settings", s.getDeploymentSettings)
+			admin.Put("/aep/v1/admin/deployment/settings", s.updateDeploymentSettings)
+			admin.Get("/aep/v1/admin/credentials", s.listCredentials)
+			admin.Post("/aep/v1/admin/credentials", s.createCredential)
+			admin.Get("/aep/v1/admin/credentials/{credentialId}", s.getCredential)
+			admin.Patch("/aep/v1/admin/credentials/{credentialId}", s.updateCredential)
+			admin.Delete("/aep/v1/admin/credentials/{credentialId}", s.deleteCredential)
+			admin.Post("/aep/v1/admin/credentials/{credentialId}/rotate", s.rotateCredential)
+			admin.Get("/aep/v1/admin/credential-assignments", s.listCredentialAssignments)
+			admin.Post("/aep/v1/admin/credential-assignments", s.createCredentialAssignment)
+			admin.Delete("/aep/v1/admin/credential-assignments/{assignmentId}", s.deleteCredentialAssignment)
+			admin.Get("/aep/v1/admin/agents", s.listAgents)
+			admin.Post("/aep/v1/admin/agents", s.createAgent)
+			admin.Delete("/aep/v1/admin/agents/{agentId}", s.deleteAgent)
+			admin.Put("/aep/v1/admin/agents/{agentId}/profile", s.updateAgentProfile)
+			admin.Get("/aep/v1/admin/identity-sources", s.listIdentitySources)
+			admin.Post("/aep/v1/admin/identity-sources", s.createIdentitySource)
+			admin.Get("/aep/v1/admin/identity-sources/{sourceId}/mappings", s.listIdentityMappings)
+			admin.Put("/aep/v1/admin/identity-sources/{sourceId}/mappings", s.upsertIdentityMapping)
+			admin.Delete("/aep/v1/admin/identity-sources/{sourceId}/mappings/{subjectType}/{externalId}", s.deleteIdentityMapping)
+			admin.Get("/aep/v1/admin/data-scope-rules", s.listDataScopeRules)
+			admin.Post("/aep/v1/admin/data-scope-rules", s.createDataScopeRule)
+			admin.Get("/aep/v1/admin/data-scope-rules/{ruleId}", s.getDataScopeRule)
+			admin.Delete("/aep/v1/admin/data-scope-rules/{ruleId}", s.deleteDataScopeRule)
+			admin.Get("/aep/v1/admin/data-scope/context", s.dataScopeContext)
+		})
+	})
 }
 
 func (s *Server) Handler() http.Handler { return s.router }
@@ -507,6 +577,13 @@ func (s *Server) metadata(response http.ResponseWriter, request *http.Request) {
 	if s.app.Credentials != nil {
 		capabilities = append(capabilities, "credentials")
 		metadata["capabilities"] = capabilities
+	}
+	// Split deployments advertise the agent control protocol endpoint so
+	// desktop agents can redirect their runtime surface (heartbeat, events,
+	// skills) without configuration; all-in-one deployments omit it and
+	// clients keep using the API base they logged in against.
+	if baseURL := effectiveAgentControlBaseURL(s.app, request); baseURL != "" {
+		metadata["agentControl"] = map[string]string{"baseUrl": baseURL}
 	}
 	writeJSON(response, http.StatusOK, metadata)
 }

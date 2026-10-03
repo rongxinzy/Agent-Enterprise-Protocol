@@ -2093,6 +2093,17 @@ components:
         modelGateway:
           $ref: '#/components/schemas/ModelGatewayMetadata'
           description: Present when the model_gateway capability is enabled.
+        agentControl:
+          $ref: '#/components/schemas/AgentControlMetadata'
+          description: 'Present in split deployments: the base URL of the agent control protocol service (auth, heartbeat, control-event inbox, skills, telemetry). Clients keep using the API base URL when omitted — the all-in-one control-service mounts the identical routes.'
+    AgentControlMetadata:
+      type: object
+      required:
+        - baseUrl
+      properties:
+        baseUrl:
+          type: string
+          format: uri
     ModelGatewayMetadata:
       type: object
       required:

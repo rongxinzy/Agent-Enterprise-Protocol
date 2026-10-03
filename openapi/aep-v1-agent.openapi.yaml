@@ -1,0 +1,97 @@
+# AEP agent control protocol — the desktop-agent runtime surface served by
+# the agent-control service in split deployments (and mounted by the
+# all-in-one control-service). It carries the Control, Event, and Asset
+# participant responsibilities from the protocol spec: session auth,
+# heartbeat, the control-event inbox, skill delivery, telemetry, model
+# connection, and credential resolution. Management APIs live in the
+# enterprise bundles (aep-v1 / m0-m2).
+openapi: 3.1.0
+info:
+  title: AEP Agent Control API
+  version: 1.0.0
+  description: >-
+    Agent-facing control protocol. Served by the aep-agent-control process in
+    split deployments; the all-in-one control-service mounts the identical
+    routes, so clients may treat this surface and the enterprise API as one
+    base URL until service metadata advertises agentControl.baseUrl.
+servers:
+  - {url: /}
+tags:
+  - {name: Service}
+  - {name: Authentication}
+  - {name: User Runtime}
+  - {name: User Control Events}
+paths:
+  /.well-known/jwks.json:
+    get:
+      tags: [Service]
+      operationId: getJsonWebKeySet
+      security: []
+      responses:
+        '200':
+          description: Public keys used to validate AEP and model access tokens
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JsonWebKeySet'}
+  /aep/v1/metadata:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1metadata'
+  /aep/v1/auth/methods:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1methods'
+  /aep/v1/auth/password/login:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1password~1login'
+  /aep/v1/auth/password/change:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1auth~1password~1change'
+  /aep/v1/auth/federated/start:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1federated~1start'
+  /aep/v1/auth/exchange:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1exchange'
+  /aep/v1/auth/refresh:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1refresh'
+  /aep/v1/auth/logout:
+    $ref: './aep-v1-authentication.openapi.yaml#/paths/~1auth~1logout'
+  /aep/v1/user/activation:
+    $ref: './aep-v1-m1.openapi.yaml#/paths/~1aep~1v1~1user~1activation'
+  /aep/v1/user/me:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1me'
+  /aep/v1/user/models:
+    $ref: './aep-v1-m1.openapi.yaml#/paths/~1aep~1v1~1user~1models'
+  /aep/v1/user/credentials:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1credentials'
+  /aep/v1/user/credentials/{credentialId}/resolve:
+    $ref: './aep-v1.openapi.yaml#/paths/~1user~1credentials~1{credentialId}~1resolve'
+  /aep/v1/user/heartbeat:
+    $ref: './aep-v1-control-events.openapi.yaml#/paths/~1user~1heartbeat'
+  /aep/v1/user/control-events:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1control-events'
+  /aep/v1/user/control-events/{deliveryId}/acknowledge:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1control-events~1{deliveryId}~1acknowledge'
+  /aep/v1/user/control-events/{deliveryId}/result:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1control-events~1{deliveryId}~1result'
+  /aep/v1/user/skills/manifest:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1skills~1manifest'
+  /aep/v1/user/skills/{skillId}/versions/{version}/package:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1skills~1{skillId}~1versions~1{version}~1package'
+  /aep/v1/user/skills/sync-results:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1skills~1sync-results'
+  /aep/v1/user/events/batch:
+    $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1events~1batch'
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    JsonWebKeySet:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, kid, use, alg, crv, x]
+            properties:
+              kty: {type: string, const: OKP}
+              kid: {type: string}
+              use: {type: string, const: sig}
+              alg: {type: string, const: EdDSA}
+              crv: {type: string, const: Ed25519}
+              x: {type: string}

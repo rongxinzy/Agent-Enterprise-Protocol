@@ -52,6 +52,8 @@ profile.
 
 ### User runtime API
 
+Served by the agent control protocol service in split deployments (`openapi/aep-v1-agent.openapi.yaml`); the all-in-one control-service mounts the same routes.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/user/me` | Current user, deployment, session, roles, and permissions |
