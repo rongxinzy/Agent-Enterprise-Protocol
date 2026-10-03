@@ -70,6 +70,49 @@ func TestHandlerAuthorizesModelAndSanitizesHeaders(t *testing.T) {
 	}
 }
 
+func TestHandlerMethodGateAllowsModelPrefixedAnthropicPaths(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	handler, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 1024}, verifierStub{claims: &ModelClaims{
+		DeploymentID: "deployment-a", ModelScopes: []string{"bench-anthropic"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The gate is method-shaped, not path-shaped: anthropic passthrough routes
+	// live under per-model prefixes instead of /v1/*.
+	request := httptest.NewRequest(http.MethodPost, "/bench-anthropic/v1/messages", strings.NewReader(`{"model":"bench-anthropic"}`))
+	request.Header.Set("Authorization", "Bearer model-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("prefixed POST = %d %s", response.Code, response.Body.String())
+	}
+
+	for name, request := range map[string]*http.Request{
+		"GET still rejected":       httptest.NewRequest(http.MethodGet, "/bench-anthropic/v1/messages", nil),
+		"PUT still rejected":       httptest.NewRequest(http.MethodPut, "/v1/chat/completions", strings.NewReader(`{}`)),
+		"unrouted path 404s later": httptest.NewRequest(http.MethodPost, "/not-a-model/v1/messages", strings.NewReader(`{"model":"bench-anthropic"}`)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			request.Header.Set("Authorization", "Bearer model-token")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if name == "unrouted path 404s later" {
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("unrouted POST should pass the authorizer and 404 at the gateway: %d %s", recorder.Code, recorder.Body.String())
+				}
+				return
+			}
+			if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), "RESOURCE_NOT_FOUND") {
+				t.Fatalf("%s = %d %s", name, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandlerRejectsMissingTokenAndUnauthorizedModel(t *testing.T) {
 	handler, err := NewHandler(Config{UpstreamURL: "http://example.test", RequestLimit: 1024}, verifierStub{claims: &ModelClaims{ModelScopes: []string{"model-a"}}})
 	if err != nil {

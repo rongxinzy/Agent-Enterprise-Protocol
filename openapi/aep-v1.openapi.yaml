@@ -846,7 +846,7 @@ components:
         id: {type: string}
         displayName: {type: string}
         sourceType: {$ref: '#/components/schemas/ModelSourceType'}
-        protocol: {type: string, enum: [openai-compatible]}
+        protocol: {type: string, enum: [openai-compatible, anthropic]}
         endpoint: {type: string, format: uri}
         upstreamModel: {type: string}
         localModelRef: {type: string}

@@ -72,7 +72,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		writeJSON(response, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
-	if request.Method != http.MethodPost || !strings.HasPrefix(request.URL.Path, "/v1/") {
+	// Inference routes are protocol-shaped, not path-shaped: OpenAI-compatible
+	// callers post /v1/* while anthropic passthrough routes live under a
+	// per-model prefix (/<model-slug>/v1/*). The model token and body-model
+	// scope are the security boundary; unknown paths 404 at the gateway.
+	if request.Method != http.MethodPost {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model gateway route was not found.")
 		return
 	}

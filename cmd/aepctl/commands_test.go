@@ -29,6 +29,15 @@ func TestManagementCommandsMapFlagsToRequests(t *testing.T) {
 			},
 		},
 		{
+			name: "model create anthropic", method: http.MethodPost, path: "/aep/v1/admin/models",
+			args: []string{"model", "create", "--model-id", "bench-anthropic", "--display-name", "Bench", "--protocol", "anthropic", "--endpoint", "https://open.bigmodel.cn/api/anthropic", "--upstream-model", "glm-5.3-flash"},
+			check: func(t *testing.T, body map[string]any) {
+				if body["protocol"] != "anthropic" || body["endpoint"] != "https://open.bigmodel.cn/api/anthropic" || body["upstreamModel"] != "glm-5.3-flash" {
+					t.Errorf("anthropic create payload = %#v", body)
+				}
+			},
+		},
+		{
 			name: "model update clears optional fields", method: http.MethodPatch, path: "/aep/v1/admin/models/chat-a",
 			args: []string{"model", "update", "--model-id", "chat-a", "--credential-id", "", "--reasoning-format", "", "--enabled=false"},
 			check: func(t *testing.T, body map[string]any) {

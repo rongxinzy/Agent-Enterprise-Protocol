@@ -41,6 +41,22 @@ const server = http.createServer(async (request, response) => {
     });
     return;
   }
+  // Anthropic passthrough target: the EnvoyFilter route (not ai-proxy)
+  // forwards here. Asserts the gateway-side rewrite and credential injection
+  // and echoes an anthropic-shaped reply.
+  if (request.method === 'POST' && request.url === '/api/anthropic/v1/messages') {
+    if (request.headers['x-api-key'] !== apiKey || request.headers.authorization !== `Bearer ${apiKey}`) {
+      sendJSON(response, 401, {type: 'error', error: {type: 'authentication_error', message: 'passthrough credential was not injected'}});
+      return;
+    }
+    const body = await readJSON(request);
+    sendJSON(response, 200, {
+      id: 'msg-aep-m1-anthropic', type: 'message', role: 'assistant', model: body.model,
+      content: [{type: 'text', text: `anthropic passthrough ok ${body.model}`}],
+      stop_reason: 'end_turn', usage: {input_tokens: 1, output_tokens: 2},
+    });
+    return;
+  }
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
     sendJSON(response, 404, {error: {message: 'route not found'}});
     return;

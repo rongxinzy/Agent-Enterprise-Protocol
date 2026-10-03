@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import * as nodeCrypto from 'node:crypto';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
@@ -45,6 +46,16 @@ const kubeServer = createServer(async (request, response) => {
     return;
   }
   const target = new URL(request.url, kubeUrl);
+  // Minimal Lease semantics for leader election: the lease never exists on
+  // GET (so the elector keeps re-acquiring), creates/renews succeed.
+  if (target.pathname.startsWith('/apis/coordination.k8s.io/')) {
+    if (request.method === 'GET') {
+      response.writeHead(404, {'content-type': 'application/json'}).end('{"message":"Lease not found"}');
+      return;
+    }
+    response.writeHead(request.method === 'POST' ? 201 : 200, {'content-type': 'application/json'}).end(body || '{}');
+    return;
+  }
   if (request.method === 'GET') {
     const match = /^\/api\/v1\/namespaces\/higress-system\/secrets\/([^/]+)$/.exec(target.pathname);
     assert(match, `unexpected Kubernetes GET path ${target.pathname}`);
@@ -131,6 +142,19 @@ try {
   await expectProblem(admin.putDataPlaneDesiredState({revision: 'malformed', routes: [{...route('bad', '', 'provider', 'key')}]}), 400, 'INVALID_DATA_PLANE_STATE');
   await expectProblem(admin.putDataPlaneDesiredState({revision: 'unsupported-provider', routes: [{...route('bad-provider', '/v1/chat', 'provider', 'key'), providerType: 'unknown'}]}), 400, 'INVALID_DATA_PLANE_STATE');
 
+  // Anthropic routes: absolute endpoints only, provider types forbidden, and
+  // two models whose sanitized path prefixes collide fail at render time.
+  const anthropicRoute = (modelId, endpoint = 'https://open.bigmodel.cn/api/anthropic') =>
+    ({modelId, enabled: true, endpoint, upstreamModel: 'glm-5.3-flash', protocol: 'anthropic', credentialRef: {name: 'provider-secrets', key: 'api-key-a', namespace: 'higress-system'}});
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'anthropic-relative', routes: [anthropicRoute('bench-anthropic', '/v1')]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'anthropic-provider', routes: [{...anthropicRoute('bench-anthropic'), providerType: 'openai'}]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await admin.putDataPlaneDesiredState({revision: 'anthropic-collision', routes: [anthropicRoute('Bench GLM'), anthropicRoute('bench-glm', 'https://api.anthropic.com')]});
+  await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'RENDER_FAILED');
+  await waitForHealth('/readyz', 503);
+  await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [route('chat', '/v1/chat', 'provider-d', 'api-key-d')]});
+  await waitForReady(admin, 'rev-4');
+  await waitForHealth('/readyz', 200);
+
   await compose('restart', 'control-service');
   await waitFor(async () => assert((await fetch(`${baseUrl}/readyz`)).ok, 'control service did not recover'));
   await waitForReady(admin, 'rev-4');
@@ -153,8 +177,11 @@ try {
 
   const published = await admin.publishDataPlaneRoutes();
   assert(published.revision.startsWith('catalog-'), 'publish did not assign a catalog revision');
-  assert(published.routes.length === 1 && published.routes[0].modelId === 'catalog-chat', 'publish derived the wrong route set');
-  assert(published.routes[0].credentialRef?.name === `aep-credential-${credential.id}` && published.routes[0].credentialRef?.key === 'api-key', 'publish did not map the Credential to the conventional Secret');
+  assert(published.routes.length === 2 && published.routes.some(candidate => candidate.modelId === 'catalog-chat' && candidate.enabled), 'publish derived the wrong route set');
+  const disabledDerived = published.routes.find(candidate => candidate.modelId === 'catalog-disabled');
+  assert(disabledDerived && disabledDerived.enabled === false, 'disabled catalog model must ride along as an enabled=false route');
+  const catalogRoute = published.routes.find(candidate => candidate.modelId === 'catalog-chat');
+  assert(catalogRoute.credentialRef?.name === `aep-credential-${credential.id}` && catalogRoute.credentialRef?.key === 'api-key', 'publish did not map the Credential to the conventional Secret');
   assert(!JSON.stringify(published).includes('catalog-secret-value-a'), 'Secret value leaked into the publish response');
   await waitForReady(admin, published.revision);
   assert(snapshot().includes("'catalog-chat': 'provider-catalog-chat'"), 'catalog modelMapping was not rendered');
@@ -174,6 +201,46 @@ try {
   assert(corrected.revision === published.revision, 'republishing the catalog did not restore the derived state');
   await waitForReady(admin, published.revision);
   assert(!snapshot().includes('ghost'), 'ghost route survived catalog publication');
+
+  // Anthropic catalog models publish into a self-contained EnvoyFilter
+  // passthrough under a per-model path prefix — no ai-proxy involvement.
+  const anthropicCredential = await admin.createCredential({name: 'BigModel key', service: 'bigmodel', type: 'api_key', deliveryMode: 'server_only', value: 'anthropic-secret-value', enabled: true});
+  kubeSecrets.set(`aep-credential-${anthropicCredential.id}`, {'api-key': 'anthropic-secret-value'});
+  await admin.createModel({id: 'bench-anthropic', displayName: 'Bench Anthropic', sourceType: 'gateway', protocol: 'anthropic', endpoint: 'https://open.bigmodel.cn/api/anthropic', upstreamModel: 'glm-5.3-flash', credentialId: anthropicCredential.id, capabilities: ['text'], isDefault: false, enabled: true});
+  const anthropicPublished = await admin.publishDataPlaneRoutes();
+  const derivedAnthropicRoute = anthropicPublished.routes.find(candidate => candidate.modelId === 'bench-anthropic');
+  assert(derivedAnthropicRoute?.protocol === 'anthropic' && !derivedAnthropicRoute.providerType, `anthropic derived route = ${JSON.stringify(derivedAnthropicRoute)}`);
+  await waitForReady(admin, anthropicPublished.revision);
+  assert(resources.size === 4, `expected openai ingress + anthropic ingress + envoyfilter + wasmplugin, got ${[...resources.keys()]}`);
+  const anthropicName = `aep-anthropic-${suffixOf('bench-anthropic')}`;
+  const filter = resources.get(`/apis/networking.istio.io/v1alpha3/namespaces/higress-system/envoyfilters/${anthropicName}`);
+  const anthropicIngress = resources.get(`/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/${anthropicName}`);
+  assert(filter && anthropicIngress, 'anthropic resources were not applied under the model-derived names');
+  assert(anthropicIngress.includes("path: '/bench-anthropic'"), 'anthropic ingress lost the per-model path prefix');
+  for (const expected of [
+    'applyTo: CLUSTER',
+    "address: 'open.bigmodel.cn'",
+    "port_value: 443",
+    "sni: 'open.bigmodel.cn'",
+    `cluster: '${anthropicName}'`,
+    "host_rewrite_literal: 'open.bigmodel.cn'",
+    "regex: '^/bench-anthropic/(.*)$'",
+    "substitution: '/api/anthropic/\\1'",
+    "value: 'anthropic-secret-value'",
+    "value: 'Bearer anthropic-secret-value'",
+  ]) {
+    assert(filter.includes(expected), `envoyfilter missing ${expected}:\n${filter}`);
+  }
+  assert(!filter.includes('credentialRef') && !filter.includes('aep-credential'), 'credential reference leaked into the envoyfilter');
+  comparison = (await admin.getDataPlaneStatus()).catalogComparison;
+  assert(comparison.missing.length === 0 && comparison.extra.length === 0 && comparison.mismatched.length === 0, `anthropic catalog drifted: ${JSON.stringify(comparison)}`);
+
+  // Disabling the anthropic model removes its whole resource pair.
+  await admin.updateModel('bench-anthropic', {enabled: false});
+  const disabledPublish = await admin.publishDataPlaneRoutes();
+  await waitForReady(admin, disabledPublish.revision);
+  assert(!snapshot().includes(anthropicName), 'disabled anthropic model left resources behind');
+  assert(snapshot().includes("'catalog-chat': 'provider-catalog-chat'"), 'openai catalog route was disturbed by the anthropic leg');
   console.log('AEP M3 live data-plane automation scenario passed.');
 } catch (error) {
   if (reconcilerErrors) console.error(reconcilerErrors);
@@ -188,6 +255,14 @@ try {
 
 function route(modelId, endpoint, upstreamModel, key, name = 'provider-secrets', providerType = 'openai') {
   return {modelId, enabled: true, endpoint, upstreamModel, protocol: 'openai-compatible', providerType, credentialRef: {name, key, namespace: 'higress-system'}};
+}
+
+// Mirrors resourceSuffix in the reconciler so the test can predict resource
+// names: lowercase [a-z0-9-], cap 40, then - plus 8 hex of sha256(modelID).
+function suffixOf(value) {
+  const clean = value.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/^-+|-+$/g, '');
+  const digest = nodeCrypto.createHash('sha256').update(value).digest('hex').slice(0, 8);
+  return `${clean || 'tenant'}-${digest}`;
 }
 
 function snapshot() {

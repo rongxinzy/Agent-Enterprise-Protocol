@@ -19,14 +19,17 @@ func modelCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})})
 
-	var modelID, displayName, sourceType, endpoint, upstreamModel, localModelRef, credentialID, reasoningFormat string
+	var modelID, displayName, sourceType, protocol, endpoint, upstreamModel, localModelRef, credentialID, reasoningFormat string
 	var capabilities []string
 	var contextWindow int32
 	var defaultModel, enabled bool
 	create := &cobra.Command{Use: "create", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
+		if protocol != "openai-compatible" && protocol != "anthropic" {
+			return errors.New("protocol must be openai-compatible or anthropic")
+		}
 		body := map[string]any{
 			"id": modelID, "displayName": displayName, "sourceType": sourceType,
-			"protocol": "openai-compatible", "capabilities": capabilities,
+			"protocol": protocol, "capabilities": capabilities,
 			"isDefault": defaultModel, "enabled": enabled,
 		}
 		if endpoint != "" {
@@ -53,6 +56,7 @@ func modelCommand(opts *options) *cobra.Command {
 	create.Flags().StringVar(&modelID, "model-id", "", "model identifier")
 	create.Flags().StringVar(&displayName, "display-name", "", "display name")
 	create.Flags().StringVar(&sourceType, "source-type", "gateway", "gateway, enterprise_open_source, or local")
+	create.Flags().StringVar(&protocol, "protocol", "openai-compatible", "wire protocol (openai-compatible or anthropic); anthropic models require an absolute http(s) endpoint and render an EnvoyFilter passthrough under /<model-id>")
 	create.Flags().StringVar(&endpoint, "endpoint", "", "upstream endpoint or gateway route")
 	create.Flags().StringVar(&upstreamModel, "upstream-model", "", "upstream model identifier")
 	create.Flags().StringVar(&localModelRef, "local-model-ref", "", "local client model reference")

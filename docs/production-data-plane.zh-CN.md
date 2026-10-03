@@ -31,21 +31,21 @@ kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 
 两个 reconciler 副本各自拥有审计副本目录，并配置了 PDB。两者都使用 field manager `aep-gateway-reconciler` 执行 Kubernetes server-side apply。因为对象名称和内容完全确定，多个副本无需 leader lease 也能安全持有相同写入字段。只有两个线上 Kubernetes 操作均成功后才会上报 `ready`；部分失败会返回 `KUBERNETES_APPLY_FAILED`，并按有界指数退避重试。
 
-reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingress 与 `extensions.higress.io/wasmplugins`。service-account token 与集群 CA 来自 Kubernetes 投射文件。上线前必须确认已安装 Higress CRD 的组和资源名。
+reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingress、`extensions.higress.io/wasmplugins` 与 `networking.istio.io/envoyfilters`。service-account token 与集群 CA 来自 Kubernetes 投射文件。上线前必须确认已安装 Higress CRD 的组和资源名。
 
 运行 `npm run test:e2e:m3-data-plane` 验证控制面与故障收敛，运行 `npm run test:e2e:m3-kubernetes` 验证真实 Kubernetes API Server 与 Higress 兼容 CRD 门禁。
 
 ## 目录派生发布
 
-优先使用 `POST /aep/v1/admin/data-plane/publish`，而不是手工编写期望状态。模型目录是单一事实源：管控服务为每个 `sourceType` 为 `gateway`、协议为 OpenAI 兼容且 endpoint 与上游模型完整的启用模型派生一条路由，并原子替换期望状态。这从结构上消除了"目录里有模型、网关 WasmPlugin 没有对应 `modelMapping`"的漂移。目录未变化时重复发布是幂等空操作；目录一旦变化就会产生新的按内容寻址的 revision。
+优先使用 `POST /aep/v1/admin/data-plane/publish`，而不是手工编写期望状态。模型目录是单一事实源：管控服务为每个 `sourceType` 为 `gateway`、协议为 OpenAI 兼容或 Anthropic 且 endpoint 与上游模型完整的模型派生一条路由，并原子替换期望状态；禁用模型以 `enabled: false` 路由随行，reconciler 借此删除该路由曾拥有的资源。这从结构上消除了"目录里有模型、网关 WasmPlugin 没有对应 `modelMapping`"的漂移。目录未变化时重复发布是幂等空操作；目录一旦变化就会产生新的按内容寻址的 revision。
 
-凭据映射按约定进行。发布的模型绑定 Credential 时，其路由引用 `higress-system` 下名为 `aep-credential-<credentialId>`、键为 `api-key` 的 Secret。通过部署侧 Secret 系统（例如 External Secret）为每个被引用的 Credential 供给一个这样的 Secret，值为供应商密钥。管控服务不写 Kubernetes，也绝不输出 Credential 明文；reconciler 在每次同步时读取 Secret 并把值内联到渲染出的 WasmPlugin。轮换时先在管控面轮换 Credential，再更新对应 Secret，下一次调和即生效。Secret 缺失的路由渲染时没有 `apiToken`，ai-proxy 会以失败关闭的方式拒绝其请求。
+凭据映射按约定进行。发布的模型绑定 Credential 时，其路由引用 `higress-system` 下名为 `aep-credential-<credentialId>`、键为 `api-key` 的 Secret。通过部署侧 Secret 系统（例如 External Secret）为每个被引用的 Credential 供给一个这样的 Secret，值为供应商密钥。管控服务不写 Kubernetes，也绝不输出 Credential 明文；reconciler 在每次同步时读取 Secret 并把值内联到渲染出的 WasmPlugin。轮换时先在管控面轮换 Credential，再更新对应 Secret，下一次调和即生效。Secret 缺失的路由渲染时没有 `apiToken`，ai-proxy 会以失败关闭的方式拒绝其请求；anthropic 透传路由的 Secret 缺失时渲染不出凭证头，由上游自己回答 401——失败暴露在上游侧，而不是网关侧失败关闭。
 
 `GET /aep/v1/admin/data-plane/status` 包含 `catalogComparison`：目录可发布但期望路由缺失的模型（`missing`）、目录不会再发布的期望路由（`extra`）、逐字段不一致项（`mismatched`）。比对非空即视为需要评审的漂移；发布可消除漂移，手工 `PUT` 逃生口则用于有意维持的差异（例如下文的原生 `deepseek` provider 类型）。
 
 ## DeepSeek 推理路由
 
-路由使用 Higress 原生 DeepSeek provider 时，必须在期望状态中显式设置 `providerType`。未携带该字段的历史路由仍按 `openai` 处理。目录派生路由一律使用 `openai`，因此原生 DeepSeek 路由需要使用手工逃生口，并且在目录获得 provider 类型元数据之前会一直出现在 `mismatched` 中。
+路由使用 Higress 原生 DeepSeek provider 时，必须在期望状态中显式设置 `providerType`。未携带该字段的历史路由仍按 `openai` 处理。目录派生的 openai-compatible 路由一律使用 `openai`，因此原生 DeepSeek 路由需要使用手工逃生口，并且在目录获得 provider 类型元数据之前会一直出现在 `mismatched` 中。
 
 ~~~json
 {
@@ -63,6 +63,14 @@ reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingr
 ~~~
 
 对应的模型描述应包含 `reasoning` 能力，并通过 `reasoningCompatibility` 声明 `thinkingFormat: deepseek`。客户端必须保留流式和非流式 `reasoning_content`；工具调用会话继续执行时，还必须回放上一条 assistant 消息的 `reasoning_content`。推理请求仍直接走模型网关数据链路，不通过 SDK 控制 API 转发。
+
+## Anthropic 透传路由
+
+`protocol: anthropic` 的目录模型发布为 EnvoyFilter 透传而非 ai-proxy 路由：ai-proxy 的 Claude provider 硬编码 `Host: api.anthropic.com`（智谱 BigModel 这类 Anthropic 协议 CDN 会回答 421），其 OpenAI provider 又会重排请求体。reconciler 按模型渲染、且不触碰任何共享资源（不用 McpBridge）：Ingress `aep-anthropic-<suffix>` 挂在客户端路径前缀 `/<净化后模型ID>` 下，同名 EnvoyFilter 增加一个 STRICT_DNS 上游集群（https endpoint 带 TLS + SNI）、把路由重定向到该集群、改写 Host、把模型前缀替换为 endpoint 自身路径，并在服务端注入 `x-api-key` 与 `authorization` 凭证。
+
+客户端把 anthropic SDK 的 baseURL 指向网关基址加模型前缀（例如 `http://<gateway>/bench-anthropic`），SDK 会追加 `/v1/messages`。请求体逐字节透传：该路径不做服务端模型 ID 改写，请发送 token scope 授权的模型 ID。禁用模型（或删除后重新发布）会在下一次调和时删除整对 Ingress+EnvoyFilter。
+
+**部署顺序很重要**：先滚动 reconciler 镜像、后 control service。旧 reconciler 不认识 `anthropic` 协议，会把此类路由静默按 OpenAI 渲染且上报 `ready`；新 reconciler 配旧 control service 则安全（根本看不到 anthropic 路由）。退役手工维护的透传路由（例如治理仓里 envsubst 渲染的 BigModel 路由）时：注册模型 → 发布 → 经新路由验证 `/<前缀>/v1/messages` → 再删手工 Ingress/EnvoyFilter——两者路径前缀不同，重叠期互不干扰。
 
 ## 回滚
 

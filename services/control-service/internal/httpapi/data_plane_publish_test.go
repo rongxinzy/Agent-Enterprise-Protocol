@@ -30,7 +30,7 @@ func TestDeriveDataPlaneRoutesFiltersCatalogAndMapsCredentials(t *testing.T) {
 		catalogModel("blank-endpoint", true, "gateway", "  ", "provider-g-chat", ""),
 	}
 	routes := deriveDataPlaneRoutes(models)
-	if len(routes) != 2 {
+	if len(routes) != 3 {
 		t.Fatalf("derived routes = %#v", routes)
 	}
 	if routes[0].ModelID != "chat-a" || !routes[0].Enabled || routes[0].Endpoint != "http://provider-a/v1" || routes[0].UpstreamModel != "provider-a-chat" || routes[0].Protocol != "openai-compatible" {
@@ -43,12 +43,35 @@ func TestDeriveDataPlaneRoutesFiltersCatalogAndMapsCredentials(t *testing.T) {
 	if routes[1].ModelID != "chat-b" || routes[1].CredentialRef != nil {
 		t.Fatalf("credential-less route = %#v", routes[1])
 	}
+	// Disabled models ride along as enabled=false so the reconciler deletes
+	// whatever the route previously owned.
+	if routes[2].ModelID != "disabled" || routes[2].Enabled {
+		t.Fatalf("disabled route = %#v", routes[2])
+	}
 }
 
 func TestDeriveDataPlaneRoutesHandlesEmptyCatalog(t *testing.T) {
 	routes := deriveDataPlaneRoutes(nil)
 	if routes == nil || len(routes) != 0 {
 		t.Fatalf("empty catalog routes = %#v", routes)
+	}
+}
+
+func TestDeriveDataPlaneRoutesAnthropicModels(t *testing.T) {
+	anthropic := catalogModel("bench-anthropic", true, "gateway", "https://open.bigmodel.cn/api/anthropic", "glm-5.3-flash", "credential-bigmodel")
+	anthropic.Protocol = "anthropic"
+	bare := catalogModel("local-anthropic", true, "gateway", "/v1", "upstream", "")
+	bare.Protocol = "anthropic"
+	routes := deriveDataPlaneRoutes([]modelRecord{anthropic, bare})
+	if len(routes) != 1 {
+		t.Fatalf("derived routes = %#v", routes)
+	}
+	route := routes[0]
+	if route.ModelID != "bench-anthropic" || route.Protocol != "anthropic" || route.ProviderType != "" {
+		t.Fatalf("anthropic derived route = %#v", route)
+	}
+	if route.CredentialRef == nil || route.CredentialRef.Name != "aep-credential-credential-bigmodel" {
+		t.Fatalf("anthropic credential reference = %#v", route.CredentialRef)
 	}
 }
 
@@ -123,5 +146,13 @@ func TestCompareCatalogRoutesReportsMissingExtraAndMismatched(t *testing.T) {
 	comparison = compareCatalogRoutes(droppedCredential, derived)
 	if len(comparison.Mismatched) != 1 || strings.Join(comparison.Mismatched[0].Fields, ",") != "credentialRef" {
 		t.Fatalf("credential drift = %#v", comparison.Mismatched)
+	}
+
+	reprotocoled := append([]dataPlaneRoute(nil), derived...)
+	reprotocoled[0].Protocol = "anthropic"
+	reprotocoled[0].ProviderType = ""
+	comparison = compareCatalogRoutes(reprotocoled, derived)
+	if len(comparison.Mismatched) != 1 || strings.Join(comparison.Mismatched[0].Fields, ",") != "protocol,providerType" {
+		t.Fatalf("protocol drift = %#v", comparison.Mismatched)
 	}
 }

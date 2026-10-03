@@ -1158,7 +1158,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in higress-system; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. */
+        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in higress-system; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. */
         post: operations["publishDataPlaneRoutes"];
         delete?: never;
         options?: never;
@@ -1238,10 +1238,13 @@ export interface components {
             /** Format: uri-reference */
             endpoint: string;
             upstreamModel: string;
-            /** @constant */
-            protocol: "openai-compatible";
             /**
-             * @description Higress AI Proxy provider implementation. Omitted legacy routes use openai.
+             * @description Wire protocol the gateway serves for this route. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as a self-contained EnvoyFilter passthrough with a per-model path prefix.
+             * @enum {string}
+             */
+            protocol: "openai-compatible" | "anthropic";
+            /**
+             * @description Higress AI Proxy provider implementation for openai-compatible routes. Forbidden (omitted) on anthropic routes. Omitted legacy routes use openai.
              * @enum {string}
              */
             providerType?: "openai" | "deepseek";
@@ -1282,7 +1285,7 @@ export interface components {
             /** @description Models present in both sets whose route fields differ from the catalog-derived route. */
             mismatched: {
                 modelId: string;
-                fields: ("enabled" | "endpoint" | "upstreamModel" | "providerType" | "credentialRef")[];
+                fields: ("enabled" | "endpoint" | "upstreamModel" | "protocol" | "providerType" | "credentialRef")[];
             }[];
         };
         JsonWebKeySet: {
@@ -1691,7 +1694,7 @@ export interface components {
             displayName: string;
             sourceType: components["schemas"]["ModelSourceType"];
             /** @enum {string} */
-            protocol: "openai-compatible";
+            protocol: "openai-compatible" | "anthropic";
             /** Format: uri */
             endpoint?: string;
             upstreamModel?: string;

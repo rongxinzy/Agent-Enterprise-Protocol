@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS models (
   id text NOT NULL,
   display_name text NOT NULL,
   source_type text NOT NULL CHECK (source_type IN ('gateway', 'enterprise_open_source', 'local')),
-  protocol text NOT NULL CHECK (protocol = 'openai-compatible'),
+  protocol text NOT NULL CHECK (protocol IN ('openai-compatible', 'anthropic')),
   endpoint text,
   upstream_model text,
   local_model_ref text,
