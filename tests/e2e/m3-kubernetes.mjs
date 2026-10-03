@@ -47,6 +47,7 @@ try {
   await command(kind, ['create', 'cluster', '--name', cluster, '--wait', '120s']);
   await command('kubectl', ['--context', context, 'create', 'namespace', 'higress-system']);
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-wasmplugin-crd.yaml')]);
+  await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-envoyfilter-crd.yaml')]);
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'service', 'clusterip', 'aep-model-gateway', '--tcp=80:8080']);
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'secret', 'generic', 'provider-secrets', `--from-literal=api-key=${providerSecretValue}`]);
   await listen(control, controlPort);
@@ -82,6 +83,37 @@ try {
   await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-2', `status is ${JSON.stringify(observed)}`));
   const disabled = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', pluginName, '-o', 'json']));
   assert(disabled.spec.matchRules === null || disabled.spec.matchRules.length === 0, 'disabled route remained in Higress match rules');
+
+  // Anthropic passthrough: a per-model Ingress plus a self-contained
+  // EnvoyFilter (own upstream cluster + route redirect + credential).
+  const anthropicName = `aep-anthropic-${suffix('bench-anthropic')}`;
+  const anthropicRoute = {modelId: 'bench-anthropic', enabled: true, endpoint: 'https://open.bigmodel.cn/api/anthropic', upstreamModel: 'glm-5.3-flash', protocol: 'anthropic', credentialRef: {name: 'provider-secrets', key: 'api-key', namespace: 'higress-system'}};
+  desired = state('rev-kind-3', [desired.routes[0], anthropicRoute]);
+  await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-3', `status is ${JSON.stringify(observed)}`));
+  const anthropicIngress = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'ingress', anthropicName, '-o', 'json']));
+  assert(anthropicIngress.spec.rules[0].http.paths[0].path === '/bench-anthropic', 'anthropic ingress path prefix was incorrect');
+  const envoyFilter = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'envoyfilter', anthropicName, '-o', 'json']));
+  const patches = envoyFilter.spec.configPatches;
+  const socket = patches.find(patch => patch.applyTo === 'CLUSTER')?.patch.value;
+  assert(socket?.load_assignment?.endpoints?.[0]?.lb_endpoints?.[0]?.endpoint?.address?.socket_address?.address === 'open.bigmodel.cn', 'anthropic cluster points at the wrong host');
+  assert(socket?.transport_socket?.typed_config?.sni === 'open.bigmodel.cn', 'anthropic cluster TLS SNI missing');
+  const routePatch = patches.find(patch => patch.applyTo === 'HTTP_ROUTE');
+  assert(routePatch?.match?.routeConfiguration?.vhost?.route?.name === anthropicName, 'envoyfilter route match did not target the ingress route name');
+  assert(routePatch?.patch?.value?.route?.cluster === anthropicName && routePatch?.patch?.value?.route?.host_rewrite_literal === 'open.bigmodel.cn', 'route redirect or host rewrite missing');
+  assert(routePatch?.patch?.value?.route?.regex_rewrite?.substitution === '/api/anthropic/\\1', 'path rewrite was incorrect');
+  assert((routePatch?.patch?.value?.request_headers_to_add ?? []).some(header => header.header.key === 'x-api-key' && header.header.value === providerSecretValue), 'credential was not injected server-side');
+  assert(!JSON.stringify(envoyFilter).includes('credentialRef'), 'credentialRef leaked into the EnvoyFilter');
+
+  desired = state('rev-kind-4', [desired.routes.find(route => route.modelId === 'chat'), {...anthropicRoute, enabled: false}]);
+  await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-4', `status is ${JSON.stringify(observed)}`));
+  for (const kindOf of ['ingress', 'envoyfilter']) {
+    try {
+      await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', kindOf, anthropicName, '-o', 'json']);
+      assert(false, `disabled anthropic ${kindOf} was not deleted`);
+    } catch (error) {
+      assert(String(error).includes('not found'), `unexpected ${kindOf} read error: ${error}`);
+    }
+  }
   console.log('AEP M3 kind/Higress-compatible server-side apply scenario passed.');
 } finally {
   for (const child of reconcilers) await stop(child);

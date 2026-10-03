@@ -46,7 +46,7 @@ func TestPublishDataPlaneRoutesDerivesCatalogState(t *testing.T) {
 		WithArgs("deployment-a", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"published_at"}).AddRow(publishedAt))
 	pool.ExpectExec(`INSERT INTO data_plane_statuses`).
-		WithArgs("deployment-a", 2).
+		WithArgs("deployment-a", 3).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	published := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-plane/publish", `{}`)
@@ -65,7 +65,7 @@ func TestPublishDataPlaneRoutesDerivesCatalogState(t *testing.T) {
 	if !strings.HasPrefix(state.Revision, "catalog-") || len(state.ContentHash) != 64 || !state.PublishedAt.Equal(publishedAt) {
 		t.Fatalf("publish response = %s", published.Body.String())
 	}
-	if len(state.Routes) != 2 || state.Routes[0].ModelID != "chat-a" || state.Routes[1].ModelID != "chat-b" {
+	if len(state.Routes) != 3 || state.Routes[0].ModelID != "chat-a" || state.Routes[1].ModelID != "chat-b" || state.Routes[2].ModelID != "chat-c" || state.Routes[2].Enabled {
 		t.Fatalf("derived routes = %s", published.Body.String())
 	}
 	reference := state.Routes[0].CredentialRef
@@ -125,7 +125,7 @@ func TestPublishDataPlaneRoutesIsIdempotentAndAdvancesRevision(t *testing.T) {
 		WithArgs("deployment-a", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"published_at"}).AddRow(publishedAt.Add(time.Hour)))
 	pool.ExpectExec(`INSERT INTO data_plane_statuses`).
-		WithArgs("deployment-a", 2).
+		WithArgs("deployment-a", 3).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	advanced := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-plane/publish", `{}`)
 	if advanced.Code != http.StatusOK || strings.Contains(advanced.Body.String(), `"revision":"`+derived.Revision+`"`) || !strings.Contains(advanced.Body.String(), `"revision":"catalog-`) {
@@ -206,7 +206,7 @@ func TestDataPlaneStatusReportsCatalogComparison(t *testing.T) {
 	if err := json.Unmarshal(status.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if view.State != "ready" || len(view.CatalogComparison.Missing) != 1 || view.CatalogComparison.Missing[0] != "chat-b" || len(view.CatalogComparison.Extra) != 1 || view.CatalogComparison.Extra[0] != "ghost" {
+	if view.State != "ready" || len(view.CatalogComparison.Missing) != 2 || view.CatalogComparison.Missing[0] != "chat-b" || view.CatalogComparison.Missing[1] != "chat-c" || len(view.CatalogComparison.Extra) != 1 || view.CatalogComparison.Extra[0] != "ghost" {
 		t.Fatalf("catalog comparison = %s", status.Body.String())
 	}
 	if len(view.CatalogComparison.Mismatched) != 1 || view.CatalogComparison.Mismatched[0].ModelID != "chat-a" || strings.Join(view.CatalogComparison.Mismatched[0].Fields, ",") != "upstreamModel,credentialRef" {

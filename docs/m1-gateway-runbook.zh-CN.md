@@ -64,6 +64,13 @@ npm run test:e2e:m1-gateway
 `mock-upstream-chat`。mock 密钥仅为测试数据。真实供应商凭证必须来自部署环境的
 Secret 管理机制，并渲染进 Higress AI Proxy 配置，不能进入 Agent 可见的模型描述。
 
+该场景同时会在真实 Higress 上验证 anthropic 透传配方：
+`deploy/compose/higress/anthropic-ingress.yaml` 与
+`anthropic-envoyfilter.yaml` 逐字镜像 gateway-reconciler 对
+`protocol: anthropic` 模型的渲染产物（按模型路径前缀、自有上游集群、
+Host/路径改写、服务端凭证头）。mock 的 `/api/anthropic/v1/messages`
+端点负责断言改写与凭证注入。
+
 authorizer 的主要环境变量：
 
 | 变量 | 默认值 | 用途 |

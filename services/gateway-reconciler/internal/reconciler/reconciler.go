@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,6 +50,9 @@ type Route struct {
 	Protocol      string           `json:"protocol"`
 	ProviderType  string           `json:"providerType,omitempty"`
 	CredentialRef *SecretReference `json:"credentialRef,omitempty"`
+	// endpoint is the parsed absolute URL of an anthropic route; Render
+	// populates it during validation and it never serializes.
+	endpoint *url.URL `json:"-"`
 }
 
 type DesiredState struct {
@@ -101,7 +105,7 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 		return err
 	}
 	credentials := r.fetchCredentials(ctx, desired)
-	document, _, err := Render(desired, credentials)
+	document, resources, _, err := Render(desired, credentials)
 	if err != nil {
 		return r.writeFailure(ctx, tenant, "RENDER_FAILED", err)
 	}
@@ -112,7 +116,7 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 		return r.writeFailure(ctx, tenant, "OUTPUT_WRITE_FAILED", err)
 	}
 	if r.config.Applier != nil {
-		if err := r.config.Applier.Apply(ctx, desired, document); err != nil {
+		if err := r.config.Applier.Apply(ctx, desired, resources); err != nil {
 			return r.writeFailure(ctx, tenant, "KUBERNETES_APPLY_FAILED", err)
 		}
 	}
@@ -206,43 +210,118 @@ func (r *Reconciler) addHeaders(request *http.Request, tenant string) {
 	request.Header.Set("X-AEP-Protocol-Version", "1.0")
 }
 
-func Render(desired DesiredState, credentialValues map[string]string) (string, string, error) {
+// ResourceKind tags each rendered Kubernetes resource so the applier can
+// apply or delete them by name without sniffing API paths.
+type ResourceKind string
+
+const (
+	ResourceOpenAIIngress    ResourceKind = "openaiIngress"
+	ResourceAnthropicIngress ResourceKind = "anthropicIngress"
+	ResourceEnvoyFilter      ResourceKind = "envoyFilter"
+	ResourceWasmPlugin       ResourceKind = "wasmPlugin"
+)
+
+// RenderedResource is one YAML document plus the Kubernetes API path it
+// server-side-applies to.
+type RenderedResource struct {
+	Kind    ResourceKind
+	APIPath string
+	Body    string
+}
+
+// Render projects the desired state into Kubernetes/Higress resources in a
+// pinned order: the tenant's openai Ingress, then per anthropic route (sorted
+// by model ID) its Ingress + EnvoyFilter pair, then the ai-proxy WasmPlugin
+// (always present so disabling every openai route only empties its
+// matchRules). Anthropic routes never touch shared resources: the EnvoyFilter
+// declares its own upstream cluster and redirects the route to it, so nothing
+// outside the tenant's own names is written.
+func Render(desired DesiredState, credentialValues map[string]string) (string, []RenderedResource, string, error) {
 	routes := append([]Route(nil), desired.Routes...)
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ModelID < routes[j].ModelID })
 	if desired.Revision == "" {
-		return "", "", errors.New("desired revision is required")
+		return "", nil, "", errors.New("desired revision is required")
 	}
 	if strings.TrimSpace(desired.TenantID()) == "" {
-		return "", "", errors.New("deployment ID is required")
+		return "", nil, "", errors.New("deployment ID is required")
 	}
 	suffix := resourceSuffix(desired.TenantID())
-	enabled := make([]Route, 0, len(routes))
+	enabledOpenAI := make([]Route, 0, len(routes))
+	anthropic := make([]Route, 0)
+	slugOwners := make(map[string]string)
 	for index := range routes {
 		route := routes[index]
+		if route.Protocol == "anthropic" {
+			if route.ProviderType != "" {
+				return "", nil, "", fmt.Errorf("provider type %q is not supported for anthropic model %q", route.ProviderType, route.ModelID)
+			}
+			endpoint, err := parseAbsoluteEndpoint(route.Endpoint)
+			if err != nil {
+				return "", nil, "", fmt.Errorf("anthropic model %q: %w", route.ModelID, err)
+			}
+			slug := anthropicSlug(route.ModelID)
+			if owner, taken := slugOwners[slug]; taken {
+				return "", nil, "", fmt.Errorf("anthropic models %q and %q share path prefix /%s", owner, route.ModelID, slug)
+			}
+			slugOwners[slug] = route.ModelID
+			route.endpoint = endpoint
+			if route.Enabled {
+				anthropic = append(anthropic, route)
+			}
+			continue
+		}
 		if route.ProviderType == "" {
 			route.ProviderType = "openai"
 		}
 		if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
-			return "", "", fmt.Errorf("unsupported provider type %q for model %q", route.ProviderType, route.ModelID)
+			return "", nil, "", fmt.Errorf("unsupported provider type %q for model %q", route.ProviderType, route.ModelID)
 		}
 		if route.Enabled {
-			enabled = append(enabled, route)
+			enabledOpenAI = append(enabledOpenAI, route)
 		}
 	}
+	resources := make([]RenderedResource, 0, 4)
+	if len(enabledOpenAI) > 0 {
+		resources = append(resources, RenderedResource{Kind: ResourceOpenAIIngress, APIPath: openAIIngressAPIPath(suffix), Body: renderOpenAIIngress(suffix, enabledOpenAI)})
+	}
+	for _, route := range anthropic {
+		name := anthropicResourceName(route.ModelID)
+		resources = append(resources,
+			RenderedResource{Kind: ResourceAnthropicIngress, APIPath: ingressAPIPath(name), Body: renderAnthropicIngress(name, route)},
+			RenderedResource{Kind: ResourceEnvoyFilter, APIPath: envoyFilterAPIPath(name), Body: renderEnvoyFilter(name, route, credentialValues)},
+		)
+	}
+	resources = append(resources, RenderedResource{Kind: ResourceWasmPlugin, APIPath: wasmPluginAPIPath(suffix), Body: renderWasmPlugin(suffix, enabledOpenAI, credentialValues)})
+	var document strings.Builder
+	for index, resource := range resources {
+		if index > 0 {
+			document.WriteString("---\n")
+		}
+		document.WriteString(resource.Body)
+	}
+	canonical := strings.TrimSpace(document.String()) + "\n"
+	digest := sha256.Sum256([]byte(canonical))
+	return canonical, resources, hex.EncodeToString(digest[:]), nil
+}
+
+func renderOpenAIIngress(suffix string, enabled []Route) string {
 	var document strings.Builder
 	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: " + yamlScalar("aep-model-gateway-"+suffix) + "\n  namespace: higress-system\nspec:\n  ingressClassName: higress\n")
-	if len(enabled) > 0 {
-		document.WriteString("  rules:\n    - http:\n        paths:\n")
-		for _, route := range enabled {
-			document.WriteString("          - path: " + yamlScalar(ingressPath(route.Endpoint)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
-		}
+	document.WriteString("  rules:\n    - http:\n        paths:\n")
+	for _, route := range enabled {
+		document.WriteString("          - path: " + yamlScalar(ingressPath(route.Endpoint)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
 	}
-	document.WriteString("---\napiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar("oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-proxy:"+aiProxyPluginVersion) + "\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
+	return document.String()
+}
+
+func renderWasmPlugin(suffix string, enabled []Route, credentialValues map[string]string) string {
+	var document strings.Builder
+	document.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar("oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-proxy:"+aiProxyPluginVersion) + "\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
 	if len(enabled) == 0 {
 		document.WriteString("  matchRules: []\n")
-	} else {
-		document.WriteString("  matchRules:\n")
+		return document.String()
 	}
+	document.WriteString("  matchRules:\n")
 	for _, route := range enabled {
 		document.WriteString("    - config:\n        provider:\n          type: " + yamlScalar(route.ProviderType) + "\n")
 		if custom, ok := upstreamURL(route.Endpoint); ok {
@@ -256,9 +335,55 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, s
 		}
 		document.WriteString("      ingress:\n        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
 	}
-	canonical := strings.TrimSpace(document.String()) + "\n"
-	digest := sha256.Sum256([]byte(canonical))
-	return canonical, hex.EncodeToString(digest[:]), nil
+	return document.String()
+}
+
+func renderAnthropicIngress(name string, route Route) string {
+	var document strings.Builder
+	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: " + yamlScalar(name) + "\n  namespace: higress-system\nspec:\n  ingressClassName: higress\n  rules:\n    - http:\n        paths:\n          - path: " + yamlScalar("/"+anthropicSlug(route.ModelID)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
+	return document.String()
+}
+
+// renderEnvoyFilter emits the self-contained passthrough: one STRICT_DNS
+// cluster for the upstream endpoint (with TLS + SNI when the endpoint is
+// https) plus a route merge that redirects the ingress route to that cluster,
+// rewrites the host, strips the model path prefix in favor of the endpoint
+// path, and injects the credential server-side. request_headers_to_add must
+// stay at the Route level — nested under `route` istiod drops it silently.
+// Without a resolved credential the headers are omitted and the upstream
+// answers 401 itself.
+func renderEnvoyFilter(name string, route Route, credentialValues map[string]string) string {
+	endpoint := route.endpoint
+	host := endpoint.Hostname()
+	if host == "" {
+		host = endpoint.Host
+	}
+	port := 443
+	if endpoint.Scheme == "http" {
+		port = 80
+	}
+	if raw := endpoint.Port(); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			port = parsed
+		}
+	}
+	clusterName := name
+	var document strings.Builder
+	document.WriteString("apiVersion: networking.istio.io/v1alpha3\nkind: EnvoyFilter\nmetadata:\n  name: " + yamlScalar(name) + "\n  namespace: higress-system\nspec:\n  configPatches:\n")
+	document.WriteString("    - applyTo: CLUSTER\n      patch:\n        operation: ADD\n        value:\n          name: " + yamlScalar(clusterName) + "\n          type: STRICT_DNS\n          connect_timeout: 10s\n          dns_lookup_family: AUTO\n          load_assignment:\n            cluster_name: " + yamlScalar(clusterName) + "\n            endpoints:\n              - lb_endpoints:\n                  - endpoint:\n                      address:\n                        socket_address:\n                          address: " + yamlScalar(host) + "\n                          port_value: " + strconv.Itoa(port) + "\n")
+	if endpoint.Scheme == "https" {
+		document.WriteString("          transport_socket:\n            name: envoy.transport_sockets.tls\n            typed_config:\n              '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext\n              sni: " + yamlScalar(host) + "\n")
+	}
+	document.WriteString("    - applyTo: HTTP_ROUTE\n      match:\n        context: GATEWAY\n        routeConfiguration:\n          vhost:\n            route:\n              name: " + yamlScalar(name) + "\n      patch:\n        operation: MERGE\n        value:\n")
+	if route.CredentialRef != nil {
+		if value, ok := credentialValues[route.CredentialRef.Name+"/"+route.CredentialRef.Key]; ok && value != "" {
+			document.WriteString("          request_headers_to_add:\n            - header:\n                key: x-api-key\n                value: " + yamlScalar(value) + "\n              append: false\n            - header:\n                key: authorization\n                value: " + yamlScalar("Bearer "+value) + "\n              append: false\n")
+		}
+	}
+	document.WriteString("          route:\n            cluster: " + yamlScalar(clusterName) + "\n            host_rewrite_literal: " + yamlScalar(host) + "\n")
+	substitution := anthropicRewrite(endpoint.Path)
+	document.WriteString("            regex_rewrite:\n              pattern:\n                google_re2: {}\n                regex: " + yamlScalar("^/"+anthropicSlug(route.ModelID)+"/(.*)$") + "\n              substitution: " + yamlScalar(substitution) + "\n")
+	return document.String()
 }
 
 func canonicalHash(desired DesiredState) string {
@@ -275,6 +400,71 @@ func canonicalHash(desired DesiredState) string {
 func yamlScalar(value string) string {
 	value = strings.ReplaceAll(value, "'", "''")
 	return "'" + value + "'"
+}
+
+// parseAbsoluteEndpoint validates the endpoint an anthropic passthrough
+// derives everything from: it must carry scheme and host.
+func parseAbsoluteEndpoint(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, fmt.Errorf("endpoint must be an absolute http(s) URL, got %q", raw)
+	}
+	return parsed, nil
+}
+
+// anthropicSlug sanitizes a model ID into the client-facing path prefix
+// (baseURL = <gateway>/<slug>; anthropic SDKs append /v1/... to it).
+func anthropicSlug(modelID string) string {
+	var result strings.Builder
+	for _, character := range strings.ToLower(modelID) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
+			result.WriteRune(character)
+		} else {
+			result.WriteByte('-')
+		}
+	}
+	clean := strings.Trim(result.String(), "-")
+	if len(clean) > 30 {
+		clean = strings.Trim(clean[:30], "-")
+	}
+	if clean == "" {
+		clean = "model"
+	}
+	return clean
+}
+
+// anthropicRewrite strips the model path prefix and rehomes the remainder
+// under the endpoint's own path ("" keeps the client path minus the slug,
+// e.g. /api/anthropic rewrites /<slug>/v1/x to /api/anthropic/v1/x).
+func anthropicRewrite(endpointPath string) string {
+	path := strings.Trim(endpointPath, "/")
+	if path == "" {
+		return "/\\1"
+	}
+	return "/" + path + "/\\1"
+}
+
+// anthropicResourceName derives the Ingress/EnvoyFilter/cluster name for an
+// anthropic route. resourceSuffix is capped at 49 chars, so the full name
+// stays within the 63-character object name limit.
+func anthropicResourceName(modelID string) string {
+	return "aep-anthropic-" + resourceSuffix(modelID)
+}
+
+func openAIIngressAPIPath(suffix string) string {
+	return "/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/aep-model-gateway-" + suffix
+}
+
+func ingressAPIPath(name string) string {
+	return "/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/" + name
+}
+
+func envoyFilterAPIPath(name string) string {
+	return "/apis/networking.istio.io/v1alpha3/namespaces/higress-system/envoyfilters/" + name
+}
+
+func wasmPluginAPIPath(suffix string) string {
+	return "/apis/extensions.higress.io/v1alpha1/namespaces/higress-system/wasmplugins/aep-ai-proxy-" + suffix
 }
 
 // ingressPath maps a route endpoint to the Ingress path prefix. Endpoints

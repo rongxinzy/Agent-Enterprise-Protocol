@@ -39,11 +39,11 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := DesiredState{DeploymentID: "Demo Tenant", Revision: "rev-1", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "upstream", Protocol: "openai-compatible"}}}
-	document, _, err := Render(desired, nil)
+	_, resources, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applier.Apply(context.Background(), desired, document); err != nil {
+	if err := applier.Apply(context.Background(), desired, resources); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 2 {
@@ -91,8 +91,8 @@ func TestKubernetesApplierValidatesConfigurationAndResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applier.Apply(context.Background(), DesiredState{DeploymentID: "demo"}, "not a rendered document"); err == nil {
-		t.Fatal("Apply accepted a missing Higress resource")
+	if err := applier.Apply(context.Background(), DesiredState{DeploymentID: "demo"}, nil); err == nil {
+		t.Fatal("Apply accepted a render without the WasmPlugin")
 	}
 }
 
@@ -119,11 +119,11 @@ func TestKubernetesApplierHandlesDeletedAndRejectedIngress(t *testing.T) {
 				t.Fatal(err)
 			}
 			desired := DesiredState{DeploymentID: "demo", Revision: "rev-1"}
-			document, _, err := Render(desired, nil)
+			_, resources, _, err := Render(desired, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = applier.Apply(context.Background(), desired, document)
+			err = applier.Apply(context.Background(), desired, resources)
 			if test.wantError {
 				if err == nil || !strings.Contains(err.Error(), "403") || len(methods) != 1 {
 					t.Fatalf("Apply() = %v, methods = %v", err, methods)
@@ -148,11 +148,11 @@ func TestKubernetesApplierStopsAfterPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible"}}}
-	document, _, err := Render(desired, nil)
+	_, resources, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = applier.Apply(context.Background(), desired, document)
+	err = applier.Apply(context.Background(), desired, resources)
 	if err == nil || !strings.Contains(err.Error(), "422") || requests != 1 {
 		t.Fatalf("Apply() error = %v, requests = %d", err, requests)
 	}
@@ -172,11 +172,11 @@ func TestKubernetesApplierDeletesIngressWhenAllRoutesAreDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-disabled", Routes: []Route{{ModelID: "chat", Enabled: false, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible"}}}
-	document, _, err := Render(desired, nil)
+	_, resources, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applier.Apply(context.Background(), desired, document); err != nil {
+	if err := applier.Apply(context.Background(), desired, resources); err != nil {
 		t.Fatal(err)
 	}
 	if len(methods) != 2 || !strings.HasPrefix(methods[0], "DELETE ") || !strings.Contains(methods[0], "/ingresses/") || !strings.HasPrefix(methods[1], "PATCH ") || !strings.Contains(methods[1], "/wasmplugins/") {

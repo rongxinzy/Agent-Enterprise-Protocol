@@ -2335,6 +2335,7 @@ components:
           type: string
           enum:
             - openai-compatible
+            - anthropic
         endpoint:
           type: string
           format: uri

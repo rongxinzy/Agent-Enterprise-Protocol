@@ -1,0 +1,20 @@
+# Mirrors the gateway-reconciler's anthropic render for the M1 gateway E2E:
+# a per-model Ingress whose backend is the nominal aep-model-gateway service —
+# the EnvoyFilter beside it redirects the route to the real upstream cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aep-anthropic-bench-anthropic
+  namespace: higress-system
+spec:
+  ingressClassName: higress
+  rules:
+    - http:
+        paths:
+          - path: /bench-anthropic
+            pathType: Prefix
+            backend:
+              service:
+                name: aep-model-gateway
+                port:
+                  number: 80

@@ -17,18 +17,18 @@ type recordingApplier struct {
 	err   error
 }
 
-func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ string) error {
+func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ []RenderedResource) error {
 	a.calls++
 	return a.err
 }
 
 func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", ContentHash: "ignored", Routes: []Route{{ModelID: "model-b", Enabled: true, Endpoint: "/b", UpstreamModel: "up-b", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-b"}}, {ModelID: "model-a", Enabled: true, Endpoint: "/a", UpstreamModel: "up-a", Protocol: "openai-compatible"}}}
-	first, firstHash, err := Render(desired, nil)
+	first, _, firstHash, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, secondHash, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}}, nil)
+	second, _, secondHash, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
 		t.Fatal("secret value leaked into render without credential fetcher")
 	}
 	// With the value resolved, it inlines as an apiToken for ai-proxy.
-	withCredentials, _, err := Render(desired, map[string]string{"provider-secrets/model-b": "provider-secret-value"})
+	withCredentials, _, _, err := Render(desired, map[string]string{"provider-secrets/model-b": "provider-secret-value"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
 }
 
 func TestRenderRejectsMissingRevision(t *testing.T) {
-	if _, _, err := Render(DesiredState{DeploymentID: "demo"}, nil); err == nil {
+	if _, _, _, err := Render(DesiredState{DeploymentID: "demo"}, nil); err == nil {
 		t.Fatal("missing revision was accepted")
 	}
 }
@@ -60,7 +60,7 @@ func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-deepseek", Routes: []Route{{
 		ModelID: "reasoner", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Protocol: "openai-compatible", ProviderType: "deepseek",
 	}}}
-	document, _, err := Render(desired, nil)
+	document, _, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
 		t.Fatalf("DeepSeek provider was not rendered: %s", document)
 	}
 	desired.Routes[0].ProviderType = "unknown"
-	if _, _, err := Render(desired, nil); err == nil {
+	if _, _, _, err := Render(desired, nil); err == nil {
 		t.Fatal("unsupported provider type was accepted")
 	}
 }

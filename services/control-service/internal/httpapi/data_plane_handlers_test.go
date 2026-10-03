@@ -29,6 +29,31 @@ func TestNormalizeDataPlaneStateDefaultsAndValidatesProviderType(t *testing.T) {
 	}
 }
 
+func TestNormalizeDataPlaneStateAnthropicRoutes(t *testing.T) {
+	anthropic := dataPlaneDesiredStateWrite{Revision: "rev-1", Routes: []dataPlaneRoute{{
+		ModelID: "bench-anthropic", Enabled: true, Endpoint: "https://open.bigmodel.cn/api/anthropic", UpstreamModel: "glm-5.3-flash", Protocol: "anthropic",
+	}}}
+	normalized, ok := normalizeDataPlaneState(anthropic)
+	if !ok {
+		t.Fatal("valid anthropic route was rejected")
+	}
+	if normalized.Routes[0].ProviderType != "" {
+		t.Fatalf("anthropic route must not default to a provider type, got %q", normalized.Routes[0].ProviderType)
+	}
+
+	for name, invalid := range map[string]dataPlaneRoute{
+		"provider type set": func() dataPlaneRoute { r := anthropic.Routes[0]; r.ProviderType = "openai"; return r }(),
+		"relative endpoint": func() dataPlaneRoute { r := anthropic.Routes[0]; r.Endpoint = "/v1"; return r }(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := dataPlaneDesiredStateWrite{Revision: "rev-1", Routes: []dataPlaneRoute{invalid}}
+			if _, ok := normalizeDataPlaneState(state); ok {
+				t.Fatalf("invalid anthropic route accepted: %#v", invalid)
+			}
+		})
+	}
+}
+
 func TestNormalizeDataPlaneStateKeepsEmptyRoutesAsJsonArray(t *testing.T) {
 	normalized, ok := normalizeDataPlaneState(dataPlaneDesiredStateWrite{Revision: "empty", Routes: []dataPlaneRoute{}})
 	if !ok {

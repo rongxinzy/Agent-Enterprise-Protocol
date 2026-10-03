@@ -295,8 +295,12 @@ paths:
       operationId: publishDataPlaneRoutes
       description: >-
         Derives gateway routes from the model catalog (enabled gateway models
-        with an OpenAI-compatible protocol and a complete endpoint and upstream
-        model) and atomically replaces the tenant's desired state. Routes for
+        with an OpenAI-compatible or Anthropic protocol and a complete endpoint
+        and upstream model) and atomically replaces the tenant's desired state.
+        OpenAI-compatible models derive the ai-proxy openai provider route;
+        Anthropic models derive an EnvoyFilter passthrough route under a
+        per-model path prefix (clients use the gateway base URL plus the
+        sanitized model ID as the path prefix). Routes for
         models bound to a Credential refer to the conventional Secret
         aep-credential-{credentialId} key api-key in higress-system; Secret
         values are provisioned by the deployment Secret system and are never
@@ -380,9 +384,12 @@ components:
         enabled: {type: boolean}
         endpoint: {type: string, format: uri-reference}
         upstreamModel: {type: string, minLength: 1, maxLength: 200}
-        protocol: {type: string, const: openai-compatible}
+        protocol:
+          description: Wire protocol the gateway serves for this route. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as a self-contained EnvoyFilter passthrough with a per-model path prefix.
+          type: string
+          enum: [openai-compatible, anthropic]
         providerType:
-          description: Higress AI Proxy provider implementation. Omitted legacy routes use openai.
+          description: Higress AI Proxy provider implementation for openai-compatible routes. Forbidden (omitted) on anthropic routes. Omitted legacy routes use openai.
           type: string
           enum: [openai, deepseek]
         credentialRef: {$ref: '#/components/schemas/DataPlaneSecretReference'}
@@ -456,7 +463,7 @@ components:
                 minItems: 1
                 items:
                   type: string
-                  enum: [enabled, endpoint, upstreamModel, providerType, credentialRef]
+                  enum: [enabled, endpoint, upstreamModel, protocol, providerType, credentialRef]
     JsonWebKeySet:
       type: object
       required: [keys]

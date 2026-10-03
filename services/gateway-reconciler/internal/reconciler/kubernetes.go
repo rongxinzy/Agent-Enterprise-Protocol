@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -19,7 +20,7 @@ import (
 const fieldManager = "aep-gateway-reconciler"
 
 type Applier interface {
-	Apply(context.Context, DesiredState, string) error
+	Apply(context.Context, DesiredState, []RenderedResource) error
 }
 
 type KubernetesConfig struct {
@@ -66,35 +67,47 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 	return &KubernetesApplier{baseURL: baseURL, token: config.Token, client: client}, nil
 }
 
-func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, document string) error {
-	documents := strings.Split(document, "---\n")
-	if len(documents) != 2 {
-		return errors.New("rendered data plane must contain exactly two resources")
+// Apply server-side-applies every rendered resource and first deletes what
+// the desired state no longer owns: the tenant's openai Ingress when no
+// openai-compatible route is enabled, and the per-route anthropic
+// Ingress+EnvoyFilter pair for every disabled anthropic route. The WasmPlugin
+// is always present in the render (with empty matchRules when idle) and is
+// therefore always applied, never deleted.
+func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, resources []RenderedResource) error {
+	if !hasResourceKind(resources, ResourceWasmPlugin) {
+		return errors.New("rendered data plane must include the ai-proxy WasmPlugin")
 	}
-	suffix := resourceSuffix(desired.TenantID())
-	resources := []struct {
-		path string
-		body string
-	}{
-		{path: "/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/aep-model-gateway-" + suffix, body: documents[0]},
-		{path: "/apis/extensions.higress.io/v1alpha1/namespaces/higress-system/wasmplugins/aep-ai-proxy-" + suffix, body: documents[1]},
-	}
-	hasEnabledRoute := false
-	for _, route := range desired.Routes {
-		if route.Enabled {
-			hasEnabledRoute = true
-			break
+	for _, resource := range resources {
+		if strings.TrimSpace(resource.APIPath) == "" || strings.TrimSpace(resource.Body) == "" {
+			return fmt.Errorf("rendered %s resource has an empty API path or body", resource.Kind)
 		}
 	}
-	if !hasEnabledRoute {
-		if err := a.delete(ctx, resources[0].path); err != nil {
+	deletions := make([]string, 0, 4)
+	hasEnabledOpenAI := false
+	for _, route := range desired.Routes {
+		if route.Protocol == "anthropic" {
+			if !route.Enabled {
+				name := anthropicResourceName(route.ModelID)
+				deletions = append(deletions, ingressAPIPath(name), envoyFilterAPIPath(name))
+			}
+			continue
+		}
+		if route.Enabled {
+			hasEnabledOpenAI = true
+		}
+	}
+	if !hasEnabledOpenAI {
+		deletions = append(deletions, openAIIngressAPIPath(resourceSuffix(desired.TenantID())))
+	}
+	sort.Strings(deletions)
+	for _, path := range deletions {
+		if err := a.delete(ctx, path); err != nil {
 			return err
 		}
-		resources = resources[1:]
 	}
 	for _, resource := range resources {
 		query := url.Values{"fieldManager": {fieldManager}, "force": {"true"}}
-		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, a.baseURL+resource.path+"?"+query.Encode(), strings.NewReader(resource.body))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, a.baseURL+resource.APIPath+"?"+query.Encode(), strings.NewReader(resource.Body))
 		if err != nil {
 			return err
 		}
@@ -111,10 +124,19 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, doc
 			return readErr
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("kubernetes apply %s returned %d: %s", resource.path, response.StatusCode, strings.TrimSpace(string(body)))
+			return fmt.Errorf("kubernetes apply %s returned %d: %s", resource.APIPath, response.StatusCode, strings.TrimSpace(string(body)))
 		}
 	}
 	return nil
+}
+
+func hasResourceKind(resources []RenderedResource, kind ResourceKind) bool {
+	for _, resource := range resources {
+		if resource.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *KubernetesApplier) delete(ctx context.Context, path string) error {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -174,13 +175,45 @@ func normalizeCapabilities(values []string) []string {
 }
 
 func validModelWrite(input modelWrite) bool {
-	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.DisplayName) == "" || input.Protocol != "openai-compatible" || input.Capabilities == nil || input.IsDefault == nil || input.Enabled == nil {
+	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.DisplayName) == "" || (input.Protocol != "openai-compatible" && input.Protocol != "anthropic") || input.Capabilities == nil || input.IsDefault == nil || input.Enabled == nil {
 		return false
 	}
 	if input.SourceType != "gateway" && input.SourceType != "enterprise_open_source" && input.SourceType != "local" {
 		return false
 	}
+	if input.Protocol == "anthropic" && !anthropicInvariantsHold(input.Endpoint, input.ReasoningCompatibility) {
+		return false
+	}
 	return (input.ContextWindow == nil || *input.ContextWindow > 0) && validReasoningCompatibility(input.ReasoningCompatibility)
+}
+
+// anthropicInvariantsHold enforces what the EnvoyFilter passthrough renderer
+// derives from the endpoint: it must be an absolute http(s) URL (cluster host,
+// TLS, host rewrite, and path rewrite all come from it). Reasoning metadata is
+// an OpenAI-wire concept and is rejected on anthropic models.
+func anthropicInvariantsHold(endpoint *string, reasoning *modelReasoningCompatibility) bool {
+	if endpoint == nil || !absoluteHTTPURL(*endpoint) || reasoning != nil {
+		return false
+	}
+	return true
+}
+
+func absoluteHTTPURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+// validAnthropicModelState re-checks the invariants against the post-update
+// row so PATCHes cannot strand an anthropic model in an unrenderable state
+// (protocol itself is immutable, endpoint and reasoningCompatibility are not).
+func validAnthropicModelState(model modelRecord) bool {
+	if model.Protocol != "anthropic" {
+		return true
+	}
+	if !model.Endpoint.Valid || !absoluteHTTPURL(model.Endpoint.String) {
+		return false
+	}
+	return len(model.ReasoningCompatibility) == 0
 }
 
 func validReasoningCompatibility(value *modelReasoningCompatibility) bool {
@@ -379,6 +412,10 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 	}
 	if err != nil {
 		databaseFailure(response, request, err)
+		return
+	}
+	if !validAnthropicModelState(model) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "Anthropic models require an absolute http(s) endpoint and cannot carry reasoning compatibility.")
 		return
 	}
 	if err := tx.Commit(request.Context()); err != nil {

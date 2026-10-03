@@ -57,14 +57,23 @@ func normalizeDataPlaneState(input dataPlaneDesiredStateWrite) (dataPlaneDesired
 	}
 	for index := range input.Routes {
 		route := &input.Routes[index]
-		if strings.TrimSpace(route.ModelID) == "" || strings.TrimSpace(route.Endpoint) == "" || strings.TrimSpace(route.UpstreamModel) == "" || route.Protocol != "openai-compatible" {
+		if strings.TrimSpace(route.ModelID) == "" || strings.TrimSpace(route.Endpoint) == "" || strings.TrimSpace(route.UpstreamModel) == "" || (route.Protocol != "openai-compatible" && route.Protocol != "anthropic") {
 			return dataPlaneDesiredStateWrite{}, false
 		}
-		if route.ProviderType == "" {
-			route.ProviderType = "openai"
-		}
-		if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
-			return dataPlaneDesiredStateWrite{}, false
+		if route.Protocol == "anthropic" {
+			// The passthrough renderer derives its cluster, host rewrite, and
+			// path rewrite from the endpoint, so it must be absolute; ai-proxy
+			// provider types do not apply to passthrough routes.
+			if route.ProviderType != "" || !absoluteHTTPURL(route.Endpoint) {
+				return dataPlaneDesiredStateWrite{}, false
+			}
+		} else {
+			if route.ProviderType == "" {
+				route.ProviderType = "openai"
+			}
+			if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
+				return dataPlaneDesiredStateWrite{}, false
+			}
 		}
 		if route.CredentialRef != nil && (strings.TrimSpace(route.CredentialRef.Name) == "" || strings.TrimSpace(route.CredentialRef.Key) == "") {
 			return dataPlaneDesiredStateWrite{}, false

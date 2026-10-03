@@ -1,0 +1,57 @@
+# The anthropic passthrough recipe as the gateway-reconciler renders it: one
+# STRICT_DNS cluster for the upstream (mock-openai here; http so no TLS block)
+# plus a route merge that redirects the Ingress route to that cluster,
+# rewrites the host, strips the model path prefix in favor of the endpoint
+# path, and injects the credential server-side. request_headers_to_add stays
+# at the Route level — nested under `route` istiod drops it silently.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: aep-anthropic-bench-anthropic
+  namespace: higress-system
+spec:
+  configPatches:
+    - applyTo: CLUSTER
+      patch:
+        operation: ADD
+        value:
+          name: aep-anthropic-bench-anthropic
+          type: STRICT_DNS
+          connect_timeout: 10s
+          dns_lookup_family: AUTO
+          load_assignment:
+            cluster_name: aep-anthropic-bench-anthropic
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: mock-openai.aep.internal
+                          port_value: 8080
+    - applyTo: HTTP_ROUTE
+      match:
+        context: GATEWAY
+        routeConfiguration:
+          vhost:
+            route:
+              name: aep-anthropic-bench-anthropic
+      patch:
+        operation: MERGE
+        value:
+          request_headers_to_add:
+            - header:
+                key: x-api-key
+                value: m1-e2e-provider-secret
+              append: false
+            - header:
+                key: authorization
+                value: Bearer m1-e2e-provider-secret
+              append: false
+          route:
+            cluster: aep-anthropic-bench-anthropic
+            host_rewrite_literal: mock-openai.aep.internal
+            regex_rewrite:
+              pattern:
+                google_re2: {}
+                regex: ^/bench-anthropic/(.*)$
+              substitution: /api/anthropic/\1

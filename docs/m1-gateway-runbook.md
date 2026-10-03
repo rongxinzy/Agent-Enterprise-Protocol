@@ -79,6 +79,14 @@ data only. Real provider credentials must be supplied through the deployment's
 secret mechanism and rendered into the Higress AI Proxy configuration without
 entering the Agent-facing model descriptor.
 
+The scenario also exercises the anthropic passthrough recipe against real
+Higress: `deploy/compose/higress/anthropic-ingress.yaml` and
+`anthropic-envoyfilter.yaml` mirror exactly what the gateway-reconciler
+renders for a `protocol: anthropic` model (per-model path prefix, own upstream
+cluster, host/path rewrite, server-side credential headers). The mock
+provider's `/api/anthropic/v1/messages` endpoint asserts the rewrite and the
+injected credential.
+
 Relevant authorizer environment variables are:
 
 | Variable | Default | Purpose |

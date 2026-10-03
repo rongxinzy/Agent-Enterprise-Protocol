@@ -74,7 +74,14 @@ async function runScenario() {
     credentialId: null, capabilities: ['text'], contextWindow: 8192,
     isDefault: false, enabled: true,
   });
+  await admin.createModel({
+    id: 'bench-anthropic', displayName: 'Bench Anthropic', sourceType: 'gateway',
+    protocol: 'anthropic', endpoint: 'http://mock-openai.aep.internal:8080/api/anthropic', upstreamModel: 'mock-upstream-chat',
+    credentialId: modelCredential.id, capabilities: ['text'],
+    isDefault: false, enabled: true,
+  });
   await admin.createModelAssignment({modelId: 'enterprise-chat', subject: {type: 'user', id: user.id}});
+  await admin.createModelAssignment({modelId: 'bench-anthropic', subject: {type: 'user', id: user.id}});
 
   const store = new MemoryTokenStore();
   const agent = new AepClient({
@@ -112,6 +119,15 @@ async function runScenario() {
   });
   assert(replay.response.status === 200, 'Reasoning tool replay failed: ' + replay.response.status + ' ' + replay.text);
 
+  // Anthropic passthrough: per-model path prefix, EnvoyFilter (not ai-proxy)
+  // hosts the route, body flows verbatim, credential injected server-side.
+  const anthropic = await anthropicInference(modelToken, {model: 'bench-anthropic', max_tokens: 64, messages: [{role: 'user', content: 'passthrough please'}]});
+  assert(anthropic.response.status === 200, 'Anthropic passthrough failed: ' + anthropic.response.status + ' ' + anthropic.text);
+  const anthropicBody = JSON.parse(anthropic.text);
+  assert(anthropicBody.type === 'message' && anthropicBody.model === 'bench-anthropic', 'Anthropic body did not pass through verbatim: ' + anthropic.text);
+  assert(anthropicBody.content?.[0]?.text === 'anthropic passthrough ok bench-anthropic', 'Unexpected anthropic mock reply: ' + anthropic.text);
+  assert(!containsSecret(anthropic), 'Provider credentials were exposed in the anthropic passthrough response');
+
   await expectGatewayProblem(null, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken + 'invalid', {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken, {model: 'unassigned-chat'}, 403, 'MODEL_NOT_ALLOWED');
@@ -130,6 +146,17 @@ async function inference(token, body) {
   };
   if (token) headers.Authorization = 'Bearer ' + token;
   const response = await fetch(gatewayBaseUrl + '/chat/completions', {method: 'POST', headers, body: JSON.stringify(body)});
+  return {response, text: await response.text()};
+}
+
+async function anthropicInference(token, body) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + token,
+    'X-AEP-Internal-Role': 'admin',
+  };
+  const base = 'http://localhost:' + gatewayPort;
+  const response = await fetch(base + '/bench-anthropic/v1/messages', {method: 'POST', headers, body: JSON.stringify(body)});
   return {response, text: await response.text()};
 }
 

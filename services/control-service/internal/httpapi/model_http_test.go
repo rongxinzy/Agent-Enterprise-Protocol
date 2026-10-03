@@ -172,6 +172,58 @@ func TestUserModelCatalogUsesAssignmentsAndHidesCredential(t *testing.T) {
 	}
 }
 
+func TestAdminModelAnthropicPatchGuard(t *testing.T) {
+	application, _, adminToken := newStoreBackedHTTPApplication(t)
+	pool := attachRuntimeDatabase(t, application)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+	reasoning := []byte(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}`)
+
+	// PATCH reasoningCompatibility onto an anthropic model: the UPDATE row
+	// comes back anthropic, so the post-update guard must reject and roll
+	// back even though the patch payload itself is well-formed.
+	pool.ExpectBegin()
+	pool.ExpectQuery(`UPDATE models SET`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
+			"bench-anthropic", "Bench", "gateway", "anthropic", "https://open.bigmodel.cn/api/anthropic", "glm-5.3-flash", nil, "credential-bigmodel",
+			[]string{"text"}, reasoning, nil, false, true, now, now,
+		))
+	pool.ExpectRollback()
+	rejected := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/bench-anthropic", `{"reasoningCompatibility":{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}}`)
+	if rejected.Code != http.StatusBadRequest || !strings.Contains(rejected.Body.String(), `"code":"INVALID_MODEL"`) {
+		t.Fatalf("anthropic reasoning patch = %d %s", rejected.Code, rejected.Body.String())
+	}
+
+	// A relative endpoint patched onto an anthropic model is equally stranded.
+	pool.ExpectBegin()
+	pool.ExpectQuery(`UPDATE models SET`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
+			"bench-anthropic", "Bench", "gateway", "anthropic", "/v1", "glm-5.3-flash", nil, nil,
+			[]string{"text"}, nil, nil, false, true, now, now,
+		))
+	pool.ExpectRollback()
+	broken := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/bench-anthropic", `{"endpoint":"/v1"}`)
+	if broken.Code != http.StatusBadRequest || !strings.Contains(broken.Body.String(), `"code":"INVALID_MODEL"`) {
+		t.Fatalf("anthropic relative endpoint patch = %d %s", broken.Code, broken.Body.String())
+	}
+
+	// The same endpoint on an openai-compatible model stays out of the guard.
+	pool.ExpectBegin()
+	pool.ExpectQuery(`UPDATE models SET`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
+			"chat-a", "Chat", "gateway", "openai-compatible", "/v1", "deepseek-chat", nil, nil,
+			[]string{"text"}, nil, nil, false, true, now, now,
+		))
+	pool.ExpectCommit()
+	allowed := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/chat-a", `{"endpoint":"/v1"}`)
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("openai-compatible endpoint patch = %d %s", allowed.Code, allowed.Body.String())
+	}
+}
+
 func TestAdminModelErrorMappings(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
 	pool := attachRuntimeDatabase(t, application)

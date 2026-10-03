@@ -28,24 +28,36 @@ type dataPlanePublishRequest struct {
 }
 
 // deriveDataPlaneRoutes projects publishable catalog models into gateway
-// routes: enabled gateway models with an OpenAI-compatible protocol and a
-// complete endpoint and upstream model. The catalog is the single source of
-// truth, so derivation is total and deterministic.
+// routes: gateway models with an OpenAI-compatible or Anthropic protocol and
+// a complete endpoint and upstream model. Disabled models are carried as
+// enabled=false routes so the reconciler can drive deletions (an anthropic
+// route owns dedicated resources); they render nothing. OpenAI-compatible
+// models keep the ai-proxy openai provider; anthropic models render as an
+// EnvoyFilter passthrough and never carry a provider type. The catalog is the
+// single source of truth, so derivation is total and deterministic.
 func deriveDataPlaneRoutes(models []modelRecord) []dataPlaneRoute {
 	routes := make([]dataPlaneRoute, 0, len(models))
 	for _, model := range models {
-		if !model.Enabled || model.SourceType != "gateway" || model.Protocol != "openai-compatible" {
+		if model.SourceType != "gateway" || (model.Protocol != "openai-compatible" && model.Protocol != "anthropic") {
 			continue
 		}
 		if !model.Endpoint.Valid || strings.TrimSpace(model.Endpoint.String) == "" || !model.UpstreamModel.Valid || strings.TrimSpace(model.UpstreamModel.String) == "" {
 			continue
 		}
+		// An anthropic passthrough derives its whole EnvoyFilter from the
+		// endpoint URL, so a relative one is as incomplete as a missing one.
+		if model.Protocol == "anthropic" && !absoluteHTTPURL(model.Endpoint.String) {
+			continue
+		}
 		route := dataPlaneRoute{
 			ModelID:       model.ID,
-			Enabled:       true,
+			Enabled:       model.Enabled,
 			Endpoint:      model.Endpoint.String,
 			UpstreamModel: model.UpstreamModel.String,
-			Protocol:      "openai-compatible",
+			Protocol:      model.Protocol,
+		}
+		if model.Protocol == "openai-compatible" {
+			route.ProviderType = "openai"
 		}
 		if model.CredentialID.Valid && strings.TrimSpace(model.CredentialID.String) != "" {
 			namespace := dataPlaneCredentialSecretNamespace
@@ -208,6 +220,9 @@ func routeDiffFields(stored, derived dataPlaneRoute) []string {
 	}
 	if stored.UpstreamModel != derived.UpstreamModel {
 		fields = append(fields, "upstreamModel")
+	}
+	if stored.Protocol != derived.Protocol {
+		fields = append(fields, "protocol")
 	}
 	if stored.ProviderType != derived.ProviderType {
 		fields = append(fields, "providerType")
