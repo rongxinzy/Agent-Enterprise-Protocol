@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -15,8 +17,8 @@ import (
 // stay idle but healthy (the readiness endpoint keeps responding), so a
 // pod failure triggers a fast failover without split-brain applies.
 type LeaderElector struct {
+	applier   *KubernetesApplier
 	baseURL   string
-	token     string
 	client    *http.Client
 	namespace string
 	leaseName string
@@ -30,8 +32,8 @@ type LeaderElector struct {
 // client and credentials (same ServiceAccount, same token).
 func NewLeaderElector(applier *KubernetesApplier, namespace, leaseName, identity string) *LeaderElector {
 	return &LeaderElector{
+		applier:   applier,
 		baseURL:   applier.baseURL,
-		token:     applier.token,
 		client:    applier.client,
 		namespace: namespace,
 		leaseName: leaseName,
@@ -53,7 +55,7 @@ func (l *LeaderElector) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := l.acquireOrRenew(ctx); err != nil {
-				if l.isLeader {
+				if l.isLeader || os.Getenv("AEP_LEADER_ELECTION_DEBUG") != "" {
 					slog.Warn("leader election: lost lease", "error", err)
 				}
 				l.isLeader = false
@@ -75,11 +77,21 @@ type leaseSpec struct {
 	RenewTime            string `json:"renewTime"`
 }
 
+// leaseMetadata keeps only the fields a renew PUT needs. The API server adds
+// complex metadata (managedFields, ownerReferences — arrays/objects) to Lease
+// responses after any write; decoding into map[string]string dies on those,
+// so unknown fields must be ignored rather than typed.
+type leaseMetadata struct {
+	Name            string `json:"name"`
+	Namespace       string `json:"namespace"`
+	ResourceVersion string `json:"resourceVersion"`
+}
+
 type lease struct {
-	APIVersion string            `json:"apiVersion"`
-	Kind       string            `json:"kind"`
-	Metadata   map[string]string `json:"metadata"`
-	Spec       leaseSpec         `json:"spec"`
+	APIVersion string        `json:"apiVersion"`
+	Kind       string        `json:"kind"`
+	Metadata   leaseMetadata `json:"metadata"`
+	Spec       leaseSpec     `json:"spec"`
 }
 
 func (l *LeaderElector) leasePath() string {
@@ -87,7 +99,7 @@ func (l *LeaderElector) leasePath() string {
 }
 
 func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := leaseTimestamp()
 
 	// Read the current lease (if any).
 	current, code, err := l.get(ctx)
@@ -100,7 +112,7 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 		body, _ := json.Marshal(lease{
 			APIVersion: "coordination.k8s.io/v1",
 			Kind:       "Lease",
-			Metadata:   map[string]string{"name": l.leaseName, "namespace": l.namespace},
+			Metadata:   leaseMetadata{Name: l.leaseName, Namespace: l.namespace},
 			Spec: leaseSpec{
 				HolderIdentity:       l.identity,
 				LeaseDurationSeconds: int(l.leaseDur.Seconds()),
@@ -143,6 +155,13 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 		return fmt.Errorf("renew lease: code=%d err=%w", code, err)
 	}
 	return nil
+}
+
+// leaseTimestamp renders microsecond-precision RFC3339: the coordination API
+// rejects metav1.Time strings with nanosecond digits (RFC3339Nano emits up to
+// nine and trims trailing zeros, so some timestamps parse and most do not).
+func leaseTimestamp() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000000Z07:00")
 }
 
 func (l *LeaderElector) release() {
@@ -188,14 +207,22 @@ func (l *LeaderElector) request(ctx context.Context, method, path string, body [
 	if err != nil {
 		return nil, 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+l.token)
+	req.Header.Set("Authorization", "Bearer "+l.applier.bearerToken())
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := l.client.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	buf := make([]byte, 4096)
-	n, _ := resp.Body.Read(buf)
-	return buf[:n], resp.StatusCode, nil
+	// Read the whole body: a single Read may legally return a partial chunk.
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return nil, resp.StatusCode, readErr
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if os.Getenv("AEP_LEADER_ELECTION_DEBUG") != "" {
+			slog.Warn("leader election: api error body", "status", resp.StatusCode, "body", string(body))
+		}
+	}
+	return body, resp.StatusCode, nil
 }
