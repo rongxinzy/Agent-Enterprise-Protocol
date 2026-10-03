@@ -134,13 +134,13 @@ func TestDataScopeRuleValidationRejectsUnimplementedKinds(t *testing.T) {
 	handler := New(application).Handler()
 
 	departmentDefault := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-scope-rules",
-		`{"id":"rule-1","ruleKind":"department_default","subjectType":"user","subjectId":"user-a","resourceKind":"team","resourceId":"rd"}`)
+		`{"ruleKind":"department_default","subjectType":"user","subjectId":"user-a","resourceKind":"team","resourceId":"rd"}`)
 	if departmentDefault.Code != http.StatusBadRequest || !strings.Contains(departmentDefault.Body.String(), "INVALID_DATA_SCOPE_RULE") {
 		t.Fatalf("department_default = %d %s", departmentDefault.Code, departmentDefault.Body.String())
 	}
 
 	uppercaseKind := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-scope-rules",
-		`{"id":"rule-1","ruleKind":"management_scope","subjectType":"user","subjectId":"user-a","resourceKind":"Knowledge_Base","resourceId":"kb-1"}`)
+		`{"ruleKind":"management_scope","subjectType":"user","subjectId":"user-a","resourceKind":"Knowledge_Base","resourceId":"kb-1"}`)
 	if uppercaseKind.Code != http.StatusBadRequest {
 		t.Fatalf("uppercase resource kind = %d %s", uppercaseKind.Code, uppercaseKind.Body.String())
 	}
@@ -151,28 +151,32 @@ func TestIdentitySourceValidationAndListing(t *testing.T) {
 	handler := New(application).Handler()
 
 	vendorKind := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources",
-		`{"id":"src-1","kind":"feishu","displayName":"Feishu"}`)
+		`{"kind":"feishu","displayName":"Feishu"}`)
 	if vendorKind.Code != http.StatusBadRequest || !strings.Contains(vendorKind.Body.String(), "INVALID_IDENTITY_SOURCE") {
 		t.Fatalf("vendor kind = %d %s", vendorKind.Code, vendorKind.Body.String())
 	}
 
 	arrayConfig := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources",
-		`{"id":"src-1","kind":"directory","displayName":"Directory","config":[1,2]}`)
+		`{"kind":"directory","displayName":"Directory","config":[1,2]}`)
 	if arrayConfig.Code != http.StatusBadRequest {
 		t.Fatalf("array config = %d %s", arrayConfig.Code, arrayConfig.Body.String())
 	}
 
 	secretConfig := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources",
-		`{"id":"src-1","kind":"directory","displayName":"Directory","config":{"password":"plain"}}`)
+		`{"kind":"directory","displayName":"Directory","config":{"password":"plain"}}`)
 	if secretConfig.Code != http.StatusBadRequest || !strings.Contains(secretConfig.Body.String(), "credential") {
 		t.Fatalf("secret config = %d %s", secretConfig.Code, secretConfig.Body.String())
 	}
 
+	// The identifier is derived from the display name; probe before insert.
+	mock.ExpectQuery(`SELECT \* FROM "identity_sources" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "directory", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "kind", "display_name", "config", "enabled", "created_at", "updated_at"}))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "identity_sources"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources",
-		`{"id":"src-1","kind":"directory","displayName":"Directory","config":{"vendor":"example"}}`)
+		`{"kind":"directory","displayName":"Directory","config":{"vendor":"example"}}`)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"kind":"directory"`) {
 		t.Fatalf("create source = %d %s", created.Code, created.Body.String())
 	}

@@ -112,15 +112,14 @@ func skillCommand(opts *options) *cobra.Command {
 		value, err := api.request(http.MethodGet, "/aep/v1/admin/skills", nil, true)
 		return output(value, err)
 	})})
-	var skillID, name, description string
+	var name, description string
 	create := &cobra.Command{Use: "create", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {
-		value, err := api.request(http.MethodPost, "/aep/v1/admin/skills", map[string]any{"id": skillID, "name": name, "description": description, "enabled": true}, true)
+		// The skill identifier is server-generated from the name.
+		value, err := api.request(http.MethodPost, "/aep/v1/admin/skills", map[string]any{"name": name, "description": description, "enabled": true}, true)
 		return output(value, err)
 	})}
-	create.Flags().StringVar(&skillID, "skill-id", "", "Skill identifier")
 	create.Flags().StringVar(&name, "name", "", "display name")
 	create.Flags().StringVar(&description, "description", "", "description")
-	_ = create.MarkFlagRequired("skill-id")
 	_ = create.MarkFlagRequired("name")
 	var uploadID, version, file string
 	upload := &cobra.Command{Use: "upload", RunE: authenticated(opts, func(api *client, _ *cobra.Command, _ []string) error {

@@ -46,13 +46,18 @@ func TestAdminRoleLifecycle(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
+	// The identifier is generated from the role name; the uniqueness probe
+	// runs before the insert transaction.
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "model-operator", 1).
+		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "roles"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "permissions" WHERE id IN \(\$1,\$2\)`).
 		WithArgs("models.read", "models.write").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectExec(`INSERT INTO "role_permissions"`).WillReturnResult(sqlmock.NewResult(2, 2))
 	mock.ExpectCommit()
-	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/roles", `{"id":"model-operator","name":" Model Operator ","description":"Manages models","permissions":["models.read","models.write"]}`)
+	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/roles", `{"name":" Model Operator ","description":"Manages models","permissions":["models.read","models.write"]}`)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"model-operator"`) || !strings.Contains(created.Body.String(), `"name":"Model Operator"`) {
 		t.Fatalf("create role = %d %s", created.Code, created.Body.String())
 	}
@@ -98,16 +103,20 @@ func TestAdminTeamLifecycle(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
+	// The identifier is generated from the team name: the existence probe
+	// lists the deployment's teams before the insert transaction.
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "teams"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"id":"platform","name":" Platform Team ","description":"Platform engineering"}`)
-	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"platform"`) || !strings.Contains(created.Body.String(), `"name":"Platform Team"`) {
+	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"name":" Platform Team ","description":"Platform engineering"}`)
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"platform-team"`) || !strings.Contains(created.Body.String(), `"name":"Platform Team"`) {
 		t.Fatalf("create team = %d %s", created.Code, created.Body.String())
 	}
 
-	expectTeamRecord(mock, "platform", "Platform Team", "Platform engineering", true, 3, now)
-	got := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/teams/platform", "")
+	expectTeamRecord(mock, "platform-team", "Platform Team", "Platform engineering", true, 3, now)
+	got := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/teams/platform-team", "")
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"memberCount":3`) || !strings.Contains(got.Body.String(), `"builtIn":false`) {
 		t.Fatalf("get team = %d %s", got.Code, got.Body.String())
 	}
@@ -115,20 +124,20 @@ func TestAdminTeamLifecycle(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "teams" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	expectTeamRecord(mock, "platform", "Platform Core", "Core platform", false, 3, now)
-	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/teams/platform", `{"name":"Platform Core","description":"Core platform","enabled":false}`)
+	expectTeamRecord(mock, "platform-team", "Platform Core", "Core platform", false, 3, now)
+	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/teams/platform-team", `{"name":"Platform Core","description":"Core platform","enabled":false}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Platform Core"`) || !strings.Contains(updated.Body.String(), `"enabled":false`) {
 		t.Fatalf("update team = %d %s", updated.Code, updated.Body.String())
 	}
 
 	mock.ExpectQuery(`SELECT \* FROM "teams" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
-		WithArgs("deployment-a", "platform", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "platform", "Platform Core", "Core platform", false, false, now, now))
+		WithArgs("deployment-a", "platform-team", 1).
+		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "platform-team", "Platform Core", "Core platform", false, false, now, now))
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "teams" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "platform").WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("deployment-a", "platform-team").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/platform", "")
+	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/platform-team", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete team = %d %s", deleted.Code, deleted.Body.String())
 	}
@@ -139,20 +148,28 @@ func TestAdminRoleErrorMappings(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
+	// The insert still races a concurrent create on the same generated id, so
+	// the unique-violation fallback branch stays covered.
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "operator", 1).
+		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "roles"`).WillReturnError(&pgconn.PgError{Code: "23505"})
 	mock.ExpectRollback()
-	duplicate := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/roles", `{"id":"operator","name":"Operator","permissions":[]}`)
+	duplicate := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/roles", `{"name":"Operator","permissions":[]}`)
 	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), `"code":"ROLE_EXISTS"`) {
 		t.Fatalf("duplicate role = %d %s", duplicate.Code, duplicate.Body.String())
 	}
 
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "operator", 1).
+		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "roles"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "permissions" WHERE id IN \(\$1\)`).
 		WithArgs("unknown.permission").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectRollback()
-	unknownPermission := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/roles", `{"id":"operator","name":"Operator","permissions":["unknown.permission"]}`)
+	unknownPermission := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/roles", `{"name":"Operator","permissions":["unknown.permission"]}`)
 	if unknownPermission.Code != http.StatusBadRequest || !strings.Contains(unknownPermission.Body.String(), `"code":"INVALID_PERMISSION"`) {
 		t.Fatalf("unknown permission = %d %s", unknownPermission.Code, unknownPermission.Body.String())
 	}
@@ -188,10 +205,14 @@ func TestAdminTeamErrorMappings(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
+	// Uniqueness-violation fallback for the concurrent-create race on a
+	// generated team id.
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "teams"`).WillReturnError(&pgconn.PgError{Code: "23505"})
 	mock.ExpectRollback()
-	duplicate := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"id":"platform","name":"Platform"}`)
+	duplicate := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"name":"Platform"}`)
 	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), `"code":"TEAM_EXISTS"`) {
 		t.Fatalf("duplicate team = %d %s", duplicate.Code, duplicate.Body.String())
 	}

@@ -171,9 +171,9 @@ try {
   // Catalog-derived publication: the model catalog is the route source of truth.
   const credential = await admin.createCredential({name: 'Provider catalog key', service: 'provider-catalog', type: 'api_key', deliveryMode: 'server_only', value: 'catalog-secret-value-a', enabled: true});
   kubeSecrets.set(`aep-credential-${credential.id}`, {'api-key': 'catalog-secret-value-a'});
-  await admin.createModel({id: 'catalog-chat', displayName: 'Catalog Chat', sourceType: 'gateway', protocol: 'openai-compatible', endpoint: 'http://provider-catalog/v1', upstreamModel: 'provider-catalog-chat', credentialId: credential.id, capabilities: ['text'], isDefault: false, enabled: true});
-  await admin.createModel({id: 'catalog-disabled', displayName: 'Catalog Disabled', sourceType: 'gateway', protocol: 'openai-compatible', endpoint: 'http://provider-catalog/v1', upstreamModel: 'provider-catalog-disabled', capabilities: ['text'], isDefault: false, enabled: false});
-  await admin.createModel({id: 'catalog-local', displayName: 'Catalog Local', sourceType: 'local', protocol: 'openai-compatible', localModelRef: 'local-gguf', capabilities: ['text'], isDefault: false, enabled: true});
+  await admin.createModel({displayName: 'Catalog Chat', sourceType: 'gateway', protocol: 'openai-compatible', endpoint: 'http://provider-catalog/v1', upstreamModel: 'provider-catalog-chat', credentialId: credential.id, capabilities: ['text'], isDefault: false, enabled: true});
+  await admin.createModel({displayName: 'Catalog Disabled', sourceType: 'gateway', protocol: 'openai-compatible', endpoint: 'http://provider-catalog/v1', upstreamModel: 'provider-catalog-disabled', capabilities: ['text'], isDefault: false, enabled: false});
+  await admin.createModel({displayName: 'Catalog Local', sourceType: 'local', protocol: 'openai-compatible', localModelRef: 'local-gguf', capabilities: ['text'], isDefault: false, enabled: true});
 
   const published = await admin.publishDataPlaneRoutes();
   assert(published.revision.startsWith('catalog-'), 'publish did not assign a catalog revision');
@@ -206,7 +206,7 @@ try {
   // passthrough under a per-model path prefix — no ai-proxy involvement.
   const anthropicCredential = await admin.createCredential({name: 'BigModel key', service: 'bigmodel', type: 'api_key', deliveryMode: 'server_only', value: 'anthropic-secret-value', enabled: true});
   kubeSecrets.set(`aep-credential-${anthropicCredential.id}`, {'api-key': 'anthropic-secret-value'});
-  await admin.createModel({id: 'bench-anthropic', displayName: 'Bench Anthropic', sourceType: 'gateway', protocol: 'anthropic', endpoint: 'https://open.bigmodel.cn/api/anthropic', upstreamModel: 'glm-5.3-flash', credentialId: anthropicCredential.id, capabilities: ['text'], isDefault: false, enabled: true});
+  await admin.createModel({displayName: 'Bench Anthropic', sourceType: 'gateway', protocol: 'anthropic', endpoint: 'https://open.bigmodel.cn/api/anthropic', upstreamModel: 'glm-5.3-flash', credentialId: anthropicCredential.id, capabilities: ['text'], isDefault: false, enabled: true});
   const anthropicPublished = await admin.publishDataPlaneRoutes();
   const derivedAnthropicRoute = anthropicPublished.routes.find(candidate => candidate.modelId === 'bench-anthropic');
   assert(derivedAnthropicRoute?.protocol === 'anthropic' && !derivedAnthropicRoute.providerType, `anthropic derived route = ${JSON.stringify(derivedAnthropicRoute)}`);

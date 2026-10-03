@@ -46,9 +46,11 @@ func TestSkillObjectKeyRequiresValidatedSegments(t *testing.T) {
 
 func TestSkillHTTPRejectsUnsafeIdentifiersBeforePersistence(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
+		// Identifiers are server-generated now, so a create is only rejected
+		// up front for a missing name — before any database access.
 		application, _, _, token := newUserHTTPApplication(t)
-		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skills", `{"id":"../writer","name":"Writer","description":""}`)
-		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusBadRequest, "INVALID_SKILL_ID")
+		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skills", `{"description":"no name"}`)
+		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusBadRequest, "INVALID_SKILL")
 	})
 
 	t.Run("upload version", func(t *testing.T) {

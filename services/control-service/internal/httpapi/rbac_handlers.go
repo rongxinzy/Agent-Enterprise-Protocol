@@ -43,20 +43,25 @@ func (s *Server) listRoles(response http.ResponseWriter, request *http.Request) 
 
 func (s *Server) createRole(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		ID          string   `json:"id"`
 		Name        string   `json:"name"`
 		Description string   `json:"description"`
 		Permissions []string `json:"permissions"`
 	}
-	if !decodeJSON(response, request, &input) || !validRBACID(input.ID) || strings.TrimSpace(input.Name) == "" || len(input.Permissions) > 128 {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The role id, name, and permissions are invalid.")
+	if !decodeJSON(response, request, &input) || strings.TrimSpace(input.Name) == "" || len(input.Permissions) > 128 {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The role name and permissions are invalid.")
 		return
 	}
 	if !s.authorizeDelegatedPermissions(response, request, input.Permissions) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateRole(
-		request.Context(), repository.Role{ID: input.ID, Name: strings.TrimSpace(input.Name), Description: input.Description}, input.Permissions,
+	tenant := claimsFrom(request).DeploymentID
+	identifier, err := s.generateIdentifier(request.Context(), tenant, "role", input.Name)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	err = s.app.Store.Deployment(tenant).CreateRole(
+		request.Context(), repository.Role{ID: identifier, Name: strings.TrimSpace(input.Name), Description: input.Description}, input.Permissions,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -70,7 +75,7 @@ func (s *Server) createRole(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": input.ID, "name": strings.TrimSpace(input.Name), "permissions": input.Permissions})
+	writeJSON(response, http.StatusCreated, map[string]any{"id": identifier, "name": strings.TrimSpace(input.Name), "permissions": input.Permissions})
 }
 
 func (s *Server) getRole(response http.ResponseWriter, request *http.Request) {
@@ -162,17 +167,22 @@ func (s *Server) listTeams(response http.ResponseWriter, request *http.Request) 
 
 func (s *Server) createTeam(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		ParentID    string `json:"parentId"`
 	}
-	if !decodeJSON(response, request, &input) || !validRBACID(input.ID) || strings.TrimSpace(input.Name) == "" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The team id and name are invalid.")
+	if !decodeJSON(response, request, &input) || strings.TrimSpace(input.Name) == "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The team name is invalid.")
 		return
 	}
-	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
-	team := repository.Team{ID: input.ID, Name: strings.TrimSpace(input.Name), Description: input.Description}
+	tenant := claimsFrom(request).DeploymentID
+	store := s.app.Store.Deployment(tenant)
+	identifier, err := s.generateIdentifier(request.Context(), tenant, "team", input.Name)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	team := repository.Team{ID: identifier, Name: strings.TrimSpace(input.Name), Description: input.Description}
 	// Department hierarchy: a new team pins its materialized path and depth at
 	// creation. Parents never move afterwards, so cycles are structurally
 	// impossible; re-parenting means delete + recreate.
@@ -191,12 +201,12 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 			parentPath = "/" + parent.ID
 		}
 		team.ParentTeamID = &input.ParentID
-		team.Path = parentPath + "/" + input.ID
+		team.Path = parentPath + "/" + identifier
 		team.Depth = parent.Depth + 1
 	} else {
-		team.Path = "/" + input.ID
+		team.Path = "/" + identifier
 	}
-	err := store.CreateTeam(request.Context(), team)
+	err = store.CreateTeam(request.Context(), team)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "TEAM_EXISTS", "The team already exists.")
@@ -205,7 +215,7 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": input.ID, "name": strings.TrimSpace(input.Name), "parentId": input.ParentID, "path": team.Path, "depth": team.Depth})
+	writeJSON(response, http.StatusCreated, map[string]any{"id": identifier, "name": strings.TrimSpace(input.Name), "parentId": input.ParentID, "path": team.Path, "depth": team.Depth})
 }
 
 func (s *Server) getTeam(response http.ResponseWriter, request *http.Request) {

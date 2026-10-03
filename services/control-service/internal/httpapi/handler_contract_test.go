@@ -222,7 +222,7 @@ func TestModelNormalizationAndJSONContract(t *testing.T) {
 	}
 	contextWindow, isDefault, enabled := int32(8192), true, true
 	input := modelWrite{
-		ID: "chat", DisplayName: "Enterprise Chat", SourceType: "gateway", Protocol: "openai-compatible",
+		DisplayName: "Enterprise Chat", SourceType: "gateway", Protocol: "openai-compatible",
 		Capabilities: &capabilities, ContextWindow: &contextWindow, IsDefault: &isDefault, Enabled: &enabled,
 	}
 	if !validModelWrite(input) {

@@ -51,6 +51,10 @@ func TestAdminModelLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	reasoning := []byte(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}`)
 
+	// The model identifier is generated from the display name: the existence
+	// probe runs on the store (sqlmock) before the runtime transaction.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
+		WithArgs("deployment-a", "enterprise-chat").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	pool.ExpectBegin()
 	pool.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM credentials`).WithArgs("deployment-a", "credential-a").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
@@ -62,28 +66,28 @@ func TestAdminModelLifecycle(t *testing.T) {
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 		).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
-			"chat-a", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
+			"enterprise-chat", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
 			[]string{"reasoning", "text"}, reasoning, int64(32768), true, true, now, now,
 		))
 	pool.ExpectCommit()
 	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/models", `{
-		"id":"chat-a","displayName":"Enterprise Chat","sourceType":"gateway","protocol":"openai-compatible",
+		"displayName":"Enterprise Chat","sourceType":"gateway","protocol":"openai-compatible",
 		"endpoint":"http://gateway/v1","upstreamModel":"deepseek-chat","credentialId":"credential-a",
 		"capabilities":[" text ","reasoning","text"],
 		"reasoningCompatibility":{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true},
 		"contextWindow":32768,"isDefault":true,"enabled":true
 	}`)
-	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"chat-a"`) || !strings.Contains(created.Body.String(), `"capabilities":["reasoning","text"]`) || !strings.Contains(created.Body.String(), `"thinkingFormat":"deepseek"`) {
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"enterprise-chat"`) || !strings.Contains(created.Body.String(), `"capabilities":["reasoning","text"]`) || !strings.Contains(created.Body.String(), `"thinkingFormat":"deepseek"`) {
 		t.Fatalf("create model = %d %s", created.Code, created.Body.String())
 	}
 
 	mock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
-		WithArgs("deployment-a", "chat-a", 1).
+		WithArgs("deployment-a", "enterprise-chat", 1).
 		WillReturnRows(sqlmock.NewRows(modelHTTPColumns()).AddRow(
-			"deployment-a", "chat-a", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
+			"deployment-a", "enterprise-chat", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
 			`{reasoning,text}`, reasoning, 32768, true, true, now, now,
 		))
-	got := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/models/chat-a", "")
+	got := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/models/enterprise-chat", "")
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"credentialId":"credential-a"`) || !strings.Contains(got.Body.String(), `"contextWindow":32768`) {
 		t.Fatalf("get model = %d %s", got.Code, got.Body.String())
 	}
@@ -91,7 +95,7 @@ func TestAdminModelLifecycle(t *testing.T) {
 	pool.ExpectBegin()
 	pool.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM credentials`).WithArgs("deployment-a", "credential-b").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
-	pool.ExpectExec(`UPDATE models SET is_default=false`).WithArgs("deployment-a", "chat-a").
+	pool.ExpectExec(`UPDATE models SET is_default=false`).WithArgs("deployment-a", "enterprise-chat").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectQuery(`UPDATE models SET`).
 		WithArgs(
@@ -99,11 +103,11 @@ func TestAdminModelLifecycle(t *testing.T) {
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 		).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
-			"chat-a", "Enterprise Chat 2", "gateway", "openai-compatible", "http://gateway/v2", "deepseek-reasoner", nil, "credential-b",
+			"enterprise-chat", "Enterprise Chat 2", "gateway", "openai-compatible", "http://gateway/v2", "deepseek-reasoner", nil, "credential-b",
 			[]string{"reasoning", "streaming", "text"}, reasoning, int64(65536), true, true, now, now,
 		))
 	pool.ExpectCommit()
-	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/chat-a", `{
+	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/enterprise-chat", `{
 		"displayName":"Enterprise Chat 2","endpoint":"http://gateway/v2","upstreamModel":"deepseek-reasoner",
 		"credentialId":"credential-b","capabilities":["streaming","text","reasoning"],"contextWindow":65536,"isDefault":true
 	}`)
@@ -114,18 +118,18 @@ func TestAdminModelLifecycle(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id`).
 		WithArgs("deployment-a").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
-			AddRow("assignment-a", "deployment-a", "chat-a", "team", "engineering", now))
+			AddRow("assignment-a", "deployment-a", "enterprise-chat", "team", "engineering", now))
 	listedAssignments := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/model-assignments", "")
-	if listedAssignments.Code != http.StatusOK || !strings.Contains(listedAssignments.Body.String(), `"resourceId":"chat-a"`) || !strings.Contains(listedAssignments.Body.String(), `"type":"team"`) {
+	if listedAssignments.Code != http.StatusOK || !strings.Contains(listedAssignments.Body.String(), `"resourceId":"enterprise-chat"`) || !strings.Contains(listedAssignments.Body.String(), `"type":"team"`) {
 		t.Fatalf("list model assignments = %d %s", listedAssignments.Code, listedAssignments.Body.String())
 	}
 
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "chat-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+		WithArgs("deployment-a", "enterprise-chat").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "model_assignments"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	assigned := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/model-assignments", `{"modelId":"chat-a","subject":{"type":"role","id":"developer"}}`)
+	assigned := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/model-assignments", `{"modelId":"enterprise-chat","subject":{"type":"role","id":"developer"}}`)
 	if assigned.Code != http.StatusCreated || !strings.Contains(assigned.Body.String(), `"resourceType":"model"`) || !strings.Contains(assigned.Body.String(), `"type":"role"`) {
 		t.Fatalf("create model assignment = %d %s", assigned.Code, assigned.Body.String())
 	}
@@ -141,9 +145,9 @@ func TestAdminModelLifecycle(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "chat-a").WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("deployment-a", "enterprise-chat").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/chat-a", "")
+	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/enterprise-chat", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete model = %d %s", deleted.Code, deleted.Body.String())
 	}
@@ -228,8 +232,11 @@ func TestAdminModelErrorMappings(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
 	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
-	validModel := `{"id":"chat-a","displayName":"Chat","sourceType":"gateway","protocol":"openai-compatible","credentialId":"credential-a","capabilities":["text"],"isDefault":false,"enabled":true}`
+	validModel := `{"displayName":"Chat","sourceType":"gateway","protocol":"openai-compatible","credentialId":"credential-a","capabilities":["text"],"isDefault":false,"enabled":true}`
 
+	// Identifier probe ("Chat" -> "chat") on the store before the runtime tx.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
+		WithArgs("deployment-a", "chat").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	pool.ExpectBegin()
 	pool.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM credentials`).WithArgs("deployment-a", "credential-a").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
@@ -239,6 +246,9 @@ func TestAdminModelErrorMappings(t *testing.T) {
 		t.Fatalf("missing model credential = %d %s", missingCredential.Code, missingCredential.Body.String())
 	}
 
+	// Unique-violation fallback stays covered for the concurrent-create race.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
+		WithArgs("deployment-a", "chat").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	pool.ExpectBegin()
 	pool.ExpectQuery(`INSERT INTO models`).
 		WithArgs(

@@ -30,7 +30,6 @@ type modelReasoningCompatibility struct {
 type modelRecord = repository.Model
 
 type modelWrite struct {
-	ID                     string                       `json:"id"`
 	DisplayName            string                       `json:"displayName"`
 	SourceType             string                       `json:"sourceType"`
 	Protocol               string                       `json:"protocol"`
@@ -175,7 +174,7 @@ func normalizeCapabilities(values []string) []string {
 }
 
 func validModelWrite(input modelWrite) bool {
-	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.DisplayName) == "" || (input.Protocol != "openai-compatible" && input.Protocol != "anthropic") || input.Capabilities == nil || input.IsDefault == nil || input.Enabled == nil {
+	if strings.TrimSpace(input.DisplayName) == "" || (input.Protocol != "openai-compatible" && input.Protocol != "anthropic") || input.Capabilities == nil || input.IsDefault == nil || input.Enabled == nil {
 		return false
 	}
 	if input.SourceType != "gateway" && input.SourceType != "enterprise_open_source" && input.SourceType != "local" {
@@ -280,13 +279,18 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 		return
 	}
 	capabilities := normalizeCapabilities(*input.Capabilities)
+	tenant := claimsFrom(request).DeploymentID
+	identifier, err := s.generateIdentifier(request.Context(), tenant, "model", input.DisplayName)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
-	tenant := claimsFrom(request).DeploymentID
 	if exists, err := validateCredentialReference(request.Context(), tx, tenant, input.CredentialID); err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -302,7 +306,7 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 	}
 	model, err := scanModel(tx.QueryRow(request.Context(), `INSERT INTO models (deployment_id,id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+modelColumns,
-		tenant, input.ID, input.DisplayName, input.SourceType, input.Protocol, optionalString(input.Endpoint), optionalString(input.UpstreamModel), optionalString(input.LocalModelRef), optionalString(input.CredentialID), capabilities, input.ReasoningCompatibility, optionalInt32(input.ContextWindow), *input.IsDefault, *input.Enabled))
+		tenant, identifier, input.DisplayName, input.SourceType, input.Protocol, optionalString(input.Endpoint), optionalString(input.UpstreamModel), optionalString(input.LocalModelRef), optionalString(input.CredentialID), capabilities, input.ReasoningCompatibility, optionalInt32(input.ContextWindow), *input.IsDefault, *input.Enabled))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "MODEL_EXISTS", "A model with this identifier already exists.")

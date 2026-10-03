@@ -33,18 +33,23 @@ func TestIdentitySourceAdminRoutes(t *testing.T) {
 	now := time.Now().UTC()
 
 	t.Run("create validates the payload", func(t *testing.T) {
-		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources", `{"id":"","kind":"directory"}`)
+		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources", `{"kind":"directory"}`)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_IDENTITY_SOURCE") {
 			t.Fatalf("create invalid = %d %s", response.Code, response.Body.String())
 		}
 	})
 
 	t.Run("create persists and returns the source", func(t *testing.T) {
+		// The identifier is derived from the display name; the uniqueness
+		// probe runs before the insert.
+		mock.ExpectQuery(`SELECT \* FROM "identity_sources" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+			WithArgs("deployment-a", "wecom", 1).
+			WillReturnRows(sqlmock.NewRows(identitySourceColumns()))
 		mock.ExpectBegin()
 		mock.ExpectExec(`.*"identity_sources".*`).WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/identity-sources",
-			`{"id":"wecom","kind":"directory","displayName":"WeCom"}`)
+			`{"kind":"directory","displayName":"WeCom"}`)
 		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":"wecom"`) {
 			t.Fatalf("create = %d %s", response.Code, response.Body.String())
 		}
@@ -119,19 +124,23 @@ func TestDataScopeRuleAdminRoutes(t *testing.T) {
 	handler := New(application).Handler()
 
 	t.Run("create validates the payload", func(t *testing.T) {
-		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-scope-rules", `{"id":""}`)
+		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-scope-rules", `{}`)
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("create invalid = %d %s", response.Code, response.Body.String())
 		}
 	})
 
 	t.Run("create persists the grant", func(t *testing.T) {
+		// The identifier is derived from the reason; probe before insert.
+		mock.ExpectQuery(`SELECT \* FROM "data_scope_rules" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+			WithArgs("deployment-a", "team-needs-reporting", 1).
+			WillReturnRows(sqlmock.NewRows(dataScopeColumns()))
 		mock.ExpectBegin()
 		mock.ExpectExec(`.*"data_scope_rules".*`).WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-scope-rules",
-			`{"id":"rule-1","ruleKind":"exception_grant","subjectType":"team","subjectId":"rd","resourceKind":"skill","resourceId":"reporting","reason":"team needs reporting"}`)
-		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "rule-1") {
+			`{"ruleKind":"exception_grant","subjectType":"team","subjectId":"rd","resourceKind":"skill","resourceId":"reporting","reason":"team needs reporting"}`)
+		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "team-needs-reporting") {
 			t.Fatalf("create = %d %s", response.Code, response.Body.String())
 		}
 	})

@@ -906,10 +906,10 @@ components:
         skills: {type: array, items: {$ref: '#/components/schemas/AdminSkill'}}
         nextCursor: {type: [string, 'null']}
     SkillWrite:
+      description: The skill identifier is server-generated from the name (slug, numeric suffix on collision).
       type: object
-      required: [id, name, description]
+      required: [name, description]
       properties:
-        id: {$ref: '#/components/schemas/SkillIdentifier'}
         name: {type: string}
         description: {type: string}
     SkillPatch:
@@ -1034,11 +1034,32 @@ components:
       properties:
         value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
     AdminModelWrite:
-      allOf:
-        - {$ref: '#/components/schemas/UserModel'}
-        - type: object
-          properties:
-            credentialId: {type: [string, 'null']}
+      description: >-
+        Model creation payload. The model identifier is server-generated from
+        the displayName (lowercase slug, numeric suffix on collision) — it
+        becomes the wire model string, the model-token scope, and the
+        anthropic passthrough path prefix. Explicit identifiers are not
+        accepted.
+      type: object
+      additionalProperties: false
+      required: [displayName, sourceType, protocol, capabilities, isDefault, enabled]
+      properties:
+        displayName: {type: string, minLength: 1, maxLength: 200}
+        sourceType: {$ref: '#/components/schemas/ModelSourceType'}
+        protocol:
+          description: Wire protocol the gateway serves for this model. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as an EnvoyFilter passthrough under a per-model path prefix.
+          type: string
+          enum: [openai-compatible, anthropic]
+        endpoint: {type: string, format: uri}
+        upstreamModel: {type: string}
+        localModelRef: {type: string}
+        credentialId: {type: [string, 'null']}
+        capabilities: {type: array, items: {type: string}}
+        reasoningCompatibility:
+          $ref: '#/components/schemas/ModelReasoningCompatibility'
+        contextWindow: {type: integer, minimum: 1}
+        isDefault: {type: boolean}
+        enabled: {type: boolean}
     AdminModelPatch:
       type: object
       minProperties: 1

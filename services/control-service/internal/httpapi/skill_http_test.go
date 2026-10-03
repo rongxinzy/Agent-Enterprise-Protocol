@@ -106,10 +106,14 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
+	// The skill identifier is generated from the name; the global-store
+	// existence probe runs before the insert transaction.
+	mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1 LIMIT \$2`).WithArgs("writer", 1).
+		WillReturnRows(sqlmock.NewRows(skillColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "skills"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/skills", `{"id":"writer","name":"Writer","description":"Draft content","enabled":true}`)
+	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/skills", `{"name":"Writer","description":"Draft content","enabled":true}`)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"writer"`) || !strings.Contains(created.Body.String(), `"state":"active"`) {
 		t.Fatalf("create Skill = %d %s", created.Code, created.Body.String())
 	}

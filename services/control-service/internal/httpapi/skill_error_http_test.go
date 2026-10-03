@@ -78,19 +78,25 @@ func TestAdminSkillCreateAndMutationFailureBoundaries(t *testing.T) {
 
 	t.Run("duplicate create", func(t *testing.T) {
 		application, mock, _, token := newUserHTTPApplication(t)
+		// The generated id is free at probe time, but a concurrent create
+		// wins the insert: the unique-violation fallback returns 409.
+		mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1 LIMIT \$2`).WithArgs("writer", 1).
+			WillReturnRows(sqlmock.NewRows(skillColumns()))
 		mock.ExpectBegin()
 		mock.ExpectExec(`INSERT INTO "skills"`).WillReturnError(&pgconn.PgError{Code: "23505"})
 		mock.ExpectRollback()
-		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skills", `{"id":"writer","name":"Writer"}`)
+		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skills", `{"name":"Writer"}`)
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusConflict, "SKILL_ALREADY_EXISTS")
 	})
 
 	t.Run("create database error", func(t *testing.T) {
 		application, mock, _, token := newUserHTTPApplication(t)
+		mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1 LIMIT \$2`).WithArgs("writer", 1).
+			WillReturnRows(sqlmock.NewRows(skillColumns()))
 		mock.ExpectBegin()
 		mock.ExpectExec(`INSERT INTO "skills"`).WillReturnError(errors.New("insert unavailable"))
 		mock.ExpectRollback()
-		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skills", `{"id":"writer","name":"Writer","enabled":false}`)
+		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skills", `{"name":"Writer","enabled":false}`)
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 

@@ -1803,8 +1803,8 @@ export interface components {
             roles: components["schemas"]["Role"][];
             nextCursor: string | null;
         };
+        /** @description The role identifier is server-generated from the name (slug, numeric suffix on collision). */
         CreateRoleRequest: {
-            id: string;
             name: string;
             description?: string;
             permissions?: string[];
@@ -1833,8 +1833,8 @@ export interface components {
             teams: components["schemas"]["Team"][];
             nextCursor: string | null;
         };
+        /** @description The team identifier is server-generated from the name (slug, numeric suffix on collision) and anchors the immutable materialized path. */
         CreateTeamRequest: {
-            id: string;
             name: string;
             description?: string;
             /** @description Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible. */
@@ -1952,8 +1952,8 @@ export interface components {
             identitySources: components["schemas"]["IdentitySource"][];
             nextCursor: string | null;
         };
+        /** @description The source identifier is server-generated from the display name (slug, numeric suffix on collision). */
         CreateIdentitySourceRequest: {
-            id: string;
             kind: components["schemas"]["IdentitySourceKind"];
             displayName: string;
             /**
@@ -2010,8 +2010,8 @@ export interface components {
             rules: components["schemas"]["DataScopeRule"][];
             nextCursor: string | null;
         };
+        /** @description The rule identifier is server-generated (slug of the reason or rule kind, numeric suffix on collision). */
         CreateDataScopeRuleRequest: {
-            id: string;
             ruleKind: components["schemas"]["DataScopeRuleKind"];
             /** @enum {string} */
             subjectType: "user" | "role" | "team";
@@ -2071,8 +2071,8 @@ export interface components {
             skills: components["schemas"]["AdminSkill"][];
             nextCursor: string | null;
         };
+        /** @description The skill identifier is server-generated from the name (slug, numeric suffix on collision). */
         SkillWrite: {
-            id: components["schemas"]["SkillIdentifier"];
             name: string;
             description: string;
         };
@@ -2296,8 +2296,25 @@ export interface components {
             models: components["schemas"]["AdminModel"][];
             nextCursor: string | null;
         };
-        AdminModelWrite: components["schemas"]["UserModel"] & {
+        /** @description Model creation payload. The model identifier is server-generated from the displayName (lowercase slug, numeric suffix on collision) — it becomes the wire model string, the model-token scope, and the anthropic passthrough path prefix. Explicit identifiers are not accepted. */
+        AdminModelWrite: {
+            displayName: string;
+            sourceType: components["schemas"]["ModelSourceType"];
+            /**
+             * @description Wire protocol the gateway serves for this model. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as an EnvoyFilter passthrough under a per-model path prefix.
+             * @enum {string}
+             */
+            protocol: "openai-compatible" | "anthropic";
+            /** Format: uri */
+            endpoint?: string;
+            upstreamModel?: string;
+            localModelRef?: string;
             credentialId?: string | null;
+            capabilities: string[];
+            reasoningCompatibility?: components["schemas"]["ModelReasoningCompatibility"];
+            contextWindow?: number;
+            isDefault: boolean;
+            enabled: boolean;
         };
         AdminModelPatch: {
             displayName?: string;

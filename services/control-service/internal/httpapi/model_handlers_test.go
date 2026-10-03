@@ -49,14 +49,14 @@ func TestModelPatchNullableFieldsAndWriteValidation(t *testing.T) {
 	}
 	valid := true
 	capabilities := []string{"text"}
-	base := modelWrite{ID: "chat", DisplayName: "Chat", SourceType: "gateway", Protocol: "openai-compatible", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid}
+	base := modelWrite{DisplayName: "Chat", SourceType: "gateway", Protocol: "openai-compatible", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid}
 	if !validModelWrite(base) {
 		t.Fatal("valid model descriptor was rejected")
 	}
 	for _, invalid := range []modelWrite{
-		{ID: "chat", DisplayName: "Chat", SourceType: "unknown", Protocol: "openai-compatible", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid},
-		{ID: "chat", DisplayName: "Chat", SourceType: "gateway", Protocol: "http", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid},
-		{ID: "chat", DisplayName: "Chat", SourceType: "gateway", Protocol: "openai-compatible", Capabilities: &capabilities, ContextWindow: ptrInt32(0), IsDefault: &valid, Enabled: &valid},
+		{DisplayName: "Chat", SourceType: "unknown", Protocol: "openai-compatible", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid},
+		{DisplayName: "Chat", SourceType: "gateway", Protocol: "http", Capabilities: &capabilities, IsDefault: &valid, Enabled: &valid},
+		{DisplayName: "Chat", SourceType: "gateway", Protocol: "openai-compatible", Capabilities: &capabilities, ContextWindow: ptrInt32(0), IsDefault: &valid, Enabled: &valid},
 	} {
 		if validModelWrite(invalid) {
 			t.Fatalf("invalid model descriptor accepted: %#v", invalid)
@@ -70,7 +70,7 @@ func TestValidModelWriteAnthropicInvariants(t *testing.T) {
 	enabled := true
 	capabilities := []string{"text"}
 	absolute := "https://open.bigmodel.cn/api/anthropic"
-	base := modelWrite{ID: "bench-anthropic", DisplayName: "Bench", SourceType: "gateway", Protocol: "anthropic", Endpoint: &absolute, Capabilities: &capabilities, IsDefault: &enabled, Enabled: &enabled}
+	base := modelWrite{DisplayName: "Bench", SourceType: "gateway", Protocol: "anthropic", Endpoint: &absolute, Capabilities: &capabilities, IsDefault: &enabled, Enabled: &enabled}
 	if !validModelWrite(base) {
 		t.Fatal("valid anthropic model descriptor was rejected")
 	}

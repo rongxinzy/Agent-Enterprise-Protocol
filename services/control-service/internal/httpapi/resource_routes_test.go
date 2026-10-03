@@ -185,7 +185,7 @@ func TestAdminSemanticValidationRoutes(t *testing.T) {
 		{name: "empty role patch", method: http.MethodPatch, path: "/aep/v1/admin/roles/operator", body: `{}`, code: "INVALID_ROLE"},
 		{name: "empty Team patch", method: http.MethodPatch, path: "/aep/v1/admin/teams/engineering", body: `{}`, code: "INVALID_TEAM"},
 		{name: "conflicting Skill state", method: http.MethodPatch, path: "/aep/v1/admin/skills/skill-a", body: `{"state":"active","enabled":false}`, code: "INVALID_SKILL_STATE"},
-		{name: "invalid model", method: http.MethodPost, path: "/aep/v1/admin/models", body: `{"id":"chat-a"}`, code: "INVALID_MODEL"},
+		{name: "invalid model", method: http.MethodPost, path: "/aep/v1/admin/models", body: `{}`, code: "INVALID_MODEL"},
 		{name: "empty model patch", method: http.MethodPatch, path: "/aep/v1/admin/models/chat-a", body: `{}`, code: "INVALID_MODEL"},
 		{name: "invalid model subject", method: http.MethodPost, path: "/aep/v1/admin/model-assignments", body: `{"modelId":"chat-a","subject":{"type":"agent","id":"agent-a"}}`, code: "INVALID_SUBJECT"},
 		{name: "empty Credential patch", method: http.MethodPatch, path: "/aep/v1/admin/credentials/credential-a", body: `{}`, code: "INVALID_CREDENTIAL"},

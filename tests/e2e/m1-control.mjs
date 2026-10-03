@@ -45,13 +45,11 @@ async function runScenario() {
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
   const role = await admin.createRole({
-    id: `model-role-${runId}`,
     name: `Model Role ${runId}`,
     description: 'M1 model authorization role',
     permissions: [],
   });
   const team = await admin.createTeam({
-    id: `model-team-${runId}`,
     name: `Model Team ${runId}`,
     description: 'M1 model authorization team',
   });
@@ -67,9 +65,7 @@ async function runScenario() {
   ];
   const assignments = [];
   for (const [index, descriptor] of descriptors.entries()) {
-    descriptor.modelId = `model-${descriptor.suffix}-${runId}`;
-    await admin.createModel({
-      id: descriptor.modelId,
+    const createdModel = await admin.createModel({
       displayName: `${descriptor.suffix} model`,
       sourceType: 'gateway',
       protocol: 'openai-compatible',
@@ -85,6 +81,7 @@ async function runScenario() {
       isDefault: index === 0,
       enabled: true,
     });
+    descriptor.modelId = createdModel.id;
     assignments.push(await admin.createModelAssignment({modelId: descriptor.modelId, subject: descriptor.subject}));
   }
 
