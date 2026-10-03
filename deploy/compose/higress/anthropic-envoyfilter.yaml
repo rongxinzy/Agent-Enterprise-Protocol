@@ -18,7 +18,7 @@ spec:
           name: aep-anthropic-bench-anthropic
           type: STRICT_DNS
           connect_timeout: 10s
-          dns_lookup_family: AUTO
+          dns_lookup_family: V4_ONLY
           load_assignment:
             cluster_name: aep-anthropic-bench-anthropic
             endpoints:

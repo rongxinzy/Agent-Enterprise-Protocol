@@ -90,7 +90,7 @@ func loadConfig() (serverConfig, error) {
 		if err != nil {
 			return serverConfig{}, err
 		}
-		workerConfig.Applier, err = reconciler.NewKubernetesApplier(reconciler.KubernetesConfig{URL: kubernetesURL, Token: kubernetesToken, CAFile: os.Getenv("AEP_RECONCILER_KUBERNETES_CA_FILE")})
+		workerConfig.Applier, err = reconciler.NewKubernetesApplier(reconciler.KubernetesConfig{URL: kubernetesURL, Token: kubernetesToken, TokenFile: os.Getenv("AEP_RECONCILER_KUBERNETES_TOKEN_FILE"), CAFile: os.Getenv("AEP_RECONCILER_KUBERNETES_CA_FILE")})
 		if err != nil {
 			return serverConfig{}, err
 		}

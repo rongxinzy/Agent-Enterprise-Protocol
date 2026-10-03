@@ -41,6 +41,7 @@ func TestRenderAnthropicPassthrough(t *testing.T) {
 		"kind: EnvoyFilter",
 		"applyTo: CLUSTER",
 		"type: STRICT_DNS",
+		"dns_lookup_family: V4_ONLY",
 		"address: 'open.bigmodel.cn'",
 		"port_value: 443",
 		"sni: 'open.bigmodel.cn'",

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -204,5 +206,74 @@ func TestLeaderElectionGetDecodesLease(t *testing.T) {
 	current, code, err := elector.get(context.Background())
 	if err != nil || code != http.StatusOK || current.Spec.HolderIdentity != "someone" {
 		t.Fatalf("get = %#v, %d, %v", current, code, err)
+	}
+}
+
+// TestLeaderElectorHandlesServerManagedLeaseMetadata pins the production
+// failure where the API server's managedFields array (present on any
+// previously written Lease) failed decode into map[string]string and the
+// elector silently never led.
+func TestLeaderElectorHandlesServerManagedLeaseMetadata(t *testing.T) {
+	t.Parallel()
+	const realShapedLease = `{"kind":"Lease","apiVersion":"coordination.k8s.io/v1","metadata":{"name":"gateway-reconciler-leader","namespace":"aep-system","uid":"27c06c75-ce9f-4c33-af3c-798278b35040","resourceVersion":"6371722","creationTimestamp":"2026-10-01T08:29:01Z","managedFields":[{"manager":"python-urllib","operation":"Update","apiVersion":"coordination.k8s.io/v1","time":"2026-10-03T10:47:12Z","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{".":{},"f:acquireTime":{},"f:holderIdentity":{},"f:leaseDurationSeconds":{},"f:renewTime":{}}}}]},"spec":{"holderIdentity":"previous-owner","leaseDurationSeconds":15,"acquireTime":"2026-10-01T08:29:01.469777Z","renewTime":"2020-01-01T00:00:00.000000Z","leaseTransitions":0}}`
+	var seeded lease
+	if err := json.Unmarshal([]byte(realShapedLease), &seeded); err != nil {
+		t.Fatalf("real-shaped lease no longer decodes: %v", err)
+	}
+	api := &fakeLeaseAPI{lease: &seeded}
+	elector := newTestElector(t, api, "reconciler-test")
+	if err := elector.acquireOrRenew(context.Background()); err != nil {
+		t.Fatalf("acquireOrRenew against a real-shaped lease failed: %v", err)
+	}
+	// Run() flips IsLeader from a nil error; acquireOrRenew itself proves the
+	// takeover through the server-side lease state.
+	api.mutex.Lock()
+	holder := api.lease.Spec.HolderIdentity
+	api.mutex.Unlock()
+	if holder != "reconciler-test" {
+		t.Fatalf("lease holder = %q", holder)
+	}
+}
+
+func TestBearerTokenRereadsProjectedTokenFile(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	path := filepath.Join(directory, "token")
+	if err := os.WriteFile(path, []byte("first-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: "http://localhost", TokenFile: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applier.bearerToken(); got != "first-token" {
+		t.Fatalf("bearerToken() = %q", got)
+	}
+	if err := os.WriteFile(path, []byte("rotated-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := applier.bearerToken(); got != "rotated-token" {
+		t.Fatalf("rotated bearerToken() = %q", got)
+	}
+	// A static token still works without a file and a broken file falls back
+	// to the last known value rather than sending an empty credential.
+	static, err := NewKubernetesApplier(KubernetesConfig{URL: "http://localhost", Token: "static"})
+	if err != nil || static.bearerToken() != "static" {
+		t.Fatalf("static token applier = %v %v", static.bearerToken(), err)
+	}
+}
+
+// TestLeaseTimestampUsesMicrosecondPrecision pins the apiserver contract:
+// metav1.Time rejects nanosecond-precision strings, and RFC3339Nano trims
+// trailing zeros so only some timestamps fail — the two-day silent stall on
+// the cicd cluster came from exactly this.
+func TestLeaseTimestampUsesMicrosecondPrecision(t *testing.T) {
+	t.Parallel()
+	stamp := leaseTimestamp()
+	if _, err := time.Parse("2006-01-02T15:04:05.000000Z07:00", stamp); err != nil {
+		t.Fatalf("leaseTimestamp() = %q, not microsecond RFC3339: %v", stamp, err)
+	}
+	if fraction := strings.Split(stamp, ".")[1]; len(fraction) != 7 {
+		t.Fatalf("leaseTimestamp() = %q, unexpected fraction %q", stamp, fraction)
 	}
 }

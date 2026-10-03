@@ -24,21 +24,40 @@ type Applier interface {
 }
 
 type KubernetesConfig struct {
-	URL        string
-	Token      string
+	URL   string
+	Token string
+	// TokenFile is re-read on every request when set: projected
+	// service-account tokens expire hourly and are rotated in place, so a
+	// token captured once at startup silently 401s after its first TTL.
+	TokenFile  string
 	CAFile     string
 	HTTPClient *http.Client
 }
 
 type KubernetesApplier struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL   string
+	token     string
+	tokenFile string
+	client    *http.Client
+}
+
+// bearerToken returns the current credential, re-reading the token file when
+// one is configured (projected tokens rotate in place).
+func (a *KubernetesApplier) bearerToken() string {
+	if a.tokenFile == "" {
+		return a.token
+	}
+	if data, err := os.ReadFile(a.tokenFile); err == nil {
+		if value := strings.TrimSpace(string(data)); value != "" {
+			return value
+		}
+	}
+	return a.token
 }
 
 func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 	baseURL := strings.TrimRight(config.URL, "/")
-	if baseURL == "" || config.Token == "" {
+	if baseURL == "" || (config.Token == "" && config.TokenFile == "") {
 		return nil, errors.New("kubernetes URL and service-account token are required")
 	}
 	parsed, err := url.Parse(baseURL)
@@ -64,7 +83,7 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 		}
 		client = &http.Client{Timeout: 10 * time.Second, Transport: transport}
 	}
-	return &KubernetesApplier{baseURL: baseURL, token: config.Token, client: client}, nil
+	return &KubernetesApplier{baseURL: baseURL, token: config.Token, tokenFile: config.TokenFile, client: client}, nil
 }
 
 // Apply server-side-applies every rendered resource and first deletes what
@@ -111,7 +130,7 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 		if err != nil {
 			return err
 		}
-		request.Header.Set("Authorization", "Bearer "+a.token)
+		request.Header.Set("Authorization", "Bearer "+a.bearerToken())
 		request.Header.Set("Content-Type", "application/apply-patch+yaml")
 		request.Header.Set("Accept", "application/json")
 		response, err := a.client.Do(request)
@@ -144,7 +163,7 @@ func (a *KubernetesApplier) delete(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Authorization", "Bearer "+a.token)
+	request.Header.Set("Authorization", "Bearer "+a.bearerToken())
 	request.Header.Set("Accept", "application/json")
 	response, err := a.client.Do(request)
 	if err != nil {
@@ -170,7 +189,7 @@ func (a *KubernetesApplier) ReadSecret(ctx context.Context, name, key string) (s
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Authorization", "Bearer "+a.token)
+	request.Header.Set("Authorization", "Bearer "+a.bearerToken())
 	request.Header.Set("Accept", "application/json")
 	response, err := a.client.Do(request)
 	if err != nil {
