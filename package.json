@@ -56,7 +56,7 @@
     "check": "npm run openapi:lint && npm run build && npm test && npm run test:release-artifacts && npm run test:offline-bundle-integrity && npm run test:backup-security"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.6.0",
+    "@redocly/cli": "^2.57.0",
     "openapi-typescript": "^7.10.1"
   }
 }
