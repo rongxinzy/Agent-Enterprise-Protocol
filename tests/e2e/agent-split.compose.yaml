@@ -1,0 +1,6 @@
+# Split-deployment overlay: run the agent control protocol as its own
+# process and advertise its address through the control-service metadata.
+services:
+  control-service:
+    environment:
+      AEP_AGENT_CONTROL_BASE_URL: ${AEP_AGENT_CONTROL_ADVERTISED_URL:-http://localhost:${AEP_AGENT_CONTROL_PORT:-8081}}

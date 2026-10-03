@@ -1214,6 +1214,12 @@ export interface components {
             jwksUri: string;
             /** @description Present when the model_gateway capability is enabled. */
             modelGateway?: components["schemas"]["ModelGatewayMetadata"];
+            /** @description Present in split deployments: the base URL of the agent control protocol service (auth, heartbeat, control-event inbox, skills, telemetry). Clients keep using the API base URL when omitted — the all-in-one control-service mounts the identical routes. */
+            agentControl?: components["schemas"]["AgentControlMetadata"];
+        };
+        AgentControlMetadata: {
+            /** Format: uri */
+            baseUrl: string;
         };
         ModelGatewayMetadata: {
             /** Format: uri-reference */

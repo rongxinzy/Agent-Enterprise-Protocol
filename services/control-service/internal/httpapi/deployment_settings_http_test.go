@@ -18,6 +18,8 @@ func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string) {
 	}
 	pool.ExpectQuery(`SELECT model_gateway_base_url FROM deployment_settings`).
 		WithArgs("deployment-a").WillReturnRows(rows)
+	pool.ExpectQuery(`SELECT agent_control_base_url FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"agent_control_base_url"}).AddRow(nil))
 }
 
 func TestAdminDeploymentSettingsLifecycle(t *testing.T) {

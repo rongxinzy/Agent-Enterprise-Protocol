@@ -28,6 +28,7 @@ type deploymentSettingState struct {
 
 type deploymentSettings struct {
 	ModelGatewayBaseURL deploymentSettingState `json:"modelGatewayBaseUrl"`
+	AgentControlBaseURL deploymentSettingState `json:"agentControlBaseUrl"`
 }
 
 // deploymentSettingsUpdate tracks field presence so an omitted field stays
@@ -37,6 +38,8 @@ type deploymentSettings struct {
 type deploymentSettingsUpdate struct {
 	ModelGatewayBaseURL    *string
 	HasModelGatewayBaseURL bool
+	AgentControlBaseURL    *string
+	HasAgentControlBaseURL bool
 }
 
 func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
@@ -45,24 +48,32 @@ func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	for key := range fields {
-		if key != "modelGatewayBaseUrl" {
+		if key != "modelGatewayBaseUrl" && key != "agentControlBaseUrl" {
 			return fmt.Errorf("unknown field %q", key)
 		}
 	}
-	raw, present := fields["modelGatewayBaseUrl"]
-	if !present {
-		return nil
+	if raw, present := fields["modelGatewayBaseUrl"]; present {
+		update.HasModelGatewayBaseURL = true
+		if string(raw) != "null" {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("modelGatewayBaseUrl must be a string or null")
+			}
+			trimmed := strings.TrimSpace(value)
+			update.ModelGatewayBaseURL = &trimmed
+		}
 	}
-	update.HasModelGatewayBaseURL = true
-	if string(raw) == "null" {
-		return nil
+	if raw, present := fields["agentControlBaseUrl"]; present {
+		update.HasAgentControlBaseURL = true
+		if string(raw) != "null" {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("agentControlBaseUrl must be a string or null")
+			}
+			trimmed := strings.TrimSpace(value)
+			update.AgentControlBaseURL = &trimmed
+		}
 	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return fmt.Errorf("modelGatewayBaseUrl must be a string or null")
-	}
-	trimmed := strings.TrimSpace(value)
-	update.ModelGatewayBaseURL = &trimmed
 	return nil
 }
 
@@ -76,13 +87,13 @@ func resolveDeploymentSetting(override *string, environmentValue string) deploym
 	return deploymentSettingState{Source: "unset"}
 }
 
-func (s *Server) modelGatewayOverride(request *http.Request) (*string, error) {
+func (s *Server) deploymentSettingOverride(request *http.Request, column string) (*string, error) {
 	database := s.app.Database()
 	if database == nil {
 		return nil, errors.New("database unavailable")
 	}
 	var value sql.NullString
-	err := database.QueryRow(request.Context(), `SELECT model_gateway_base_url FROM deployment_settings WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&value)
+	err := database.QueryRow(request.Context(), `SELECT `+column+` FROM deployment_settings WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&value)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -96,12 +107,20 @@ func (s *Server) modelGatewayOverride(request *http.Request) (*string, error) {
 }
 
 func (s *Server) getDeploymentSettings(response http.ResponseWriter, request *http.Request) {
-	override, err := s.modelGatewayOverride(request)
+	override, err := s.deploymentSettingOverride(request, "model_gateway_base_url")
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, deploymentSettings{ModelGatewayBaseURL: resolveDeploymentSetting(override, s.app.Config.ModelGatewayBaseURL)})
+	agentOverride, err := s.deploymentSettingOverride(request, "agent_control_base_url")
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, deploymentSettings{
+		ModelGatewayBaseURL: resolveDeploymentSetting(override, s.app.Config.ModelGatewayBaseURL),
+		AgentControlBaseURL: resolveDeploymentSetting(agentOverride, s.app.Config.AgentControlBaseURL),
+	})
 }
 
 func (s *Server) updateDeploymentSettings(response http.ResponseWriter, request *http.Request) {
@@ -130,7 +149,40 @@ ON CONFLICT (deployment_id) DO UPDATE SET model_gateway_base_url=EXCLUDED.model_
 			return
 		}
 	}
+	if input.HasAgentControlBaseURL {
+		var stored any
+		if input.AgentControlBaseURL != nil {
+			value := *input.AgentControlBaseURL
+			// Unlike the model gateway, the agent-control endpoint may be a
+			// cluster-internal hostname when a split deployment fronts it with
+			// an ingress; only the absolute-URL shape is enforced here.
+			if problem := validateAbsoluteSettingURL(value, "agent control base URL"); problem != "" {
+				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+				return
+			}
+			stored = value
+		}
+		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,agent_control_base_url) VALUES ($1,$2)
+ON CONFLICT (deployment_id) DO UPDATE SET agent_control_base_url=EXCLUDED.agent_control_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, stored); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
 	s.getDeploymentSettings(response, request)
+}
+
+// validateAbsoluteSettingURL enforces the shared write-time shape for URL
+// runtime settings: an absolute http(s) URL of bounded length.
+func validateAbsoluteSettingURL(value string, label string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(trimmed) > maxDeploymentSettingValueLength {
+		return "The " + label + " must be an absolute http or https URL."
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "The " + label + " must be an absolute http or https URL."
+	}
+	return ""
 }
 
 // validateModelGatewayBaseURL applies the write-time contract for the model
@@ -180,4 +232,20 @@ func effectiveModelGatewayBaseURL(application *app.App, request *http.Request) s
 		slog.Warn("deployment settings lookup failed", "request_id", request.Context().Value(contextKey("request-id")), "error", err)
 	}
 	return application.Config.ModelGatewayBaseURL
+}
+
+// effectiveAgentControlBaseURL resolves the split agent-control endpoint
+// advertised through service metadata, mirroring the model-gateway override
+// precedence: runtime setting over environment value.
+func effectiveAgentControlBaseURL(application *app.App, request *http.Request) string {
+	database := application.Database()
+	if database == nil {
+		return application.Config.AgentControlBaseURL
+	}
+	var value sql.NullString
+	err := database.QueryRow(request.Context(), `SELECT agent_control_base_url FROM deployment_settings WHERE deployment_id=$1`, application.DeploymentID()).Scan(&value)
+	if err == nil && value.Valid && value.String != "" {
+		return value.String
+	}
+	return application.Config.AgentControlBaseURL
 }

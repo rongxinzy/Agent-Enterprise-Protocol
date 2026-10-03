@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - external-secrets.yaml
   - control-service.yaml
+  - agent-control.yaml
   - gateway-authorizer.yaml
   - gateway-reconciler-rbac.yaml
   - gateway-reconciler.yaml

@@ -87,6 +87,7 @@ import type {
 
 export class AepClient {
   readonly #baseUrl: string;
+  readonly #agentControlBaseUrl: string | undefined;
   #sessionId?: string;
   readonly #tokenStore: AepClientOptions['tokenStore'];
   readonly #transport: AepTransport;
@@ -94,9 +95,21 @@ export class AepClient {
 
   constructor(options: AepClientOptions) {
     this.#baseUrl = options.baseUrl;
+    this.#agentControlBaseUrl = options.agentControlBaseUrl;
     this.#sessionId = options.sessionId;
     this.#tokenStore = options.tokenStore;
     this.#transport = options.transport ?? new FetchTransport();
+  }
+
+  /**
+   * Split deployments serve the agent control protocol (auth sessions and
+   * the /aep/v1/user runtime surface) from its own process; discovery and
+   * management endpoints stay on the API base. Unset agentControlBaseUrl
+   * keeps everything on one host.
+   */
+  #baseFor(path: string): string {
+    const isAgentSurface = path.startsWith('/aep/v1/user/') || path.startsWith('/aep/v1/auth/');
+    return isAgentSurface && this.#agentControlBaseUrl ? this.#agentControlBaseUrl : this.#baseUrl;
   }
 
   getMetadata(): Promise<ServiceMetadata> {
@@ -876,13 +889,14 @@ export class AepClient {
       }
     }
 
-    let response = await this.#transport.request<T>(this.#baseUrl, {...request, headers});
+    const baseUrl = this.#baseFor(request.path);
+    let response = await this.#transport.request<T>(baseUrl, {...request, headers});
     if (authenticated && response.status === 401 && request.path !== '/aep/v1/auth/refresh') {
       const tokens = await this.#tokenStore.get();
       if (tokens) {
         const retryTokens = tokens.accessToken === usedAccessToken ? await this.#refresh() : tokens;
         headers.Authorization = `Bearer ${retryTokens.accessToken}`;
-        response = await this.#transport.request<T>(this.#baseUrl, {...request, headers});
+        response = await this.#transport.request<T>(baseUrl, {...request, headers});
       }
     }
     return response;
@@ -901,7 +915,7 @@ export class AepClient {
       const current = await this.#tokenStore.get();
       const refreshToken = current?.refreshToken ?? storedRefreshToken ?? await this.#tokenStore.getRefreshToken?.();
       if (!refreshToken) throw new AepProblem({type: 'about:blank', title: 'No session', status: 401, code: 'NO_SESSION'});
-      const response = await this.#transport.request<AepTokens>(this.#baseUrl, {
+      const response = await this.#transport.request<AepTokens>(this.#baseFor('/aep/v1/auth/refresh'), {
         method: HttpMethod.Post,
         path: '/aep/v1/auth/refresh',
         headers: this.#sessionHeaders(),
