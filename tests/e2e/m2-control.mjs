@@ -36,8 +36,7 @@ async function runScenario() {
   const metadata = await admin.getMetadata();
   assert(metadata.capabilities.includes('credentials'), 'Configured Credential capability was not advertised');
 
-  const skillId = 'm2-withdraw-' + runId;
-  await admin.createSkill({id: skillId, name: 'M2 withdraw test', description: 'Skill version withdrawal test'});
+  const skillId = (await admin.createSkill({name: 'M2 withdraw test', description: 'Skill version withdrawal test'})).id;
   const createdSkills = await admin.listSkills();
   const createdSkill = Array.isArray(createdSkills.skills)
     ? createdSkills.skills.find(item => item.id === skillId)
@@ -56,19 +55,15 @@ async function runScenario() {
   assert((await postgres(`SELECT count(*) FROM skill_versions WHERE skill_id='${skillId}' AND version='1.0.0'`)) === '0', 'Withdrawn Skill version remained in PostgreSQL');
   await expectProblem(admin.deleteSkillVersion(skillId, '1.0.0'), 404, 'RESOURCE_NOT_FOUND');
 
-  const roleId = 'm2-role-' + runId;
-  const teamId = 'm2-team-' + runId;
-  await adminRequest('/aep/v1/admin/roles', {
-    id: roleId,
+  const roleId = (await adminRequest('/aep/v1/admin/roles', {
     name: 'M2 Role',
     description: 'M2 credential control test role',
     permissions: ['credentials.read', 'licenses.read'],
-  }, adminStore);
-  await adminRequest('/aep/v1/admin/teams', {
-    id: teamId,
+  }, adminStore)).id;
+  const teamId = (await adminRequest('/aep/v1/admin/teams', {
     name: 'M2 Team',
     description: 'M2 credential control test team',
-  }, adminStore);
+  }, adminStore)).id;
 
   const username = 'm2-user-' + runId;
   const password = 'temporary-password-123';
@@ -189,7 +184,7 @@ async function runScenario() {
   await admin.updateCredential(assigned[1].item.id, {deliveryMode: 'client'});
 
   await expectProblem(admin.createModel({
-    id: 'missing-credential-model', displayName: 'Invalid model', sourceType: 'gateway',
+    displayName: 'Invalid model', sourceType: 'gateway',
     protocol: 'openai-compatible', endpoint: 'https://models.example.test/v1',
     upstreamModel: 'invalid', credentialId: 'missing-' + runId,
     capabilities: ['text'], contextWindow: 4096, isDefault: false, enabled: true,
@@ -259,13 +254,11 @@ async function runScenario() {
 }
 
 async function assertDelegatedRoleBoundaries(admin, suffix) {
-  const delegatedRoleId = 'delegated-user-admin-' + suffix;
-  await admin.createRole({
-    id: delegatedRoleId,
+  const delegatedRoleId = (await admin.createRole({
     name: 'Delegated user administrator',
     description: 'Security regression fixture',
     permissions: ['users.read', 'users.write', 'roles.read', 'roles.write'],
-  });
+  })).id;
   const delegatedUsername = 'delegated-admin-' + suffix;
   const delegatedPassword = 'delegated-password-123';
   const delegatedUser = await admin.createUser({
@@ -305,7 +298,6 @@ async function assertDelegatedRoleBoundaries(admin, suffix) {
     password: 'escalated-password-123', roleIds: ['admin'], teamIds: [], homeTeamId: 'all-users',
   }), 403, 'ROLE_GRANT_FORBIDDEN');
   await expectProblem(delegated.createRole({
-    id: 'escalated-role-' + suffix,
     name: 'Escalated role',
     description: 'Must be rejected',
     permissions: ['data_plane.write'],
@@ -317,12 +309,11 @@ async function assertDelegatedRoleBoundaries(admin, suffix) {
   );
 
   const permittedRole = await delegated.createRole({
-    id: 'delegated-reader-' + suffix,
     name: 'Delegated reader',
     description: 'Permission subset fixture',
     permissions: ['users.read'],
   });
-  assert(permittedRole.id === 'delegated-reader-' + suffix, 'Delegated administrator could not create a permission subset role');
+  assert(permittedRole.id, 'Delegated administrator could not create a permission subset role');
 }
 
 async function assertBuiltinRbacLabelsSurviveUpgrade(adminStore) {
@@ -430,13 +421,13 @@ async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
 
   // Identity sources accept protocol categories only; vendor connector
   // flavors are deployment config, never a protocol vocabulary.
-  const sourceId = 'm2-src-' + suffix;
   const source = await admin.createIdentitySource({
-    id: sourceId, kind: 'directory', displayName: 'M2 Directory', config: {flavor: 'example'},
+    kind: 'directory', displayName: 'M2 Directory', config: {flavor: 'example'},
   });
+  const sourceId = source.id;
   assert(source?.kind === 'directory', 'Identity source creation failed');
   await expectProblem(admin.createIdentitySource({
-    id: 'm2-src-vendor-' + suffix, kind: 'feishu', displayName: 'Vendor connector',
+    kind: 'feishu', displayName: 'Vendor connector',
   }), 400, 'INVALID_IDENTITY_SOURCE');
   const mapping = await admin.upsertIdentityMapping(sourceId, {
     externalSubjectType: 'user', externalId: 'ext-' + suffix, localSubjectId: agent.id,

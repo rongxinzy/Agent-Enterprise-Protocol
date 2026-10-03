@@ -1085,10 +1085,10 @@ components:
         nextCursor: {type: [string, 'null']}
     CreateRoleRequest:
       type: object
-      required: [id, name]
+      description: The role identifier is server-generated from the name (slug, numeric suffix on collision).
+      required: [name]
       additionalProperties: false
       properties:
-        id: {type: string, minLength: 1, maxLength: 100}
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
         permissions: {type: array, maxItems: 128, uniqueItems: true, items: {type: string}}
@@ -1122,10 +1122,10 @@ components:
         nextCursor: {type: [string, 'null']}
     CreateTeamRequest:
       type: object
-      required: [id, name]
+      description: The team identifier is server-generated from the name (slug, numeric suffix on collision) and anchors the immutable materialized path.
+      required: [name]
       additionalProperties: false
       properties:
-        id: {type: string, minLength: 1, maxLength: 100}
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
         parentId: {type: [string, 'null'], maxLength: 100, description: 'Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible.'}
@@ -1282,9 +1282,9 @@ components:
     CreateIdentitySourceRequest:
       type: object
       additionalProperties: false
-      required: [id, kind, displayName]
+      description: The source identifier is server-generated from the display name (slug, numeric suffix on collision).
+      required: [kind, displayName]
       properties:
-        id: {type: string, minLength: 1, maxLength: 100, pattern: '^[A-Za-z0-9._-]+$'}
         kind: {$ref: '#/components/schemas/IdentitySourceKind'}
         displayName: {type: string, minLength: 1, maxLength: 256}
         config:
@@ -1353,9 +1353,9 @@ components:
     CreateDataScopeRuleRequest:
       type: object
       additionalProperties: false
-      required: [id, ruleKind, subjectType, subjectId, resourceKind, resourceId]
+      description: The rule identifier is server-generated (slug of the reason or rule kind, numeric suffix on collision).
+      required: [ruleKind, subjectType, subjectId, resourceKind, resourceId]
       properties:
-        id: {type: string, minLength: 1, maxLength: 100, pattern: '^[A-Za-z0-9._-]+$'}
         ruleKind: {$ref: '#/components/schemas/DataScopeRuleKind'}
         subjectType: {type: string, enum: [user, role, team]}
         subjectId: {type: string, minLength: 1, maxLength: 256}

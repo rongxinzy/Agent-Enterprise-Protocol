@@ -69,7 +69,6 @@ async function runScenario() {
     roleIds: ['admin'],
   });
   await admin.createModel({
-    id: 'enterprise-chat',
     displayName: 'Enterprise Chat',
     sourceType: 'gateway',
     protocol: 'openai-compatible',

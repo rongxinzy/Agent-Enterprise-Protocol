@@ -41,7 +41,6 @@ func (s *Server) listSkills(response http.ResponseWriter, request *http.Request)
 
 func (s *Server) createSkill(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Enabled     *bool  `json:"enabled"`
@@ -49,7 +48,13 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if !requireSkillIdentifier(response, request, input.ID) {
+	if strings.TrimSpace(input.Name) == "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL", "The skill name is required.")
+		return
+	}
+	identifier, err := s.generateIdentifier(request.Context(), "", "skill", input.Name)
+	if err != nil {
+		databaseFailure(response, request, err)
 		return
 	}
 	enabled := true
@@ -57,7 +62,7 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 		enabled = *input.Enabled
 	}
 	skill, err := s.app.Store.CreateSkill(request.Context(), repository.Skill{
-		ID: input.ID, Name: input.Name, Description: input.Description, Enabled: enabled,
+		ID: identifier, Name: input.Name, Description: input.Description, Enabled: enabled,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {

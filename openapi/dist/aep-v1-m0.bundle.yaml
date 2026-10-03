@@ -2442,15 +2442,11 @@ components:
             - 'null'
     CreateRoleRequest:
       type: object
+      description: The role identifier is server-generated from the name (slug, numeric suffix on collision).
       required:
-        - id
         - name
       additionalProperties: false
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
         name:
           type: string
           minLength: 1
@@ -2537,15 +2533,11 @@ components:
             - 'null'
     CreateTeamRequest:
       type: object
+      description: The team identifier is server-generated from the name (slug, numeric suffix on collision) and anchors the immutable materialized path.
       required:
-        - id
         - name
       additionalProperties: false
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
         name:
           type: string
           minLength: 1
@@ -2686,14 +2678,12 @@ components:
             - string
             - 'null'
     SkillWrite:
+      description: The skill identifier is server-generated from the name (slug, numeric suffix on collision).
       type: object
       required:
-        - id
         - name
         - description
       properties:
-        id:
-          $ref: '#/components/schemas/SkillIdentifier'
         name:
           type: string
         description:

@@ -20,17 +20,20 @@ func TestManagementCommandsMapFlagsToRequests(t *testing.T) {
 	}{
 		{
 			name: "model create", method: http.MethodPost, path: "/aep/v1/admin/models",
-			args: []string{"model", "create", "--model-id", "chat-a", "--display-name", "Chat A", "--credential-id", "credential-a", "--reasoning-format", "deepseek", "--context-window", "32768"},
+			args: []string{"model", "create", "--display-name", "Chat A", "--credential-id", "credential-a", "--reasoning-format", "deepseek", "--context-window", "32768"},
 			check: func(t *testing.T, body map[string]any) {
 				reasoning, ok := body["reasoningCompatibility"].(map[string]any)
 				if !ok || reasoning["thinkingFormat"] != "deepseek" || reasoning["requiresReasoningContentOnAssistantMessages"] != true || body["credentialId"] != "credential-a" || body["contextWindow"] != float64(32768) {
 					t.Errorf("model flags were not mapped to the create payload")
 				}
+				if _, sent := body["id"]; sent {
+					t.Errorf("client must not send an id; the server generates it")
+				}
 			},
 		},
 		{
 			name: "model create anthropic", method: http.MethodPost, path: "/aep/v1/admin/models",
-			args: []string{"model", "create", "--model-id", "bench-anthropic", "--display-name", "Bench", "--protocol", "anthropic", "--endpoint", "https://open.bigmodel.cn/api/anthropic", "--upstream-model", "glm-5.3-flash"},
+			args: []string{"model", "create", "--display-name", "Bench Anthropic", "--protocol", "anthropic", "--endpoint", "https://open.bigmodel.cn/api/anthropic", "--upstream-model", "glm-5.3-flash"},
 			check: func(t *testing.T, body map[string]any) {
 				if body["protocol"] != "anthropic" || body["endpoint"] != "https://open.bigmodel.cn/api/anthropic" || body["upstreamModel"] != "glm-5.3-flash" {
 					t.Errorf("anthropic create payload = %#v", body)

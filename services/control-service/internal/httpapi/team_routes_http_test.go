@@ -26,32 +26,40 @@ func TestCreateTeamRoute(t *testing.T) {
 	now := time.Now().UTC()
 
 	t.Run("invalid payload is rejected", func(t *testing.T) {
-		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"id":"Bad ID","name":""}`)
+		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"name":""}`)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_TEAM") {
 			t.Fatalf("invalid = %d %s", response.Code, response.Body.String())
 		}
 	})
 
 	t.Run("root team persists with its materialized path", func(t *testing.T) {
+		// "Platform Team" slugifies to the generated id platform-team; the
+		// probe lists existing teams before the insert.
+		mock.ExpectQuery(`FROM "teams"`).
+			WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamJoinColumns()))
 		mock.ExpectBegin()
 		mock.ExpectExec(`INSERT INTO "teams"`).WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams",
-			`{"id":"platform","name":"平台组"}`)
-		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "platform") {
+			`{"name":"Platform Team"}`)
+		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":"platform-team"`) || !strings.Contains(response.Body.String(), `"path":"/platform-team"`) {
 			t.Fatalf("create = %d %s", response.Code, response.Body.String())
 		}
 	})
 
 	t.Run("child team resolves its parent and nests the path", func(t *testing.T) {
+		// The generated id (backend-team) is probed first, then the parent
+		// (engineering) is resolved from the same listing.
+		mock.ExpectQuery(`FROM "teams"`).
+			WithArgs("deployment-a").WillReturnRows(teamJoinRows(now))
 		mock.ExpectQuery(`FROM "teams"`).
 			WithArgs("deployment-a").WillReturnRows(teamJoinRows(now))
 		mock.ExpectBegin()
 		mock.ExpectExec(`INSERT INTO "teams"`).WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams",
-			`{"id":"backend","name":"后端组","parentId":"engineering"}`)
-		if response.Code != http.StatusCreated {
+			`{"name":"Backend Team","parentId":"engineering"}`)
+		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"path":"/engineering/backend-team"`) {
 			t.Fatalf("create child = %d %s", response.Code, response.Body.String())
 		}
 	})
@@ -59,8 +67,10 @@ func TestCreateTeamRoute(t *testing.T) {
 	t.Run("missing parent is rejected", func(t *testing.T) {
 		mock.ExpectQuery(`FROM "teams"`).
 			WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamJoinColumns()))
+		mock.ExpectQuery(`FROM "teams"`).
+			WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamJoinColumns()))
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams",
-			`{"id":"backend","name":"后端组","parentId":"engineering"}`)
+			`{"name":"Backend Team","parentId":"engineering"}`)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "parent team does not exist") {
 			t.Fatalf("orphan = %d %s", response.Code, response.Body.String())
 		}

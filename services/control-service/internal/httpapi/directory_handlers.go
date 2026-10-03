@@ -379,13 +379,12 @@ func identitySourceConfigProblem(config json.RawMessage) string {
 
 func (s *Server) createIdentitySource(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		ID          string          `json:"id"`
 		Kind        string          `json:"kind"`
 		DisplayName string          `json:"displayName"`
 		Config      json.RawMessage `json:"config"`
 	}
-	if !decodeJSON(response, request, &input) || !validRBACID(input.ID) || !validIdentitySourceKind(input.Kind) || strings.TrimSpace(input.DisplayName) == "" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_SOURCE", "The identity source id, kind, and display name are invalid.")
+	if !decodeJSON(response, request, &input) || !validIdentitySourceKind(input.Kind) || strings.TrimSpace(input.DisplayName) == "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_SOURCE", "The identity source kind and display name are invalid.")
 		return
 	}
 	if len(input.Config) == 0 {
@@ -394,8 +393,14 @@ func (s *Server) createIdentitySource(response http.ResponseWriter, request *htt
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_SOURCE", problem)
 		return
 	}
-	source, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateIdentitySource(request.Context(), repository.IdentitySource{
-		ID: input.ID, Kind: input.Kind, DisplayName: strings.TrimSpace(input.DisplayName), Config: input.Config, Enabled: true,
+	tenant := claimsFrom(request).DeploymentID
+	identifier, err := s.generateIdentifier(request.Context(), tenant, "source", input.DisplayName)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	source, err := s.app.Store.Deployment(tenant).CreateIdentitySource(request.Context(), repository.IdentitySource{
+		ID: identifier, Kind: input.Kind, DisplayName: strings.TrimSpace(input.DisplayName), Config: input.Config, Enabled: true,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -528,7 +533,6 @@ func validDataScopeResourceKind(kind string) bool {
 
 func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		ID           string     `json:"id"`
 		RuleKind     string     `json:"ruleKind"`
 		SubjectType  string     `json:"subjectType"`
 		SubjectID    string     `json:"subjectId"`
@@ -538,18 +542,28 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 		ExpiresAt    *time.Time `json:"expiresAt"`
 		Reason       string     `json:"reason"`
 	}
-	if !decodeJSON(response, request, &input) || !validRBACID(input.ID) || !dataScopeRuleKinds[input.RuleKind] ||
+	if !decodeJSON(response, request, &input) || !dataScopeRuleKinds[input.RuleKind] ||
 		!validSubjectType(input.SubjectType) || strings.TrimSpace(input.SubjectID) == "" ||
 		!validDataScopeResourceKind(input.ResourceKind) || strings.TrimSpace(input.ResourceID) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_SCOPE_RULE", "The rule kind, subject, and resource are invalid.")
 		return
 	}
+	tenant := claimsFrom(request).DeploymentID
+	name := strings.TrimSpace(input.Reason)
+	if name == "" {
+		name = input.RuleKind
+	}
+	identifier, err := s.generateIdentifier(request.Context(), tenant, "data-scope-rule", name)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	rule := repository.DataScopeRule{
-		ID: input.ID, RuleKind: input.RuleKind, SubjectType: input.SubjectType, SubjectID: strings.TrimSpace(input.SubjectID),
+		ID: identifier, RuleKind: input.RuleKind, SubjectType: input.SubjectType, SubjectID: strings.TrimSpace(input.SubjectID),
 		ResourceKind: input.ResourceKind, ResourceID: strings.TrimSpace(input.ResourceID),
 		StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: claimsFrom(request).Subject,
 	}
-	created, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).CreateDataScopeRule(request.Context(), rule)
+	created, err := s.app.Store.Deployment(tenant).CreateDataScopeRule(request.Context(), rule)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "DATA_SCOPE_RULE_EXISTS", "The data scope rule already exists.")

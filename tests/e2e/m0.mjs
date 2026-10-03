@@ -48,21 +48,19 @@ async function runScenario() {
   const password = 'temporary-password-123';
   const user = await runCli(['user', 'create', '--user', username, '--display-name', `E2E User ${runId}`, '--temporary-password', password, '--require-password-change=false', '--role-id', 'admin', '--team-id', 'all-users']);
   const role = await admin.createRole({
-    id: `skill-role-${runId}`,
     name: `Skill Role ${runId}`,
     description: 'M0 Skill authorization role',
     permissions: [],
   });
   const team = await admin.createTeam({
-    id: `skill-team-${runId}`,
     name: `Skill Team ${runId}`,
     description: 'M0 Skill authorization team',
   });
   await admin.replaceUserRBAC(user.id, {roleIds: [role.id], teamIds: [team.id]});
-  const skillId = `review-${runId}`;
-  const archivePath = path.join(tempDirectory, `${skillId}.zip`);
+  const archivePath = path.join(tempDirectory, `review-${runId}.zip`);
   fs.writeFileSync(archivePath, await createSkillArchive());
-  await runCli(['skill', 'create', '--skill-id', skillId, '--name', `Review ${runId}`, '--description', 'M0 end-to-end Skill']);
+  const createdSkill = await runCli(['skill', 'create', '--name', `Review ${runId}`, '--description', 'M0 end-to-end Skill']);
+  const skillId = createdSkill.id;
   await runCli(['skill', 'upload', '--skill-id', skillId, '--version', '1.0.0', '--file', archivePath]);
   await runCli(['skill', 'publish', '--skill-id', skillId, '--version', '1.0.0']);
   const assignment = await runCli(['skill', 'assign', '--skill-id', skillId, '--subject-type', 'user', '--subject-id', String(user.id)]);

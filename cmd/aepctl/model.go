@@ -19,7 +19,7 @@ func modelCommand(opts *options) *cobra.Command {
 		return output(value, err)
 	})})
 
-	var modelID, displayName, sourceType, protocol, endpoint, upstreamModel, localModelRef, credentialID, reasoningFormat string
+	var displayName, sourceType, protocol, endpoint, upstreamModel, localModelRef, credentialID, reasoningFormat string
 	var capabilities []string
 	var contextWindow int32
 	var defaultModel, enabled bool
@@ -27,8 +27,10 @@ func modelCommand(opts *options) *cobra.Command {
 		if protocol != "openai-compatible" && protocol != "anthropic" {
 			return errors.New("protocol must be openai-compatible or anthropic")
 		}
+		// The model identifier is server-generated from the display name and
+		// doubles as the anthropic passthrough path prefix.
 		body := map[string]any{
-			"id": modelID, "displayName": displayName, "sourceType": sourceType,
+			"displayName": displayName, "sourceType": sourceType,
 			"protocol": protocol, "capabilities": capabilities,
 			"isDefault": defaultModel, "enabled": enabled,
 		}
@@ -53,7 +55,6 @@ func modelCommand(opts *options) *cobra.Command {
 		value, err := api.request(http.MethodPost, "/aep/v1/admin/models", body, true)
 		return output(value, err)
 	})}
-	create.Flags().StringVar(&modelID, "model-id", "", "model identifier")
 	create.Flags().StringVar(&displayName, "display-name", "", "display name")
 	create.Flags().StringVar(&sourceType, "source-type", "gateway", "gateway, enterprise_open_source, or local")
 	create.Flags().StringVar(&protocol, "protocol", "openai-compatible", "wire protocol (openai-compatible or anthropic); anthropic models require an absolute http(s) endpoint and render an EnvoyFilter passthrough under /<model-id>")
@@ -66,7 +67,6 @@ func modelCommand(opts *options) *cobra.Command {
 	create.Flags().Int32Var(&contextWindow, "context-window", 0, "context window size")
 	create.Flags().BoolVar(&defaultModel, "default", false, "make this the enterprise default model")
 	create.Flags().BoolVar(&enabled, "enabled", true, "make this model available for authorization")
-	_ = create.MarkFlagRequired("model-id")
 	_ = create.MarkFlagRequired("display-name")
 
 	var showID string

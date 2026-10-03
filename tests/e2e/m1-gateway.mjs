@@ -58,7 +58,7 @@ async function runScenario() {
     temporaryPassword: password, requirePasswordChange: false, teamIds: ['all-users'], roleIds: ['admin'],
   });
   await admin.createModel({
-    id: 'enterprise-chat', displayName: 'Enterprise Chat', sourceType: 'gateway',
+    displayName: 'Enterprise Chat', sourceType: 'gateway',
     protocol: 'openai-compatible', endpoint: gatewayBaseUrl, upstreamModel: 'mock-upstream-chat',
     credentialId: modelCredential.id, capabilities: ['text', 'streaming', 'reasoning'],
     reasoningCompatibility: {
@@ -69,13 +69,13 @@ async function runScenario() {
     isDefault: true, enabled: true,
   });
   await admin.createModel({
-    id: 'unassigned-chat', displayName: 'Unassigned Chat', sourceType: 'gateway',
+    displayName: 'Unassigned Chat', sourceType: 'gateway',
     protocol: 'openai-compatible', endpoint: gatewayBaseUrl, upstreamModel: 'unassigned-upstream',
     credentialId: null, capabilities: ['text'], contextWindow: 8192,
     isDefault: false, enabled: true,
   });
   await admin.createModel({
-    id: 'bench-anthropic', displayName: 'Bench Anthropic', sourceType: 'gateway',
+    displayName: 'Bench Anthropic', sourceType: 'gateway',
     protocol: 'anthropic', endpoint: 'http://mock-openai.aep.internal:8080/api/anthropic', upstreamModel: 'mock-upstream-chat',
     credentialId: modelCredential.id, capabilities: ['text'],
     isDefault: false, enabled: true,

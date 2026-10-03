@@ -3657,15 +3657,11 @@ components:
             - 'null'
     CreateRoleRequest:
       type: object
+      description: The role identifier is server-generated from the name (slug, numeric suffix on collision).
       required:
-        - id
         - name
       additionalProperties: false
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
         name:
           type: string
           minLength: 1
@@ -3752,15 +3748,11 @@ components:
             - 'null'
     CreateTeamRequest:
       type: object
+      description: The team identifier is server-generated from the name (slug, numeric suffix on collision) and anchors the immutable materialized path.
       required:
-        - id
         - name
       additionalProperties: false
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
         name:
           type: string
           minLength: 1
@@ -4089,16 +4081,11 @@ components:
     CreateIdentitySourceRequest:
       type: object
       additionalProperties: false
+      description: The source identifier is server-generated from the display name (slug, numeric suffix on collision).
       required:
-        - id
         - kind
         - displayName
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
-          pattern: ^[A-Za-z0-9._-]+$
         kind:
           $ref: '#/components/schemas/IdentitySourceKind'
         displayName:
@@ -4251,19 +4238,14 @@ components:
     CreateDataScopeRuleRequest:
       type: object
       additionalProperties: false
+      description: The rule identifier is server-generated (slug of the reason or rule kind, numeric suffix on collision).
       required:
-        - id
         - ruleKind
         - subjectType
         - subjectId
         - resourceKind
         - resourceId
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
-          pattern: ^[A-Za-z0-9._-]+$
         ruleKind:
           $ref: '#/components/schemas/DataScopeRuleKind'
         subjectType:
@@ -4421,14 +4403,12 @@ components:
             - string
             - 'null'
     SkillWrite:
+      description: The skill identifier is server-generated from the name (slug, numeric suffix on collision).
       type: object
       required:
-        - id
         - name
         - description
       properties:
-        id:
-          $ref: '#/components/schemas/SkillIdentifier'
         name:
           type: string
         description:
@@ -5027,14 +5007,53 @@ components:
             - string
             - 'null'
     AdminModelWrite:
-      allOf:
-        - $ref: '#/components/schemas/UserModel'
-        - type: object
-          properties:
-            credentialId:
-              type:
-                - string
-                - 'null'
+      description: Model creation payload. The model identifier is server-generated from the displayName (lowercase slug, numeric suffix on collision) — it becomes the wire model string, the model-token scope, and the anthropic passthrough path prefix. Explicit identifiers are not accepted.
+      type: object
+      additionalProperties: false
+      required:
+        - displayName
+        - sourceType
+        - protocol
+        - capabilities
+        - isDefault
+        - enabled
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        sourceType:
+          $ref: '#/components/schemas/ModelSourceType'
+        protocol:
+          description: Wire protocol the gateway serves for this model. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as an EnvoyFilter passthrough under a per-model path prefix.
+          type: string
+          enum:
+            - openai-compatible
+            - anthropic
+        endpoint:
+          type: string
+          format: uri
+        upstreamModel:
+          type: string
+        localModelRef:
+          type: string
+        credentialId:
+          type:
+            - string
+            - 'null'
+        capabilities:
+          type: array
+          items:
+            type: string
+        reasoningCompatibility:
+          $ref: '#/components/schemas/ModelReasoningCompatibility'
+        contextWindow:
+          type: integer
+          minimum: 1
+        isDefault:
+          type: boolean
+        enabled:
+          type: boolean
     AdminModelPatch:
       type: object
       minProperties: 1
