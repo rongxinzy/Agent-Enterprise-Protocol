@@ -439,12 +439,12 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 	}
 	if len(rows) > 0 {
 		values := make([]string, 0, len(rows))
-		args := make([]any, 0, len(rows)*10)
-		for i, row := range rows {
-			placeholders := make([]string, 0, 10)
-			for j, value := range row {
+		var args []any
+		for _, row := range rows {
+			placeholders := make([]string, 0, len(row))
+			for _, value := range row {
 				args = append(args, value)
-				placeholders = append(placeholders, fmt.Sprintf("$%d", i*10+j+1))
+				placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 			}
 			values = append(values, "("+strings.Join(placeholders, ",")+")")
 		}
