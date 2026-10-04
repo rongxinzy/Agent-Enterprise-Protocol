@@ -147,11 +147,24 @@ func TestTelemetryUploadAndSearch(t *testing.T) {
 	application, pool, adminToken, userToken := newRuntimeHTTPApplication(t)
 	handler := New(application).Handler()
 	payload := `{"events":[{"eventId":"telemetry-1","type":"skill.sync.completed","occurredAt":"2026-09-11T10:00:00Z","data":{"version":"2"}},{"eventId":"telemetry-2","type":"skill.sync.failed","occurredAt":"2026-09-11T10:01:00Z","result":"failure","data":{}}]}`
-	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs("telemetry-1", "deployment-a", "user-a", "session-user", "skill.sync.completed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs("telemetry-2", "deployment-a", "user-a", "session-user", "skill.sync.failed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnError(errors.New("database unavailable"))
+	// One multi-VALUES statement carries the whole batch (10 args per row).
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(
+		"telemetry-1", "deployment-a", "user-a", "session-user", "skill.sync.completed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+		"telemetry-2", "deployment-a", "user-a", "session-user", "skill.sync.failed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+	).WillReturnResult(pgxmock.NewResult("INSERT", 2))
 	upload := userRequest(handler, userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
-	if upload.Code != http.StatusOK || !strings.Contains(upload.Body.String(), `"accepted":["telemetry-1"]`) || !strings.Contains(upload.Body.String(), `"INTERNAL_ERROR"`) {
+	if upload.Code != http.StatusOK || !strings.Contains(upload.Body.String(), `"accepted":["telemetry-1","telemetry-2"]`) {
 		t.Fatalf("telemetry upload = %d %s", upload.Code, upload.Body.String())
+	}
+
+	// A database failure rejects the whole insertable set at once.
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(
+		"telemetry-1", "deployment-a", "user-a", "session-user", "skill.sync.completed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+		"telemetry-2", "deployment-a", "user-a", "session-user", "skill.sync.failed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+	).WillReturnError(errors.New("database unavailable"))
+	failed := userRequest(handler, userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
+	if failed.Code != http.StatusOK || !strings.Contains(failed.Body.String(), `"accepted":[]`) || strings.Count(failed.Body.String(), `"INTERNAL_ERROR"`) != 2 {
+		t.Fatalf("telemetry upload failure = %d %s", failed.Code, failed.Body.String())
 	}
 
 	now := time.Now().UTC()
