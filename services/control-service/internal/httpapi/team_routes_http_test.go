@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -29,6 +30,22 @@ func TestCreateTeamRoute(t *testing.T) {
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"name":""}`)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_TEAM") {
 			t.Fatalf("invalid = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("undecodable payload writes exactly one problem document", func(t *testing.T) {
+		// Unknown fields (the retired client-provided id shape) must fail
+		// decode once; the response body is a single RFC 9457 problem, not
+		// the decode problem concatenated with a validation problem.
+		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/teams", `{"id":"legacy","name":"Platform Team"}`)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d %s", response.Code, response.Body.String())
+		}
+		var problem struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil || problem.Code != "INVALID_REQUEST" {
+			t.Fatalf("body is not a single problem document: %v %s", err, response.Body.String())
 		}
 	})
 
