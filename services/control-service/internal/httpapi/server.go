@@ -521,7 +521,18 @@ func databaseFailure(response http.ResponseWriter, request *http.Request, err er
 
 func limit(request *http.Request) int32 {
 	value := int32(50)
-	if parsed, err := json.Number(request.URL.Query().Get("limit")).Int64(); err == nil && parsed > 0 && parsed <= 200 {
+	parsed, err := json.Number(request.URL.Query().Get("limit")).Int64()
+	if err != nil {
+		return value
+	}
+	if parsed > 200 {
+		// Out-of-range values used to silently fall back to the default
+		// (50): a single-page caller asking for 500 got a quarter of what
+		// it expected with no signal (scale-round A2). Clamp to the
+		// contract maximum instead.
+		parsed = 200
+	}
+	if parsed > 0 {
 		value = int32(parsed)
 	}
 	return value
