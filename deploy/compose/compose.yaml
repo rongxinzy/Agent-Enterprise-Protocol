@@ -85,6 +85,53 @@ services:
       retries: 12
       start_period: 5s
 
+  # Split agent-control protocol surface (optional profile): serves
+  # /aep/v1/user/* + auth + discovery as its own process against the same
+  # database, MinIO, and signing key. Default deployments leave this profile
+  # off — the all-in-one control-service mounts the identical routes.
+  agent-control:
+    profiles: ["agent-split"]
+    image: ${AEP_AGENT_CONTROL_IMAGE:-aep-m0-agent-control}
+    build:
+      context: ../..
+      dockerfile: services/control-service/Dockerfile.agent-control
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      AEP_ENVIRONMENT: development
+      AEP_LOG_FORMAT: ${AEP_LOG_FORMAT:-text}
+      AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
+      AEP_ADDRESS: :8080
+      AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
+      AEP_MINIO_ENDPOINT: minio:9000
+      AEP_MINIO_ACCESS_KEY: minioadmin
+      AEP_MINIO_SECRET_KEY: minioadmin
+      AEP_MINIO_BUCKET: aep-skills
+      AEP_ISSUER: http://localhost:${AEP_PORT:-8080}
+      AEP_SIGNING_KEY_BASE64: MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      AEP_CREDENTIAL_MASTER_KEY_BASE64: ${AEP_CREDENTIAL_MASTER_KEY_BASE64:-QUVQLU0yLWNyZWRlbnRpYWwta2V5LTMyLWJ5dGVzISE=}
+      AEP_DEPLOYMENT_ID: ${AEP_DEPLOYMENT_ID:-demo}
+      AEP_DEPLOYMENT_NAME: ${AEP_DEPLOYMENT_NAME:-Demo Deployment}
+    ports:
+      - "127.0.0.1:${AEP_AGENT_CONTROL_PORT:-8081}:8080"
+    healthcheck:
+      test: [CMD, /aep-agent-control, healthcheck, http://127.0.0.1:8080/readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
 volumes:
   postgres-data:
   minio-data:

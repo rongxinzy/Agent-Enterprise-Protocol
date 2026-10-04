@@ -80,3 +80,29 @@ spec:
     - to:
         - ipBlock: {cidr: 0.0.0.0/0}
       ports: [{protocol: TCP, port: 443}]
+---
+# The agent control protocol surface carries desktop-agent runtime traffic
+# (heartbeats, event polling, skill downloads) through the shared ingress,
+# so its ingress is the widest of the control-plane policies; the
+# control-service above stays restricted to gateway and management callers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aep-agent-control
+  namespace: aep-system
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: aep-agent-control}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: higress-system}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports: [{protocol: TCP, port: 443}, {protocol: TCP, port: 5432}, {protocol: TCP, port: 9000}]

@@ -18,6 +18,8 @@ func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string) {
 	}
 	pool.ExpectQuery(`SELECT model_gateway_base_url FROM deployment_settings`).
 		WithArgs("deployment-a").WillReturnRows(rows)
+	pool.ExpectQuery(`SELECT agent_control_base_url FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"agent_control_base_url"}).AddRow(nil))
 }
 
 func TestAdminDeploymentSettingsLifecycle(t *testing.T) {
@@ -103,6 +105,11 @@ func TestAdminDeploymentSettingsValidation(t *testing.T) {
 		{"overlong value", `{"modelGatewayBaseUrl":"https://gateway.example.com/` + strings.Repeat("a", 2050) + `"}`, http.StatusUnprocessableEntity},
 		{"non-string value", `{"modelGatewayBaseUrl":42}`, http.StatusBadRequest},
 		{"unknown field", `{"modelGatewayBaseUrl":null,"unknown":true}`, http.StatusBadRequest},
+		{"agent control relative URL", `{"agentControlBaseUrl":"/agents"}`, http.StatusUnprocessableEntity},
+		{"agent control missing host", `{"agentControlBaseUrl":"https://"}`, http.StatusUnprocessableEntity},
+		{"agent control unsupported scheme", `{"agentControlBaseUrl":"ftp://agents.example.com"}`, http.StatusUnprocessableEntity},
+		{"agent control empty value", `{"agentControlBaseUrl":""}`, http.StatusUnprocessableEntity},
+		{"agent control non-string value", `{"agentControlBaseUrl":7}`, http.StatusBadRequest},
 	}
 	for _, test := range rejected {
 		response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", test.body)
@@ -258,5 +265,40 @@ func TestValidateModelGatewayBaseURL(t *testing.T) {
 		if (problem == "") != test.valid {
 			t.Errorf("validateModelGatewayBaseURL(%q, %q) valid = %v, want %v (problem %q)", test.value, test.environment, problem == "", test.valid, problem)
 		}
+	}
+}
+
+func TestAdminDeploymentSettingsAgentControlOverride(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	application.Config.AgentControlBaseURL = "http://env-agents.example.com"
+	handler := New(application).Handler()
+
+	expectSettingsRead(pool, nil)
+	initial := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
+	if initial.Code != http.StatusOK ||
+		!strings.Contains(initial.Body.String(), `"agentControlBaseUrl":{"override":null,"effectiveValue":"http://env-agents.example.com","source":"env"}`) {
+		t.Fatalf("initial agent control setting = %d %s", initial.Code, initial.Body.String())
+	}
+
+	// Unlike the model gateway, cluster-internal hostnames are allowed: a
+	// split deployment may front the agent surface with an internal ingress.
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", "http://aep-agent-control.aep-system.svc.cluster.local:8080").
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	clusterInternal := "http://aep-agent-control.aep-system.svc.cluster.local:8080"
+	expectSettingsRead(pool, &clusterInternal)
+	updated := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"agentControlBaseUrl":"http://aep-agent-control.aep-system.svc.cluster.local:8080"}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"source":"override"`) {
+		t.Fatalf("cluster-internal agent control override = %d %s", updated.Code, updated.Body.String())
+	}
+
+	// Explicit null clears the override back to the environment value.
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", nil).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSettingsRead(pool, nil)
+	cleared := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"agentControlBaseUrl":null}`)
+	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"source":"env"`) {
+		t.Fatalf("cleared agent control override = %d %s", cleared.Code, cleared.Body.String())
 	}
 }

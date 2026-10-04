@@ -1,0 +1,1639 @@
+openapi: 3.1.0
+info:
+  title: AEP Agent Control API
+  version: 1.0.0
+  description: Agent-facing control protocol. Served by the aep-agent-control process in split deployments; the all-in-one control-service mounts the identical routes, so clients may treat this surface and the enterprise API as one base URL until service metadata advertises agentControl.baseUrl.
+servers:
+  - url: /
+tags:
+  - name: Service
+  - name: Authentication
+  - name: User Runtime
+  - name: User Control Events
+paths:
+  /.well-known/jwks.json:
+    get:
+      tags:
+        - Service
+      operationId: getJsonWebKeySet
+      security: []
+      responses:
+        '200':
+          description: Public keys used to validate AEP and model access tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonWebKeySet'
+  /aep/v1/metadata:
+    get:
+      tags:
+        - Service
+      operationId: getMetadata
+      security: []
+      responses:
+        '200':
+          description: M0 service metadata and implemented capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceMetadata'
+  /aep/v1/auth/methods:
+    get:
+      tags:
+        - Authentication
+      operationId: getAuthenticationMethods
+      security: []
+      parameters:
+        - name: deploymentHint
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Available authentication methods
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationMethods'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/password/login:
+    post:
+      tags:
+        - Authentication
+      operationId: loginWithPassword
+      description: Authenticates an administrator-provisioned ZhiYuan platform account. HTTP and HTTPS are valid in development and production. HTTPS is strongly recommended outside a trusted private network because plain HTTP exposes credentials and bearer tokens in transit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordLoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/password/change:
+    post:
+      tags:
+        - Authentication
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChangeRequest'
+      responses:
+        '200':
+          description: Rotated AEP session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/federated/start:
+    post:
+      tags:
+        - Authentication
+      operationId: startFederatedLogin
+      description: Starts a system-browser login through a customer OIDC provider or another server-side identity adapter.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FederatedLoginStartRequest'
+      responses:
+        '200':
+          description: Federated login transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FederatedLoginStartResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/exchange:
+    post:
+      tags:
+        - Authentication
+      operationId: exchangeFederatedAuthorizationCode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FederatedExchangeRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/refresh:
+    post:
+      tags:
+        - Authentication
+      operationId: refreshAuthenticationSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/auth/logout:
+    post:
+      tags:
+        - Authentication
+      operationId: logoutAuthenticationSession
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: Session revoked
+        '401':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/user/activation:
+    post:
+      tags:
+        - Authentication
+      operationId: activateDeploymentLicense
+      description: Exchanges the authenticated deployment session for a short-lived entitlement token bound to the authenticated user and session. The Control Service verifies its own registered vendor-signed License at startup and never receives License material from the client.
+      security:
+        - aepBearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LicenseActivationRequest'
+      responses:
+        '200':
+          description: Deployment entitlement token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementTokenResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /aep/v1/user/me:
+    get:
+      tags:
+        - User Runtime
+      operationId: getCurrentIdentity
+      responses:
+        '200':
+          description: Current identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentIdentity'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/models:
+    get:
+      tags:
+        - User Runtime
+      operationId: listUserModels
+      responses:
+        '200':
+          description: Visible model catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserModelList'
+  /aep/v1/user/credentials:
+    get:
+      tags:
+        - User Runtime
+      operationId: listUserCredentials
+      responses:
+        '200':
+          description: Assigned credential metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialList'
+  /aep/v1/user/credentials/{credentialId}/resolve:
+    post:
+      tags:
+        - User Runtime
+      operationId: resolveUserCredential
+      parameters:
+        - $ref: '#/components/parameters/CredentialId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveCredentialRequest'
+      responses:
+        '200':
+          description: Secret material; do not cache
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedCredential'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/heartbeat:
+    post:
+      tags:
+        - User Control Events
+      operationId: reportUserHeartbeat
+      parameters:
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Liveness accepted and discovery metadata returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/control-events:
+    get:
+      tags:
+        - User Control Events
+      operationId: listUserControlEvents
+      description: Reading does not consume an event. Unacknowledged deliveries may be returned again.
+      parameters:
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+        - name: afterCursor
+          in: query
+          schema:
+            type:
+              - string
+              - 'null'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Applicable unacknowledged control events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlEventPage'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/control-events/{deliveryId}/acknowledge:
+    post:
+      tags:
+        - User Control Events
+      operationId: acknowledgeControlEvent
+      description: Call only after the delivery is committed to the durable local inbox.
+      parameters:
+        - $ref: '#/components/parameters/DeliveryId'
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcknowledgeRequest'
+      responses:
+        '204':
+          description: Durable receipt recorded
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/control-events/{deliveryId}/result:
+    post:
+      tags:
+        - User Control Events
+      operationId: reportControlEventResult
+      parameters:
+        - $ref: '#/components/parameters/DeliveryId'
+        - $ref: '#/components/parameters/AepProtocolVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControlEventResult'
+      responses:
+        '204':
+          description: Execution state recorded
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/skills/manifest:
+    get:
+      tags:
+        - User Runtime
+      operationId: getSkillManifest
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Complete desired Skill manifest
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillManifest'
+        '304':
+          description: Manifest unchanged
+        '401':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/skills/{skillId}/versions/{version}/package:
+    get:
+      tags:
+        - User Runtime
+      operationId: downloadSkillPackage
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Version'
+      responses:
+        '200':
+          description: Skill ZIP package
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/skills/sync-results:
+    post:
+      tags:
+        - User Runtime
+      operationId: reportSkillSyncResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSyncResult'
+      responses:
+        '202':
+          description: Result accepted
+        '400':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/user/events/batch:
+    post:
+      tags:
+        - User Runtime
+      operationId: uploadEventBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatchRequest'
+      responses:
+        '200':
+          description: Per-event result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatchResponse'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '413':
+          $ref: '#/components/responses/Problem-2'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    JsonWebKeySet:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required:
+              - kty
+              - kid
+              - use
+              - alg
+              - crv
+              - x
+            properties:
+              kty:
+                type: string
+                const: OKP
+              kid:
+                type: string
+              use:
+                type: string
+                const: sig
+              alg:
+                type: string
+                const: EdDSA
+              crv:
+                type: string
+                const: Ed25519
+              x:
+                type: string
+    ServiceMetadata:
+      type: object
+      required:
+        - service
+        - supportedProtocolVersions
+        - capabilities
+        - jwksUri
+      properties:
+        service:
+          type: string
+        supportedProtocolVersions:
+          type: array
+          items:
+            type: string
+        deploymentId:
+          type: string
+          minLength: 1
+        deployment:
+          type: object
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - password_auth
+              - federated_auth
+              - skills
+              - telemetry
+              - control_events
+              - model_gateway
+              - credentials
+              - mcp
+              - plugins
+        jwksUri:
+          type: string
+          format: uri-reference
+    Deployment:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    AuthenticationMethod:
+      type: object
+      required:
+        - id
+        - type
+        - displayName
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - password
+            - federated
+        protocol:
+          type:
+            - string
+            - 'null'
+          enum:
+            - oidc
+            - saml
+            - custom
+            - null
+        displayName:
+          type: string
+    AuthenticationMethods:
+      type: object
+      description: Authentication methods enabled for the deployment. The built-in password method has the stable ID zhiyuan-password. Federated methods are optional and MUST NOT be returned unless a production identity adapter is configured.
+      required:
+        - deployment
+        - methods
+      properties:
+        deployment:
+          $ref: '#/components/schemas/Deployment'
+        deploymentId:
+          type: string
+          minLength: 1
+        preferredMethodId:
+          type:
+            - string
+            - 'null'
+          description: The ID of the preferred enabled method. Defaults to zhiyuan-password for the password-only production profile.
+        methods:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AuthenticationMethod'
+    Problem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - code
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+        requestId:
+          type: string
+    ClientIdentity:
+      type: object
+      description: Self-reported client software identity recorded on a user session, for example the Admin Console browser or a managed desktop client. These values are administrative hints; they are not verified claims.
+      required:
+        - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Client software name, for example zhiyuan-desktop or zhiyuan-admin-console.
+        version:
+          type: string
+          maxLength: 64
+          description: Client software version.
+        deviceId:
+          type: string
+          maxLength: 128
+          description: Stable installation or device identifier chosen by the client.
+    PasswordLoginRequest:
+      type: object
+      required:
+        - deploymentId
+        - username
+        - password
+      properties:
+        deploymentId:
+          type: string
+          minLength: 1
+        sessionId:
+          type: string
+          minLength: 1
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        client:
+          description: Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent.
+          $ref: '#/components/schemas/ClientIdentity'
+    TokenResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - modelAccessToken
+        - tokenType
+        - expiresIn
+        - modelAccessExpiresIn
+        - passwordChangeRequired
+      properties:
+        accessToken:
+          type: string
+          description: Bearer token for AEP management APIs.
+        refreshToken:
+          type: string
+          writeOnly: true
+        modelAccessToken:
+          type: string
+          description: Bearer token with a Model Gateway audience and model grant claims. The gateway validates it locally on each inference request.
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          minimum: 1
+        modelAccessExpiresIn:
+          type: integer
+          minimum: 1
+        deploymentId:
+          type: string
+          minLength: 1
+        sessionId:
+          type: string
+          minLength: 1
+        passwordChangeRequired:
+          type: boolean
+          description: When true, the access session is restricted to current identity, password change, and logout operations. The model token has no model scopes until the password is changed.
+    PasswordChangeRequest:
+      type: object
+      required:
+        - currentPassword
+        - newPassword
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+        newPassword:
+          type: string
+          minLength: 12
+          maxLength: 1024
+          writeOnly: true
+    FederatedLoginStartRequest:
+      type: object
+      required:
+        - deploymentId
+        - methodId
+        - redirectUri
+        - codeChallenge
+      properties:
+        deploymentId:
+          type: string
+          minLength: 1
+        sessionId:
+          type: string
+          minLength: 1
+        methodId:
+          type: string
+          minLength: 1
+        redirectUri:
+          type: string
+          format: uri
+        codeChallenge:
+          type: string
+          minLength: 43
+          maxLength: 128
+        codeChallengeMethod:
+          type: string
+          const: S256
+          default: S256
+    FederatedLoginStartResponse:
+      type: object
+      required:
+        - transactionId
+        - authorizationUrl
+        - state
+        - expiresIn
+      properties:
+        transactionId:
+          type: string
+        authorizationUrl:
+          type: string
+          format: uri
+        state:
+          type: string
+          minLength: 16
+        expiresIn:
+          type: integer
+          minimum: 1
+          maximum: 600
+    FederatedExchangeRequest:
+      type: object
+      required:
+        - transactionId
+        - authorizationCode
+        - redirectUri
+        - codeVerifier
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+        authorizationCode:
+          type: string
+          minLength: 1
+        redirectUri:
+          type: string
+          format: uri
+        codeVerifier:
+          type: string
+          minLength: 43
+          maxLength: 128
+          writeOnly: true
+    RefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+          writeOnly: true
+        sessionId:
+          type: string
+          minLength: 1
+          description: User session identifier.
+    LogoutRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+          writeOnly: true
+    LicenseActivationRequest:
+      type: object
+      additionalProperties: false
+      description: Empty activation request. The server-side registered License is used.
+    EntitlementTokenResponse:
+      type: object
+      required:
+        - entitlementToken
+        - tokenType
+        - expiresAt
+        - expiresIn
+        - licenseId
+        - licenseDigest
+        - deploymentId
+        - features
+        - modelScopes
+      properties:
+        entitlementToken:
+          type: string
+          description: Short-lived service-signed token bound to the authenticated deployment, user, and session for runtime checks.
+        tokenType:
+          type: string
+          const: Bearer
+        expiresAt:
+          type: string
+          format: date-time
+        expiresIn:
+          type: integer
+          minimum: 1
+        licenseId:
+          type: string
+        licenseDigest:
+          type: string
+          pattern: ^sha256:[0-9a-f]{64}$
+        deploymentId:
+          type: string
+        features:
+          type: array
+          items:
+            type: string
+        modelScopes:
+          description: Model identifiers authorized for this deployment entitlement.
+          type: array
+          items:
+            type: string
+    User:
+      type: object
+      required:
+        - id
+        - displayName
+        - kind
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        email:
+          type:
+            - string
+            - 'null'
+          format: email
+        kind:
+          type: string
+          enum:
+            - human
+            - agent
+          description: Account category of the authenticated principal.
+    CurrentIdentity:
+      type: object
+      required:
+        - user
+        - deployment
+        - deploymentId
+        - sessionId
+        - roles
+        - permissions
+        - sessionExpiresAt
+        - passwordChangeRequired
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        deployment:
+          $ref: '#/components/schemas/Deployment'
+        deploymentId:
+          type: string
+          minLength: 1
+        sessionId:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        sessionExpiresAt:
+          type: string
+          format: date-time
+        passwordChangeRequired:
+          type: boolean
+    Problem-2:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - code
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        code:
+          type: string
+        requestId:
+          type: string
+    ModelSourceType:
+      type: string
+      enum:
+        - gateway
+        - enterprise_open_source
+        - local
+    ModelReasoningCompatibility:
+      description: Wire-level reasoning behavior a client must preserve through an OpenAI-compatible endpoint.
+      type: object
+      required:
+        - thinkingFormat
+        - supportsReasoningEffort
+        - requiresReasoningContentOnAssistantMessages
+      additionalProperties: false
+      properties:
+        thinkingFormat:
+          type: string
+          enum:
+            - deepseek
+            - zai
+        supportsReasoningEffort:
+          type: boolean
+          const: true
+        requiresReasoningContentOnAssistantMessages:
+          description: Prior assistant reasoning_content must be replayed when a tool-call conversation continues.
+          type: boolean
+          const: true
+        thinkingLevelMap:
+          description: Provider-specific values for Pi thinking levels. Null hides an unsupported level.
+          type: object
+          additionalProperties: false
+          properties:
+            'off':
+              type:
+                - string
+                - 'null'
+            minimal:
+              type:
+                - string
+                - 'null'
+            low:
+              type:
+                - string
+                - 'null'
+            medium:
+              type:
+                - string
+                - 'null'
+            high:
+              type:
+                - string
+                - 'null'
+            xhigh:
+              type:
+                - string
+                - 'null'
+            max:
+              type:
+                - string
+                - 'null'
+    UserModel:
+      type: object
+      required:
+        - id
+        - displayName
+        - sourceType
+        - protocol
+        - capabilities
+        - isDefault
+        - enabled
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        sourceType:
+          $ref: '#/components/schemas/ModelSourceType'
+        protocol:
+          type: string
+          enum:
+            - openai-compatible
+            - anthropic
+        endpoint:
+          type: string
+          format: uri
+        upstreamModel:
+          type: string
+        localModelRef:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        reasoningCompatibility:
+          $ref: '#/components/schemas/ModelReasoningCompatibility'
+        contextWindow:
+          type: integer
+          minimum: 1
+        isDefault:
+          type: boolean
+        enabled:
+          type: boolean
+    UserModelList:
+      type: object
+      required:
+        - models
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserModel'
+    CredentialMetadata:
+      type: object
+      required:
+        - id
+        - name
+        - service
+        - type
+        - deliveryMode
+        - maskedValue
+        - enabled
+        - updatedAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        service:
+          type: string
+        type:
+          type: string
+          enum:
+            - api_key
+        deliveryMode:
+          type: string
+          enum:
+            - server_only
+            - client
+        maskedValue:
+          type: string
+        enabled:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+    CredentialList:
+      type: object
+      required:
+        - credentials
+        - nextCursor
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialMetadata'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    ResolveCredentialRequest:
+      type: object
+      required:
+        - purpose
+      properties:
+        purpose:
+          type: string
+          minLength: 1
+          maxLength: 500
+    ResolvedCredential:
+      type: object
+      required:
+        - credentialId
+        - type
+        - value
+        - expiresAt
+      properties:
+        credentialId:
+          type: string
+        type:
+          type: string
+          enum:
+            - api_key
+        value:
+          type: string
+        expiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    HeartbeatRequest:
+      type: object
+      required:
+        - status
+      properties:
+        lastControlEventCursor:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - online
+            - idle
+            - busy
+        client:
+          description: Optional client identity refresh. When present, the server replaces the client identity recorded on the session, so client version upgrades become visible without a new login. No User-Agent fallback is applied here.
+          $ref: '#/components/schemas/ClientIdentity'
+    HeartbeatResponse:
+      type: object
+      required:
+        - serverTime
+        - controlEvents
+        - nextHeartbeatAfterSeconds
+      properties:
+        serverTime:
+          type: string
+          format: date-time
+        controlEvents:
+          type: object
+          required:
+            - pending
+            - watermark
+          properties:
+            pending:
+              type: boolean
+            watermark:
+              type: string
+        nextHeartbeatAfterSeconds:
+          type: integer
+          minimum: 5
+          maximum: 3600
+    ControlEventType:
+      type: string
+      enum:
+        - skill.manifest.changed
+        - plugin.manifest.changed
+        - credential.assignments.changed
+        - model.catalog.changed
+    GlobalScope:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: global
+      additionalProperties: false
+    TeamScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: team
+        id:
+          type: string
+      additionalProperties: false
+    RoleScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: role
+        id:
+          type: string
+      additionalProperties: false
+    UserScope:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+          const: user
+        id:
+          type: string
+      additionalProperties: false
+    ControlEventScope:
+      oneOf:
+        - $ref: '#/components/schemas/GlobalScope'
+        - $ref: '#/components/schemas/TeamScope'
+        - $ref: '#/components/schemas/RoleScope'
+        - $ref: '#/components/schemas/UserScope'
+      discriminator:
+        propertyName: type
+    ControlEventResource:
+      type: object
+      required:
+        - type
+        - id
+        - revision
+      properties:
+        type:
+          type: string
+          enum:
+            - skill
+            - plugin
+            - credential
+            - model
+        id:
+          type: string
+        revision:
+          type: string
+    ControlTask:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - skill.reconcile
+            - plugin.reconcile
+            - credential.reconcile
+            - model.reconcile
+    ControlEventDelivery:
+      type: object
+      required:
+        - deliveryId
+        - eventId
+        - cursor
+        - type
+        - scope
+        - task
+        - createdAt
+        - expiresAt
+      properties:
+        deliveryId:
+          type: string
+        eventId:
+          type: string
+        cursor:
+          type: string
+        type:
+          $ref: '#/components/schemas/ControlEventType'
+        scope:
+          $ref: '#/components/schemas/ControlEventScope'
+        resource:
+          $ref: '#/components/schemas/ControlEventResource'
+        task:
+          $ref: '#/components/schemas/ControlTask'
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    ControlEventPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+        - watermark
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControlEventDelivery'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+        watermark:
+          type: string
+    AcknowledgeRequest:
+      type: object
+      required:
+        - status
+        - receivedAt
+      properties:
+        status:
+          type: string
+          const: received
+        receivedAt:
+          type: string
+          format: date-time
+    RunningResult:
+      type: object
+      required:
+        - status
+        - startedAt
+      properties:
+        status:
+          type: string
+          const: running
+        startedAt:
+          type: string
+          format: date-time
+    SucceededResult:
+      type: object
+      required:
+        - status
+        - completedAt
+      properties:
+        status:
+          type: string
+          const: succeeded
+        completedAt:
+          type: string
+          format: date-time
+        appliedRevision:
+          type: string
+    FailedResult:
+      type: object
+      required:
+        - status
+        - completedAt
+        - errorCode
+        - message
+        - retryable
+      properties:
+        status:
+          type: string
+          const: failed
+        completedAt:
+          type: string
+          format: date-time
+        errorCode:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+    ControlEventResult:
+      oneOf:
+        - $ref: '#/components/schemas/RunningResult'
+        - $ref: '#/components/schemas/SucceededResult'
+        - $ref: '#/components/schemas/FailedResult'
+      discriminator:
+        propertyName: status
+    SkillIdentifier:
+      description: Portable Skill identifier. Path separators and leading or trailing punctuation are forbidden.
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$
+    SkillVersionIdentifier:
+      description: Portable Skill version identifier. It may be SemVer or another safe opaque version.
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,126}[A-Za-z0-9])?$
+    SkillPackage:
+      type: object
+      required:
+        - url
+        - sha256
+        - size
+      properties:
+        url:
+          type: string
+          format: uri-reference
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        size:
+          type: integer
+          minimum: 0
+    SkillManifestItem:
+      type: object
+      required:
+        - id
+        - name
+        - version
+        - enabled
+        - package
+      properties:
+        id:
+          $ref: '#/components/schemas/SkillIdentifier'
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          $ref: '#/components/schemas/SkillVersionIdentifier'
+        enabled:
+          type: boolean
+        package:
+          $ref: '#/components/schemas/SkillPackage'
+    SkillManifest:
+      type: object
+      required:
+        - revision
+        - generatedAt
+        - skills
+      properties:
+        revision:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillManifestItem'
+    SkillSyncItem:
+      type: object
+      required:
+        - skillId
+        - version
+        - action
+        - status
+      properties:
+        skillId:
+          $ref: '#/components/schemas/SkillIdentifier'
+        version:
+          $ref: '#/components/schemas/SkillVersionIdentifier'
+        action:
+          type: string
+          enum:
+            - install
+            - update
+            - remove
+            - unchanged
+        status:
+          type: string
+          enum:
+            - success
+            - failed
+        errorCode:
+          type: string
+        message:
+          type: string
+    SkillSyncResult:
+      type: object
+      required:
+        - manifestRevision
+        - startedAt
+        - completedAt
+        - status
+        - items
+      properties:
+        manifestRevision:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - success
+            - partial
+            - failed
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillSyncItem'
+    EventResource:
+      type: object
+      required:
+        - type
+        - id
+      properties:
+        type:
+          type: string
+        id:
+          type: string
+    EventResult:
+      type: string
+      enum:
+        - success
+        - failure
+        - info
+    UserEvent:
+      type: object
+      required:
+        - eventId
+        - type
+        - occurredAt
+        - result
+      properties:
+        eventId:
+          type: string
+        type:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        resource:
+          $ref: '#/components/schemas/EventResource'
+        result:
+          $ref: '#/components/schemas/EventResult'
+        metadata:
+          type: object
+          additionalProperties: true
+    EventBatchRequest:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/UserEvent'
+    RejectedEvent:
+      type: object
+      required:
+        - eventId
+        - code
+        - message
+      properties:
+        eventId:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+    EventBatchResponse:
+      type: object
+      required:
+        - accepted
+        - rejected
+      properties:
+        accepted:
+          type: array
+          items:
+            type: string
+        rejected:
+          type: array
+          items:
+            $ref: '#/components/schemas/RejectedEvent'
+  responses:
+    Problem:
+      description: AEP Problem Details
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TokenResponse:
+      description: AEP session tokens. The model token is issued at login or refresh and is validated locally by the Model Gateway without a per-request authorization call to the Control Service.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TokenResponse'
+    Problem-2:
+      description: AEP Problem Details
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem-2'
+  parameters:
+    CredentialId:
+      name: credentialId
+      in: path
+      required: true
+      schema:
+        type: string
+    AepProtocolVersion:
+      name: X-AEP-Protocol-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        const: '1.0'
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    DeliveryId:
+      name: deliveryId
+      in: path
+      required: true
+      schema:
+        type: string
+    SkillId:
+      name: skillId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SkillIdentifier'
+    Version:
+      name: version
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SkillVersionIdentifier'

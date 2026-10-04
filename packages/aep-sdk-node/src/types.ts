@@ -22,6 +22,13 @@ export interface AepClientOptions {
   tokenStore: AepTokenStore;
   sessionId?: string;
   transport?: AepTransport;
+  /**
+   * Base URL of the agent control protocol service in split deployments
+   * (session auth + /aep/v1/user/*: heartbeat, control-event inbox, skills,
+   * telemetry, models, credentials). Omitted, every request uses baseUrl —
+   * the all-in-one shape.
+   */
+  agentControlBaseUrl?: string;
   /** @deprecated Agent metadata is ignored by the control-plane client. */
   agentId?: string;
   /** @deprecated Agent metadata is ignored by the control-plane client. */
