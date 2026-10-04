@@ -1023,12 +1023,14 @@ components:
     UpdatePlatformUserRequest:
       type: object
       minProperties: 1
+      description: >-
+        Profile updates only. Membership (teamIds/roleIds) is set at
+        creation or import; sending it here is rejected with
+        MEMBERSHIP_UPDATE_UNSUPPORTED rather than silently ignored.
       properties:
         displayName: {type: string, minLength: 1, maxLength: 256}
         email: {type: [string, 'null'], format: email}
         status: {type: string, enum: [active, disabled]}
-        teamIds: {type: array, items: {type: string}, uniqueItems: true}
-        roleIds: {type: array, items: {type: string}, uniqueItems: true}
     ResetPasswordRequest:
       type: object
       required: [temporaryPassword]
