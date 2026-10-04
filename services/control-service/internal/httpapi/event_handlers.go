@@ -417,23 +417,45 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 	claims := claimsFrom(request)
 	accepted := make([]string, 0, len(input.Events))
 	rejected := make([]map[string]string, 0)
+	// Rows land in ONE multi-VALUES statement: a single network round trip
+	// and a single transaction, where the per-row path autocommitted up to
+	// a hundred inserts per batch (571ms p50 per 100 rows at scale; see the
+	// scale-round findings). Duplicates stay "accepted" via ON CONFLICT
+	// DO NOTHING, matching the previous per-row semantics.
+	rows := make([][]any, 0, len(input.Events))
 	for _, event := range input.Events {
+		if claims.SessionID == "" {
+			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED"})
+			continue
+		}
 		payload, _ := json.Marshal(event.Data)
 		var resourceType, resourceID *string
 		if event.Resource != nil {
 			resourceType = &event.Resource.Type
 			resourceID = &event.Resource.ID
 		}
-		if claims.SessionID == "" {
-			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED"})
-			continue
-		}
-		_, err := s.app.Database().Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(event_id) DO NOTHING`, event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt)
-		if err != nil {
-			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "INTERNAL_ERROR"})
-			continue
-		}
+		rows = append(rows, []any{event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt})
 		accepted = append(accepted, event.EventID)
+	}
+	if len(rows) > 0 {
+		values := make([]string, 0, len(rows))
+		args := make([]any, 0, len(rows)*10)
+		for i, row := range rows {
+			placeholders := make([]string, 0, 10)
+			for j, value := range row {
+				args = append(args, value)
+				placeholders = append(placeholders, fmt.Sprintf("$%d", i*10+j+1))
+			}
+			values = append(values, "("+strings.Join(placeholders, ",")+")")
+		}
+		if _, err := s.app.Database().Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES `+strings.Join(values, ",")+` ON CONFLICT(event_id) DO NOTHING`, args...); err != nil {
+			// A single statement cannot fail per row, so a database error
+			// rejects the whole insertable set at once.
+			accepted = accepted[:0]
+			for _, row := range rows {
+				rejected = append(rejected, map[string]string{"eventId": fmt.Sprint(row[0]), "code": "INTERNAL_ERROR"})
+			}
+		}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"accepted": accepted, "rejected": rejected})
 }
