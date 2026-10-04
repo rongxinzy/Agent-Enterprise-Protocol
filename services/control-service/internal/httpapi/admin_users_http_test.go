@@ -85,6 +85,13 @@ func TestAdminUserImportReportsPartialResults(t *testing.T) {
 func TestAdminUserUpdateDisableAndResetPassword(t *testing.T) {
 	application, mock, pool, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
+
+	// Membership fields must be rejected, not silently dropped (A3).
+	membership := userRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/users/user-a", `{"displayName":"Alice","teamIds":["engineering"],"roleIds":["member"]}`)
+	if membership.Code != http.StatusBadRequest || !strings.Contains(membership.Body.String(), "MEMBERSHIP_UPDATE_UNSUPPORTED") {
+		t.Fatalf("membership update = %d %s", membership.Code, membership.Body.String())
+	}
+
 	now := time.Now().UTC()
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "users" SET`).WithArgs("Disabled Alice", "disabled", sqlmock.AnyArg(), "deployment-a", "user-a").WillReturnResult(sqlmock.NewResult(0, 1))

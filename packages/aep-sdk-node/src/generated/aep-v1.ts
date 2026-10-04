@@ -1776,14 +1776,13 @@ export interface components {
                 detail: string;
             }[];
         };
+        /** @description Profile updates only. Membership (teamIds/roleIds) is set at creation or import; sending it here is rejected with MEMBERSHIP_UPDATE_UNSUPPORTED rather than silently ignored. */
         UpdatePlatformUserRequest: {
             displayName?: string;
             /** Format: email */
             email?: string | null;
             /** @enum {string} */
             status?: "active" | "disabled";
-            teamIds?: string[];
-            roleIds?: string[];
         };
         ResetPasswordRequest: {
             temporaryPassword: string;
