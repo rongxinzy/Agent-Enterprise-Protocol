@@ -176,9 +176,9 @@ func (s *Server) insertUser(request *http.Request, input createUserRequest) (rep
 
 func (s *Server) updateUser(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		DisplayName *string   `json:"displayName"`
-		Email       *string   `json:"email"`
-		Status      *string   `json:"status"`
+		DisplayName *string `json:"displayName"`
+		Email       *string `json:"email"`
+		Status      *string `json:"status"`
 		// Membership fields are decoded only to be rejected: they were
 		// previously accepted and silently dropped, leaving callers under
 		// the impression team/role relationships had changed (scale-round
