@@ -254,10 +254,16 @@ func TestServerUtilityErrorContracts(t *testing.T) {
 	if limit(request) != 200 {
 		t.Fatalf("limit = %d", limit(request))
 	}
-	for _, raw := range []string{"", "0", "201", "invalid"} {
+	for _, raw := range []string{"", "0", "invalid"} {
 		request := httptest.NewRequest(http.MethodGet, "/?limit="+raw, nil)
 		if limit(request) != 50 {
 			t.Fatalf("limit %q = %d", raw, limit(request))
+		}
+	}
+	for _, raw := range []string{"201", "500", "10000"} {
+		request := httptest.NewRequest(http.MethodGet, "/?limit="+raw, nil)
+		if got := limit(request); got != 200 {
+			t.Fatalf("limit %q = %d, want clamped 200", raw, got)
 		}
 	}
 	if !validRequestID("request-1_OK:test") || validRequestID("") || validRequestID("has space") || validRequestID(strings.Repeat("a", 129)) {
