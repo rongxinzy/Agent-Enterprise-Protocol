@@ -176,13 +176,21 @@ func (s *Server) insertUser(request *http.Request, input createUserRequest) (rep
 
 func (s *Server) updateUser(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		DisplayName *string   `json:"displayName"`
-		Email       *string   `json:"email"`
-		Status      *string   `json:"status"`
-		TeamIDs     *[]string `json:"teamIds"`
-		RoleIDs     *[]string `json:"roleIds"`
+		DisplayName *string `json:"displayName"`
+		Email       *string `json:"email"`
+		Status      *string `json:"status"`
+		// Membership fields are decoded only to be rejected: they were
+		// previously accepted and silently dropped, leaving callers under
+		// the impression team/role relationships had changed (scale-round
+		// A3). Membership is set at creation or import.
+		TeamIDs *[]string `json:"teamIds"`
+		RoleIDs *[]string `json:"roleIds"`
 	}
 	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.TeamIDs != nil || input.RoleIDs != nil {
+		writeProblem(response, request, http.StatusBadRequest, "MEMBERSHIP_UPDATE_UNSUPPORTED", "teamIds and roleIds cannot be changed on user update; they are set at creation or import.")
 		return
 	}
 	user, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateUser(
