@@ -266,45 +266,36 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 	}
 	// New user sessions receive one durable delivery per terminal. The user
 	// topic is represented by the session rows, so every active terminal gets
-	// an independent cursor and acknowledgement state.
-	rows, err := tx.Query(request.Context(), `SELECT DISTINCT s.session_id
+	// an independent cursor and acknowledgement state. The fan-out is one
+	// INSERT..SELECT (the same shape as createSkillAssignmentEvent): the
+	// DISTINCT-then-loop path shipped the whole session set over the wire
+	// and re-inserted it row by row — 135ms at 383 sessions, growing
+	// linearly. RowsAffected counts deliveries actually created, which is
+	// the pending summary (ON CONFLICT dedupes; session_id is unique).
+	tag, err := tx.Exec(request.Context(), `INSERT INTO session_control_deliveries (delivery_id,event_id,session_id)
+SELECT gen_random_uuid()::text,$1,s.session_id
 FROM user_sessions s
-JOIN users u ON u.id=s.user_id AND u.deployment_id=$1
-WHERE s.deployment_id=$1 AND s.revoked_at IS NULL
-  AND ($2='global' OR ($2='user' AND s.user_id=$3) OR ($2='team' AND EXISTS (
+JOIN users u ON u.id=s.user_id AND u.deployment_id=$2
+WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
+  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (
     SELECT 1 FROM user_team_bindings utb
-    WHERE utb.deployment_id=$1 AND utb.user_id=s.user_id AND utb.team_id=$3
-  )) OR ($2='role' AND EXISTS (
+    WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4
+  )) OR ($3='role' AND EXISTS (
     SELECT 1 FROM user_role_bindings urb
     JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
-    WHERE urb.deployment_id=$1 AND urb.user_id=s.user_id AND urb.role_id=$3
-  )))`, claims.DeploymentID, input.Scope.Type, input.Scope.ID)
+    WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4
+  )))
+ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, claims.DeploymentID, input.Scope.Type, input.Scope.ID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	sessionIDs := make([]string, 0)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			databaseFailure(response, request, err)
-			return
-		}
-		sessionIDs = append(sessionIDs, id)
-	}
-	rows.Close()
-	for _, sessionID := range sessionIDs {
-		if _, err = tx.Exec(request.Context(), `INSERT INTO session_control_deliveries (delivery_id,event_id,session_id) VALUES ($1,$2,$3) ON CONFLICT (event_id,session_id) DO NOTHING`, uuid.NewString(), eventID, sessionID); err != nil {
-			databaseFailure(response, request, err)
-			return
-		}
-	}
+	pending := int(tag.RowsAffected())
 	if err := tx.Commit(request.Context()); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"eventId": eventID, "type": input.Type, "scope": input.Scope, "resource": input.Resource, "task": input.Task, "expiresAt": input.ExpiresAt, "state": "active", "createdAt": time.Now().UTC(), "createdBy": claims.Subject, "deliverySummary": map[string]int{"pending": len(sessionIDs), "received": 0, "running": 0, "succeeded": 0, "failed": 0, "expired": 0, "superseded": 0}})
+	writeJSON(response, http.StatusCreated, map[string]any{"eventId": eventID, "type": input.Type, "scope": input.Scope, "resource": input.Resource, "task": input.Task, "expiresAt": input.ExpiresAt, "state": "active", "createdAt": time.Now().UTC(), "createdBy": claims.Subject, "deliverySummary": map[string]int{"pending": pending, "received": 0, "running": 0, "succeeded": 0, "failed": 0, "expired": 0, "superseded": 0}})
 }
 
 func (s *Server) listAdminControlEvents(response http.ResponseWriter, request *http.Request) {

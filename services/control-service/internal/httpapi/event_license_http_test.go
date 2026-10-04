@@ -106,8 +106,7 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 		pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "global", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 	).WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	pool.ExpectQuery(`SELECT DISTINCT s.session_id`).WithArgs("deployment-a", "global", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"session_id"}).AddRow("session-user"))
-	pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), "session-user").WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "global", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectCommit()
 	created := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events", `{"type":"skill.manifest.changed","scope":{"type":"global"},"task":{"type":"skill.reconcile"},"expiresAt":"`+future+`"}`)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"pending":1`) {
