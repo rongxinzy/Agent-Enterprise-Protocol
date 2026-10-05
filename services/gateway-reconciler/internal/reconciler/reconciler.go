@@ -424,8 +424,13 @@ func anthropicSlug(modelID string) string {
 		}
 	}
 	clean := strings.Trim(result.String(), "-")
-	if len(clean) > 30 {
-		clean = strings.Trim(clean[:30], "-")
+	// The ingress path must equal the wire model id verbatim — runtimes
+	// build their gateway base URL as <gateway>/<model-id> — so the slug
+	// cap only guards against runaway names. AEP caps model ids at 40
+	// characters (identifier_slug.go); capping at 30 truncated longer ids
+	// into paths nothing could ever route to (silent 404).
+	if len(clean) > 40 {
+		clean = strings.Trim(clean[:40], "-")
 	}
 	if clean == "" {
 		clean = "model"
