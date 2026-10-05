@@ -43,18 +43,18 @@ npm run compose:up
 The default local endpoints are:
 
 - control service: `http://localhost:8080`
-- MinIO console: `http://localhost:9001`
+- RustFS console: `http://localhost:9001`
 - health check: `http://localhost:8080/healthz`
 
 The local-only bootstrap identity is enterprise `demo`, user `admin`, password
 `change-this-admin-password`. Compose also contains fixed development signing and
-MinIO credentials. The Compose profile fixes `AEP_ENVIRONMENT=development`,
+RustFS credentials. The Compose profile fixes `AEP_ENVIRONMENT=development`,
 disables mock federated authentication, and binds every published port to
 `127.0.0.1`. It is not a production deployment input; use the production
 Kubernetes baseline and deployment Secret system instead.
 
 To use a different service port, set `AEP_PORT` before starting Compose. Set
-`AEP_MINIO_CONSOLE_PORT` similarly for the MinIO console. Set `GOPROXY` to
+`AEP_MINIO_CONSOLE_PORT` similarly for the RustFS console. Set `GOPROXY` to
 override the Go module proxy used by the image build.
 
 ## Manage M0
@@ -113,7 +113,7 @@ npm run test:e2e
 ```
 
 The script uses isolated project name `aep-m0-e2e`, service port `18080`, and
-MinIO console port `19001`. It creates the user, Skill, version, publication, and
+RustFS console port `19001`. It creates the user, Skill, version, publication, and
 assignment through `aepctl`; runs the Agent; verifies install and revocation;
 checks delivery, Agent, and telemetry records; and removes only its own containers
 and volumes. Override the two host ports with `AEP_E2E_PORT` and
@@ -130,8 +130,8 @@ manual stack with `npm run compose:down`; its named data volumes are preserved.
 - Example Agent build, SQLite recovery tests, ZIP traversal rejection, and hash
   validation pass.
 - `go test ./...`, `go vet ./...`, and `go build ./...` pass.
-- Compose E2E passes with PostgreSQL and MinIO and cleans its scoped resources.
-- Bootstrap passwords, signing key, issuer, MinIO credentials, and HTTP exposure
+- Compose E2E passes with PostgreSQL and RustFS and cleans its scoped resources.
+- Bootstrap passwords, signing key, issuer, RustFS credentials, and HTTP exposure
   are reviewed for the target environment.
 - M0 capability metadata does not advertise unsupported gateway, Credential,
   MCP, or Plugin features.

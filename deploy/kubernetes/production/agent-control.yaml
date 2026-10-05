@@ -1,7 +1,8 @@
 # Agent control protocol service — the desktop-agent runtime surface
 # (/aep/v1/user/*: heartbeat, control-event inbox, skill delivery, telemetry,
 # model connection, credential resolution) plus shared session auth and
-# discovery. Shares the control plane's PostgreSQL, MinIO, signing key, and
+# discovery. Shares the control plane's PostgreSQL, S3-compatible object
+# storage, signing key, and
 # credential keyring (same secret, read-only), so sessions and tokens are
 # valid on both services. The control-service continues to mount the same
 # routes for all-in-one deployments; split deployments route /aep/v1/user,

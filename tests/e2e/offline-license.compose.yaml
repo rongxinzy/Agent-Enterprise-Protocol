@@ -3,10 +3,10 @@ services:
     networks:
       - offline
 
-  minio:
+  rustfs:
     environment:
-      MINIO_ROOT_USER: offline-minio-access
-      MINIO_ROOT_PASSWORD: offline-minio-secret
+      RUSTFS_ACCESS_KEY: offline-minio-access
+      RUSTFS_SECRET_KEY: offline-minio-secret
     networks:
       - offline
 
@@ -19,7 +19,7 @@ services:
       AEP_LOG_FORMAT: json
       AEP_LOG_LEVEL: info
       AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
-      AEP_MINIO_ENDPOINT: minio:9000
+      AEP_MINIO_ENDPOINT: rustfs:9000
       AEP_MINIO_ACCESS_KEY: offline-minio-access
       AEP_MINIO_SECRET_KEY: offline-minio-secret
       AEP_ISSUER: http://localhost:${AEP_OFFLINE_PORT:-18089}

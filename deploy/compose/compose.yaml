@@ -16,16 +16,22 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address :9001
+  # S3-compatible object storage for Skill ZIP blobs (RustFS replaced MinIO
+  # after the upstream community images were withdrawn). AEP_MINIO_* service
+  # variables below are the long-lived blob-store config contract.
+  rustfs:
+    image: rustfs/rustfs:1.0.0
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      RUSTFS_ACCESS_KEY: minioadmin
+      RUSTFS_SECRET_KEY: minioadmin
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       - "127.0.0.1:${AEP_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - minio-data:/data
+      - rustfs-data:/data
 
   control-service:
     image: ${AEP_CONTROL_SERVICE_IMAGE:-aep-m0-control-service}
@@ -43,7 +49,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      rustfs:
         condition: service_started
     environment:
       AEP_ENVIRONMENT: development
@@ -52,7 +58,7 @@ services:
       AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
       AEP_ADDRESS: :8080
       AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
-      AEP_MINIO_ENDPOINT: minio:9000
+      AEP_MINIO_ENDPOINT: rustfs:9000
       AEP_MINIO_ACCESS_KEY: minioadmin
       AEP_MINIO_SECRET_KEY: minioadmin
       AEP_MINIO_BUCKET: aep-skills
@@ -87,8 +93,8 @@ services:
 
   # Split agent-control protocol surface (optional profile): serves
   # /aep/v1/user/* + auth + discovery as its own process against the same
-  # database, MinIO, and signing key. Default deployments leave this profile
-  # off — the all-in-one control-service mounts the identical routes.
+  # database, object storage, and signing key. Default deployments leave this
+  # profile off — the all-in-one control-service mounts the identical routes.
   agent-control:
     profiles: ["agent-split"]
     image: ${AEP_AGENT_CONTROL_IMAGE:-aep-m0-agent-control}
@@ -106,7 +112,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      rustfs:
         condition: service_started
     environment:
       AEP_ENVIRONMENT: development
@@ -114,7 +120,7 @@ services:
       AEP_LOG_LEVEL: ${AEP_LOG_LEVEL:-info}
       AEP_ADDRESS: :8080
       AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
-      AEP_MINIO_ENDPOINT: minio:9000
+      AEP_MINIO_ENDPOINT: rustfs:9000
       AEP_MINIO_ACCESS_KEY: minioadmin
       AEP_MINIO_SECRET_KEY: minioadmin
       AEP_MINIO_BUCKET: aep-skills
@@ -134,4 +140,4 @@ services:
 
 volumes:
   postgres-data:
-  minio-data:
+  rustfs-data:

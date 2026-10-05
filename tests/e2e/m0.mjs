@@ -70,12 +70,12 @@ async function runScenario() {
   const agentData = path.join(tempDirectory, 'agent');
   const installEventId = await automaticSkillEventId(skillId, 'assigned:');
   const installedSkill = path.join(agentData, 'managed-skills', skillId, 'SKILL.md');
-  await runCompose('stop', 'minio');
+  await runCompose('stop', 'rustfs');
   await runAgent(username, password, agentData);
-  assert(!fs.existsSync(installedSkill), 'Skill was installed while MinIO was unavailable');
+  assert(!fs.existsSync(installedSkill), 'Skill was installed while object storage was unavailable');
   await assertDelivery(admin, installEventId, 'failed');
 
-  await runCompose('start', 'minio');
+  await runCompose('start', 'rustfs');
   await waitForSkillInstall(username, password, agentData, installedSkill);
   const recoveredDelivery = await assertDelivery(admin, installEventId, 'succeeded');
   assert(recoveredDelivery.attemptCount >= 2, 'Recovered delivery did not record a retry');
@@ -266,7 +266,7 @@ async function waitForSkillInstall(username, password, dataDirectory, installedS
     if (fs.existsSync(installedSkill)) return;
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  throw new Error('Skill was not installed after MinIO recovered');
+  throw new Error('Skill was not installed after object storage recovered');
 }
 
 async function runAgent(username, password, dataDirectory) {

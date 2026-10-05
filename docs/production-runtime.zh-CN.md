@@ -1,10 +1,10 @@
 # AEP 生产运行基线
 
-该基线使 AEP control-service 与 gateway-authorizer 能够由生产编排平台可靠运行，但不会把本地 Compose 或 `higress-standalone` 包装成生产拓扑。生产环境仍需使用外部托管 PostgreSQL、S3 兼容 MinIO、Higress Helm 部署、TLS 入口、Secret 管理、监控、备份，以及符合企业可用性目标的基础设施。
+该基线使 AEP control-service 与 gateway-authorizer 能够由生产编排平台可靠运行，但不会把本地 Compose 或 `higress-standalone` 包装成生产拓扑。生产环境仍需使用外部托管 PostgreSQL、S3 兼容 RustFS、Higress Helm 部署、TLS 入口、Secret 管理、监控、备份，以及符合企业可用性目标的基础设施。
 
 ## 配置门禁
 
-设置 `AEP_ENVIRONMENT=production` 后，control-service 会拒绝临时 JWT 签名密钥、开发 PostgreSQL URL、默认 MinIO 凭据、默认或过短的初始管理员密码，并要求配置 License 公钥文件、License 文件、客户 ID 和部署 ID。服务启动时会验证挂载的 License；无效或过期 License 不会启动。非法布尔值、时长、URL、日志参数、请求限制和 Header 限制都会导致启动失败，不再静默回退。
+设置 `AEP_ENVIRONMENT=production` 后，control-service 会拒绝临时 JWT 签名密钥、开发 PostgreSQL URL、默认 RustFS 凭据、默认或过短的初始管理员密码，并要求配置 License 公钥文件、License 文件、客户 ID 和部署 ID。服务启动时会验证挂载的 License；无效或过期 License 不会启动。非法布尔值、时长、URL、日志参数、请求限制和 Header 限制都会导致启动失败，不再静默回退。
 
 模型网关地址 `AEP_MODEL_GATEWAY_BASE_URL` 会原样通过 `GET /aep/v1/metadata` 下发给全部客户端，必须是集群外客户端可解析、可直达的地址，否则客户端只会在运行期收到莫名失败。启动时即校验：主机为集群内部名称（`*.svc.cluster.local`，或不含 `.` 的单段裸主机名，如 `aep-gateway-authorizer`）在任何环境都拒绝启动；`AEP_ENVIRONMENT=production` 时主机为 localhost 或回环地址（127.0.0.1、::1 等）同样拒绝启动，development/test 放行以便本机联调。未配置该变量不阻止启动，但 metadata 不再公布 `model_gateway` capability、也不输出 `modelGateway` 字段，客户端按能力关闭处理。启动日志会打印生效的模型网关地址，未配置时输出一条 warn。
 
@@ -35,7 +35,7 @@ control-service 默认每 15 分钟（`AEP_RETENTION_CLEANUP_INTERVAL`）执行�
 | 端点 | 语义 | 编排用途 |
 | --- | --- | --- |
 | `/livez` | 进程仍能提供 HTTP，不检查依赖 | Liveness probe |
-| `/readyz` | 管控服务检查 PostgreSQL 与 MinIO；网关检查可信 JWKS 可刷新；reconciler 检查所有已配置 deployment 的最近一次同步均成功 | Readiness probe |
+| `/readyz` | 管控服务检查 PostgreSQL 与 RustFS；网关检查可信 JWKS 可刷新；reconciler 检查所有已配置 deployment 的最近一次同步均成功 | Readiness probe |
 | `/healthz` | `/readyz` 的兼容别名 | 现有集成 |
 | `/metrics` | Prometheus/OpenMetrics，包含稳定路由、方法、状态、延迟和并发数 | 内网监控采集 |
 
@@ -53,7 +53,7 @@ reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-pl
 
 ## 可用性与发布
 
-数据库 migration、初始管理员初始化和数据留存清理都使用 PostgreSQL advisory lock 串行执行；多个 control-service 副本可同时连接新库或升级库，不会竞争 schema 与 bootstrap 写入，同一轮清理也只由一个副本执行。MinIO bucket 首次并发创建同样可安全收敛。
+数据库 migration、初始管理员初始化和数据留存清理都使用 PostgreSQL advisory lock 串行执行；多个 control-service 副本可同时连接新库或升级库，不会竞争 schema 与 bootstrap 写入，同一轮清理也只由一个副本执行。RustFS bucket 首次并发创建同样可安全收敛。
 
 当依赖服务达到相同可用性目标时，control-service 与 gateway-authorizer 应至少各部署两个跨故障域副本。发布顺序：
 
@@ -63,15 +63,15 @@ reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-pl
 4. 检查错误率与延迟指标，并验证 Agent 登录、Credential 解析、Skill 下载和模型调用。
 5. 观察窗口结束前保留上一版本镜像 digest。
 
-数据库 migration 只向前执行。仅当旧二进制兼容新 schema 时才能直接回滚应用；否则必须恢复同一恢复点的 PostgreSQL 与 MinIO，并恢复匹配的签名 seed 和 Credential keyring。
+数据库 migration 只向前执行。仅当旧二进制兼容新 schema 时才能直接回滚应用；否则必须恢复同一恢复点的 PostgreSQL 与 RustFS，并恢复匹配的签名 seed 和 Credential keyring。
 
 ## 备份恢复
 
-使用维护窗口或协调存储快照，使 PostgreSQL 与 Skill bucket 属于同一恢复点。PostgreSQL 保存身份、授权、Credential 密文、事件、审计和对象引用；MinIO 保存不可变 Skill ZIP。签名 seed 和所有 Credential keyring 条目必须由 Secret 系统独立备份，旧密钥丢失会导致对应 Credential 无法解密。
+使用维护窗口或协调存储快照，使 PostgreSQL 与 Skill bucket 属于同一恢复点。PostgreSQL 保存身份、授权、Credential 密文、事件、审计和对象引用；RustFS 保存不可变 Skill ZIP。签名 seed 和所有 Credential keyring 条目必须由 Secret 系统独立备份，旧密钥丢失会导致对应 Credential 无法解密。
 
 Compose 操作工具、私有文件权限、可选 AES-256-GCM 信封加密及隔离恢复流程见 [backup-restore-runbook.zh-CN.md](backup-restore-runbook.zh-CN.md)。备份密钥加密密钥必须与备份目录及仓库分开保管。
 
-先恢复到隔离的 PostgreSQL 与 MinIO，校验对象数量和数据库完整性，再只启动一个 control-service 运行内嵌 migration。验证 `/readyz`、JWKS 连续性、Credential 解析审计和 Skill checksum 后，才能增加副本或切换流量。
+先恢复到隔离的 PostgreSQL 与 RustFS，校验对象数量和数据库完整性，再只启动一个 control-service 运行内嵌 migration。验证 `/readyz`、JWKS 连续性、Credential 解析审计和 Skill checksum 后，才能增加副本或切换流量。
 
 ## 验证
 

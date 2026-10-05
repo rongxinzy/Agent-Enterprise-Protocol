@@ -28,7 +28,7 @@ const replicas = [project + '-replica-a', project + '-replica-b'];
 
 try {
   await compose('down', '-v', '--remove-orphans', true);
-  await compose('up', '-d', 'postgres', 'minio');
+  await compose('up', '-d', 'postgres', 'rustfs');
   await waitForCommand(() => psql('SELECT 1'));
   await installLegacySchema();
   await seedLegacyData();

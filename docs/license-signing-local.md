@@ -48,7 +48,7 @@ private signing key.
 
 Keep old public keys available until every License signed with the previous key
 has expired. Back up the private key and signing metadata in the organization's
-offline secret-management system, separately from PostgreSQL, MinIO, and the
+offline secret-management system, separately from PostgreSQL, RustFS, and the
 Credential keyring. AEP backup and recovery procedures must restore matching
 verification material before reactivating enterprise clients.
 

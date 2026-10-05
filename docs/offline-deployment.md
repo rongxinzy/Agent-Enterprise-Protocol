@@ -3,7 +3,7 @@
 The repository can stage a self-contained Docker image bundle for a controlled
 air-gapped installation. The bundle contains Compose inputs, locally saved image
 archives, immutable image IDs/digests, and SHA-256 checksums. It never contains
-PostgreSQL data, MinIO data, provider credentials, License private keys, signing
+PostgreSQL data, RustFS data, provider credentials, License private keys, signing
 seeds, offline release private keys, or customer configuration.
 
 ## Export
@@ -63,11 +63,11 @@ The installer rejects a public key located inside the bundle; such a key is not
 an independent trust anchor. Add `--dry-run` to inspect the actions without
 changing Docker state. For a base-only bundle the installer automatically omits
 `gateway.yaml`. The generated `offline.yaml` removes build contexts and pins the loaded AEP service images. PostgreSQL,
-MinIO, deployment Secrets, License material, and provider credentials remain
+RustFS, deployment Secrets, License material, and provider credentials remain
 deployment inputs and must be provisioned separately through the approved
 offline Secret process.
 
 This is an image/install bundle, not an upgrade mechanism. Before upgrading,
-take the coordinated PostgreSQL and MinIO backup described in
+take the coordinated PostgreSQL and RustFS backup described in
 `backup-restore-runbook.md`, verify schema compatibility, then load the new
 bundle and roll the services according to `production-runtime.md`.

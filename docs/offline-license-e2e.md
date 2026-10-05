@@ -19,7 +19,7 @@ fixture was never persisted in this repository. The E2E creates only an
 ephemeral AEP JWT test seed in process memory for the local service.
 
 The Compose overlay mounts the fixtures read-only and places PostgreSQL,
-MinIO, and Control Service on an internal Docker network. It probes that the
+RustFS, and Control Service on an internal Docker network. It probes that the
 network has no external egress, checks that activation sends `{}` rather than
 License material, verifies activation after a service restart, rejects a
 tampered or deployment-mismatched License at startup, and scans service logs

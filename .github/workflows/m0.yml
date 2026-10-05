@@ -72,11 +72,6 @@ jobs:
     needs:
       - control-service
       - example-agent
-    # Temporarily skipped: the compose stack cannot start because upstream
-    # MinIO images were withdrawn (Docker Hub repos deleted, quay.io rejects
-    # anonymous pulls). Re-enable by setting the repository variable
-    # AEP_ENABLE_MINIO_E2E to 'true' once the image source is fixed.
-    if: vars.AEP_ENABLE_MINIO_E2E == 'true'
     runs-on: ubuntu-latest
     env:
       GOPROXY: https://proxy.golang.org,direct
@@ -123,9 +118,6 @@ jobs:
     needs:
       - control-service
       - example-agent
-    # Temporarily skipped for the same MinIO image withdrawal as compose-e2e.
-    # Re-enable by setting the repository variable AEP_ENABLE_MINIO_E2E to 'true'.
-    if: vars.AEP_ENABLE_MINIO_E2E == 'true'
     runs-on: ubuntu-latest
     env:
       GOPROXY: https://proxy.golang.org,direct

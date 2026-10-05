@@ -97,7 +97,7 @@ assert(controlServer.includes('cfg.Environment != "production"'), "production do
 for (const sample of ["deploy/production/control-service.env.example", "deploy/production/gateway-authorizer.env.example"]) {
   const content = await readText(sample);
   assert(content.includes("AEP_ENVIRONMENT=production"), sample + " is not a production profile");
-  for (const forbidden of ["change-this-admin-password", "minioadmin"]) {
+  for (const forbidden of ["change-this-admin-password", "minioadmin", "rustfsadmin"]) {
     assert(!content.includes(forbidden), sample + " contains a forbidden development default");
   }
 }
@@ -192,6 +192,8 @@ const developmentGatewayCompose = await readText("deploy/compose/gateway.yaml");
 assert(developmentCompose.includes("AEP_ENVIRONMENT: development"), "local Compose must be pinned to the development environment");
 assert(!developmentCompose.includes("AEP_ENVIRONMENT: ${"), "local Compose must not allow promotion to production");
 assert(developmentCompose.includes('AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"'), "local Compose must disable mock federated authentication");
+assert(developmentCompose.includes("rustfs/rustfs:1.0.0"), "local Compose object storage image is not pinned to rustfs/rustfs:1.0.0");
+assert(!developmentCompose.includes("rustfs/rustfs:latest"), "local Compose object storage image must not float on latest");
 for (const binding of [
   '127.0.0.1:${AEP_MINIO_CONSOLE_PORT:-9001}:9001',
   '127.0.0.1:${AEP_PORT:-8080}:8080',

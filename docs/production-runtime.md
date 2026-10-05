@@ -1,10 +1,10 @@
 # AEP Production Runtime Baseline
 
-This baseline makes the AEP control service and gateway authorizer operable under a production orchestrator. It does not turn the local Compose stack or `higress-standalone` into a production topology. Production still requires externally managed PostgreSQL and S3-compatible MinIO, Higress Helm deployment, TLS ingress, Secret management, monitoring, backups, and an organization-specific availability design.
+This baseline makes the AEP control service and gateway authorizer operable under a production orchestrator. It does not turn the local Compose stack or `higress-standalone` into a production topology. Production still requires externally managed PostgreSQL and S3-compatible RustFS, Higress Helm deployment, TLS ingress, Secret management, monitoring, backups, and an organization-specific availability design.
 
 ## Configuration Gate
 
-Set `AEP_ENVIRONMENT=production`. The control service then refuses to start with an ephemeral JWT signing key, the development PostgreSQL URL, default MinIO credentials, or the default/short bootstrap administrator password, and requires a License trusted-key file, License file, customer ID, and deployment ID. Startup verifies the mounted License and refuses invalid or expired licenses. Invalid booleans, durations, URLs, log settings, request limits, and header limits always fail startup instead of silently reverting to defaults.
+Set `AEP_ENVIRONMENT=production`. The control service then refuses to start with an ephemeral JWT signing key, the development PostgreSQL URL, default RustFS credentials, or the default/short bootstrap administrator password, and requires a License trusted-key file, License file, customer ID, and deployment ID. Startup verifies the mounted License and refuses invalid or expired licenses. Invalid booleans, durations, URLs, log settings, request limits, and header limits always fail startup instead of silently reverting to defaults.
 
 The model gateway address `AEP_MODEL_GATEWAY_BASE_URL` is published verbatim through `GET /aep/v1/metadata`, so it must resolve and be reachable for clients outside the cluster; otherwise clients only fail at runtime with opaque errors. Startup validates it: a cluster-internal host (`*.svc.cluster.local`, or a single-label bare hostname such as `aep-gateway-authorizer`) fails startup in every environment, and with `AEP_ENVIRONMENT=production` a localhost or loopback host (127.0.0.1, ::1) also fails startup while development/test allow it for local debugging. Leaving the variable unset does not block startup, but metadata then omits the `model_gateway` capability and the `modelGateway` field, and clients treat the capability as disabled. Startup logs print the effective model gateway address, with a warning when it is unset.
 
@@ -35,7 +35,7 @@ The control service runs a bounded PostgreSQL cleanup every `AEP_RETENTION_CLEAN
 | Endpoint | Meaning | Orchestrator use |
 | --- | --- | --- |
 | `/livez` | Process can serve HTTP; no dependency check | Liveness probe |
-| `/readyz` | Control: PostgreSQL and MinIO ready. Gateway: trusted JWKS refresh succeeds. Reconciler: every configured deployment's latest synchronization succeeded | Readiness probe |
+| `/readyz` | Control: PostgreSQL and RustFS ready. Gateway: trusted JWKS refresh succeeds. Reconciler: every configured deployment's latest synchronization succeeded | Readiness probe |
 | `/healthz` | Backward-compatible alias of `/readyz` | Existing integrations |
 | `/metrics` | Prometheus/OpenMetrics with stable route, method, status, latency, and in-flight requests | Internal metrics scrape |
 
@@ -53,7 +53,7 @@ The reconciler does not expose the legacy `/healthz` alias. Its `/livez` stays i
 
 ## Availability And Rollout
 
-Migration execution, bootstrap administrator initialization, and retention cleanup are protected by PostgreSQL advisory locks. Multiple control-service replicas may start against a new or upgraded database without racing schema or bootstrap writes, and only one replica performs a cleanup cycle. MinIO bucket initialization also tolerates concurrent first creation.
+Migration execution, bootstrap administrator initialization, and retention cleanup are protected by PostgreSQL advisory locks. Multiple control-service replicas may start against a new or upgraded database without racing schema or bootstrap writes, and only one replica performs a cleanup cycle. RustFS bucket initialization also tolerates concurrent first creation.
 
 Use at least two control-service and two gateway-authorizer replicas across failure domains when the dependent services meet the same availability target. During rollout:
 
@@ -63,15 +63,15 @@ Use at least two control-service and two gateway-authorizer replicas across fail
 4. Verify error rate and latency metrics, Agent login, Credential resolve, Skill download, and model calls.
 5. Retain the previous image digest until the observation window closes.
 
-Database migrations are forward-only. Application rollback is allowed only when the previous binary supports the migrated schema. Otherwise restore PostgreSQL and MinIO from the coordinated pre-rollout backup, then restore the matching signing seed and Credential keyring.
+Database migrations are forward-only. Application rollback is allowed only when the previous binary supports the migrated schema. Otherwise restore PostgreSQL and RustFS from the coordinated pre-rollout backup, then restore the matching signing seed and Credential keyring.
 
 ## Backup And Recovery
 
-Use a maintenance window or coordinated storage snapshots so PostgreSQL and the Skill bucket represent one recovery point. PostgreSQL contains identities, assignments, encrypted Credential material, events, audit, and object references; MinIO contains immutable Skill ZIP objects. Back up the signing seed and every Credential keyring entry separately through the Secret system. Losing an old Credential key makes its rows undecryptable.
+Use a maintenance window or coordinated storage snapshots so PostgreSQL and the Skill bucket represent one recovery point. PostgreSQL contains identities, assignments, encrypted Credential material, events, audit, and object references; RustFS contains immutable Skill ZIP objects. Back up the signing seed and every Credential keyring entry separately through the Secret system. Losing an old Credential key makes its rows undecryptable.
 
 The Compose operational tools, private file modes, optional AES-256-GCM envelope encryption, and isolated restore procedure are documented in [backup-restore-runbook.md](backup-restore-runbook.md). Keep the backup key-encryption key outside the backup directory and repository.
 
-Restore into isolated PostgreSQL and MinIO instances first, verify object counts and database integrity, then start exactly one control-service replica to run embedded migrations. Confirm `/readyz`, JWKS continuity, a Credential resolve audit, and a Skill checksum before adding replicas or switching traffic.
+Restore into isolated PostgreSQL and RustFS instances first, verify object counts and database integrity, then start exactly one control-service replica to run embedded migrations. Confirm `/readyz`, JWKS continuity, a Credential resolve audit, and a Skill checksum before adding replicas or switching traffic.
 
 ## Verification
 
