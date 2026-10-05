@@ -1,7 +1,7 @@
 # Backup And Restore Rehearsal
 
 The backup rehearsal validates that the PostgreSQL control-plane records and
-the MinIO Skill objects can be restored together into an isolated deployment.
+the RustFS Skill objects can be restored together into an isolated deployment.
 It is a disposable integration test and never touches the default `aep-m0`
 Compose project or its volumes.
 
@@ -14,7 +14,7 @@ npm run test:e2e:backup-restore
 
 The scenario creates a temporary user, Skill, published version, and user
 assignment. It stops application writes, takes a PostgreSQL custom-format dump
-and a MinIO data-volume archive, restores both into a second Compose project,
+and a RustFS data-volume archive, restores both into a second Compose project,
 then verifies administrator session/JWKS continuity, Skill metadata, the user
 manifest, and the downloaded package checksum. Both projects and all temporary
 volumes are removed in the final cleanup path.
@@ -25,14 +25,14 @@ default disposable ports are unavailable. Do not point these projects at an
 existing production database or object store.
 
 This rehearsal is evidence for the GA gate, not a substitute for the
-deployment's scheduled PostgreSQL/MinIO backups, secret-provider backups, or
+deployment's scheduled PostgreSQL/RustFS backups, secret-provider backups, or
 an organization-approved recovery-time and recovery-point objective.
 
 ## Operational tools
 
 The repository also includes operational scripts for a coordinated backup. The
-backup briefly stops `control-service` and MinIO, writes a PostgreSQL custom dump
-and a MinIO data-volume archive to one directory, and restarts the services:
+backup briefly stops `control-service` and RustFS, writes a PostgreSQL custom dump
+and a RustFS data-volume archive to one directory, and restarts the services:
 
 ```sh
 npm run ops:backup -- --project aep-m0 --output-dir backups/20260909
@@ -40,7 +40,7 @@ npm run ops:backup -- --project aep-m0 --output-dir backups/20260909
 
 The output directory is forced to mode `0700`, and every artifact and manifest
 is forced to mode `0600`. An unencrypted backup contains `postgres.dump`,
-`minio-data.tgz`, and a v2 `manifest.json` with byte counts and SHA-256 values.
+`rustfs-data.tgz`, and a v2 `manifest.json` with byte counts and SHA-256 values.
 Treat the directory as sensitive even though Credential values remain encrypted
 at the application layer.
 
@@ -56,11 +56,11 @@ npm run ops:backup -- --project aep-m0 --output-dir backups/20260909 \
 
 The script creates a random data key for each backup, wraps it with the supplied
 key-encryption key, and encrypts both artifacts with AES-256-GCM. The output
-files are then named `postgres.dump.enc` and `minio-data.tgz.enc`. The key path
+files are then named `postgres.dump.enc` and `rustfs-data.tgz.enc`. The key path
 may instead be supplied through `AEP_BACKUP_ENCRYPTION_KEY_FILE`; key material
 is never written to the manifest or command output. Back up the key separately.
 
-MinIO volume archiving uses the locally preloaded `alpine:3.20` image by
+RustFS volume archiving uses the locally preloaded `alpine:3.20` image by
 default. A different organization-approved, explicitly tagged or digest-pinned
 image must be passed with `--helper-image` to both backup and restore. Helper
 containers always run with `--pull never`, and restore rejects a manifest whose
@@ -68,7 +68,7 @@ helper image differs from the locally selected image. The scripts do not back
 up database passwords, deployment Secrets, License files, signing seeds,
 Credential keyrings, or provider keys held by the external Secret system.
 
-Restore replaces the target project's database and MinIO volume and therefore
+Restore replaces the target project's database and RustFS volume and therefore
 requires an explicit confirmation:
 
 ```sh

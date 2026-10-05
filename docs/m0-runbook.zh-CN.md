@@ -41,16 +41,16 @@ npm run compose:up
 默认本地地址：
 
 - 管控服务：`http://localhost:8080`
-- MinIO 控制台：`http://localhost:9001`
+- RustFS 控制台：`http://localhost:9001`
 - 健康检查：`http://localhost:8080/healthz`
 
 仅供本地开发的初始化身份为企业 `demo`、用户 `admin`、密码
-`change-this-admin-password`。Compose 还包含固定的开发签名密钥和 MinIO
+`change-this-admin-password`。Compose 还包含固定的开发签名密钥和 RustFS
 凭证。Compose 档位固定使用 `AEP_ENVIRONMENT=development`、关闭 mock 联合认证，
 并将所有发布端口绑定到 `127.0.0.1`。该档位不是生产部署输入；生产环境必须使用
 Kubernetes 基线和部署 Secret 系统。
 
-如需修改服务端口，在启动 Compose 前设置 `AEP_PORT`；MinIO 控制台端口使用
+如需修改服务端口，在启动 Compose 前设置 `AEP_PORT`；RustFS 控制台端口使用
 `AEP_MINIO_CONSOLE_PORT`。`GOPROXY` 可覆盖容器构建使用的 Go 模块代理。
 
 ## 管理 M0
@@ -104,7 +104,7 @@ go run ./cmd/aepctl --password change-this-admin-password audit --agent-id AGENT
 npm run test:e2e
 ```
 
-脚本使用隔离项目名 `aep-m0-e2e`、服务端口 `18080`、MinIO 控制台端口
+脚本使用隔离项目名 `aep-m0-e2e`、服务端口 `18080`、RustFS 控制台端口
 `19001`。它通过 `aepctl` 创建用户、Skill、版本、发布和授权；运行 Agent；
 验证安装与撤销；检查 delivery、Agent 和遥测记录；最后只删除自己的容器与卷。
 可通过 `AEP_E2E_PORT` 和 `AEP_E2E_MINIO_CONSOLE_PORT` 覆盖两个宿主机端口。
@@ -119,6 +119,6 @@ npm run test:e2e
 - SDK 构建和 Mock 契约测试先通过，Go 阶段才开始。
 - 示例 Agent 构建、SQLite 恢复、ZIP 路径逃逸拒绝和哈希校验测试通过。
 - `go test ./...`、`go vet ./...`、`go build ./...` 全部通过。
-- PostgreSQL 与 MinIO Compose E2E 通过，并清理隔离资源。
-- 针对目标环境复核初始化密码、签名密钥、issuer、MinIO 凭证和 HTTP 暴露。
+- PostgreSQL 与 RustFS Compose E2E 通过，并清理隔离资源。
+- 针对目标环境复核初始化密码、签名密钥、issuer、RustFS 凭证和 HTTP 暴露。
 - M0 metadata 不得宣称支持未实现的网关、Credential、MCP 或 Plugin 能力。

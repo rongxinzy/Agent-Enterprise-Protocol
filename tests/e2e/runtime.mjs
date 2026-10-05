@@ -26,7 +26,7 @@ try {
   await waitForStatus('/readyz', 200);
   await verifyRuntimeEndpoints();
   await verifyRetentionCleanup();
-  await verifyDependencyFailure('minio');
+  await verifyDependencyFailure('rustfs');
   await verifyDependencyFailure('postgres');
   await verifyGracefulShutdown();
   await verifyJSONLogs();
@@ -39,11 +39,11 @@ try {
 }
 
 async function verifyConcurrentStartup() {
-  await compose('up', '-d', '--build', 'postgres', 'minio');
+  await compose('up', '-d', '--build', 'postgres', 'rustfs');
   await waitForCommand(() => composeOutput('exec', '-T', 'postgres', 'pg_isready', '-U', 'aep', '-d', 'aep'));
   await waitForCommand(() => composeOutput(
     'run', '--rm', '--no-deps', 'control-service',
-    'healthcheck', 'http://minio:9000/minio/health/ready',
+    'healthcheck', 'http://rustfs:9000/health',
   ));
   await Promise.all(replicas.map(name => composeOutput(
     'run', '--detach', '--no-deps', '--name', name, 'control-service',

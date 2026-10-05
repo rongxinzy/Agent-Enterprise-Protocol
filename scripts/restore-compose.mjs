@@ -24,14 +24,14 @@ const minioConsolePort = options['minio-console-port'] ?? process.env.AEP_MINIO_
 const composeEnv = {AEP_PORT: port, AEP_MINIO_CONSOLE_PORT: minioConsolePort};
 const composeArgs = ['compose', '-p', project, ...composeFiles.flatMap(file => ['-f', file])];
 
-if (options.confirm !== 'yes') throw new Error('Restore replaces the target database and MinIO volume. Re-run with --confirm yes.');
+if (options.confirm !== 'yes') throw new Error('Restore replaces the target database and RustFS volume. Re-run with --confirm yes.');
 const manifest = JSON.parse(await readRegularFile(path.join(inputDir, 'manifest.json'), 'utf8'));
 if (!['aep-backup-v1', BACKUP_FORMAT].includes(manifest.format) || !Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 2) throw new Error('Unsupported or incomplete backup manifest');
 if (manifest.helperImage !== helperImage) throw new Error('Backup helper image does not match the locally approved image');
 const keyEncryptionKey = encryptionKeyFile ? await readKeyEncryptionKey(path.resolve(root, encryptionKeyFile)) : null;
 let dataKey = null;
 let database = null;
-let minio = null;
+let storage = null;
 const sensitiveBuffers = [];
 try {
   dataKey = openBackupEnvelope(manifest.encryption, keyEncryptionKey);
@@ -39,7 +39,7 @@ try {
   for (const item of manifest.artifacts) {
     const name = manifest.format === 'aep-backup-v1' ? item.file : item.name;
     const expectedFile = dataKey ? `${name}.enc` : name;
-    if (!['postgres.dump', 'minio-data.tgz'].includes(name)
+    if (!['postgres.dump', 'rustfs-data.tgz'].includes(name)
       || item.file !== expectedFile
       || !/^[a-f0-9]{64}$/.test(item.sha256)
       || !Number.isInteger(item.bytes)
@@ -64,16 +64,16 @@ try {
     artifacts.set(name, recovered);
   }
   database = artifacts.get('postgres.dump');
-  minio = artifacts.get('minio-data.tgz');
-  if (!database || !minio) throw new Error('Backup must contain postgres.dump and minio-data.tgz');
+  storage = artifacts.get('rustfs-data.tgz');
+  if (!database || !storage) throw new Error('Backup must contain postgres.dump and rustfs-data.tgz');
 
-  await command('docker', [...composeArgs, 'stop', 'control-service', 'minio'], true, composeEnv);
-  await command('docker', [...composeArgs, 'up', '-d', '--no-build', '--pull', 'never', 'postgres', 'minio'], false, composeEnv);
+  await command('docker', [...composeArgs, 'stop', 'control-service', 'rustfs'], true, composeEnv);
+  await command('docker', [...composeArgs, 'up', '-d', '--no-build', '--pull', 'never', 'postgres', 'rustfs'], false, composeEnv);
   await waitForPostgres();
   await commandWithInput('docker', [...composeArgs, 'exec', '-T', 'postgres', 'pg_restore', '-U', 'aep', '-d', 'aep', '--clean', '--if-exists', '--no-owner', '--no-privileges'], database, composeEnv);
-  await command('docker', [...composeArgs, 'stop', 'minio'], false, composeEnv);
-  await commandWithInput('docker', ['run', '--rm', '--pull', 'never', '-i', '-v', `${project}_minio-data:/target`, helperImage, 'sh', '-c', 'find /target -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf - -C /target'], minio);
-  await command('docker', [...composeArgs, 'start', 'minio'], false, composeEnv);
+  await command('docker', [...composeArgs, 'stop', 'rustfs'], false, composeEnv);
+  await commandWithInput('docker', ['run', '--rm', '--pull', 'never', '-i', '-v', `${project}_rustfs-data:/target`, helperImage, 'sh', '-c', 'find /target -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf - -C /target'], storage);
+  await command('docker', [...composeArgs, 'start', 'rustfs'], false, composeEnv);
   await command('docker', [...composeArgs, 'up', '-d', '--no-build', '--pull', 'never', 'control-service'], false, composeEnv);
   await waitForHttp(`http://127.0.0.1:${port}/readyz`);
   console.log(JSON.stringify({status: 'passed', inputDir, project, baseUrl: `http://127.0.0.1:${port}`}, null, 2));

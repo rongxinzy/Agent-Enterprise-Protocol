@@ -1,7 +1,7 @@
 # AEP control plane on a local k3s cluster (development shape).
 #
 # Self-contained development-flavored variant of deploy/kubernetes/production:
-# in-cluster postgres + minio (local-path PVCs), plain Secret instead of
+# in-cluster postgres + rustfs (local-path PVCs), plain Secret instead of
 # ExternalSecret, plain env instead of *_FILE secrets, no ingress-TLS /
 # network-policies / disruption budgets. Higress is installed separately via
 # the higress helm chart (see README); the reconciler server-side-applies
@@ -9,7 +9,7 @@
 #
 # Images come from the internal registry (REG placeholder): aep-control-service,
 # aep-gateway-authorizer, aep-gateway-reconciler 0.1.0; postgres 17.6-alpine;
-# minio RELEASE.2025-09-07T16-13-09Z.
+# rustfs 1.0.0 (S3-compatible object storage, replaced MinIO).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -57,36 +57,40 @@ spec:
   selector: {app: postgres}
   ports: [{port: 5432, targetPort: 5432}]
 ---
-# ---------------------------------------------------------------- minio
+# ---------------------------------------------------------------- rustfs
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: minio
+  name: rustfs
   namespace: aep-system
 spec:
   replicas: 1
-  selector: {matchLabels: {app: minio}}
+  selector: {matchLabels: {app: rustfs}}
   template:
-    metadata: {labels: {app: minio}}
+    metadata: {labels: {app: rustfs}}
     spec:
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
       containers:
-        - name: minio
-          image: 172.18.5.251:8081/zhiyuan/minio:RELEASE.2025-09-07T16-13-09Z
-          args: [server, /data, --console-address, ":9001"]
+        - name: rustfs
+          image: 172.18.5.251:8081/zhiyuan/rustfs:1.0.0
           env:
-            - {name: MINIO_ROOT_USER, value: minioadmin}
-            - {name: MINIO_ROOT_PASSWORD, value: minioadmin}
+            - {name: RUSTFS_ACCESS_KEY, value: minioadmin}
+            - {name: RUSTFS_SECRET_KEY, value: minioadmin}
+            - {name: RUSTFS_VOLUMES, value: /data}
+            - {name: RUSTFS_ADDRESS, value: 0.0.0.0:9000}
+            - {name: RUSTFS_CONSOLE_ADDRESS, value: 0.0.0.0:9001}
+            - {name: RUSTFS_CONSOLE_ENABLE, value: "true"}
           ports: [{containerPort: 9000}, {containerPort: 9001}]
-          readinessProbe: {httpGet: {path: /minio/health/ready, port: 9000}, initialDelaySeconds: 5, periodSeconds: 5}
+          readinessProbe: {httpGet: {path: /health, port: 9000}, initialDelaySeconds: 5, periodSeconds: 5}
           volumeMounts: [{name: data, mountPath: /data}]
       volumes:
         - name: data
-          persistentVolumeClaim: {claimName: minio-data}
+          persistentVolumeClaim: {claimName: rustfs-data}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: minio-data
+  name: rustfs-data
   namespace: aep-system
 spec:
   accessModes: [ReadWriteOnce]
@@ -94,9 +98,9 @@ spec:
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: minio, namespace: aep-system}
+metadata: {name: rustfs, namespace: aep-system}
 spec:
-  selector: {app: minio}
+  selector: {app: rustfs}
   ports: [{name: api, port: 9000, targetPort: 9000}, {name: console, port: 9001, targetPort: 9001}]
 ---
 # ---------------------------------------------------------------- control-service
@@ -111,7 +115,7 @@ data:
   AEP_LOG_LEVEL: info
   AEP_ADDRESS: ":8080"
   AEP_DATABASE_URL: postgres://aep:aep@postgres:5432/aep?sslmode=disable
-  AEP_MINIO_ENDPOINT: minio:9000
+  AEP_MINIO_ENDPOINT: rustfs:9000
   AEP_MINIO_ACCESS_KEY: minioadmin
   AEP_MINIO_SECRET_KEY: minioadmin
   AEP_MINIO_BUCKET: aep-skills

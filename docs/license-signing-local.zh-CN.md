@@ -38,7 +38,7 @@ D:\rxzy\zhiyuan-license-signer\
 ## 轮换与恢复
 
 在使用旧密钥签发的 License 全部过期前，必须继续保留旧公钥。私钥和签发
-元数据应在企业离线 Secret 系统中备份，并与 PostgreSQL、MinIO 和
+元数据应在企业离线 Secret 系统中备份，并与 PostgreSQL、RustFS 和
 Credential keyring 分开保存。AEP 备份恢复时，必须先恢复匹配的验签材料，
 再重新启用企业客户端。
 

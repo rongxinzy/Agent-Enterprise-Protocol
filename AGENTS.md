@@ -136,7 +136,8 @@ npm run compose:gateway:up
 ```
 
 Default development endpoints are Control Service `http://localhost:8080`,
-MinIO console `http://localhost:9001`, and model gateway
+RustFS console `http://localhost:9001` (S3-compatible object storage for Skill
+ZIP blobs), and model gateway
 `http://localhost:8090/v1` when the gateway profile is enabled. Development
 bootstrap credentials and mock provider keys are disposable fixtures only.
 Change them before exposing any service outside the local machine.

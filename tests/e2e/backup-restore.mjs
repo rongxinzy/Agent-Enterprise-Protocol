@@ -60,7 +60,7 @@ try {
     restoreProject,
     checks: [
       'coordinated PostgreSQL custom-format dump',
-      'MinIO volume archive and restore',
+      'RustFS volume archive and restore',
       'AES-256-GCM envelope encryption and private file modes',
       'restore helper image trust and pull-never policy',
       'restored admin session and JWKS continuity',
@@ -84,10 +84,10 @@ async function verifyEncryptedBackup() {
   assert(manifest.encryption?.algorithm === 'aes-256-gcm', 'backup tool did not enable envelope encryption');
   assert(manifest.artifacts?.every(item => item.file.endsWith('.enc')), 'backup tool emitted a plaintext artifact');
   assert(!(await lstat(path.join(backupDirectory, 'postgres.dump')).catch(() => null)), 'plaintext PostgreSQL dump was left on disk');
-  assert(!(await lstat(path.join(backupDirectory, 'minio-data.tgz')).catch(() => null)), 'plaintext MinIO archive was left on disk');
+  assert(!(await lstat(path.join(backupDirectory, 'rustfs-data.tgz')).catch(() => null)), 'plaintext RustFS archive was left on disk');
   if (process.platform !== 'win32') {
     assert(((await lstat(backupDirectory)).mode & 0o777) === 0o700, 'backup directory mode is not 0700');
-    for (const file of ['manifest.json', 'postgres.dump.enc', 'minio-data.tgz.enc']) {
+    for (const file of ['manifest.json', 'postgres.dump.enc', 'rustfs-data.tgz.enc']) {
       assert(((await lstat(path.join(backupDirectory, file))).mode & 0o777) === 0o600, `${file} mode is not 0600`);
     }
   }

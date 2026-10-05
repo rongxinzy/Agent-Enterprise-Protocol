@@ -16,7 +16,7 @@ npm run test:e2e:offline-license
 生成 fixture 时使用的 License 签名私钥从未落盘到本仓库。E2E 在进程内只
 临时生成 AEP JWT 测试 seed，用于本地服务启动，不属于 License 签发私钥。
 
-Compose overlay 以只读方式挂载 fixture，并将 PostgreSQL、MinIO 和 Control
+Compose overlay 以只读方式挂载 fixture，并将 PostgreSQL、RustFS 和 Control
 Service 放入内部 Docker 网络。测试会确认网络无外网出口、激活请求体为 `{}`
 而不包含 License 材料、服务重启后仍可激活，并确认篡改或部署不匹配的
 License 在启动阶段被拒绝，同时扫描服务日志中的 License 和密钥材料。

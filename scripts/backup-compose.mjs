@@ -28,10 +28,10 @@ const keyEncryptionKey = encryptionKeyFile ? await readKeyEncryptionKey(path.res
 let envelope = null;
 let stopped = false;
 let dump = null;
-let minioArchive = null;
+let storageArchive = null;
 try {
   envelope = keyEncryptionKey ? createBackupEnvelope(keyEncryptionKey) : null;
-  await command('docker', [...composeArgs, 'stop', 'control-service', 'minio']);
+  await command('docker', [...composeArgs, 'stop', 'control-service', 'rustfs']);
   stopped = true;
 
   dump = await commandOutput('docker', [
@@ -41,14 +41,14 @@ try {
   await writePrivateFile(path.join(outputDir, protectedDatabase.manifest.file), protectedDatabase.bytes);
   if (protectedDatabase.bytes !== dump) protectedDatabase.bytes.fill(0);
 
-  const volume = `${project}_minio-data`;
-  minioArchive = await commandOutput('docker', [
+  const volume = `${project}_rustfs-data`;
+  storageArchive = await commandOutput('docker', [
     'run', '--rm', '--pull', 'never', '-v', `${volume}:/source:ro`, helperImage,
     'tar', '-czf', '-', '-C', '/source', '.',
   ]);
-  const protectedMinio = protectArtifact('minio-data.tgz', minioArchive, envelope?.dataKey ?? null);
-  await writePrivateFile(path.join(outputDir, protectedMinio.manifest.file), protectedMinio.bytes);
-  if (protectedMinio.bytes !== minioArchive) protectedMinio.bytes.fill(0);
+  const protectedStorage = protectArtifact('rustfs-data.tgz', storageArchive, envelope?.dataKey ?? null);
+  await writePrivateFile(path.join(outputDir, protectedStorage.manifest.file), protectedStorage.bytes);
+  if (protectedStorage.bytes !== storageArchive) protectedStorage.bytes.fill(0);
 
   const manifest = {
     format: BACKUP_FORMAT,
@@ -59,17 +59,17 @@ try {
     encryption: envelope?.manifest ?? null,
     artifacts: [
       protectedDatabase.manifest,
-      protectedMinio.manifest,
+      protectedStorage.manifest,
     ],
   };
   await writePrivateFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify({status: 'passed', outputDir, project, artifacts: manifest.artifacts}, null, 2));
 } finally {
   dump?.fill(0);
-  minioArchive?.fill(0);
+  storageArchive?.fill(0);
   envelope?.dataKey.fill(0);
   keyEncryptionKey?.fill(0);
-  if (stopped) await command('docker', [...composeArgs, 'start', 'minio', 'control-service'], true);
+  if (stopped) await command('docker', [...composeArgs, 'start', 'rustfs', 'control-service'], true);
 }
 
 function timestamp() {

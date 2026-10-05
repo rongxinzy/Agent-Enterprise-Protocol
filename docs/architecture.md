@@ -17,7 +17,7 @@ The protocol spec (`aep-v1.md`) names the Control, Event, and Asset participants
 ## Shared state (the split is a process boundary, not a data boundary)
 
 - **PostgreSQL** — sessions, control events, skills, telemetry, credentials. Access-token verification re-checks the session row per request, so both services validate sessions directly against the shared database.
-- **MinIO** — the `aep-skills` bucket; the agent surface streams package downloads from the same object keys the admin surface uploads.
+- **RustFS** — the `aep-skills` bucket; the agent surface streams package downloads from the same object keys the admin surface uploads.
 - **Signing key** — one Ed25519 seed issues access, model, and entitlement tokens on either service; JWKS is served by both. Same trust domain; the gateway data plane already verifies model tokens via JWKS without calling either service.
 - **Credential keyring** — the AEAD master key; the agent surface decrypts resolved credentials with the same keyring the admin surface encrypts with.
 
@@ -25,7 +25,7 @@ Retention, migrations, and bootstrap stay with the control-service (`app.Open` i
 
 ## Network policy (production)
 
-The agent-control ingress is the widest control-plane policy: desktop-agent runtime traffic (heartbeats, event polling, skill downloads) arrives through the shared higress ingress. The control-service accepts traffic only from the gateway authorizer, the gateway reconciler, and the ingress namespace. Both egress to DNS, 443 (MinIO/external), 5432 (PostgreSQL), 9000 (MinIO).
+The agent-control ingress is the widest control-plane policy: desktop-agent runtime traffic (heartbeats, event polling, skill downloads) arrives through the shared higress ingress. The control-service accepts traffic only from the gateway authorizer, the gateway reconciler, and the ingress namespace. Both egress to DNS, 443 (RustFS/external), 5432 (PostgreSQL), 9000 (RustFS).
 
 ## Client routing
 
