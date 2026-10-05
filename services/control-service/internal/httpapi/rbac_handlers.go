@@ -47,7 +47,10 @@ func (s *Server) createRole(response http.ResponseWriter, request *http.Request)
 		Description string   `json:"description"`
 		Permissions []string `json:"permissions"`
 	}
-	if !decodeJSON(response, request, &input) || strings.TrimSpace(input.Name) == "" || len(input.Permissions) > 128 {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" || len(input.Permissions) > 128 {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The role name and permissions are invalid.")
 		return
 	}
@@ -98,7 +101,10 @@ func (s *Server) updateRole(response http.ResponseWriter, request *http.Request)
 		Enabled     *bool     `json:"enabled"`
 		Permissions *[]string `json:"permissions"`
 	}
-	if !decodeJSON(response, request, &input) || (input.Name == nil && input.Description == nil && input.Enabled == nil && input.Permissions == nil) {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Name == nil && input.Description == nil && input.Enabled == nil && input.Permissions == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "At least one role field is required.")
 		return
 	}
@@ -171,7 +177,10 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 		Description string `json:"description"`
 		ParentID    string `json:"parentId"`
 	}
-	if !decodeJSON(response, request, &input) || strings.TrimSpace(input.Name) == "" {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The team name is invalid.")
 		return
 	}
@@ -237,7 +246,10 @@ func (s *Server) updateTeam(response http.ResponseWriter, request *http.Request)
 		Description *string `json:"description"`
 		Enabled     *bool   `json:"enabled"`
 	}
-	if !decodeJSON(response, request, &input) || (input.Name == nil && input.Description == nil && input.Enabled == nil) {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Name == nil && input.Description == nil && input.Enabled == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "At least one Team field is required.")
 		return
 	}
@@ -302,7 +314,10 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 		RoleIDs []string `json:"roleIds"`
 		TeamIDs []string `json:"teamIds"`
 	}
-	if !decodeJSON(response, request, &input) || len(input.RoleIDs) == 0 || len(input.TeamIDs) == 0 || len(input.RoleIDs) > 64 || len(input.TeamIDs) > 64 {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if len(input.RoleIDs) == 0 || len(input.TeamIDs) == 0 || len(input.RoleIDs) > 64 || len(input.TeamIDs) > 64 {
 		writeProblem(response, request, http.StatusBadRequest, "USER_RBAC_REQUIRED", "A user must have at least one role and one team.")
 		return
 	}

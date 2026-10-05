@@ -95,16 +95,17 @@ async function verifyEncryptedBackup() {
 
 async function seedSource() {
   const adminToken = await login(sourceBaseUrl, 'admin', 'change-this-admin-password');
-  const skillId = `backup-skill-${runId}`;
   const username = `backup-user-${runId}`;
   const password = `Backup-${runId}-password`;
   const archive = emptyZip();
   const sha256 = digest(archive);
 
-  await request(sourceBaseUrl, '/admin/skills', {
+  // Skill identifiers are server-generated slugs (uniqueness rides on the
+  // run id in the name).
+  const skillId = (await request(sourceBaseUrl, '/admin/skills', {
     method: 'POST', token: adminToken,
-    body: {id: skillId, name: `Backup Skill ${runId}`, description: 'Backup rehearsal fixture', enabled: true},
-  });
+    body: {name: `Backup Skill ${runId}`, description: 'Backup rehearsal fixture', enabled: true},
+  })).id;
   const form = new FormData();
   form.append('version', '1.0.0');
   form.append('package', new Blob([archive], {type: 'application/zip'}), 'skill.zip');

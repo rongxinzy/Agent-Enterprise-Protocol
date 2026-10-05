@@ -189,8 +189,8 @@ async function runScenario() {
     upstreamModel: 'invalid', credentialId: 'missing-' + runId,
     capabilities: ['text'], contextWindow: 4096, isDefault: false, enabled: true,
   }), 404, 'RESOURCE_NOT_FOUND');
-  await admin.createModel({
-    id: 'm2-model-' + runId, displayName: 'M2 model', sourceType: 'gateway',
+  const m2Model = await admin.createModel({
+    displayName: 'M2 model ' + runId, sourceType: 'gateway',
     protocol: 'openai-compatible', endpoint: 'https://models.example.test/v1',
     upstreamModel: 'mock-upstream', credentialId: serverOnly.id,
     capabilities: ['text'], contextWindow: 4096, isDefault: false, enabled: true,
@@ -248,7 +248,7 @@ async function runScenario() {
   const audit = await postgres("SELECT outcome||':'||count(*) FROM credential_resolution_audit GROUP BY outcome ORDER BY outcome");
   assert(audit.includes('resolved:') && audit.includes('denied:'), 'Credential resolution audit did not retain both outcomes');
 
-  await admin.deleteModel('m2-model-' + runId);
+  await admin.deleteModel(m2Model.id);
   await admin.deleteCredential(serverOnly.id);
   await expectProblem(admin.getCredential(serverOnly.id), 404, 'RESOURCE_NOT_FOUND');
 }
@@ -386,18 +386,21 @@ async function adminDelete(path, tokenStore) {
 // sources, and data scope rules against the running control service.
 async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
   // Department tree: path and depth are pinned at creation; parents never
-  // move afterwards, so cycles are structurally impossible.
-  const parentTeamId = 'm2-dept-' + suffix;
-  const childTeamId = 'm2-dept-child-' + suffix;
-  const otherTeamId = 'm2-dept-other-' + suffix;
-  const parentTeam = await adminRequest('/aep/v1/admin/teams', {id: parentTeamId, name: 'M2 Department'}, adminStore);
+  // move afterwards, so cycles are structurally impossible. Identifiers are
+  // server-generated slugs, so uniqueness rides on the name (the run id).
+  const parentTeam = await adminRequest('/aep/v1/admin/teams', {name: 'M2 Department ' + suffix}, adminStore);
+  const parentTeamId = parentTeam.id;
   assert(parentTeam?.path === '/' + parentTeamId && parentTeam?.depth === 0, 'Team creation did not pin the root path');
-  const childTeam = await adminRequest('/aep/v1/admin/teams', {id: childTeamId, name: 'M2 Child Department', parentId: parentTeamId}, adminStore);
+  const childTeam = await adminRequest('/aep/v1/admin/teams', {name: 'M2 Child Department ' + suffix, parentId: parentTeamId}, adminStore);
+  const childTeamId = childTeam.id;
   assert(childTeam?.parentId === parentTeamId && childTeam?.path === '/' + parentTeamId + '/' + childTeamId && childTeam?.depth === 1, 'Child team did not pin path and depth');
-  await adminRequest('/aep/v1/admin/teams', {id: otherTeamId, name: 'M2 Other Department'}, adminStore);
+  const otherTeamId = (await adminRequest('/aep/v1/admin/teams', {name: 'M2 Other Department ' + suffix}, adminStore)).id;
 
   // Agent directory: create with the shared membership floor, list, update.
-  const roleId = 'm2-role-' + suffix;
+  const roleId = (await adminRequest('/aep/v1/admin/roles', {
+    name: 'M2 Foundation Role ' + suffix,
+    permissions: ['credentials.read'],
+  }, adminStore)).id;
   const agentUsername = 'm2-agent-' + suffix;
   const agent = await admin.createAgent({
     username: agentUsername, displayName: 'M2 Agent ' + suffix,
@@ -438,25 +441,25 @@ async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
   await admin.deleteIdentityMapping(sourceId, 'user', 'ext-' + suffix);
 
   // Data scope: management scope expands cross-department, explicit deny
-  // wins, and the reserved department_default kind is rejected.
-  const grantId = 'm2-scope-grant-' + suffix;
-  const denyId = 'm2-scope-deny-' + suffix;
+  // wins, and the reserved department_default kind is rejected. Rule ids
+  // are server-generated from the reason slug.
   await admin.createDataScopeRule({
-    id: grantId, ruleKind: 'management_scope', subjectType: 'user', subjectId: agent.id,
+    ruleKind: 'management_scope', subjectType: 'user', subjectId: agent.id,
     resourceKind: 'team', resourceId: otherTeamId, reason: 'm2 e2e management scope',
   });
   await expectProblem(admin.createDataScopeRule({
-    id: grantId + '-dup', ruleKind: 'management_scope', subjectType: 'user', subjectId: agent.id,
+    ruleKind: 'management_scope', subjectType: 'user', subjectId: agent.id,
     resourceKind: 'team', resourceId: otherTeamId,
   }), 409, 'DATA_SCOPE_RULE_EXISTS');
   await expectProblem(admin.createDataScopeRule({
-    id: 'm2-scope-default-' + suffix, ruleKind: 'department_default', subjectType: 'user', subjectId: agent.id,
+    ruleKind: 'department_default', subjectType: 'user', subjectId: agent.id,
     resourceKind: 'team', resourceId: childTeamId,
   }), 400, 'INVALID_DATA_SCOPE_RULE');
-  await admin.createDataScopeRule({
-    id: denyId, ruleKind: 'explicit_deny', subjectType: 'user', subjectId: agent.id,
+  const denyRule = await admin.createDataScopeRule({
+    ruleKind: 'explicit_deny', subjectType: 'user', subjectId: agent.id,
     resourceKind: 'team', resourceId: childTeamId, reason: 'm2 e2e deny',
   });
+  const denyId = denyRule.id;
   let context = await admin.getDataScopeContext(agent.id);
   assert(context.orgScope.includes(otherTeamId), 'Management scope did not expand the cross-department subtree');
   assert(context.crossDepartmentReason?.includes('management_scope'), 'Cross-department reason was not reported');
@@ -475,8 +478,7 @@ async function assertDigitalEmployeeFoundations(admin, adminStore, suffix) {
 // Ephemeral conversation-scoped digital employees: frozen scope snapshots,
 // directory hygiene, hard expiry, and lifecycle close-out.
 async function assertEphemeralDigitalEmployees(admin, adminStore, suffix, user, userTeamId, roleId) {
-  const outsideTeamId = 'm2-eph-outside-' + suffix;
-  await adminRequest('/aep/v1/admin/teams', {id: outsideTeamId, name: 'M2 Ephemeral Outside Team'}, adminStore);
+  const outsideTeamId = (await adminRequest('/aep/v1/admin/teams', {name: 'M2 Ephemeral Outside Team ' + suffix}, adminStore)).id;
 
   // The confinement guard: a home team outside the scope source's visible
   // teams must be rejected before anything is created.
@@ -493,14 +495,14 @@ async function assertEphemeralDigitalEmployees(admin, adminStore, suffix, user, 
     password: 'agent-password-123', roleIds: [roleId], teamIds: [], homeTeamId: userTeamId,
     ephemeral: true, expiresAt, scopeFromUserId: user.id,
   });
-  assert(ephemeral?.ephemeral === true && ephemeral?.expiresAt === expiresAt, 'Ephemeral creation did not echo the lifecycle');
+  assert(ephemeral?.ephemeral === true && Date.parse(ephemeral?.expiresAt ?? '') === Date.parse(expiresAt), 'Ephemeral creation did not echo the lifecycle');
 
   // The directory hides ephemeral instances by default and lists them on demand.
   const hidden = await admin.listAgents();
   assert(!hidden.agents.some(item => item.id === ephemeral.id), 'Directory leaked an ephemeral instance by default');
   const shown = await admin.listAgents({includeEphemeral: true});
   const entry = shown.agents.find(item => item.id === ephemeral.id);
-  assert(entry?.ephemeral === true && entry?.expiresAt === expiresAt, 'includeEphemeral did not list the instance with its lifecycle');
+  assert(entry?.ephemeral === true && Date.parse(entry?.expiresAt ?? '') === Date.parse(expiresAt), 'includeEphemeral did not list the instance with its lifecycle');
 
   // The frozen snapshot mirrors the source user's visible subtree.
   const context = await admin.getDataScopeContext(ephemeral.id);

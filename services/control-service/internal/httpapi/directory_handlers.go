@@ -33,7 +33,10 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		ScopeFrom     string   `json:"scopeFromUserId"`
 		ModelIDs      []string `json:"modelIds"`
 	}
-	if !decodeJSON(response, request, &input) || !validRBACID(input.Username) || strings.TrimSpace(input.DisplayName) == "" {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if !validRBACID(input.Username) || strings.TrimSpace(input.DisplayName) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_AGENT", "The agent username and display name are invalid.")
 		return
 	}
@@ -383,7 +386,10 @@ func (s *Server) createIdentitySource(response http.ResponseWriter, request *htt
 		DisplayName string          `json:"displayName"`
 		Config      json.RawMessage `json:"config"`
 	}
-	if !decodeJSON(response, request, &input) || !validIdentitySourceKind(input.Kind) || strings.TrimSpace(input.DisplayName) == "" {
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if !validIdentitySourceKind(input.Kind) || strings.TrimSpace(input.DisplayName) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_SOURCE", "The identity source kind and display name are invalid.")
 		return
 	}
@@ -438,7 +444,10 @@ func (s *Server) upsertIdentityMapping(response http.ResponseWriter, request *ht
 		ExternalID          string `json:"externalId"`
 		LocalSubjectID      string `json:"localSubjectId"`
 	}
-	if !decodeJSON(response, request, &input) || (input.ExternalSubjectType != "user" && input.ExternalSubjectType != "team") ||
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if (input.ExternalSubjectType != "user" && input.ExternalSubjectType != "team") ||
 		strings.TrimSpace(input.ExternalID) == "" || strings.TrimSpace(input.LocalSubjectID) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_IDENTITY_MAPPING", "The mapping subject type, external id, and local id are required.")
 		return
@@ -542,7 +551,10 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 		ExpiresAt    *time.Time `json:"expiresAt"`
 		Reason       string     `json:"reason"`
 	}
-	if !decodeJSON(response, request, &input) || !dataScopeRuleKinds[input.RuleKind] ||
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if !dataScopeRuleKinds[input.RuleKind] ||
 		!validSubjectType(input.SubjectType) || strings.TrimSpace(input.SubjectID) == "" ||
 		!validDataScopeResourceKind(input.ResourceKind) || strings.TrimSpace(input.ResourceID) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_SCOPE_RULE", "The rule kind, subject, and resource are invalid.")
