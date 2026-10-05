@@ -166,8 +166,13 @@ func TestAnthropicSlugAndRewriteHelpers(t *testing.T) {
 	if got := anthropicSlug("  "); got != "model" {
 		t.Fatalf("empty slug fallback = %q", got)
 	}
-	if got := anthropicSlug(strings.Repeat("x", 50)); len(got) != 30 {
+	if got := anthropicSlug(strings.Repeat("x", 50)); len(got) != 40 {
 		t.Fatalf("slug length = %d", len(got))
+	}
+	// Regression: ids longer than the old 30-char cap must route verbatim.
+	long := "bench-qwen3-8-flash-next-llama-cpp-l20-2"
+	if got := anthropicSlug(long); got != long {
+		t.Fatalf("long id slug = %q, want verbatim %q", got, long)
 	}
 	if got := anthropicRewrite(""); got != "/\\1" {
 		t.Fatalf("root rewrite = %q", got)
