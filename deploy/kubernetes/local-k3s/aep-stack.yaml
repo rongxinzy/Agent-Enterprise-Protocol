@@ -8,7 +8,7 @@
 # Higress CRs through the k8s API — the real desired-state routing path.
 #
 # Images come from the internal registry (REG placeholder): aep-control-service,
-# aep-gateway-authorizer, aep-gateway-reconciler 0.1.0; postgres 17.6-alpine;
+# aep-gateway-authorizer 0.2.0, aep-gateway-reconciler 0.4.3, aep-control-service 0.8.0; postgres 17.6-alpine;
 # rustfs 1.0.0 (S3-compatible object storage, replaced MinIO).
 apiVersion: v1
 kind: Namespace
@@ -23,13 +23,16 @@ metadata:
   namespace: aep-system
 spec:
   replicas: 1
+  # RWO PVC 铁律：单写者卷必须 Recreate，RollingUpdate 同节点双挂 = 双写损坏
+  # （2026-10-06 aep postgres 实际事故，pg_resetwal 救援后固化此纪律）。
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: postgres}}
   template:
     metadata: {labels: {app: postgres}}
     spec:
       containers:
         - name: postgres
-          image: 172.18.5.251:8081/zhiyuan/postgres:17.6-alpine
+          image: harbor.zhiyuan.local:30443/zhiyuan/postgres:17.6-alpine
           env:
             - {name: POSTGRES_DB, value: aep}
             - {name: POSTGRES_USER, value: aep}
@@ -39,15 +42,16 @@ spec:
           volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
       volumes:
         - name: data
-          persistentVolumeClaim: {claimName: postgres-data}
+          persistentVolumeClaim: {claimName: postgres-data-lh}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: postgres-data
+  name: postgres-data-lh
   namespace: aep-system
 spec:
   accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
   resources: {requests: {storage: 5Gi}}
 ---
 apiVersion: v1
@@ -65,6 +69,7 @@ metadata:
   namespace: aep-system
 spec:
   replicas: 1
+  strategy: {type: Recreate}  # RWO PVC 铁律，同上
   selector: {matchLabels: {app: rustfs}}
   template:
     metadata: {labels: {app: rustfs}}
@@ -72,7 +77,7 @@ spec:
       securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
       containers:
         - name: rustfs
-          image: 172.18.5.251:8081/zhiyuan/rustfs:1.0.0
+          image: harbor.zhiyuan.local:30443/zhiyuan/rustfs:1.0.0
           env:
             - {name: RUSTFS_ACCESS_KEY, value: minioadmin}
             - {name: RUSTFS_SECRET_KEY, value: minioadmin}
@@ -85,15 +90,16 @@ spec:
           volumeMounts: [{name: data, mountPath: /data}]
       volumes:
         - name: data
-          persistentVolumeClaim: {claimName: rustfs-data}
+          persistentVolumeClaim: {claimName: rustfs-data-lh}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: rustfs-data
+  name: rustfs-data-lh
   namespace: aep-system
 spec:
   accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
   resources: {requests: {storage: 5Gi}}
 ---
 apiVersion: v1
@@ -151,7 +157,7 @@ spec:
     spec:
       containers:
         - name: control
-          image: 172.18.5.251:8081/zhiyuan/aep-control-service:0.1.0
+          image: harbor.zhiyuan.local:30443/zhiyuan/aep-control-service:0.8.0
           envFrom: [{configMapRef: {name: aep-control-service-config}}]
           ports: [{containerPort: 8080}]
           readinessProbe: {httpGet: {path: /readyz, port: 8080}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 24}
@@ -205,7 +211,7 @@ spec:
     spec:
       containers:
         - name: authorizer
-          image: 172.18.5.251:8081/zhiyuan/aep-gateway-authorizer:0.1.0
+          image: harbor.zhiyuan.local:30443/zhiyuan/aep-gateway-authorizer:0.2.0
           envFrom: [{configMapRef: {name: aep-gateway-authorizer-config}}]
           ports: [{containerPort: 8090}]
           readinessProbe: {httpGet: {path: /readyz, port: 8090}, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 24}
@@ -251,7 +257,7 @@ spec:
       serviceAccountName: aep-gateway-reconciler
       containers:
         - name: reconciler
-          image: 172.18.5.251:8081/zhiyuan/aep-gateway-reconciler:0.3.1
+          image: harbor.zhiyuan.local:30443/zhiyuan/aep-gateway-reconciler:0.4.3
           envFrom: [{configMapRef: {name: aep-gateway-reconciler-config}}]
           ports: [{name: health, containerPort: 8091}]
           readinessProbe: {httpGet: {path: /readyz, port: 8091}, initialDelaySeconds: 8, periodSeconds: 5, failureThreshold: 24}
