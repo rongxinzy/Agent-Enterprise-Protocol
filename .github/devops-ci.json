@@ -1,0 +1,16 @@
+{
+  "workflows": [
+    {
+      "name": "CodeQL",
+      "path": ".github/workflows/codeql.yml"
+    },
+    {
+      "name": "AEP",
+      "path": ".github/workflows/m0.yml"
+    },
+    {
+      "name": "AEP security baseline",
+      "path": ".github/workflows/security.yml"
+    }
+  ]
+}
