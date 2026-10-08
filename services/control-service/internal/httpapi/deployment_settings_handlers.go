@@ -250,9 +250,9 @@ func (s *Server) updateDeploymentSettings(response http.ResponseWriter, request 
 			var matched int
 			// The referential check mirrors the prober's own selection so a
 			// chain can only contain models that can ever be observed
-			// healthy: enabled gateway models with a complete endpoint and
-			// upstream model.
-			if err := database.QueryRow(request.Context(), `SELECT count(*) FROM models WHERE deployment_id=$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>'' AND id = ANY($2)`, claimsFrom(request).DeploymentID, ids).Scan(&matched); err != nil {
+			// healthy: enabled gateway models with a complete absolute endpoint
+			// and upstream model.
+			if err := database.QueryRow(request.Context(), `SELECT count(*) FROM models WHERE deployment_id=$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>'' AND endpoint ~ '^https?://' AND id = ANY($2)`, claimsFrom(request).DeploymentID, ids).Scan(&matched); err != nil {
 				databaseFailure(response, request, err)
 				return
 			}

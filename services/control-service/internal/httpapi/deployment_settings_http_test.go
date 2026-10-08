@@ -67,7 +67,7 @@ func TestAdminDeploymentSettingsFallbackChain(t *testing.T) {
 
 	// A valid chain is trimmed, deduplicated, stored, and echoed back.
 	stored := []string{"bench-qwen", "bench-glm"}
-	pool.ExpectQuery(`SELECT count\(\*\) FROM models WHERE deployment_id=\$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>''`).
+	pool.ExpectQuery(`SELECT count\(\*\) FROM models WHERE deployment_id=\$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>'' AND endpoint ~ '\^https\?://'`).
 		WithArgs("deployment-a", pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(2))
 	pool.ExpectExec(`INSERT INTO deployment_settings`).

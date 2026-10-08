@@ -5258,7 +5258,7 @@ components:
           minLength: 1
           maxLength: 2048
         modelFallbackIds:
-          description: New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain.
+          description: New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete absolute endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain.
           type:
             - array
             - 'null'

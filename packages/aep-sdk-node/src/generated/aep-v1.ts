@@ -2412,7 +2412,7 @@ export interface components {
         DeploymentSettingsUpdate: {
             /** @description New model gateway runtime override. It must be an absolute http or https URL whose hostname is not cluster-internal; production deployments additionally reject loopback addresses. Null clears the override so the AEP_MODEL_GATEWAY_BASE_URL environment value applies again. */
             modelGatewayBaseUrl?: string | null;
-            /** @description New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain. */
+            /** @description New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete absolute endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain. */
             modelFallbackIds?: string[] | null;
         };
     };

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -444,20 +445,10 @@ func scrubCredential(body []byte, credentialValue string) []byte {
 	if credentialValue == "" {
 		return body
 	}
-	lowerBody := bytes.ToLower(body)
-	needle := bytes.ToLower([]byte(credentialValue))
-	var result []byte
-	for {
-		index := bytes.Index(lowerBody, needle)
-		if index < 0 {
-			result = append(result, body...)
-			return result
-		}
-		result = append(result, body[:index]...)
-		result = append(result, "***"...)
-		body = body[index+len(needle):]
-		lowerBody = lowerBody[index+len(needle):]
-	}
+	// (?i) folding via regexp is Unicode-aware; bytes.ToLower can change
+	// byte lengths (e.g. U+0130), which would corrupt index arithmetic.
+	pattern := regexp.MustCompile("(?i)" + regexp.QuoteMeta(credentialValue))
+	return pattern.ReplaceAll(body, []byte("***"))
 }
 
 func snippetOf(body []byte) string {

@@ -241,6 +241,47 @@ func TestProbeModelRelativeEndpointIsConfigurationError(t *testing.T) {
 	}
 }
 
+func TestProbeModelScrubKeepsUnicodeIntact(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("\u0130 sk-abcdefgh rejected"))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "sk-abcdefgh")
+	if strings.Contains(outcome.Detail, "sk-abcdefgh") || !strings.Contains(outcome.Detail, "\u0130") || !strings.Contains(outcome.Detail, "***") {
+		t.Fatalf("unicode folding must not corrupt the snippet: %#v", outcome)
+	}
+}
+
+func TestProbeModelRejectsEmptyChoicesPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "")
+	if outcome.Status != ModelHealthError {
+		t.Fatalf("an empty choices array is not a served completion: %#v", outcome)
+	}
+}
+
+func TestProbeModelClassifies5xxAsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "anthropic", server.URL, "model-a", "key")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "502") {
+		t.Fatalf("5xx rides the hysteresis path: %#v", outcome)
+	}
+}
+
 // staticKeyProvider serves one fixed master key to the Sealer.
 type staticKeyProvider struct{ key credential.MasterKey }
 
