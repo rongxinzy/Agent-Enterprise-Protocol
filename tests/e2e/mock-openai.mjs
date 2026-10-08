@@ -243,6 +243,9 @@ const server = http.createServer(async (request, response) => {
     response.write(`data: ${JSON.stringify(chunk('Hello'))}\n\n`);
     setTimeout(() => {
       response.write(`data: ${JSON.stringify(chunk(' AEP', undefined, 'stop'))}\n\n`);
+      if (body.stream_options?.include_usage) {
+        response.write(`data: ${JSON.stringify({id: 'chatcmpl-aep-m1', object: 'chat.completion.chunk', created: 1, model: expectedModel, choices: [], usage: {prompt_tokens: 1, completion_tokens: 2, total_tokens: 3}})}\n\n`);
+      }
       response.end('data: [DONE]\n\n');
     }, 40);
     return;

@@ -29,11 +29,47 @@ kubectl -n aep-system rollout status deployment/aep-gateway-authorizer
 kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 ```
 
-两个 reconciler 副本各自拥有审计副本目录，并配置了 PDB。两者都使用 field manager `aep-gateway-reconciler` 执行 Kubernetes server-side apply。因为对象名称和内容完全确定，多个副本无需 leader lease 也能安全持有相同写入字段。只有两个线上 Kubernetes 操作均成功后才会上报 `ready`；部分失败会返回 `KUBERNETES_APPLY_FAILED`，并按有界指数退避重试。
+两个 reconciler 副本各自拥有审计副本目录，并配置了 PDB。两者都使用 field manager `aep-gateway-reconciler` 执行 Kubernetes server-side apply。因为对象名称和内容完全确定，多个副本无需 leader lease 也能安全持有相同写入字段。只有所有线上 Kubernetes 操作均成功后才会上报 `ready`；部分失败会返回 `KUBERNETES_APPLY_FAILED`，并按有界指数退避重试。
 
 reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingress、`extensions.higress.io/wasmplugins` 与 `networking.istio.io/envoyfilters`。service-account token 与集群 CA 来自 Kubernetes 投射文件。上线前必须确认已安装 Higress CRD 的组和资源名。
 
 运行 `npm run test:e2e:m3-data-plane` 验证控制面与故障收敛，运行 `npm run test:e2e:m3-kubernetes` 验证真实 Kubernetes API Server 与 Higress 兼容 CRD 门禁。
+
+## AI 用量统计
+
+reconciler 同步下发 `aep-ai-statistics-<deployment-suffix>`，复用官方开源
+`ai-statistics` 2.0.1，并将 OCI 制品固定为
+`sha256:9bebfc803f6ea92c0805670bd9a6e8a5bb727f2e1a86b133f20bb7002e71511e`。
+优先级 200 使统计先于 ai-proxy 执行；`defaultConfigDisable: true` 配合当前部署
+已启用的 OpenAI 与 Anthropic Ingress 名称限制作用范围。全部路由禁用后，匹配集
+收敛为空；不修改全局插件或其他网关路由。
+
+使用轻量响应属性采集模型和用量元数据，不开启完整问题、回答、工具参数或推理内容
+属性。`FAIL_OPEN` 使统计插件无法加载时仍可调用模型。reconciler 的 `ready` 只表示
+Kubernetes apply 成功，不表示插件加载或指标采集成功，上线后仍需验证真实指标。
+网关必须能获取固定 OCI 制品，或由交付系统镜像该准确制品。
+
+网关在内网 `http://<gateway-pod-ip>:15020/stats/prometheus` 暴露 Prometheus
+指标。输入/输出 Token、请求耗时和流式首 Token 耗时复用 Higress 的统计能力，
+Token 值依赖上游报告 usage；缺少 usage 不能视为零成本。本阶段不安装
+Prometheus/Grafana、不采集请求内容、不添加用户/团队/角色标签、不计算价格，也不
+提供持久化请求日志。
+
+本地隔离 Compose 网关使用相同的固定制品验证：
+
+```sh
+npm ci
+npm run build --workspace @aep/sdk-node
+npm run test:e2e:m1-gateway
+```
+
+场景检查 OpenAI 非流式/SSE 与 Anthropic 非流式 Mock 响应的真实导出计数器，
+验证上游 503 与鉴权行为保持，并检查指标中不包含凭据或模型内容。容器指标端口
+保持内网可见。该结果只代表本地验证，不替代生产集群或未测试供应商/协议模式的验收。
+
+回滚到旧 reconciler 时，需显式删除对应部署的
+`aep-ai-statistics-<deployment-suffix>` 对象：旧版本不会管理或清除新增插件。
+本次没有数据库迁移。
 
 ## 目录派生发布
 

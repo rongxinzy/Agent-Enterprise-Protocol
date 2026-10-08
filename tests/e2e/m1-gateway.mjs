@@ -101,7 +101,7 @@ async function runScenario() {
   assert(completion.response.headers.get('x-mock-provider-auth') === 'accepted', 'Higress did not inject the provider credential');
   assert(!containsSecret(completion), 'Provider credentials were exposed in the client response');
 
-  const streaming = await inference(modelToken, {model: 'enterprise-chat', stream: true, messages: [{role: 'user', content: 'stream'}]});
+  const streaming = await inference(modelToken, {model: 'enterprise-chat', stream: true, stream_options: {include_usage: true}, messages: [{role: 'user', content: 'stream'}]});
   assert(streaming.response.status === 200, 'Streaming inference failed: ' + streaming.response.status + ' ' + streaming.text);
   assert(streaming.response.headers.get('content-type')?.startsWith('text/event-stream'), 'Streaming response was not SSE');
   assert(streaming.text.includes('Hello') && streaming.text.includes(' AEP') && streaming.text.includes('[DONE]'), 'Streaming chunks were incomplete');
@@ -128,6 +128,9 @@ async function runScenario() {
   assert(anthropicBody.content?.[0]?.text === 'anthropic passthrough ok bench-anthropic', 'Unexpected anthropic mock reply: ' + anthropic.text);
   assert(!containsSecret(anthropic), 'Provider credentials were exposed in the anthropic passthrough response');
 
+  const failed = await inference(modelToken, {model: 'enterprise-chat', messages: [{role: 'user', content: 'force upstream failure'}]});
+  assert(failed.response.status === 503, 'Upstream failure status was not preserved');
+
   await expectGatewayProblem(null, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken + 'invalid', {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken, {model: 'unassigned-chat'}, 403, 'MODEL_NOT_ALLOWED');
@@ -135,6 +138,45 @@ async function runScenario() {
   const expiresAt = decodeJwtPart(modelToken, 1).exp * 1000;
   await new Promise(resolve => setTimeout(resolve, Math.max(0, expiresAt - Date.now() + 250)));
   await expectGatewayProblem(modelToken, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
+  await verifyStatistics(modelToken);
+}
+
+async function verifyStatistics(modelToken) {
+  const deadline = Date.now() + 45_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const metrics = await composeOutput('exec', '-T', 'higress', 'curl', '-fsS', '--max-time', '5', 'http://localhost:15020/stats/prometheus');
+      const value = (name, route) => metrics.split('\n').filter(line => line.startsWith(name + '{') && line.includes(`ai_route="${route}"`)).reduce((sum, line) => sum + Number(line.slice(line.lastIndexOf(' ') + 1)), 0);
+      const prefix = 'route_upstream_model_consumer_metric_';
+      assert(value(prefix + 'input_token', 'aep-model-gateway') >= 3, 'OpenAI input tokens were not exported, including streaming usage');
+      assert(value(prefix + 'output_token', 'aep-model-gateway') >= 6, 'OpenAI output tokens were not exported');
+      assert(value(prefix + 'llm_stream_duration_count', 'aep-model-gateway') >= 1, 'Streaming observations were not exported');
+      assert(value(prefix + 'input_token', 'aep-anthropic-bench-anthropic') >= 1, 'Anthropic input tokens were not exported');
+      assert(value(prefix + 'output_token', 'aep-anthropic-bench-anthropic') >= 2, 'Anthropic output tokens were not exported');
+      assert(!metrics.includes(modelToken) && !metrics.includes('m1-e2e-provider-secret') && !metrics.includes('Think through the request.'), 'Model content or credentials leaked into metrics');
+      console.log('Higress AI statistics exported OpenAI, SSE and Anthropic usage without model content or credentials.');
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
+  throw lastError;
+}
+
+function composeOutput(...args) {
+  return new Promise((resolve, reject) => {
+    const commandArgs = ['compose', '-p', project];
+    for (const file of composeFiles) commandArgs.push('-f', file);
+    commandArgs.push(...args);
+    const child = spawn('docker', commandArgs, {cwd: root, env: {...process.env, ...composeEnv}, stdio: ['ignore', 'pipe', 'pipe'], shell: false});
+    let result = '';
+    child.stdout.on('data', data => { result += data; });
+    child.stderr.resume();
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve(result) : reject(new Error('Higress metrics command failed with exit ' + code)));
+  });
 }
 
 async function inference(token, body) {
