@@ -27,10 +27,10 @@ func catalogModelsQuery(storeMock sqlmock.Sqlmock, rows *sqlmock.Rows) {
 
 func catalogModelRows(now time.Time) *sqlmock.Rows {
 	return sqlmock.NewRows(modelHTTPColumns()).
-		AddRow("deployment-a", "chat-b", "Chat B", "gateway", "openai-compatible", "/v1", "provider-b-chat", nil, nil, `{text}`, nil, nil, false, true, now, now).
-		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, 8192, false, true, now, now).
-		AddRow("deployment-a", "chat-c", "Chat C", "gateway", "openai-compatible", "http://provider-c/v1", "provider-c-chat", nil, "credential-c", `{text}`, nil, nil, false, false, now, now).
-		AddRow("deployment-a", "local-a", "Local A", "local", "openai-compatible", nil, nil, "local-ref", nil, `{text}`, nil, nil, false, true, now, now)
+		AddRow("deployment-a", "chat-b", "Chat B", "gateway", "openai-compatible", "/v1", "provider-b-chat", nil, nil, `{text}`, nil, nil, false, true, "unknown", nil, nil, now, now).
+		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, 8192, false, true, "unknown", nil, nil, now, now).
+		AddRow("deployment-a", "chat-c", "Chat C", "gateway", "openai-compatible", "http://provider-c/v1", "provider-c-chat", nil, "credential-c", `{text}`, nil, nil, false, false, "unknown", nil, nil, now, now).
+		AddRow("deployment-a", "local-a", "Local A", "local", "openai-compatible", nil, nil, "local-ref", nil, `{text}`, nil, nil, false, true, "unknown", nil, nil, now, now)
 }
 
 func TestPublishDataPlaneRoutesDerivesCatalogState(t *testing.T) {
@@ -90,7 +90,7 @@ func TestPublishDataPlaneRoutesIsIdempotentAndAdvancesRevision(t *testing.T) {
 	hash := dataPlaneHash(derived)
 
 	catalogModelsQuery(storeMock, sqlmock.NewRows(modelHTTPColumns()).
-		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, nil, false, true, now, now))
+		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, nil, false, true, "unknown", nil, nil, now, now))
 	pool.ExpectQuery(`SELECT content_hash,published_at FROM data_plane_desired_states`).
 		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"content_hash", "published_at"}))
 	pool.ExpectQuery(`INSERT INTO data_plane_desired_states`).
@@ -107,7 +107,7 @@ func TestPublishDataPlaneRoutesIsIdempotentAndAdvancesRevision(t *testing.T) {
 	// Same catalog: the stored hash matches, so no write happens and the
 	// stored publication time is returned unchanged.
 	catalogModelsQuery(storeMock, sqlmock.NewRows(modelHTTPColumns()).
-		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, nil, false, true, now, now))
+		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, nil, false, true, "unknown", nil, nil, now, now))
 	pool.ExpectQuery(`SELECT content_hash,published_at FROM data_plane_desired_states`).
 		WithArgs("deployment-a").
 		WillReturnRows(pgxmock.NewRows([]string{"content_hash", "published_at"}).AddRow(hash, publishedAt))
@@ -180,9 +180,9 @@ func TestDataPlaneStatusReportsCatalogComparison(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"state", "observed_revision", "content_hash", "last_applied_at", "error_code", "message", "resource_count"}).
 			AddRow("ready", nil, nil, nil, nil, nil, 2))
 	catalogModelsQuery(storeMock, sqlmock.NewRows(modelHTTPColumns()).
-		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, nil, false, true, now, now).
-		AddRow("deployment-a", "chat-b", "Chat B", "gateway", "openai-compatible", "/v1", "provider-b-chat", nil, nil, `{text}`, nil, nil, false, true, now, now).
-		AddRow("deployment-a", "chat-c", "Chat C", "gateway", "openai-compatible", "http://provider-c/v1", "provider-c-chat", nil, nil, `{text}`, nil, nil, false, false, now, now))
+		AddRow("deployment-a", "chat-a", "Chat A", "gateway", "openai-compatible", "http://provider-a/v1", "provider-a-chat", nil, "credential-a", `{text}`, nil, nil, false, true, "unknown", nil, nil, now, now).
+		AddRow("deployment-a", "chat-b", "Chat B", "gateway", "openai-compatible", "/v1", "provider-b-chat", nil, nil, `{text}`, nil, nil, false, true, "unknown", nil, nil, now, now).
+		AddRow("deployment-a", "chat-c", "Chat C", "gateway", "openai-compatible", "http://provider-c/v1", "provider-c-chat", nil, nil, `{text}`, nil, nil, false, false, "unknown", nil, nil, now, now))
 	storedRoutes := []byte(`[{"modelId":"chat-a","enabled":true,"endpoint":"http://provider-a/v1","upstreamModel":"stale-upstream","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"legacy-secret","key":"api-key","namespace":"higress-system"}},{"modelId":"ghost","enabled":true,"endpoint":"/v1","upstreamModel":"ghost","protocol":"openai-compatible","providerType":"openai"}]`)
 	pool.ExpectQuery(`SELECT routes FROM data_plane_desired_states`).
 		WithArgs("deployment-a").

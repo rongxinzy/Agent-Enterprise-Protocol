@@ -11,7 +11,28 @@ import (
 	pgxmock "github.com/pashagolub/pgxmock/v4"
 )
 
-func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string) {
+func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string, fallbackOverride *[]string) {
+	rows := pgxmock.NewRows([]string{"model_gateway_base_url"})
+	if override != nil {
+		rows.AddRow(*override)
+	}
+	pool.ExpectQuery(`SELECT model_gateway_base_url FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(rows)
+	pool.ExpectQuery(`SELECT agent_control_base_url FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"agent_control_base_url"}).AddRow(nil))
+	fallbackRows := pgxmock.NewRows([]string{"present", "model_fallback_ids"})
+	if fallbackOverride != nil {
+		fallbackRows.AddRow(true, *fallbackOverride)
+	} else {
+		fallbackRows.AddRow(false, []string{})
+	}
+	pool.ExpectQuery(`SELECT model_fallback_ids IS NOT NULL`).
+		WithArgs("deployment-a").WillReturnRows(fallbackRows)
+}
+
+// The service metadata reads only the two advertised endpoints; it does not
+// touch the failover chain.
+func expectMetadataSettingsRead(pool pgxmock.PgxPoolIface, override *string) {
 	rows := pgxmock.NewRows([]string{"model_gateway_base_url"})
 	if override != nil {
 		rows.AddRow(*override)
@@ -22,12 +43,73 @@ func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string) {
 		WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"agent_control_base_url"}).AddRow(nil))
 }
 
+func TestAdminDeploymentSettingsFallbackChain(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	application.Config.ModelFallbackIDs = []string{"env-fallback"}
+	handler := New(application).Handler()
+
+	// The environment-configured chain surfaces while no override is stored.
+	expectSettingsRead(pool, nil, nil)
+	initial := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
+	if initial.Code != http.StatusOK ||
+		!strings.Contains(initial.Body.String(), `"modelFallbackIds":{"override":null,"effectiveValue":["env-fallback"],"source":"env"}`) {
+		t.Fatalf("initial fallback = %d %s", initial.Code, initial.Body.String())
+	}
+
+	// Every referenced id must name an enabled model of this deployment.
+	pool.ExpectQuery(`SELECT count\(\*\) FROM models`).
+		WithArgs("deployment-a", pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(1))
+	rejected := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelFallbackIds":["bench-qwen","ghost"]}`)
+	if rejected.Code != http.StatusUnprocessableEntity || !strings.Contains(rejected.Body.String(), `"code":"INVALID_DEPLOYMENT_SETTINGS"`) {
+		t.Fatalf("unknown fallback id = %d %s", rejected.Code, rejected.Body.String())
+	}
+
+	// A valid chain is trimmed, deduplicated, stored, and echoed back.
+	stored := []string{"bench-qwen", "bench-glm"}
+	pool.ExpectQuery(`SELECT count\(\*\) FROM models`).
+		WithArgs("deployment-a", pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(2))
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSettingsRead(pool, nil, &stored)
+	updated := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelFallbackIds":[" bench-qwen ","bench-glm","bench-qwen"]}`)
+	if updated.Code != http.StatusOK ||
+		!strings.Contains(updated.Body.String(), `"modelFallbackIds":{"override":["bench-qwen","bench-glm"],"effectiveValue":["bench-qwen","bench-glm"],"source":"override"}`) {
+		t.Fatalf("fallback chain update = %d %s", updated.Code, updated.Body.String())
+	}
+
+	// An explicit empty array disables failover without clearing the override.
+	empty := []string{}
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSettingsRead(pool, nil, &empty)
+	disabled := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelFallbackIds":[]}`)
+	if disabled.Code != http.StatusOK ||
+		!strings.Contains(disabled.Body.String(), `"modelFallbackIds":{"override":[],"effectiveValue":[],"source":"override"}`) {
+		t.Fatalf("disabled fallback = %d %s", disabled.Code, disabled.Body.String())
+	}
+
+	// Null clears the override so the environment chain applies again.
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", nil).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSettingsRead(pool, nil, nil)
+	cleared := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelFallbackIds":null}`)
+	if cleared.Code != http.StatusOK ||
+		!strings.Contains(cleared.Body.String(), `"modelFallbackIds":{"override":null,"effectiveValue":["env-fallback"],"source":"env"}`) {
+		t.Fatalf("cleared fallback = %d %s", cleared.Code, cleared.Body.String())
+	}
+}
+
 func TestAdminDeploymentSettingsLifecycle(t *testing.T) {
 	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
 	application.Config.ModelGatewayBaseURL = "http://env-gateway.example.com:8090/v1"
 	handler := New(application).Handler()
 
-	expectSettingsRead(pool, nil)
+	expectSettingsRead(pool, nil, nil)
 	initial := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
 	if initial.Code != http.StatusOK || !strings.Contains(initial.Body.String(), `"override":null`) ||
 		!strings.Contains(initial.Body.String(), `"effectiveValue":"http://env-gateway.example.com:8090/v1"`) ||
@@ -39,14 +121,14 @@ func TestAdminDeploymentSettingsLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "https://runtime-gateway.example.com/v1").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	override := "https://runtime-gateway.example.com/v1"
-	expectSettingsRead(pool, &override)
+	expectSettingsRead(pool, &override, nil)
 	updated := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelGatewayBaseUrl":"https://runtime-gateway.example.com/v1"}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"override":"https://runtime-gateway.example.com/v1"`) ||
 		!strings.Contains(updated.Body.String(), `"source":"override"`) {
 		t.Fatalf("updated settings = %d %s", updated.Code, updated.Body.String())
 	}
 
-	expectSettingsRead(pool, &override)
+	expectSettingsRead(pool, &override, nil)
 	current := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
 	if current.Code != http.StatusOK || !strings.Contains(current.Body.String(), `"effectiveValue":"https://runtime-gateway.example.com/v1"`) ||
 		strings.Contains(current.Body.String(), "env-gateway") {
@@ -54,7 +136,7 @@ func TestAdminDeploymentSettingsLifecycle(t *testing.T) {
 	}
 
 	// An empty update changes nothing and performs no write.
-	expectSettingsRead(pool, &override)
+	expectSettingsRead(pool, &override, nil)
 	noop := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{}`)
 	if noop.Code != http.StatusOK || !strings.Contains(noop.Body.String(), `"source":"override"`) {
 		t.Fatalf("noop update = %d %s", noop.Code, noop.Body.String())
@@ -64,7 +146,7 @@ func TestAdminDeploymentSettingsLifecycle(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO deployment_settings`).
 		WithArgs("deployment-a", nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	expectSettingsRead(pool, nil)
+	expectSettingsRead(pool, nil, nil)
 	cleared := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelGatewayBaseUrl":null}`)
 	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"override":null`) ||
 		!strings.Contains(cleared.Body.String(), `"source":"env"`) ||
@@ -77,7 +159,7 @@ func TestAdminDeploymentSettingsUnsetWithoutEnvironmentValue(t *testing.T) {
 	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
 	handler := New(application).Handler()
 
-	expectSettingsRead(pool, nil)
+	expectSettingsRead(pool, nil, nil)
 	settings := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
 	if settings.Code != http.StatusOK || !strings.Contains(settings.Body.String(), `"effectiveValue":null`) ||
 		!strings.Contains(settings.Body.String(), `"source":"unset"`) {
@@ -127,7 +209,7 @@ func TestAdminDeploymentSettingsValidation(t *testing.T) {
 		WithArgs("deployment-a", "http://127.0.0.1:8090/v1").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	loopback := "http://127.0.0.1:8090/v1"
-	expectSettingsRead(pool, &loopback)
+	expectSettingsRead(pool, &loopback, nil)
 	accepted := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"modelGatewayBaseUrl":"http://127.0.0.1:8090/v1"}`)
 	if accepted.Code != http.StatusOK || !strings.Contains(accepted.Body.String(), `"source":"override"`) {
 		t.Fatalf("non-production loopback override = %d %s", accepted.Code, accepted.Body.String())
@@ -164,7 +246,7 @@ func TestAdminDeploymentSettingsRequirePermission(t *testing.T) {
 
 	pool.ExpectQuery(`SELECT EXISTS`).WithArgs("deployment-a", "user-a", "deployment.read").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
-	expectSettingsRead(pool, nil)
+	expectSettingsRead(pool, nil, nil)
 	allowed := adminRequest(handler, userToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
 	if allowed.Code != http.StatusOK || !strings.Contains(allowed.Body.String(), `"source":"unset"`) {
 		t.Fatalf("read with permission = %d %s", allowed.Code, allowed.Body.String())
@@ -199,13 +281,13 @@ func TestMetadataResolvesDeploymentSettingsOverride(t *testing.T) {
 		return gateway
 	}
 
-	expectSettingsRead(pool, nil)
+	expectMetadataSettingsRead(pool, nil)
 	if gateway := metadataGateway(); gateway["baseUrl"] != "http://env-gateway.example.com:8090/v1" {
 		t.Fatalf("metadata without override = %#v", gateway)
 	}
 
 	override := "https://runtime-gateway.example.com/v1"
-	expectSettingsRead(pool, &override)
+	expectMetadataSettingsRead(pool, &override)
 	if gateway := metadataGateway(); gateway["baseUrl"] != "https://runtime-gateway.example.com/v1" {
 		t.Fatalf("metadata with override = %#v", gateway)
 	}
@@ -219,7 +301,7 @@ func TestMetadataResolvesDeploymentSettingsOverride(t *testing.T) {
 
 	// No environment value and no override keeps the gateway capability hidden.
 	application.Config.ModelGatewayBaseURL = ""
-	expectSettingsRead(pool, nil)
+	expectMetadataSettingsRead(pool, nil)
 	if gateway := metadataGateway(); gateway != nil {
 		t.Fatalf("metadata without any gateway configuration = %#v", gateway)
 	}
@@ -273,7 +355,7 @@ func TestAdminDeploymentSettingsAgentControlOverride(t *testing.T) {
 	application.Config.AgentControlBaseURL = "http://env-agents.example.com"
 	handler := New(application).Handler()
 
-	expectSettingsRead(pool, nil)
+	expectSettingsRead(pool, nil, nil)
 	initial := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
 	if initial.Code != http.StatusOK ||
 		!strings.Contains(initial.Body.String(), `"agentControlBaseUrl":{"override":null,"effectiveValue":"http://env-agents.example.com","source":"env"}`) {
@@ -286,7 +368,7 @@ func TestAdminDeploymentSettingsAgentControlOverride(t *testing.T) {
 		WithArgs("deployment-a", "http://aep-agent-control.aep-system.svc.cluster.local:8080").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	clusterInternal := "http://aep-agent-control.aep-system.svc.cluster.local:8080"
-	expectSettingsRead(pool, &clusterInternal)
+	expectSettingsRead(pool, &clusterInternal, nil)
 	updated := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"agentControlBaseUrl":"http://aep-agent-control.aep-system.svc.cluster.local:8080"}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"source":"override"`) {
 		t.Fatalf("cluster-internal agent control override = %d %s", updated.Code, updated.Body.String())
@@ -296,7 +378,7 @@ func TestAdminDeploymentSettingsAgentControlOverride(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO deployment_settings`).
 		WithArgs("deployment-a", nil).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	expectSettingsRead(pool, nil)
+	expectSettingsRead(pool, nil, nil)
 	cleared := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"agentControlBaseUrl":null}`)
 	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"source":"env"`) {
 		t.Fatalf("cleared agent control override = %d %s", cleared.Code, cleared.Body.String())

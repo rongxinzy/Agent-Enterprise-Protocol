@@ -117,22 +117,25 @@ type CredentialAssignment struct {
 func (CredentialAssignment) TableName() string { return "credential_assignments" }
 
 type Model struct {
-	DeploymentID           string          `gorm:"column:deployment_id;primaryKey"`
-	ID                     string          `gorm:"column:id;primaryKey"`
-	DisplayName            string          `gorm:"column:display_name;not null"`
-	SourceType             string          `gorm:"column:source_type;not null"`
-	Protocol               string          `gorm:"column:protocol;not null"`
-	Endpoint               pgtype.Text     `gorm:"column:endpoint"`
-	UpstreamModel          pgtype.Text     `gorm:"column:upstream_model"`
-	LocalModelRef          pgtype.Text     `gorm:"column:local_model_ref"`
-	CredentialID           pgtype.Text     `gorm:"column:credential_id"`
-	Capabilities           StringArray     `gorm:"column:capabilities;type:text[]"`
-	ReasoningCompatibility json.RawMessage `gorm:"column:reasoning_compatibility;type:jsonb"`
-	ContextWindow          pgtype.Int4     `gorm:"column:context_window"`
-	IsDefault              bool            `gorm:"column:is_default;not null"`
-	Enabled                bool            `gorm:"column:enabled;not null"`
-	CreatedAt              time.Time       `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt              time.Time       `gorm:"column:updated_at;autoUpdateTime"`
+	DeploymentID           string             `gorm:"column:deployment_id;primaryKey"`
+	ID                     string             `gorm:"column:id;primaryKey"`
+	DisplayName            string             `gorm:"column:display_name;not null"`
+	SourceType             string             `gorm:"column:source_type;not null"`
+	Protocol               string             `gorm:"column:protocol;not null"`
+	Endpoint               pgtype.Text        `gorm:"column:endpoint"`
+	UpstreamModel          pgtype.Text        `gorm:"column:upstream_model"`
+	LocalModelRef          pgtype.Text        `gorm:"column:local_model_ref"`
+	CredentialID           pgtype.Text        `gorm:"column:credential_id"`
+	Capabilities           StringArray        `gorm:"column:capabilities;type:text[]"`
+	ReasoningCompatibility json.RawMessage    `gorm:"column:reasoning_compatibility;type:jsonb"`
+	ContextWindow          pgtype.Int4        `gorm:"column:context_window"`
+	IsDefault              bool               `gorm:"column:is_default;not null"`
+	Enabled                bool               `gorm:"column:enabled;not null"`
+	HealthStatus           string             `gorm:"column:health_status;not null;default:'unknown'"`
+	HealthCheckedAt        pgtype.Timestamptz `gorm:"column:health_checked_at"`
+	HealthDetail           pgtype.Text        `gorm:"column:health_detail"`
+	CreatedAt              time.Time          `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt              time.Time          `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (Model) TableName() string { return "models" }

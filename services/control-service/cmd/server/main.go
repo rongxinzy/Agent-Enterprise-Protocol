@@ -94,6 +94,12 @@ func runWithDependencies(dependencies serverDependencies) error {
 		defer close(retentionDone)
 		application.RunRetention(retentionContext)
 	}()
+	healthContext, stopHealth := context.WithCancel(ctx)
+	healthDone := make(chan struct{})
+	go func() {
+		defer close(healthDone)
+		application.RunModelHealth(healthContext)
+	}()
 
 	metrics := runtime.NewHTTPMetrics("control_service")
 	api := httpapi.New(application, metrics.Middleware).Handler()
@@ -124,6 +130,7 @@ func runWithDependencies(dependencies serverDependencies) error {
 		}
 	}
 	stopRetention()
+	stopHealth()
 	shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
 	if err := dependencies.shutdown(server, shutdownContext); err != nil {
@@ -134,5 +141,6 @@ func runWithDependencies(dependencies serverDependencies) error {
 		}
 	}
 	<-retentionDone
+	<-healthDone
 	return serveErr
 }

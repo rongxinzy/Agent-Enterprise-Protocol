@@ -1083,6 +1083,24 @@ components:
         - type: object
           properties:
             credentialId: {type: [string, 'null']}
+            healthStatus:
+              description: >-
+                Latest active-probe result for this model. The control plane
+                periodically calls the upstream endpoint with the stored
+                credential to classify reachability, credential validity, and
+                upstream model availability. Server-computed; read-only.
+              type: string
+              enum: [unknown, healthy, credential_invalid, model_missing, unreachable, error]
+              readOnly: true
+            healthCheckedAt:
+              description: When the latest probe finished; null before the first probe.
+              type: [string, 'null']
+              format: date-time
+              readOnly: true
+            healthDetail:
+              description: Short human-readable probe outcome (status code, missing model id, transport error).
+              type: [string, 'null']
+              readOnly: true
     AdminModelList:
       type: object
       required: [models, nextCursor]
@@ -1180,14 +1198,38 @@ components:
           description: Origin of the effective value.
           type: string
           enum: [override, env, unset]
+    DeploymentListSettingValue:
+      description: One deployment-level ordered runtime setting with its override and resolution state.
+      type: object
+      required: [override, effectiveValue, source]
+      properties:
+        override:
+          description: Runtime override stored in the control plane; null when no override is set.
+          type: [array, 'null']
+          items: {type: string}
+        effectiveValue:
+          description: Value currently in effect — the runtime override when set, otherwise the environment-configured value; an empty array when neither exists.
+          type: array
+          items: {type: string}
+        source:
+          description: Origin of the effective value.
+          type: string
+          enum: [override, env, unset]
     DeploymentSettings:
       description: Deployment-level runtime settings maintained through the administration API.
       type: object
-      required: [modelGatewayBaseUrl]
+      required: [modelGatewayBaseUrl, modelFallbackIds]
       properties:
         modelGatewayBaseUrl:
           $ref: '#/components/schemas/DeploymentSettingValue'
           description: Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata.
+        modelFallbackIds:
+          $ref: '#/components/schemas/DeploymentListSettingValue'
+          description: >-
+            Ordered fallback model chain used by platform failover: when an
+            employee's default model is unhealthy, the first healthy model in
+            this list takes over (and the original is restored once it
+            recovers). Empty disables automatic failover.
     DeploymentSettingsUpdate:
       description: Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback.
       type: object
@@ -1198,6 +1240,16 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 2048
+        modelFallbackIds:
+          description: >-
+            New ordered fallback model chain. Every id must reference an
+            enabled model of this deployment; duplicates and unknown ids are
+            rejected. An explicit empty array disables automatic failover;
+            null clears the override and restores the environment-configured
+            chain.
+          type: [array, 'null']
+          items: {type: string, minLength: 1, maxLength: 200}
+          maxItems: 8
     Problem:
       type: object
       required: [type, title, status, code]
