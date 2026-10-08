@@ -229,6 +229,7 @@ func probeOpenAI(ctx context.Context, client *http.Client, base, upstreamModel, 
 	}
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 32<<10))
 	_ = response.Body.Close()
+	body = scrubCredential(body, credentialValue)
 	switch {
 	case response.StatusCode == http.StatusOK:
 		var catalog struct {
@@ -286,6 +287,7 @@ func probeOpenAICompletion(ctx context.Context, client *http.Client, base, upstr
 	}
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 32<<10))
 	_ = response.Body.Close()
+	body = scrubCredential(body, credentialValue)
 	switch response.StatusCode {
 	case http.StatusOK:
 		return probeOutcome{Status: ModelHealthHealthy, Detail: "the upstream answered a minimal completion"}
@@ -321,6 +323,7 @@ func probeAnthropic(ctx context.Context, client *http.Client, base, upstreamMode
 	}
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 32<<10))
 	_ = response.Body.Close()
+	body = scrubCredential(body, credentialValue)
 	switch response.StatusCode {
 	case http.StatusOK:
 		return probeOutcome{Status: ModelHealthHealthy, Detail: "the upstream answered a minimal messages call"}
@@ -362,6 +365,17 @@ func transportDetail(err error) string {
 		message = message[:200]
 	}
 	return message
+}
+
+// scrubCredential removes any echo of the probe credential from a response
+// snippet. Some providers quote the presented key (or a fragment) in their
+// error bodies; health details are persisted and shown in the console, so the
+// value must never survive into them.
+func scrubCredential(body []byte, credentialValue string) []byte {
+	if credentialValue == "" {
+		return body
+	}
+	return bytes.ReplaceAll(body, []byte(credentialValue), []byte("***"))
 }
 
 func snippetOf(body []byte) string {

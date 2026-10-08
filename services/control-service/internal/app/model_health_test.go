@@ -111,6 +111,19 @@ func TestProbeModelAnthropicClassifiesModelMissing(t *testing.T) {
 	}
 }
 
+func TestProbeModelScrubsCredentialEchoesFromDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided: sk-secret-12345. Rotate it."}}`))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "sk-secret-12345")
+	if strings.Contains(outcome.Detail, "sk-secret-12345") || !strings.Contains(outcome.Detail, "***") {
+		t.Fatalf("credential echoes must be scrubbed from details: %#v", outcome)
+	}
+}
+
 func TestProbeModelUnreachableEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	client := server.Client()
