@@ -3374,6 +3374,38 @@ components:
               type:
                 - string
                 - 'null'
+            healthStatus:
+              description: Latest active-probe result for this model. The control plane periodically calls the upstream endpoint with the stored credential to classify reachability, credential validity, and upstream model availability. Server-computed; read-only.
+              type: string
+              enum:
+                - unknown
+                - healthy
+                - credential_invalid
+                - denied
+                - model_missing
+                - unreachable
+                - error
+              readOnly: true
+            healthCheckedAt:
+              description: When the latest probe finished; null before the first probe.
+              type:
+                - string
+                - 'null'
+              format: date-time
+              readOnly: true
+            healthSince:
+              description: When the current healthStatus began (set on transitions). Consumers derive hysteresis from this — e.g. fail over only after N minutes of continuous unhealth. Server-computed; read-only.
+              type:
+                - string
+                - 'null'
+              format: date-time
+              readOnly: true
+            healthDetail:
+              description: Short human-readable probe outcome (status code, missing model id, transport error).
+              type:
+                - string
+                - 'null'
+              readOnly: true
     AdminModelList:
       type: object
       required:

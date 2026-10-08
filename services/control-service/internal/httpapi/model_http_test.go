@@ -17,14 +17,14 @@ import (
 func modelHTTPColumns() []string {
 	return []string{
 		"deployment_id", "id", "display_name", "source_type", "protocol", "endpoint", "upstream_model", "local_model_ref", "credential_id",
-		"capabilities", "reasoning_compatibility", "context_window", "is_default", "enabled", "created_at", "updated_at",
+		"capabilities", "reasoning_compatibility", "context_window", "is_default", "enabled", "health_status", "health_checked_at", "health_since", "health_detail", "created_at", "updated_at",
 	}
 }
 
 func modelRuntimeColumns() []string {
 	return []string{
 		"id", "display_name", "source_type", "protocol", "endpoint", "upstream_model", "local_model_ref", "credential_id",
-		"capabilities", "reasoning_compatibility", "context_window", "is_default", "enabled", "created_at", "updated_at",
+		"capabilities", "reasoning_compatibility", "context_window", "is_default", "enabled", "health_status", "health_checked_at", "health_since", "health_detail", "created_at", "updated_at",
 	}
 }
 
@@ -67,7 +67,7 @@ func TestAdminModelLifecycle(t *testing.T) {
 		).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
 			"enterprise-chat", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
-			[]string{"reasoning", "text"}, reasoning, int64(32768), true, true, now, now,
+			[]string{"reasoning", "text"}, reasoning, int64(32768), true, true, "healthy", now, now, "upstream catalog lists deepseek-chat", now, now,
 		))
 	pool.ExpectCommit()
 	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/models", `{
@@ -85,10 +85,11 @@ func TestAdminModelLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "enterprise-chat", 1).
 		WillReturnRows(sqlmock.NewRows(modelHTTPColumns()).AddRow(
 			"deployment-a", "enterprise-chat", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
-			`{reasoning,text}`, reasoning, 32768, true, true, now, now,
+			`{reasoning,text}`, reasoning, 32768, true, true, "credential_invalid", now, now, "HTTP 401: unauthorized", now, now,
 		))
 	got := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/models/enterprise-chat", "")
-	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"credentialId":"credential-a"`) || !strings.Contains(got.Body.String(), `"contextWindow":32768`) {
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"credentialId":"credential-a"`) || !strings.Contains(got.Body.String(), `"contextWindow":32768`) ||
+		!strings.Contains(got.Body.String(), `"healthStatus":"credential_invalid"`) || !strings.Contains(got.Body.String(), `"healthDetail":"HTTP 401: unauthorized"`) {
 		t.Fatalf("get model = %d %s", got.Code, got.Body.String())
 	}
 
@@ -104,7 +105,7 @@ func TestAdminModelLifecycle(t *testing.T) {
 		).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
 			"enterprise-chat", "Enterprise Chat 2", "gateway", "openai-compatible", "http://gateway/v2", "deepseek-reasoner", nil, "credential-b",
-			[]string{"reasoning", "streaming", "text"}, reasoning, int64(65536), true, true, now, now,
+			[]string{"reasoning", "streaming", "text"}, reasoning, int64(65536), true, true, "healthy", now, now, nil, now, now,
 		))
 	pool.ExpectCommit()
 	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/enterprise-chat", `{
@@ -168,7 +169,7 @@ func TestUserModelCatalogUsesAssignmentsAndHidesCredential(t *testing.T) {
 		WithArgs("deployment-a", true, "chat-a").
 		WillReturnRows(sqlmock.NewRows(modelHTTPColumns()).AddRow(
 			"deployment-a", "chat-a", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
-			`{text,reasoning}`, []byte(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}`), 32768, true, true, now, now,
+			`{text,reasoning}`, []byte(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}`), 32768, true, true, "unknown", nil, nil, nil, now, now,
 		))
 	response := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/models", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"chat-a"`) || !strings.Contains(response.Body.String(), `"reasoningCompatibility"`) || strings.Contains(response.Body.String(), "credentialId") || strings.Contains(response.Body.String(), "credential-a") {
@@ -191,7 +192,7 @@ func TestAdminModelAnthropicPatchGuard(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
 			"bench-anthropic", "Bench", "gateway", "anthropic", "https://open.bigmodel.cn/api/anthropic", "glm-5.3-flash", nil, "credential-bigmodel",
-			[]string{"text"}, reasoning, nil, false, true, now, now,
+			[]string{"text"}, reasoning, nil, false, true, "unknown", nil, nil, nil, now, now,
 		))
 	pool.ExpectRollback()
 	rejected := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/bench-anthropic", `{"reasoningCompatibility":{"thinkingFormat":"deepseek","supportsReasoningEffort":true,"requiresReasoningContentOnAssistantMessages":true}}`)
@@ -205,7 +206,7 @@ func TestAdminModelAnthropicPatchGuard(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
 			"bench-anthropic", "Bench", "gateway", "anthropic", "/v1", "glm-5.3-flash", nil, nil,
-			[]string{"text"}, nil, nil, false, true, now, now,
+			[]string{"text"}, nil, nil, false, true, "unknown", nil, nil, nil, now, now,
 		))
 	pool.ExpectRollback()
 	broken := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/bench-anthropic", `{"endpoint":"/v1"}`)
@@ -219,7 +220,7 @@ func TestAdminModelAnthropicPatchGuard(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
 			"chat-a", "Chat", "gateway", "openai-compatible", "/v1", "deepseek-chat", nil, nil,
-			[]string{"text"}, nil, nil, false, true, now, now,
+			[]string{"text"}, nil, nil, false, true, "unknown", nil, nil, nil, now, now,
 		))
 	pool.ExpectCommit()
 	allowed := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/chat-a", `{"endpoint":"/v1"}`)

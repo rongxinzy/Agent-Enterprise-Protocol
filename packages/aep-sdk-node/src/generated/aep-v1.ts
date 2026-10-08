@@ -2296,6 +2296,23 @@ export interface components {
         };
         AdminModel: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
+            /**
+             * @description Latest active-probe result for this model. The control plane periodically calls the upstream endpoint with the stored credential to classify reachability, credential validity, and upstream model availability. Server-computed; read-only.
+             * @enum {string}
+             */
+            readonly healthStatus?: "unknown" | "healthy" | "credential_invalid" | "denied" | "model_missing" | "unreachable" | "error";
+            /**
+             * Format: date-time
+             * @description When the latest probe finished; null before the first probe.
+             */
+            readonly healthCheckedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description When the current healthStatus began (set on transitions). Consumers derive hysteresis from this — e.g. fail over only after N minutes of continuous unhealth. Server-computed; read-only.
+             */
+            readonly healthSince?: string | null;
+            /** @description Short human-readable probe outcome (status code, missing model id, transport error). */
+            readonly healthDetail?: string | null;
         };
         AdminModelList: {
             models: components["schemas"]["AdminModel"][];
@@ -2372,15 +2389,31 @@ export interface components {
              */
             source: "override" | "env" | "unset";
         };
+        /** @description One deployment-level ordered runtime setting with its override and resolution state. */
+        DeploymentListSettingValue: {
+            /** @description Runtime override stored in the control plane; null when no override is set. */
+            override: string[] | null;
+            /** @description Value currently in effect — the runtime override when set, otherwise the environment-configured value; an empty array when neither exists. */
+            effectiveValue: string[];
+            /**
+             * @description Origin of the effective value.
+             * @enum {string}
+             */
+            source: "override" | "env" | "unset";
+        };
         /** @description Deployment-level runtime settings maintained through the administration API. */
         DeploymentSettings: {
             /** @description Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata. */
             modelGatewayBaseUrl: components["schemas"]["DeploymentSettingValue"];
+            /** @description Ordered fallback model chain used by platform failover: when an employee's default model is unhealthy, the first healthy model in this list takes over (and the original is restored once it recovers). Empty disables automatic failover. */
+            modelFallbackIds: components["schemas"]["DeploymentListSettingValue"];
         };
         /** @description Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback. */
         DeploymentSettingsUpdate: {
             /** @description New model gateway runtime override. It must be an absolute http or https URL whose hostname is not cluster-internal; production deployments additionally reject loopback addresses. Null clears the override so the AEP_MODEL_GATEWAY_BASE_URL environment value applies again. */
             modelGatewayBaseUrl?: string | null;
+            /** @description New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete absolute endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain. */
+            modelFallbackIds?: string[] | null;
         };
     };
     responses: {
