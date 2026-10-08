@@ -88,6 +88,23 @@ func TestLoadParsesTrustedProxyCIDRs(t *testing.T) {
 	}
 }
 
+func TestLoadParsesModelFallbackIDs(t *testing.T) {
+	t.Setenv("AEP_MODEL_FALLBACK_IDS", " bench-qwen , bench-glm ,bench-qwen, ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"bench-qwen", "bench-glm"}
+	if len(cfg.ModelFallbackIDs) != len(want) || cfg.ModelFallbackIDs[0] != want[0] || cfg.ModelFallbackIDs[1] != want[1] {
+		t.Fatalf("ModelFallbackIDs = %#v, want %#v (trimmed, order-preserving, deduplicated)", cfg.ModelFallbackIDs, want)
+	}
+
+	t.Setenv("AEP_MODEL_FALLBACK_IDS", "a,b,c,d,e,f,g,h,i")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_MODEL_FALLBACK_IDS") {
+		t.Fatalf("nine entries must be rejected, got %v", err)
+	}
+}
+
 func TestLoadRejectsInvertedLoginBackoff(t *testing.T) {
 	clearEnvironment(t)
 	t.Setenv("AEP_LOGIN_BACKOFF_BASE", "2m")

@@ -263,8 +263,8 @@ func probeOpenAI(ctx context.Context, client *http.Client, base, upstreamModel, 
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 32<<10))
 	_ = response.Body.Close()
 	body = scrubCredential(body, credentialValue)
-	switch {
-	case response.StatusCode == http.StatusOK:
+	switch response.StatusCode {
+	case http.StatusOK:
 		var catalog struct {
 			Data []struct {
 				ID      string   `json:"id"`
@@ -289,11 +289,11 @@ func probeOpenAI(ctx context.Context, client *http.Client, base, upstreamModel, 
 		// credential acceptance; fall through to a completion probe for the
 		// model id check.
 		return probeOpenAICompletion(ctx, client, base, upstreamModel, credentialValue)
-	case response.StatusCode == http.StatusUnauthorized:
+	case http.StatusUnauthorized:
 		return probeOutcome{Status: ModelHealthCredentialInvalid, Detail: statusDetail(response.StatusCode, body)}
-	case response.StatusCode == http.StatusForbidden:
+	case http.StatusForbidden:
 		return probeOutcome{Status: ModelHealthDenied, Detail: statusDetail(response.StatusCode, body)}
-	case response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed:
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
 		// Some OpenAI-compatible servers expose no catalog route; probe with
 		// a minimal completion instead.
 		return probeOpenAICompletion(ctx, client, base, upstreamModel, credentialValue)

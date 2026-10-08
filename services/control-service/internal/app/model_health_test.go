@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	pgxmock "github.com/pashagolub/pgxmock/v4"
 
@@ -285,6 +286,146 @@ func TestProbeModelClassifies5xxAsError(t *testing.T) {
 	outcome := probeModel(context.Background(), server.Client(), "anthropic", server.URL, "model-a", "key")
 	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "502") {
 		t.Fatalf("5xx rides the hysteresis path: %#v", outcome)
+	}
+}
+
+func TestProbeModelUnsupportedProtocol(t *testing.T) {
+	outcome := probeModel(context.Background(), http.DefaultClient, "grpc", "http://upstream.example", "m", "")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "unsupported protocol") {
+		t.Fatalf("unknown protocol is a configuration error: %#v", outcome)
+	}
+	outcome = probeModel(context.Background(), http.DefaultClient, "openai-compatible", "  ", "m", "")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "no endpoint") {
+		t.Fatalf("missing endpoint is a configuration error: %#v", outcome)
+	}
+}
+
+func TestProbeModelCompletionClassifiesModelMissingAndUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"The model 'gone' does not exist"}}`))
+	}))
+	defer server.Close()
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "gone", "")
+	if outcome.Status != ModelHealthModelMissing {
+		t.Fatalf("a completion 400 naming the model means the model is missing: %#v", outcome)
+	}
+
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	client := closed.Client()
+	url := closed.URL
+	closed.Close()
+	outcome = probeModel(context.Background(), client, "openai-compatible", url, "m", "")
+	if outcome.Status != ModelHealthUnreachable {
+		t.Fatalf("refused completion connection is unreachable: %#v", outcome)
+	}
+}
+
+func TestProbeModelOpenAINonJSONCatalogFallsBackToCompletion(t *testing.T) {
+	var completionProbed bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte("not json at all"))
+		case "/chat/completions":
+			completionProbed = true
+			_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"p"}}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "")
+	if outcome.Status != ModelHealthHealthy || !completionProbed {
+		t.Fatalf("an unparsable catalog must fall back to a completion probe: %#v", outcome)
+	}
+}
+
+func TestProbeModelAnthropicTypeOnlyBodyIsHealthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"type":"message"}`))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "anthropic", server.URL, "model-a", "k")
+	if outcome.Status != ModelHealthHealthy {
+		t.Fatalf("a typed message envelope is a real response: %#v", outcome)
+	}
+}
+
+func TestSnippetAndTransportTruncation(t *testing.T) {
+	long := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(strings.Repeat("x", 400)))
+	}))
+	defer long.Close()
+	outcome := probeModel(context.Background(), long.Client(), "anthropic", long.URL, "m", "k")
+	if outcome.Status != ModelHealthError || utf8.RuneCountInString(outcome.Detail) > 200 {
+		t.Fatalf("long bodies must be truncated into the detail: %#v", outcome)
+	}
+
+	endpoint := "http://127.0.0.1:1/" + strings.Repeat("a", 250)
+	outcome = probeModel(context.Background(), http.DefaultClient, "anthropic", endpoint, "m", "k")
+	if outcome.Status != ModelHealthUnreachable || len(outcome.Detail) > 200 {
+		t.Fatalf("long transport errors must be truncated: %#v", outcome)
+	}
+}
+
+func TestCheckModelHealthBoundCredentialWithoutStore(t *testing.T) {
+	application, pool, _ := newMockApplication(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+
+	credentialID := "cred-missing-store"
+	pool.ExpectQuery(`SELECT deployment_id,id,protocol,endpoint,upstream_model,credential_id,health_status`).
+		WillReturnRows(pgxmock.NewRows([]string{"deployment_id", "id", "protocol", "endpoint", "upstream_model", "credential_id", "health_status"}).
+			AddRow("demo", "bench-a", "openai-compatible", upstream.URL, "model-a", &credentialID, "unknown"))
+	pool.ExpectExec(`UPDATE models SET health_status`).
+		WithArgs("demo", "bench-a", ModelHealthError, pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	result, err := application.CheckModelHealth(context.Background(), now, upstream.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Checked != 1 || result.Unhealthy != 1 {
+		t.Fatalf("an unresolvable bound credential records an error outcome: %#v", result)
+	}
+}
+
+func TestRunModelHealthDisabledAndInitialRound(t *testing.T) {
+	application, _, _ := newMockApplication(t)
+	application.Config.ModelHealthInterval = 0
+	done := make(chan struct{})
+	go func() { application.RunModelHealth(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a disabled prober must return immediately")
+	}
+
+	application, pool, _ := newMockApplication(t)
+	application.Config.ModelHealthInterval = time.Hour
+	application.Config.ModelHealthTimeout = time.Second
+	pool.ExpectQuery(`SELECT deployment_id,id,protocol,endpoint,upstream_model,credential_id,health_status`).
+		WillReturnRows(pgxmock.NewRows([]string{"deployment_id", "id", "protocol", "endpoint", "upstream_model", "credential_id", "health_status"}))
+	ctx, cancel := context.WithCancel(context.Background())
+	done = make(chan struct{})
+	go func() { application.RunModelHealth(ctx); close(done) }()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelling must stop the prober")
 	}
 }
 
