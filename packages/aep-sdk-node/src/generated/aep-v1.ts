@@ -2300,7 +2300,7 @@ export interface components {
              * @description Latest active-probe result for this model. The control plane periodically calls the upstream endpoint with the stored credential to classify reachability, credential validity, and upstream model availability. Server-computed; read-only.
              * @enum {string}
              */
-            readonly healthStatus?: "unknown" | "healthy" | "credential_invalid" | "model_missing" | "unreachable" | "error";
+            readonly healthStatus?: "unknown" | "healthy" | "credential_invalid" | "denied" | "model_missing" | "unreachable" | "error";
             /**
              * Format: date-time
              * @description When the latest probe finished; null before the first probe.

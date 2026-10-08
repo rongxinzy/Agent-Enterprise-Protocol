@@ -24,11 +24,16 @@ import (
 // credential stored on the model, persists the classification on the model
 // row, and logs transitions so the audit pipeline carries them.
 
-// Model health statuses persisted on models.health_status.
+// Model health statuses persisted on models.health_status. credential_invalid
+// (HTTP 401) and denied (HTTP 403 — often throttling, occasionally a revoked
+// grant; either way the model cannot serve right now) are hard failures that
+// warrant immediate failover; unreachable/error may be transient and are left
+// to the consumer's hysteresis.
 const (
 	ModelHealthUnknown           = "unknown"
 	ModelHealthHealthy           = "healthy"
 	ModelHealthCredentialInvalid = "credential_invalid"
+	ModelHealthDenied            = "denied"
 	ModelHealthModelMissing      = "model_missing"
 	ModelHealthUnreachable       = "unreachable"
 	ModelHealthError             = "error"
@@ -186,7 +191,7 @@ func (a *App) recordModelHealth(ctx context.Context, row modelProbeRow, outcome 
 	if outcome.Detail != "" {
 		detail = outcome.Detail
 	}
-	_, err := a.database().Exec(ctx, `UPDATE models SET health_status=$3,health_checked_at=$4,health_detail=$5,health_since=CASE WHEN health_status<>$3 THEN $4 ELSE health_since END WHERE deployment_id=$1 AND id=$2`,
+	_, err := a.database().Exec(ctx, `UPDATE models SET health_status=$3,health_checked_at=$4,health_detail=$5,health_since=CASE WHEN health_status<>$3 OR health_since IS NULL THEN $4 ELSE health_since END WHERE deployment_id=$1 AND id=$2`,
 		row.deploymentID, row.modelID, outcome.Status, now, detail)
 	if err != nil {
 		return fmt.Errorf("record model health for %s: %w", row.modelID, err)
@@ -256,8 +261,10 @@ func probeOpenAI(ctx context.Context, client *http.Client, base, upstreamModel, 
 		// credential acceptance; fall through to a completion probe for the
 		// model id check.
 		return probeOpenAICompletion(ctx, client, base, upstreamModel, credentialValue)
-	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
+	case response.StatusCode == http.StatusUnauthorized:
 		return probeOutcome{Status: ModelHealthCredentialInvalid, Detail: statusDetail(response.StatusCode, body)}
+	case response.StatusCode == http.StatusForbidden:
+		return probeOutcome{Status: ModelHealthDenied, Detail: statusDetail(response.StatusCode, body)}
 	case response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed:
 		// Some OpenAI-compatible servers expose no catalog route; probe with
 		// a minimal completion instead.
@@ -291,8 +298,10 @@ func probeOpenAICompletion(ctx context.Context, client *http.Client, base, upstr
 	switch response.StatusCode {
 	case http.StatusOK:
 		return probeOutcome{Status: ModelHealthHealthy, Detail: "the upstream answered a minimal completion"}
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
 		return probeOutcome{Status: ModelHealthCredentialInvalid, Detail: statusDetail(response.StatusCode, body)}
+	case http.StatusForbidden:
+		return probeOutcome{Status: ModelHealthDenied, Detail: statusDetail(response.StatusCode, body)}
 	default:
 		outcome := classifyHTTPStatus(response.StatusCode, body)
 		if outcome.Status == ModelHealthError && (response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusNotFound) && strings.Contains(strings.ToLower(string(body)), "model") {
@@ -327,8 +336,10 @@ func probeAnthropic(ctx context.Context, client *http.Client, base, upstreamMode
 	switch response.StatusCode {
 	case http.StatusOK:
 		return probeOutcome{Status: ModelHealthHealthy, Detail: "the upstream answered a minimal messages call"}
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
 		return probeOutcome{Status: ModelHealthCredentialInvalid, Detail: statusDetail(response.StatusCode, body)}
+	case http.StatusForbidden:
+		return probeOutcome{Status: ModelHealthDenied, Detail: statusDetail(response.StatusCode, body)}
 	case http.StatusNotFound:
 		return probeOutcome{Status: ModelHealthModelMissing, Detail: statusDetail(response.StatusCode, body)}
 	default:

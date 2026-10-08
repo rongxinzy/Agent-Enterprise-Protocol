@@ -1090,7 +1090,7 @@ components:
                 credential to classify reachability, credential validity, and
                 upstream model availability. Server-computed; read-only.
               type: string
-              enum: [unknown, healthy, credential_invalid, model_missing, unreachable, error]
+              enum: [unknown, healthy, credential_invalid, denied, model_missing, unreachable, error]
               readOnly: true
             healthCheckedAt:
               description: When the latest probe finished; null before the first probe.

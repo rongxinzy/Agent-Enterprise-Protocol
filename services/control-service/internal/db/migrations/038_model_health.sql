@@ -13,7 +13,7 @@
 
 ALTER TABLE models
   ADD COLUMN IF NOT EXISTS health_status text NOT NULL DEFAULT 'unknown'
-    CHECK (health_status IN ('unknown', 'healthy', 'credential_invalid', 'model_missing', 'unreachable', 'error')),
+    CHECK (health_status IN ('unknown', 'healthy', 'credential_invalid', 'denied', 'model_missing', 'unreachable', 'error')),
   ADD COLUMN IF NOT EXISTS health_checked_at timestamptz,
   ADD COLUMN IF NOT EXISTS health_since timestamptz,
   ADD COLUMN IF NOT EXISTS health_detail text;

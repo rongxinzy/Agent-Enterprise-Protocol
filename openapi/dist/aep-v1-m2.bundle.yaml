@@ -5001,6 +5001,7 @@ components:
                 - unknown
                 - healthy
                 - credential_invalid
+                - denied
                 - model_missing
                 - unreachable
                 - error
