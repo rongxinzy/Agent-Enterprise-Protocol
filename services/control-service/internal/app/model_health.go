@@ -95,7 +95,16 @@ ORDER BY deployment_id,id`)
 		return result, fmt.Errorf("iterate models for health check: %w", err)
 	}
 
-	for _, row := range models {
+	skipped := 0
+	var skipReason error
+	for index, row := range models {
+		if ctx.Err() != nil {
+			// The round budget is exhausted (or the service is shutting
+			// down): stop quietly instead of misclassifying every remaining
+			// model as unreachable.
+			skipped, skipReason = len(models)-index, ctx.Err()
+			break
+		}
 		var outcome probeOutcome
 		secret, credentialErr := a.modelCredential(ctx, row.deploymentID, row.credentialID)
 		if credentialErr != nil {
@@ -104,6 +113,10 @@ ORDER BY deployment_id,id`)
 			outcome = probeModel(ctx, client, row.protocol, row.endpoint, row.upstreamModel, secret)
 		}
 		if err := a.recordModelHealth(ctx, row, outcome, now); err != nil {
+			if ctx.Err() != nil {
+				skipped, skipReason = len(models)-index, ctx.Err()
+				break
+			}
 			return result, err
 		}
 		result.Checked++
@@ -123,6 +136,9 @@ ORDER BY deployment_id,id`)
 				"from", row.currentStatus, "to", outcome.Status, "detail", outcome.Detail)
 		}
 	}
+	if skipped > 0 {
+		slog.Warn("model health round ended early", "probed", result.Checked, "skipped", skipped, "reason", skipReason)
+	}
 	return result, nil
 }
 
@@ -140,6 +156,11 @@ func (a *App) RunModelHealth(ctx context.Context) {
 		defer cancel()
 		result, err := a.CheckModelHealth(checkCtx, time.Now().UTC(), client)
 		if err != nil {
+			if ctx.Err() != nil || checkCtx.Err() != nil {
+				// Shutdown or an exhausted round budget; the checker already
+				// accounted for the skipped models. Not an operational error.
+				return
+			}
 			slog.Warn("model health check failed", "error", err)
 			return
 		}
@@ -208,6 +229,12 @@ func probeModel(ctx context.Context, client *http.Client, protocol, endpoint, up
 	base := strings.TrimRight(strings.TrimSpace(endpoint), "/")
 	if base == "" {
 		return probeOutcome{Status: ModelHealthError, Detail: "the model has no endpoint"}
+	}
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		// A relative endpoint cannot be probed directly; classify it as a
+		// configuration error rather than an upstream outage so it does not
+		// read as a transient network failure.
+		return probeOutcome{Status: ModelHealthError, Detail: "endpoint " + base + " is not an absolute URL; active probing requires one"}
 	}
 	switch protocol {
 	case "openai-compatible":
@@ -297,6 +324,9 @@ func probeOpenAICompletion(ctx context.Context, client *http.Client, base, upstr
 	body = scrubCredential(body, credentialValue)
 	switch response.StatusCode {
 	case http.StatusOK:
+		if !validOpenAICompletion(body) {
+			return probeOutcome{Status: ModelHealthError, Detail: "HTTP 200 without a completion payload (an intercepting proxy or login page answered)"}
+		}
 		return probeOutcome{Status: ModelHealthHealthy, Detail: "the upstream answered a minimal completion"}
 	case http.StatusUnauthorized:
 		return probeOutcome{Status: ModelHealthCredentialInvalid, Detail: statusDetail(response.StatusCode, body)}
@@ -335,12 +365,18 @@ func probeAnthropic(ctx context.Context, client *http.Client, base, upstreamMode
 	body = scrubCredential(body, credentialValue)
 	switch response.StatusCode {
 	case http.StatusOK:
+		if !validAnthropicMessage(body) {
+			return probeOutcome{Status: ModelHealthError, Detail: "HTTP 200 without a messages payload (an intercepting proxy or login page answered)"}
+		}
 		return probeOutcome{Status: ModelHealthHealthy, Detail: "the upstream answered a minimal messages call"}
 	case http.StatusUnauthorized:
 		return probeOutcome{Status: ModelHealthCredentialInvalid, Detail: statusDetail(response.StatusCode, body)}
 	case http.StatusForbidden:
 		return probeOutcome{Status: ModelHealthDenied, Detail: statusDetail(response.StatusCode, body)}
 	case http.StatusNotFound:
+		// Heuristic: a 404 usually means the upstream model id is gone, but
+		// a misconfigured endpoint path (e.g. one already ending in /v1)
+		// also lands here — the detail keeps the status code for triage.
 		return probeOutcome{Status: ModelHealthModelMissing, Detail: statusDetail(response.StatusCode, body)}
 	default:
 		outcome := classifyHTTPStatus(response.StatusCode, body)
@@ -351,15 +387,34 @@ func probeAnthropic(ctx context.Context, client *http.Client, base, upstreamMode
 	}
 }
 
-func classifyHTTPStatus(status int, body []byte) probeOutcome {
-	switch {
-	case status == http.StatusTooManyRequests:
-		return probeOutcome{Status: ModelHealthError, Detail: statusDetail(status, body)}
-	case status >= 500:
-		return probeOutcome{Status: ModelHealthError, Detail: statusDetail(status, body)}
-	default:
-		return probeOutcome{Status: ModelHealthError, Detail: statusDetail(status, body)}
+// validOpenAICompletion reports whether a 200 body is an actual completion.
+// Intercepting proxies (SSO portals, captive gateways, session-expiry
+// redirects followed to a login page) answer 200 with HTML that would
+// otherwise masquerade as a healthy model.
+func validOpenAICompletion(body []byte) bool {
+	var payload struct {
+		Choices []json.RawMessage `json:"choices"`
 	}
+	return json.Unmarshal(body, &payload) == nil && len(payload.Choices) >= 1
+}
+
+// validAnthropicMessage reports whether a 200 body is an actual messages
+// response ("type" or "content" must be present — see validOpenAICompletion
+// for the failure mode this guards against).
+func validAnthropicMessage(body []byte) bool {
+	var payload struct {
+		Type    string            `json:"type"`
+		Content []json.RawMessage `json:"content"`
+	}
+	return json.Unmarshal(body, &payload) == nil && (payload.Type != "" || payload.Content != nil)
+}
+
+// classifyHTTPStatus maps every remaining status to error. 429/5xx mean "we
+// cannot get an answer right now" without proving the credential or model
+// invalid, so they ride the consumer's hysteresis instead of triggering an
+// immediate failover.
+func classifyHTTPStatus(status int, body []byte) probeOutcome {
+	return probeOutcome{Status: ModelHealthError, Detail: statusDetail(status, body)}
 }
 
 func statusDetail(status int, body []byte) string {
@@ -378,15 +433,31 @@ func transportDetail(err error) string {
 	return message
 }
 
-// scrubCredential removes any echo of the probe credential from a response
-// snippet. Some providers quote the presented key (or a fragment) in their
-// error bodies; health details are persisted and shown in the console, so the
-// value must never survive into them.
+// scrubCredential removes exact (case-insensitive) echoes of the probe
+// credential from a response snippet. Some providers quote the presented key
+// in their error bodies; health details are persisted and shown in the
+// console, so the value must never survive into them. Boundary: this only
+// covers byte-exact echoes — partial reveals (last four characters), JSON
+// escape forms and URL-encoded forms are not scrubbed, so details must not
+// be treated as a leak-proof channel.
 func scrubCredential(body []byte, credentialValue string) []byte {
 	if credentialValue == "" {
 		return body
 	}
-	return bytes.ReplaceAll(body, []byte(credentialValue), []byte("***"))
+	lowerBody := bytes.ToLower(body)
+	needle := bytes.ToLower([]byte(credentialValue))
+	var result []byte
+	for {
+		index := bytes.Index(lowerBody, needle)
+		if index < 0 {
+			result = append(result, body...)
+			return result
+		}
+		result = append(result, body[:index]...)
+		result = append(result, "***"...)
+		body = body[index+len(needle):]
+		lowerBody = lowerBody[index+len(needle):]
+	}
 }
 
 func snippetOf(body []byte) string {

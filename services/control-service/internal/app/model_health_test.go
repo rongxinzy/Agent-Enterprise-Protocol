@@ -9,6 +9,8 @@ import (
 	"time"
 
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 )
 
 func TestProbeModelClassifiesOpenAICatalog(t *testing.T) {
@@ -63,7 +65,7 @@ func TestProbeModelOpenAIWithoutCatalogFallsBackToCompletion(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/chat/completions":
 			completionProbed = true
-			_, _ = w.Write([]byte(`{"choices":[]}`))
+			_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"p"}}]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -146,6 +148,143 @@ func TestProbeModelUnreachableEndpoint(t *testing.T) {
 	outcome := probeModel(context.Background(), client, "anthropic", url, "model-a", "key")
 	if outcome.Status != ModelHealthUnreachable {
 		t.Fatalf("a refused connection should classify unreachable: %#v", outcome)
+	}
+}
+
+func TestProbeModelRejectsHTML200InsteadOfHealthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<!doctype html><html><body>login required</body></html>"))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "key")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "200 without a completion payload") {
+		t.Fatalf("an HTML 200 must not read as healthy: %#v", outcome)
+	}
+}
+
+func TestProbeModelRejectsHTML200OnAnthropic(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>sso</html>"))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "anthropic", server.URL, "model-a", "key")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "200 without a messages payload") {
+		t.Fatalf("an HTML 200 must not read as healthy: %#v", outcome)
+	}
+}
+
+func TestProbeModelRedirectToLoginPageIsNotHealthy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html>sign in</html>"))
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusFound)
+	}))
+	defer server.Close()
+
+	for _, protocol := range []string{"openai-compatible", "anthropic"} {
+		outcome := probeModel(context.Background(), server.Client(), protocol, server.URL, "model-a", "key")
+		if outcome.Status == ModelHealthHealthy {
+			t.Fatalf("%s: a login-page redirect must not read as healthy: %#v", protocol, outcome)
+		}
+	}
+}
+
+func TestProbeModelClassifies429AsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"slow down"}}`))
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "key")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "429") {
+		t.Fatalf("429 rides the hysteresis path, not a hard failover: %#v", outcome)
+	}
+}
+
+func TestProbeModelOpenAIEmptyCatalogFallsBackToCompletion(t *testing.T) {
+	var completionProbed bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+		case "/chat/completions":
+			completionProbed = true
+			_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"p"}}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "")
+	if outcome.Status != ModelHealthHealthy || !completionProbed {
+		t.Fatalf("an empty catalog should fall back to a completion probe: %#v", outcome)
+	}
+}
+
+func TestProbeModelRelativeEndpointIsConfigurationError(t *testing.T) {
+	outcome := probeModel(context.Background(), http.DefaultClient, "openai-compatible", "/v1", "model-a", "key")
+	if outcome.Status != ModelHealthError || !strings.Contains(outcome.Detail, "not an absolute URL") {
+		t.Fatalf("a relative endpoint is a configuration problem, not unreachability: %#v", outcome)
+	}
+}
+
+// staticKeyProvider serves one fixed master key to the Sealer.
+type staticKeyProvider struct{ key credential.MasterKey }
+
+func (p staticKeyProvider) Active(context.Context) (credential.MasterKey, error) { return p.key, nil }
+func (p staticKeyProvider) ByID(context.Context, string) (credential.MasterKey, error) {
+	return p.key, nil
+}
+
+func TestCheckModelHealthResolvesSealedCredential(t *testing.T) {
+	application, pool, _ := newMockApplication(t)
+	key := credential.MasterKey{ID: "key-1", Bytes: []byte("0123456789abcdef0123456789abcdef")}
+	sealer := credential.NewSealer(staticKeyProvider{key: key})
+	envelope, err := sealer.Seal(context.Background(), []byte("secret-key"), credential.AssociatedData("demo", "cred-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	application.Credentials = sealer
+
+	var sawAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"model-a"}]}`))
+	}))
+	defer upstream.Close()
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+
+	credentialID := "cred-a"
+	pool.ExpectQuery(`SELECT deployment_id,id,protocol,endpoint,upstream_model,credential_id,health_status`).
+		WillReturnRows(pgxmock.NewRows([]string{"deployment_id", "id", "protocol", "endpoint", "upstream_model", "credential_id", "health_status"}).
+			AddRow("demo", "bench-a", "openai-compatible", upstream.URL, "model-a", &credentialID, "unknown"))
+	pool.ExpectQuery(`SELECT encrypted_value,nonce,key_id FROM credentials`).
+		WithArgs("demo", "cred-a").
+		WillReturnRows(pgxmock.NewRows([]string{"encrypted_value", "nonce", "key_id"}).
+			AddRow(envelope.Ciphertext, envelope.Nonce, envelope.KeyID))
+	pool.ExpectExec(`UPDATE models SET health_status`).
+		WithArgs("demo", "bench-a", ModelHealthHealthy, pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	result, err := application.CheckModelHealth(context.Background(), now, upstream.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Healthy != 1 || sawAuth != "Bearer secret-key" {
+		t.Fatalf("the sealed credential must reach the upstream: result=%#v auth=%q", result, sawAuth)
 	}
 }
 

@@ -220,60 +220,66 @@ func (s *Server) updateDeploymentSettings(response http.ResponseWriter, request 
 		databaseFailure(response, request, errors.New("database unavailable"))
 		return
 	}
-	if input.HasModelGatewayBaseURL {
-		var stored any
-		if input.ModelGatewayBaseURL != nil {
-			value := *input.ModelGatewayBaseURL
-			if problem := validateModelGatewayBaseURL(value, s.app.Config.Environment); problem != "" {
-				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+	// Validate every field before writing any of them: a rejected field must
+	// not leave its siblings half-applied.
+	var gatewayStored any
+	if input.HasModelGatewayBaseURL && input.ModelGatewayBaseURL != nil {
+		value := *input.ModelGatewayBaseURL
+		if problem := validateModelGatewayBaseURL(value, s.app.Config.Environment); problem != "" {
+			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+			return
+		}
+		gatewayStored = value
+	}
+	var agentStored any
+	if input.HasAgentControlBaseURL && input.AgentControlBaseURL != nil {
+		value := *input.AgentControlBaseURL
+		// Unlike the model gateway, the agent-control endpoint may be a
+		// cluster-internal hostname when a split deployment fronts it with
+		// an ingress; only the absolute-URL shape is enforced here.
+		if problem := validateAbsoluteSettingURL(value, "agent control base URL"); problem != "" {
+			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+			return
+		}
+		agentStored = value
+	}
+	var fallbackStored any
+	if input.HasModelFallbackIDs && input.ModelFallbackIDs != nil {
+		ids := *input.ModelFallbackIDs
+		if len(ids) > 0 {
+			var matched int
+			// The referential check mirrors the prober's own selection so a
+			// chain can only contain models that can ever be observed
+			// healthy: enabled gateway models with a complete endpoint and
+			// upstream model.
+			if err := database.QueryRow(request.Context(), `SELECT count(*) FROM models WHERE deployment_id=$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>'' AND id = ANY($2)`, claimsFrom(request).DeploymentID, ids).Scan(&matched); err != nil {
+				databaseFailure(response, request, err)
 				return
 			}
-			stored = value
+			if matched != len(ids) {
+				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", "Every modelFallbackIds entry must reference an enabled gateway model with a complete endpoint and upstream model.")
+				return
+			}
 		}
+		fallbackStored = ids
+	}
+	if input.HasModelGatewayBaseURL {
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,model_gateway_base_url) VALUES ($1,$2)
-ON CONFLICT (deployment_id) DO UPDATE SET model_gateway_base_url=EXCLUDED.model_gateway_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, stored); err != nil {
+ON CONFLICT (deployment_id) DO UPDATE SET model_gateway_base_url=EXCLUDED.model_gateway_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, gatewayStored); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
 	if input.HasAgentControlBaseURL {
-		var stored any
-		if input.AgentControlBaseURL != nil {
-			value := *input.AgentControlBaseURL
-			// Unlike the model gateway, the agent-control endpoint may be a
-			// cluster-internal hostname when a split deployment fronts it with
-			// an ingress; only the absolute-URL shape is enforced here.
-			if problem := validateAbsoluteSettingURL(value, "agent control base URL"); problem != "" {
-				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
-				return
-			}
-			stored = value
-		}
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,agent_control_base_url) VALUES ($1,$2)
-ON CONFLICT (deployment_id) DO UPDATE SET agent_control_base_url=EXCLUDED.agent_control_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, stored); err != nil {
+ON CONFLICT (deployment_id) DO UPDATE SET agent_control_base_url=EXCLUDED.agent_control_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, agentStored); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
 	if input.HasModelFallbackIDs {
-		var stored any
-		if input.ModelFallbackIDs != nil {
-			ids := *input.ModelFallbackIDs
-			if len(ids) > 0 {
-				var matched int
-				if err := database.QueryRow(request.Context(), `SELECT count(*) FROM models WHERE deployment_id=$1 AND enabled AND id = ANY($2)`, claimsFrom(request).DeploymentID, ids).Scan(&matched); err != nil {
-					databaseFailure(response, request, err)
-					return
-				}
-				if matched != len(ids) {
-					writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", "Every modelFallbackIds entry must reference an enabled model of this deployment.")
-					return
-				}
-			}
-			stored = ids
-		}
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,model_fallback_ids) VALUES ($1,$2)
-ON CONFLICT (deployment_id) DO UPDATE SET model_fallback_ids=EXCLUDED.model_fallback_ids,updated_at=now()`, claimsFrom(request).DeploymentID, stored); err != nil {
+ON CONFLICT (deployment_id) DO UPDATE SET model_fallback_ids=EXCLUDED.model_fallback_ids,updated_at=now()`, claimsFrom(request).DeploymentID, fallbackStored); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}

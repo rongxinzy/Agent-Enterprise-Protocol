@@ -67,7 +67,7 @@ func TestAdminDeploymentSettingsFallbackChain(t *testing.T) {
 
 	// A valid chain is trimmed, deduplicated, stored, and echoed back.
 	stored := []string{"bench-qwen", "bench-glm"}
-	pool.ExpectQuery(`SELECT count\(\*\) FROM models`).
+	pool.ExpectQuery(`SELECT count\(\*\) FROM models WHERE deployment_id=\$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>''`).
 		WithArgs("deployment-a", pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(2))
 	pool.ExpectExec(`INSERT INTO deployment_settings`).
@@ -230,6 +230,24 @@ func TestAdminDeploymentSettingsProductionLoopbackRejected(t *testing.T) {
 		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"INVALID_DEPLOYMENT_SETTINGS"`) {
 			t.Fatalf("production %s = %d %s", body, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestAdminDeploymentSettingsRejectsBeforeWriting(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	handler := New(application).Handler()
+
+	// A valid gateway field alongside an invalid fallback chain: the whole
+	// request fails and nothing may be persisted. No INSERT expectation is
+	// registered — pgxmock verifies on cleanup, so any executed write fails
+	// this test.
+	pool.ExpectQuery(`SELECT count\(\*\) FROM models`).
+		WithArgs("deployment-a", pgxmock.AnyArg()).
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(1))
+	rejected := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings",
+		`{"modelGatewayBaseUrl":"https://runtime-gateway.example.com/v1","modelFallbackIds":["bench-qwen","ghost"]}`)
+	if rejected.Code != http.StatusUnprocessableEntity || !strings.Contains(rejected.Body.String(), `"code":"INVALID_DEPLOYMENT_SETTINGS"`) {
+		t.Fatalf("partial write = %d %s", rejected.Code, rejected.Body.String())
 	}
 }
 
