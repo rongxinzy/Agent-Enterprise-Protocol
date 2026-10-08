@@ -237,6 +237,10 @@ func (s *Server) resetUserPassword(response http.ResponseWriter, request *http.R
 		requireChange = *input.RequirePasswordChange
 	}
 	userID := chi.URLParam(request, "userId")
+	if requireChange && userID == claimsFrom(request).Subject {
+		writeProblem(response, request, http.StatusConflict, "SELF_PASSWORD_RESET_RESTRICTED", "Requiring a password change on your own account would lock you into a restricted session; use the self-service password change endpoint or set requirePasswordChange to false.")
+		return
+	}
 	if err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
 		UpdatePassword(request.Context(), userID, hash, requireChange); err != nil {
 		databaseFailure(response, request, err)

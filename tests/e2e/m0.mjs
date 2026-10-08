@@ -43,6 +43,7 @@ async function runScenario() {
   await assertMultiTerminalControlEvent();
   await assertSessionClientIdentity(admin);
   await assertAdminSessionRevoke(admin);
+  await assertSelfPasswordResetRejected(admin);
 
   await assertPasswordSecurity();
 
@@ -234,6 +235,14 @@ async function findAdminSession(admin, sessionId) {
   const item = page.items.find(entry => entry.sessionId === sessionId);
   assert(item, `Session ${sessionId} was missing from the admin session list`);
   return item;
+}
+
+async function assertSelfPasswordResetRejected(admin) {
+  const identity = await admin.getCurrentIdentity();
+  await assertProblem(
+    admin.resetUserPassword(identity.user.id, {temporaryPassword: 'e2e-self-reset-12345', requirePasswordChange: true}),
+    'SELF_PASSWORD_RESET_RESTRICTED',
+  );
 }
 
 function decodeJwtPayload(token) {
