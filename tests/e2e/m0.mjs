@@ -271,7 +271,7 @@ async function assertPasswordSecurity() {
   assert(identity.passwordChangeRequired === true && identity.sessionExpiresAt, 'Restricted identity state was incomplete');
   await assertProblem(client.listModels(), 'PASSWORD_CHANGE_REQUIRED');
 
-  const changed = await client.changePassword(temporaryPassword, changedPassword);
+  const changed = await client.changePassword({newPassword: changedPassword});
   assert(changed.passwordChangeRequired === false, 'Password change did not rotate to an unrestricted session');
   await client.listModels();
   await client.logout();

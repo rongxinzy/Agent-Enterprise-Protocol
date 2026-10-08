@@ -127,10 +127,12 @@ These values are self-reported administrative hints, not verified claims.
 
 ### `POST /auth/password/change`
 
-Request: `{"currentPassword":"old-password","newPassword":"new-long-password"}`.
-The authenticated account password is replaced, its other refresh sessions are
-revoked, and the response returns a fresh token structure with
-`passwordChangeRequired` set to false.
+Request: `{"newPassword":"new-long-password"}`. The session bearer authenticates
+the change. `currentPassword` is an optional step-up proof: when provided it is
+verified and a mismatch fails with `401 INVALID_CREDENTIALS`; when omitted the
+session alone authorizes the change. The account password is replaced, its other
+refresh sessions are revoked, and the response returns a fresh token structure
+with `passwordChangeRequired` set to false.
 
 ### `POST /auth/federated/start`
 

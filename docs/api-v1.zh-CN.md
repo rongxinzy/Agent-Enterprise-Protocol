@@ -120,7 +120,9 @@ HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token�
 
 ### `POST /auth/password/change`
 
-请求：`{"currentPassword":"old-password","newPassword":"new-long-password"}`。服务端修改当前
+请求：`{"newPassword":"new-long-password"}`。会话 bearer 令牌即完成身份认证。
+`currentPassword` 是可选的加强校验：提供时服务端会校验，不匹配返回
+`401 INVALID_CREDENTIALS`；省略时仅凭会话授权改密。服务端修改当前
 账号密码、撤销该账号的其他 refresh 会话，并返回
 `passwordChangeRequired` 为 false 的新 token 结构。
 
