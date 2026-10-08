@@ -249,8 +249,14 @@ func TestProbeModelScrubKeepsUnicodeIntact(t *testing.T) {
 	defer server.Close()
 
 	outcome := probeModel(context.Background(), server.Client(), "openai-compatible", server.URL, "model-a", "sk-abcdefgh")
-	if strings.Contains(outcome.Detail, "sk-abcdefgh") || !strings.Contains(outcome.Detail, "\u0130") || !strings.Contains(outcome.Detail, "***") {
+	if strings.Contains(outcome.Detail, "sk-abcdefgh") || !strings.Contains(outcome.Detail, "***") {
 		t.Fatalf("unicode folding must not corrupt the snippet: %#v", outcome)
+	}
+	// Exact-fragment assertion: the pre-fix byte-index arithmetic produced
+	// "\u0130***h rejected" (trailing byte survived, leading text eaten), so a
+	// loose contains-check would not distinguish the implementations.
+	if !strings.Contains(outcome.Detail, "\u0130 *** rejected") {
+		t.Fatalf("scrub must preserve the surrounding text exactly: %#v", outcome)
 	}
 }
 
