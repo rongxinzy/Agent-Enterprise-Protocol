@@ -18,7 +18,7 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
-const modelColumns = `id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled,health_status,health_checked_at,health_detail,created_at,updated_at`
+const modelColumns = `id,display_name,source_type,protocol,endpoint,upstream_model,local_model_ref,credential_id,capabilities,reasoning_compatibility,context_window,is_default,enabled,health_status,health_checked_at,health_since,health_detail,created_at,updated_at`
 
 type modelReasoningCompatibility struct {
 	ThinkingFormat                              string             `json:"thinkingFormat"`
@@ -105,7 +105,7 @@ func scanModel(row rowScanner) (modelRecord, error) {
 		&model.ID, &model.DisplayName, &model.SourceType, &model.Protocol,
 		&model.Endpoint, &model.UpstreamModel, &model.LocalModelRef, &model.CredentialID,
 		&model.Capabilities, &model.ReasoningCompatibility, &model.ContextWindow, &model.IsDefault, &model.Enabled,
-		&model.HealthStatus, &model.HealthCheckedAt, &model.HealthDetail,
+		&model.HealthStatus, &model.HealthCheckedAt, &model.HealthSince, &model.HealthDetail,
 		&model.CreatedAt, &model.UpdatedAt,
 	)
 	return model, err
@@ -148,6 +148,10 @@ func modelJSON(model modelRecord, admin bool) map[string]any {
 		value["healthCheckedAt"] = nil
 		if model.HealthCheckedAt.Valid {
 			value["healthCheckedAt"] = model.HealthCheckedAt.Time.UTC().Format(time.RFC3339)
+		}
+		value["healthSince"] = nil
+		if model.HealthSince.Valid {
+			value["healthSince"] = model.HealthSince.Time.UTC().Format(time.RFC3339)
 		}
 		value["healthDetail"] = nil
 		if model.HealthDetail.Valid && model.HealthDetail.String != "" {

@@ -186,7 +186,7 @@ func (a *App) recordModelHealth(ctx context.Context, row modelProbeRow, outcome 
 	if outcome.Detail != "" {
 		detail = outcome.Detail
 	}
-	_, err := a.database().Exec(ctx, `UPDATE models SET health_status=$3,health_checked_at=$4,health_detail=$5 WHERE deployment_id=$1 AND id=$2`,
+	_, err := a.database().Exec(ctx, `UPDATE models SET health_status=$3,health_checked_at=$4,health_detail=$5,health_since=CASE WHEN health_status<>$3 THEN $4 ELSE health_since END WHERE deployment_id=$1 AND id=$2`,
 		row.deploymentID, row.modelID, outcome.Status, now, detail)
 	if err != nil {
 		return fmt.Errorf("record model health for %s: %w", row.modelID, err)

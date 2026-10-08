@@ -133,6 +133,7 @@ type Model struct {
 	Enabled                bool               `gorm:"column:enabled;not null"`
 	HealthStatus           string             `gorm:"column:health_status;not null;default:'unknown'"`
 	HealthCheckedAt        pgtype.Timestamptz `gorm:"column:health_checked_at"`
+	HealthSince            pgtype.Timestamptz `gorm:"column:health_since"`
 	HealthDetail           pgtype.Text        `gorm:"column:health_detail"`
 	CreatedAt              time.Time          `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt              time.Time          `gorm:"column:updated_at;autoUpdateTime"`

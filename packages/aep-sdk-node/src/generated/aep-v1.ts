@@ -2306,6 +2306,11 @@ export interface components {
              * @description When the latest probe finished; null before the first probe.
              */
             readonly healthCheckedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description When the current healthStatus began (set on transitions). Consumers derive hysteresis from this — e.g. fail over only after N minutes of continuous unhealth. Server-computed; read-only.
+             */
+            readonly healthSince?: string | null;
             /** @description Short human-readable probe outcome (status code, missing model id, transport error). */
             readonly healthDetail?: string | null;
         };
