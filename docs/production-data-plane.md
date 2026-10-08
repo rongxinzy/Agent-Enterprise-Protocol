@@ -78,6 +78,9 @@ When rolling back to an older reconciler, remove its deployment-scoped
 `aep-ai-statistics-<deployment-suffix>` object explicitly: older binaries do not
 own or clear the newly introduced plugin. No database migration is involved.
 
+To collect these metrics with an existing cluster Prometheus and import the
+official dashboard into existing Grafana, follow [Higress monitoring](higress-monitoring.md).
+
 ## Catalog-Derived Publication
 
 Prefer `POST /aep/v1/admin/data-plane/publish` over hand-written desired states. The model catalog is the single source of truth: the control service derives one route per `gateway` model with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model, and atomically replaces the desired state. Disabled models ride along as `enabled: false` routes so the reconciler deletes resources a route previously owned. This eliminates the structural drift where the catalog advertises a model but the gateway WasmPlugin has no matching `modelMapping`. Republishing an unchanged catalog is a no-op; any catalog change produces a new content-addressed revision.
