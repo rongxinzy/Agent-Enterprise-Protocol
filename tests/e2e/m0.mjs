@@ -41,6 +41,8 @@ async function runScenario() {
   const sessions = await admin.listUserSessions();
   assert(Array.isArray(sessions.items) && sessions.items.length >= 1, 'Admin session inventory was empty');
   await assertMultiTerminalControlEvent();
+  await assertSessionClientIdentity(admin);
+  await assertAdminSessionRevoke(admin);
 
   await assertPasswordSecurity();
 
@@ -172,6 +174,66 @@ async function assertMultiTerminalControlEvent() {
   const deliveries = await first.listControlEventDeliveries(event.eventId);
   const sessionDeliveries = deliveries.items.filter(item => item.sessionId);
   assert(sessionDeliveries.length >= 2, 'Admin delivery query did not include both sessions');
+}
+
+async function assertSessionClientIdentity(admin) {
+  const deviceId = `device-${runId}`;
+  const client = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  const tokens = await client.loginWithPassword({
+    deploymentId: 'demo',
+    username: 'admin',
+    password: 'change-this-admin-password',
+    client: {name: 'zhiyuan-desktop', version: '1.4.0', deviceId},
+  });
+  const listed = await findAdminSession(admin, tokens.sessionId);
+  assert(listed.client?.name === 'zhiyuan-desktop' && listed.client?.version === '1.4.0' && listed.client?.deviceId === deviceId,
+    'Admin session list did not return the client identity recorded at login');
+
+  await client.heartbeat({status: 'online', client: {name: 'zhiyuan-desktop', version: '1.5.0', deviceId}});
+  const refreshed = await findAdminSession(admin, tokens.sessionId);
+  assert(refreshed.client?.version === '1.5.0', 'Heartbeat client identity refresh was not visible in the admin session list');
+
+  const fallback = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  const fallbackTokens = await fallback.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const derived = await findAdminSession(admin, fallbackTokens.sessionId);
+  assert(derived.client?.name === 'node' && !derived.client?.version,
+    `User-Agent fallback recorded ${JSON.stringify(derived.client)} instead of the coarse node label`);
+}
+
+async function assertAdminSessionRevoke(admin) {
+  const first = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  const second = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
+  await first.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+  const secondTokens = await second.loginWithPassword({deploymentId: 'demo', username: 'admin', password: 'change-this-admin-password'});
+
+  await admin.revokeUserSession(secondTokens.sessionId);
+
+  const revoked = await fetch(`${baseUrl}/aep/v1/user/control-events`, {
+    headers: {Authorization: `Bearer ${secondTokens.accessToken}`, 'X-AEP-Protocol-Version': '1.0'},
+  });
+  assert(revoked.status === 401, `Revoked session access returned ${revoked.status}`);
+  const problem = await revoked.json();
+  assert(problem.code === 'SESSION_REVOKED', `Revoked session access returned problem ${problem.code}`);
+
+  const refresh = await fetch(`${baseUrl}/aep/v1/auth/refresh`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-AEP-Protocol-Version': '1.0'},
+    body: JSON.stringify({refreshToken: secondTokens.refreshToken, sessionId: secondTokens.sessionId}),
+  });
+  assert(refresh.status === 401, `Revoked session refresh returned ${refresh.status}`);
+  const refreshProblem = await refresh.json();
+  assert(refreshProblem.code === 'REFRESH_TOKEN_INVALID', `Revoked session refresh returned problem ${refreshProblem.code}`);
+
+  await first.listControlEvents(undefined, 1);
+  const item = await findAdminSession(admin, secondTokens.sessionId);
+  assert(item.revokedAt, 'Admin session list did not mark the revoked session');
+}
+
+async function findAdminSession(admin, sessionId) {
+  const page = await admin.listUserSessions({limit: 200});
+  const item = page.items.find(entry => entry.sessionId === sessionId);
+  assert(item, `Session ${sessionId} was missing from the admin session list`);
+  return item;
 }
 
 function decodeJwtPayload(token) {

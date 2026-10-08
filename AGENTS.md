@@ -207,3 +207,7 @@ downstream database or provider is unavailable.
   inspect `git status` for unrelated user changes. Never discard existing work.
 - A release PR must include the applicable OpenAPI drift, SDK package, Go
   security, Compose E2E, deployment, and release-audit evidence.
+
+## 跨仓协作规范
+
+提交、PR 标题与说明、review、bug fix 验证遵循 [DEVOPS.md](DEVOPS.md)。本仓已有专项安全、设计与发布门继续执行。
