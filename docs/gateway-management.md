@@ -69,3 +69,38 @@ The protocol version header remains `X-AEP-Protocol-Version: 1.0`. Existing
 model catalog, assignment, health, identity, events and data-plane APIs remain
 the source for administrative metadata. The new contracts do not imply that an
 unconfigured deployment already has a log store or native quota plugin.
+# Native source configuration
+
+Set `AEP_GATEWAY_PROMETHEUS_URL` and/or `AEP_GATEWAY_LOKI_URL` to the existing
+monitoring services; optional `*_TOKEN` and `*_TOKEN_FILE` supply their own
+service credentials. Browser access tokens are never forwarded. HTTP clients
+reject redirects, bound response size to 4 MiB and time out after 8 seconds.
+The sources receive the authenticated deployment as `X-Scope-OrgID`.
+
+AI metrics additionally constrain `ai_consumer` to the authorizer's encoded
+deployment/user identity. They expose the native `ai_model` label (the upstream
+model), not a reconstructed catalog name. `calls` is the native usage-bearing
+`llm_duration_count`, not a claim that authorizer rejections contain token usage.
+Historical `none` consumers cannot be safely assigned to users retroactively.
+
+Envoy connection-manager/cluster counters lack consumer labels. Enable their
+QPS/non-5xx ratios and authorizer status counts only with
+`AEP_GATEWAY_METRICS_DEPLOYMENT=<deployment-id>` **and a dedicated datasource
+containing only that deployment's inference gateway and authorizer metrics**.
+For a shared datasource these operations return 422. Native non-5xx ratios do
+not mean model business success. Stock Prometheus plugin labels lack organizations.
+With `AEP_GATEWAY_ORGANIZATION_LOGS=true` and the metadata-only Vector/Loki
+pipeline from the identity stage, organization queries use **native Loki**
+count/sum range functions over call-time membership streams. The collector
+only copies metadata into membership streams; it calculates no numbers. Base
+streams are used for filtered totals, membership streams for team/role groups,
+so the overall total is never the sum of overlapping memberships. Native
+access-log failures mean HTTP status >=400, unlike ai-statistics model-body
+failure counts. Neither source is silently substituted for the other.
+
+Loki streams must use `aep_deployment_id` and `aep_source=gateway|authorizer`.
+Only the allowlisted access-log fields described by the deployment guide may
+be ingested into these streams. The query renders only request/model/user,
+membership, status/flags, tokens and native duration fields; prompts,
+responses, tool arguments, credentials and free-form provider errors are not
+returned. AEP stores no copy of the monitoring history.
