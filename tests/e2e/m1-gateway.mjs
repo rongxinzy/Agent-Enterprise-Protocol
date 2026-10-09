@@ -171,10 +171,20 @@ async function verifyGatewayManagement(client, userId) {
   assert(health.sources.some(source => source.source === 'prometheus' && source.state === 'healthy' && source.targets.length === 1), 'Native gateway target health is missing');
   const end = new Date().toISOString();
   const start = new Date(Date.now() - 60_000).toISOString();
-  for (const metric of ['input_tokens', 'output_tokens', 'calls', 'failures', 'first_token_duration', 'service_duration']) {
-    const result = await client.queryGatewayMetrics({metric, start, end, step: 10, groupBy: 'user', userId});
+  const definitions = {
+    input_tokens: 'ai_input_tokens', output_tokens: 'ai_output_tokens',
+    calls: 'ai_usage_completed_calls', failures: 'ai_detected_failures',
+    first_token_duration: 'ai_usage_mean_first_token_duration', service_duration: 'ai_usage_mean_service_duration',
+  };
+  for (const [metric, expectedDefinition] of Object.entries(definitions)) {
+    const result = await client.queryGatewayMetrics({metric, start, end, step: 10, groupBy: 'user', userId, expectedDefinition});
     assert(result.source === 'prometheus' && result.data.status === 'success' && result.data.data.resultType === 'matrix', 'Gateway metrics did not return native Prometheus data: ' + metric);
+    const rateMean = metric === 'first_token_duration' || metric === 'service_duration';
+    assert(result.definition.id === expectedDefinition && result.definition.windowSeconds === (rateMean ? 120 : 10)
+      && result.definition.groupBy === 'user' && result.definition.modelDimension === 'not_applicable', 'Gateway metric definition does not describe the native query: ' + metric);
   }
+  await expectAepProblem(() => client.queryGatewayMetrics({metric: 'calls', start, end,
+    modelId: 'enterprise-chat', expectedDefinition: 'ai_usage_completed_calls'}), 422, 'GATEWAY_METRIC_DEFINITION_MISMATCH');
   await expectAepProblem(() => client.searchGatewayRequests({start, end, limit: 10}), 503);
   await expectAepProblem(() => client.queryGatewayMetrics({metric: 'calls', start, end, groupBy: 'team'}), 422);
 
@@ -195,11 +205,12 @@ async function verifyGatewayManagement(client, userId) {
   console.log('Gateway management APIs passed with PostgreSQL, native Higress inference/identity and Prometheus; unconfigured sources remain unavailable.');
 }
 
-async function expectAepProblem(action, status) {
+async function expectAepProblem(action, status, code) {
   try {
     await action();
   } catch (error) {
     assert(error.status === status, 'Expected AEP status ' + status + ', got ' + error.status);
+    if (code) assert(error.code === code, 'Expected AEP problem ' + code + ', got ' + error.code);
     return;
   }
   throw new Error('Expected AEP status ' + status);
