@@ -167,9 +167,18 @@ components:
         jwksUri: {type: string, format: uri-reference}
     PasswordChangeRequest:
       type: object
-      required: [currentPassword, newPassword]
+      required: [newPassword]
       properties:
-        currentPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+          description: >-
+            Optional step-up proof. The session bearer already authenticates
+            the change; when currentPassword is provided the server verifies it
+            and rejects a mismatch with 401 INVALID_CREDENTIALS, when omitted
+            the session alone authorizes the change.
         newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
     JsonWebKeySet:
       type: object

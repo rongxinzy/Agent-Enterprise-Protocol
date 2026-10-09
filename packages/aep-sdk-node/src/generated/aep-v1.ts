@@ -419,6 +419,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Sets a temporary password and revokes the target user's sessions. Resetting the caller's own account with requirePasswordChange=true is rejected with 409 SELF_PASSWORD_RESET_RESTRICTED, because the forced change flag would lock the caller into a restricted session; use the self-service password change endpoint or pass requirePasswordChange=false. */
         post: operations["resetPlatformUserPassword"];
         delete?: never;
         options?: never;
@@ -3289,6 +3290,7 @@ export interface operations {
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listPermissions: {

@@ -127,10 +127,12 @@ These values are self-reported administrative hints, not verified claims.
 
 ### `POST /auth/password/change`
 
-Request: `{"currentPassword":"old-password","newPassword":"new-long-password"}`.
-The authenticated account password is replaced, its other refresh sessions are
-revoked, and the response returns a fresh token structure with
-`passwordChangeRequired` set to false.
+Request: `{"newPassword":"new-long-password"}`. The session bearer authenticates
+the change. `currentPassword` is an optional step-up proof: when provided it is
+verified and a mismatch fails with `401 INVALID_CREDENTIALS`; when omitted the
+session alone authorizes the change. The account password is replaced, its other
+refresh sessions are revoked, and the response returns a fresh token structure
+with `passwordChangeRequired` set to false.
 
 ### `POST /auth/federated/start`
 
@@ -505,7 +507,7 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
-Every user must have at least one role and one team when created or imported. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way.
+Every user must have at least one role and one team when created or imported. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
 
 ### RBAC and sessions
 

@@ -46,7 +46,7 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 	if err := applier.Apply(context.Background(), desired, resources); err != nil {
 		t.Fatal(err)
 	}
-	if len(applied) != 2 {
+	if len(applied) != 3 {
 		t.Fatalf("apply requests = %d", len(applied))
 	}
 	for _, request := range applied {
@@ -60,7 +60,7 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 			t.Fatal("service account token leaked into resource body")
 		}
 	}
-	if !strings.Contains(applied[0].path, "/ingresses/aep-model-gateway-demo-tenant-") || !strings.Contains(applied[1].path, "/wasmplugins/aep-ai-proxy-demo-tenant-") {
+	if !strings.Contains(applied[0].path, "/ingresses/aep-model-gateway-demo-tenant-") || !strings.Contains(applied[1].path, "/wasmplugins/aep-ai-proxy-demo-tenant-") || !strings.Contains(applied[2].path, "/wasmplugins/aep-ai-statistics-demo-tenant-") {
 		t.Fatalf("unexpected resource paths: %#v", applied)
 	}
 }
@@ -128,7 +128,7 @@ func TestKubernetesApplierHandlesDeletedAndRejectedIngress(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "403") || len(methods) != 1 {
 					t.Fatalf("Apply() = %v, methods = %v", err, methods)
 				}
-			} else if err != nil || len(methods) != 2 || methods[1] != http.MethodPatch {
+			} else if err != nil || len(methods) != 3 || methods[1] != http.MethodPatch || methods[2] != http.MethodPatch {
 				t.Fatalf("Apply() = %v, methods = %v", err, methods)
 			}
 		})
@@ -179,7 +179,7 @@ func TestKubernetesApplierDeletesIngressWhenAllRoutesAreDisabled(t *testing.T) {
 	if err := applier.Apply(context.Background(), desired, resources); err != nil {
 		t.Fatal(err)
 	}
-	if len(methods) != 2 || !strings.HasPrefix(methods[0], "DELETE ") || !strings.Contains(methods[0], "/ingresses/") || !strings.HasPrefix(methods[1], "PATCH ") || !strings.Contains(methods[1], "/wasmplugins/") {
+	if len(methods) != 3 || !strings.HasPrefix(methods[0], "DELETE ") || !strings.Contains(methods[0], "/ingresses/") || !strings.HasPrefix(methods[1], "PATCH ") || !strings.Contains(methods[1], "/wasmplugins/") || !strings.Contains(methods[2], "/wasmplugins/aep-ai-statistics-") {
 		t.Fatalf("requests = %#v", methods)
 	}
 }
