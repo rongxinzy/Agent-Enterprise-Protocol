@@ -15,6 +15,7 @@ export class MockAepServer {
   #modelGatewayOverride: string | null = null;
   readonly requests: Array<{method: string; path: string; search: string; headers: IncomingMessage['headers']}> = [];
   readonly loginBodies: Record<string, unknown>[] = [];
+  readonly passwordChangeBodies: Record<string, unknown>[] = [];
   refreshCount = 0;
   baseUrl = '';
 
@@ -102,6 +103,7 @@ export class MockAepServer {
     }
     if (path === '/aep/v1/auth/logout') return empty(response, 204);
     if (path === '/aep/v1/auth/password/change') {
+      this.passwordChangeBodies.push(await readJson(request));
       return json(response, 200, tokens(this.#validAccessToken, this.#validRefreshToken));
     }
 

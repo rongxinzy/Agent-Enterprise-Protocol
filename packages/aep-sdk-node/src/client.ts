@@ -192,11 +192,14 @@ export class AepClient {
     return tokens;
   }
 
-  async changePassword(currentPassword: string, newPassword: string): Promise<AepTokens> {
+  async changePassword(input: {newPassword: string; currentPassword?: string}): Promise<AepTokens> {
     const tokens = await this.#send<AepTokens>({
       method: HttpMethod.Post,
       path: '/aep/v1/auth/password/change',
-      body: asJson({currentPassword, newPassword}),
+      body: asJson({
+        newPassword: input.newPassword,
+        ...(input.currentPassword ? {currentPassword: input.currentPassword} : {}),
+      }),
     });
     await this.#tokenStore.set(tokens);
     this.#sessionId = tokens.sessionId ?? this.#sessionId;
