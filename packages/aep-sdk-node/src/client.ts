@@ -2,6 +2,18 @@ import {AEP_PROTOCOL_VERSION, AepCapability, HttpMethod} from './constants.js';
 import {AepProblem} from './problem.js';
 import {FetchTransport} from './transport.js';
 import type {
+  GatewayCapabilities,
+  GatewayNativeResult,
+  GatewayHealth,
+  GatewayMetricQuery,
+  GatewayRequestQuery,
+  GatewayLimitWrite,
+  GatewayLimit,
+  GatewayLimitPage,
+  GatewayLimitPublication,
+  GatewayLimitStatus,
+  GatewayQuota,
+  GatewayTestAccess,
   AdminModel,
   AdminModelList,
   AdminModelPatch,
@@ -786,6 +798,66 @@ export class AepClient {
 
   getDataPlaneDesiredState(): Promise<DataPlaneDesiredState> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/desired-state'});
+  }
+
+  getGatewayCapabilities(): Promise<GatewayCapabilities> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/capabilities'});
+  }
+
+  queryGatewayMetrics(filters: GatewayMetricQuery): Promise<GatewayNativeResult> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/metrics?${query(filters)}`});
+  }
+
+  getGatewayMonitoringHealth(): Promise<GatewayHealth> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/health'});
+  }
+
+  searchGatewayRequests(filters: GatewayRequestQuery): Promise<GatewayNativeResult> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests?${query(filters)}`});
+  }
+
+  getGatewayRequest(requestId: string, filters: GatewayRequestQuery): Promise<GatewayNativeResult> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests/${segment(requestId)}?${query(filters)}`});
+  }
+
+  listGatewayLimits(): Promise<GatewayLimitPage> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/limits'});
+  }
+
+  getGatewayLimit(ruleId: string): Promise<GatewayLimit> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}`});
+  }
+
+  putGatewayLimit(ruleId: string, input: GatewayLimitWrite): Promise<GatewayLimit> {
+    return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}`, body: asJson(input), retry: false});
+  }
+
+  deleteGatewayLimit(ruleId: string, expectedVersion: number): Promise<void> {
+    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}?${query({expectedVersion})}`, responseType: 'empty', retry: false});
+  }
+
+  publishGatewayLimits(): Promise<GatewayLimitPublication> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/model-gateway/limits/publish', retry: false});
+  }
+
+  getGatewayLimitsStatus(): Promise<GatewayLimitStatus> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/limits/status'});
+  }
+
+  getGatewayQuota(userId: string): Promise<GatewayQuota> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}`});
+  }
+
+  refreshGatewayQuota(userId: string, quota: number): Promise<GatewayQuota> {
+    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}/refresh`, body: {quota}, retry: false});
+  }
+
+  changeGatewayQuota(userId: string, value: number): Promise<GatewayQuota> {
+    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}/delta`, body: {value}, retry: false});
+  }
+
+  createGatewayTestAccess(modelId: string): Promise<GatewayTestAccess> {
+    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/models/${segment(modelId)}/test-access`, retry: false});
   }
 
   putDataPlaneDesiredState(input: DataPlaneDesiredStateWrite): Promise<DataPlaneDesiredState> {

@@ -31,6 +31,7 @@ tags:
   - {name: Admin Credentials}
   - {name: Admin Data Plane}
   - {name: Admin Deployment}
+  - {name: Admin Model Gateway}
 paths:
   /.well-known/jwks.json:
     get:
@@ -256,6 +257,32 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments'
   /aep/v1/admin/model-assignments/{assignmentId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments~1{assignmentId}'
+  /aep/v1/admin/model-gateway/capabilities:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1capabilities'
+  /aep/v1/admin/model-gateway/metrics:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1metrics'
+  /aep/v1/admin/model-gateway/health:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1health'
+  /aep/v1/admin/model-gateway/requests:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1requests'
+  /aep/v1/admin/model-gateway/requests/{requestId}:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1requests~1{requestId}'
+  /aep/v1/admin/model-gateway/limits:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1limits'
+  /aep/v1/admin/model-gateway/limits/{ruleId}:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1limits~1{ruleId}'
+  /aep/v1/admin/model-gateway/limits/publish:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1limits~1publish'
+  /aep/v1/admin/model-gateway/limits/status:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1limits~1status'
+  /aep/v1/admin/model-gateway/quotas/{userId}:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1quotas~1{userId}'
+  /aep/v1/admin/model-gateway/quotas/{userId}/refresh:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1quotas~1{userId}~1refresh'
+  /aep/v1/admin/model-gateway/quotas/{userId}/delta:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1quotas~1{userId}~1delta'
+  /aep/v1/admin/model-gateway/models/{modelId}/test-access:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1models~1{modelId}~1test-access'
   /aep/v1/admin/data-plane/desired-state:
     get:
       tags: [Admin Data Plane]
@@ -379,6 +406,30 @@ components:
       properties:
         currentPassword: {type: string, minLength: 1, maxLength: 1024, writeOnly: true}
         newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
+    GatewayCapabilities:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayCapabilities'
+    GatewayNativeResult:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayNativeResult'
+    GatewayHealth:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayHealth'
+    GatewayLimitWrite:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayLimitWrite'
+    GatewayLimit:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayLimit'
+    GatewayLimitPage:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayLimitPage'
+    GatewayLimitPublication:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayLimitPublication'
+    GatewayLimitStatus:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayLimitStatus'
+    GatewayQuota:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayQuota'
+    GatewayQuotaRefresh:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayQuotaRefresh'
+    GatewayQuotaDelta:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayQuotaDelta'
+    GatewayTestAccess:
+      $ref: './aep-v1-gateway.openapi.yaml#/components/schemas/GatewayTestAccess'
     DataPlaneSecretReference:
       type: object
       required: [name, key]

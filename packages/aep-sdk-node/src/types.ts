@@ -1,6 +1,29 @@
 import type { AepCapability, HttpMethod } from './constants.js';
 import type {components} from './generated/aep-v1.js';
 
+/** Values are native source results. The SDK never aggregates usage or costs. */
+export type GatewayCapabilities = components['schemas']['GatewayCapabilities'];
+export type GatewayNativeResult = components['schemas']['GatewayNativeResult'];
+export type GatewayHealth = components['schemas']['GatewayHealth'];
+export type GatewayLimitWrite = components['schemas']['GatewayLimitWrite'];
+export type GatewayLimit = components['schemas']['GatewayLimit'];
+export type GatewayLimitPage = components['schemas']['GatewayLimitPage'];
+export type GatewayLimitPublication = components['schemas']['GatewayLimitPublication'];
+export type GatewayLimitStatus = components['schemas']['GatewayLimitStatus'];
+export type GatewayQuota = components['schemas']['GatewayQuota'];
+export type GatewayTestAccess = components['schemas']['GatewayTestAccess'];
+export type GatewayMetricQuery = {
+  start: string; end: string; step?: number;
+  metric: 'input_tokens' | 'output_tokens' | 'calls' | 'failures' | 'first_token_duration' | 'service_duration'
+    | 'downstream_qps' | 'upstream_qps' | 'downstream_success_rate' | 'upstream_success_rate' | 'auth_requests';
+  groupBy?: 'none' | 'model' | 'route' | 'user' | 'team' | 'role';
+  modelId?: string; userId?: string; teamId?: string; roleId?: string;
+};
+export type GatewayRequestQuery = {
+  start: string; end: string; modelId?: string; userId?: string; teamId?: string; roleId?: string;
+  source?: 'all' | 'gateway' | 'authorizer'; limit?: number; cursor?: string;
+};
+
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | {[key: string]: JsonValue};
 export type JsonObject = {[key: string]: JsonValue};
