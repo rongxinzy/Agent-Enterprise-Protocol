@@ -71,6 +71,9 @@ npm run test:e2e:m1-gateway
 `aep-ai-statistics-<deployment-suffix>` 对象：旧版本不会管理或清除新增插件。
 本次没有数据库迁移。
 
+复用集群已有 Prometheus 采集，并将官方面板导入已有 Grafana，详见
+[Higress 监控接入](higress-monitoring.zh-CN.md)。
+
 ## 目录派生发布
 
 优先使用 `POST /aep/v1/admin/data-plane/publish`，而不是手工编写期望状态。模型目录是单一事实源：管控服务为每个 `sourceType` 为 `gateway`、协议为 OpenAI 兼容或 Anthropic 且 endpoint 与上游模型完整的模型派生一条路由，并原子替换期望状态；禁用模型以 `enabled: false` 路由随行，reconciler 借此删除该路由曾拥有的资源。这从结构上消除了"目录里有模型、网关 WasmPlugin 没有对应 `modelMapping`"的漂移。目录未变化时重复发布是幂等空操作；目录一旦变化就会产生新的按内容寻址的 revision。
