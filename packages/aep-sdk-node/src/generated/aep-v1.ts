@@ -4074,7 +4074,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Skill withdrawn */
+            /** @description Skill deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -4082,6 +4082,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
         };
     };
     updateSkill: {

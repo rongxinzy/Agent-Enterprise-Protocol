@@ -33,10 +33,16 @@ func TestSkillResourceWriteLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1`).WithArgs("writer", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "enabled", "created_at", "updated_at"}).AddRow("writer", name, "Updated", enabled, now, now))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "agent_profiles" WHERE prompt_skill_id = \$1`).WithArgs("writer").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "skill_assignments" WHERE skill_id = \$1`).WithArgs("writer").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := store.DeleteSkill(context.Background(), "writer"); err != nil {
-		t.Fatalf("DeleteSkill() = %v", err)
+	if _, err := store.DeleteSkillIfUnreferenced(context.Background(), "writer"); err != nil {
+		t.Fatalf("DeleteSkillIfUnreferenced() = %v", err)
 	}
 }
 

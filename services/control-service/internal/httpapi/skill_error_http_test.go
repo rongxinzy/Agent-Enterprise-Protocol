@@ -146,24 +146,26 @@ func TestAdminSkillCreateAndMutationFailureBoundaries(t *testing.T) {
 
 	for _, test := range []struct {
 		name        string
-		result      driver.Result
+		missing     bool
 		err         error
 		status      int
 		problemCode string
 	}{
-		{name: "missing delete", result: sqlmock.NewResult(0, 0), status: http.StatusNotFound, problemCode: "RESOURCE_NOT_FOUND"},
+		{name: "missing delete", missing: true, status: http.StatusNotFound, problemCode: "RESOURCE_NOT_FOUND"},
 		{name: "delete database error", err: errors.New("delete unavailable"), status: http.StatusInternalServerError, problemCode: "INTERNAL_ERROR"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			application, mock, _, token := newUserHTTPApplication(t)
-			mock.ExpectBegin()
-			expectation := mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer")
-			if test.err != nil {
-				expectation.WillReturnError(test.err)
+			if test.missing {
+				// The row lock finds nothing, so GORM reports ErrRecordNotFound.
+				mock.ExpectBegin()
+				mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1`).WithArgs("writer", 1).
+					WillReturnRows(sqlmock.NewRows(skillColumns()))
 				mock.ExpectRollback()
 			} else {
-				expectation.WillReturnResult(test.result)
-				mock.ExpectCommit()
+				expectSkillDeleteLock(mock, "writer", 0, 0)
+				mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer").WillReturnError(test.err)
+				mock.ExpectRollback()
 			}
 			response := adminRequest(New(application).Handler(), token, http.MethodDelete, "/aep/v1/admin/skills/writer", "")
 			requireSkillProblem(t, response.Code, response.Body.String(), test.status, test.problemCode)

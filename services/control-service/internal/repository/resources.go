@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type StringArray []string
@@ -221,9 +223,39 @@ func (s *Store) UpdateSkill(ctx context.Context, id string, params UpdateSkillPa
 	return s.GetSkill(ctx, id)
 }
 
-func (s *Store) DeleteSkill(ctx context.Context, id string) error {
-	result := s.db.WithContext(ctx).Where("id = ?", id).Delete(&Skill{})
-	return resultError(result)
+// SkillReferenceCounts is the usage that blocks deleting a Skill: the digital
+// employee prompt binding (which the foreign key would silently SET NULL) and
+// the Skill assignments (which would be cascade deleted).
+type SkillReferenceCounts struct {
+	PromptBindings int64
+	Assignments    int64
+}
+
+// DeleteSkillIfUnreferenced removes a Skill only when nothing references it. It
+// locks the Skill row for the whole transaction, so a concurrent assignment or
+// agent-profile write cannot slip in between the check and the delete
+// (PostgreSQL makes such writers take FOR KEY SHARE on this row). With
+// references still present it makes no change and returns ErrSkillInUse
+// together with the counts; a missing Skill returns ErrNotFound.
+func (s *Store) DeleteSkillIfUnreferenced(ctx context.Context, id string) (SkillReferenceCounts, error) {
+	var counts SkillReferenceCounts
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var skill Skill
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&skill).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&AgentProfile{}).Where("prompt_skill_id = ?", id).Count(&counts.PromptBindings).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&SkillAssignment{}).Where("skill_id = ?", id).Count(&counts.Assignments).Error; err != nil {
+			return err
+		}
+		if counts.PromptBindings > 0 || counts.Assignments > 0 {
+			return ErrSkillInUse
+		}
+		return tx.Where("id = ?", id).Delete(&Skill{}).Error
+	})
+	return counts, err
 }
 
 func (s *Store) UpsertSkillVersion(ctx context.Context, version SkillVersion) error {

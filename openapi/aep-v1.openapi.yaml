@@ -237,8 +237,9 @@ paths:
       tags: [Admin Skills]
       operationId: deleteSkill
       responses:
-        '204': {description: Skill withdrawn}
+        '204': {description: Skill deleted}
         '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
   /admin/skills/{skillId}/versions:
     post:
       tags: [Admin Skills]

@@ -924,8 +924,10 @@ paths:
       operationId: deleteSkill
       responses:
         '204':
-          description: Skill withdrawn
+          description: Skill deleted
         '400':
+          $ref: '#/components/responses/Problem-2'
+        '409':
           $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skills/{skillId}/versions:
     post:

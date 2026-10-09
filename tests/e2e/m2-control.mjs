@@ -97,6 +97,23 @@ async function runScenario() {
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
   await userClient.loginWithPassword({deploymentId: 'demo', username, password});
 
+  // A Skill that is still in use must not be deleted: the guard refuses while
+  // assignments remain, and while a digital employee binds it as its prompt Skill.
+  const guardedSkillId = (await admin.createSkill({
+    name: 'M2 guarded skill ' + runId, description: 'Skill delete guard regression',
+  })).id;
+  await admin.createSkillAssignment({skillId: guardedSkillId, subject: {type: 'user', id: user.id}});
+  await expectProblem(admin.deleteSkill(guardedSkillId), 409, 'SKILL_IN_USE');
+  const promptSkillId = (await admin.createSkill({
+    name: 'M2 prompt skill ' + runId, description: 'Skill delete guard regression',
+  })).id;
+  await admin.createAgent({
+    username: 'm2-guard-' + runId, displayName: 'M2 guard ' + runId,
+    password: 'agent-password-123', roleIds: [roleId], teamIds: [], homeTeamId: teamId,
+    promptSkillId,
+  });
+  await expectProblem(admin.deleteSkill(promptSkillId), 409, 'SKILL_IN_USE');
+
   const readOnlyTokens = await userStore.get();
   const deniedLicenseImport = await fetch(baseUrl + '/aep/v1/admin/licenses/import', {
     method: 'POST',
