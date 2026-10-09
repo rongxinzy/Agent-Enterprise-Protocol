@@ -4,6 +4,7 @@ import {FetchTransport} from './transport.js';
 import type {
   GatewayCapabilities,
   GatewayNativeResult,
+  GatewayMetricResult,
   GatewayHealth,
   GatewayMetricQuery,
   GatewayRequestQuery,
@@ -804,7 +805,7 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/capabilities'});
   }
 
-  queryGatewayMetrics(filters: GatewayMetricQuery): Promise<GatewayNativeResult> {
+  queryGatewayMetrics(filters: GatewayMetricQuery): Promise<GatewayMetricResult> {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/metrics?${query(filters)}`});
   }
 

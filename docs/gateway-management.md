@@ -1,5 +1,40 @@
 # Native gateway management APIs
 
+## Metric definitions
+
+Every metric response includes `source` and a required `definition` with `id`,
+`unit`, `aggregation`, `windowSeconds`, `groupBy`, and `modelDimension`. These
+describe the native query; they do not calculate telemetry. The SDK preserves
+both native values and metadata. Clients must label definitions explicitly and
+must not combine different definitions or sum returned points into totals.
+
+| Metric | Prometheus definition | Loki definition |
+| --- | --- | --- |
+| calls | `ai_usage_completed_calls`: completed requests with plugin usage/duration records | `gateway_access_requests`: gateway access-log requests |
+| failures | `ai_detected_failures`: plugin-detected model response failures | `gateway_http_errors`: gateway log HTTP status >=400 |
+| input_tokens / output_tokens | `ai_input_tokens` / `ai_output_tokens`: reported usage counter increases | `gateway_log_input_tokens` / `gateway_log_output_tokens`: native range sums of logged usage |
+| first_token_duration / service_duration | `ai_usage_mean_first_token_duration` / `ai_usage_mean_service_duration`: duration/count rate means | `gateway_log_mean_first_token_duration` / `gateway_log_mean_service_duration`: means of logs carrying the duration field |
+
+QPS uses `envoy_downstream_qps` / `envoy_upstream_qps`. The existing success_rate
+names mean `envoy_downstream_non_5xx_ratio` / `envoy_upstream_non_5xx_ratio`, in
+0–1 ratio units; they are not model business success rates.
+`authorizer_http_requests` counts authorizer HTTP requests grouped by status.
+
+Catalog `modelId` and organization queries use Loki. Prometheus model groups
+identify upstream models; Loki identifies AEP catalog models. `modelDimension`
+exposes that distinction. Pin a previously returned `expectedDefinition` to its
+`definition.id` when keeping the same semantics. A changed selected definition
+returns 422 `GATEWAY_METRIC_DEFINITION_MISMATCH` before any source request.
+
+`windowSeconds` is each point's native lookback: 120 seconds for rate queries,
+otherwise `step` (default 60). `step` controls output sampling and may differ
+from the lookback. Counter series are not whole-period totals. Missing usage,
+empty series and unknown values are not zero-filled.
+
+These are AEP adapters: Higress/ai-statistics already exports observations,
+Prometheus/Loki provides queries, Console manages plugin configuration and
+ai-quota exposes balance management. No new numeric or inference engine is added.
+
 The administrator surface under `/aep/v1/admin/model-gateway` connects native
 Higress, Prometheus and Loki results to AEP session authorization. Monitoring
 results are returned with their source; neither the SDK nor AEP calculates

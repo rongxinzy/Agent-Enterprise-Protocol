@@ -4,6 +4,8 @@ import type {components} from './generated/aep-v1.js';
 /** Values are native source results. The SDK never aggregates usage or costs. */
 export type GatewayCapabilities = components['schemas']['GatewayCapabilities'];
 export type GatewayNativeResult = components['schemas']['GatewayNativeResult'];
+export type GatewayMetricResult = components['schemas']['GatewayMetricResult'];
+export type GatewayMetricDefinition = components['schemas']['GatewayMetricDefinition'];
 export type GatewayHealth = components['schemas']['GatewayHealth'];
 export type GatewayLimitWrite = components['schemas']['GatewayLimitWrite'];
 export type GatewayLimit = components['schemas']['GatewayLimit'];
@@ -14,6 +16,7 @@ export type GatewayQuota = components['schemas']['GatewayQuota'];
 export type GatewayTestAccess = components['schemas']['GatewayTestAccess'];
 export type GatewayMetricQuery = {
   start: string; end: string; step?: number;
+  expectedDefinition?: GatewayMetricDefinition['id'];
   metric: 'input_tokens' | 'output_tokens' | 'calls' | 'failures' | 'first_token_duration' | 'service_duration'
     | 'downstream_qps' | 'upstream_qps' | 'downstream_success_rate' | 'upstream_success_rate' | 'auth_requests';
   groupBy?: 'none' | 'model' | 'route' | 'user' | 'team' | 'role';
