@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,5 +48,35 @@ func TestInternalGatewayIdentity(t *testing.T) {
 	New(a).Handler().ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestInternalGatewayIdentityDependencyFailures(t *testing.T) {
+	for _, failure := range []string{"scopes", "roles", "teams"} {
+		a, mock, _ := newStoreBackedHTTPApplication(t)
+		pool := attachRuntimeDatabase(t, a)
+		a.Config.GatewayLicenseStatusToken = "service-token"
+		r := httptest.NewRequest(http.MethodGet, "/internal/gateway/identity", nil)
+		r.Header.Set("X-AEP-Gateway-Token", "service-token")
+		r.Header.Set("X-AEP-Deployment-ID", "deployment-a")
+		r.Header.Set("X-AEP-User-ID", "user-a")
+		r.Header.Set("X-AEP-Session-ID", "session-a")
+		r.Header.Set("X-AEP-Model-ID", "model-a")
+		if failure == "scopes" {
+			pool.ExpectQuery(`SELECT DISTINCT m.id`).WithArgs("deployment-a", "user-a").WillReturnError(fmt.Errorf("dependency unavailable"))
+		} else {
+			pool.ExpectQuery(`SELECT DISTINCT m.id`).WithArgs("deployment-a", "user-a").WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("model-a"))
+			if failure == "roles" {
+				mock.ExpectQuery(`SELECT "b"."role_id"`).WithArgs("deployment-a", "user-a").WillReturnError(fmt.Errorf("roles unavailable"))
+			} else {
+				mock.ExpectQuery(`SELECT "b"."role_id"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
+				mock.ExpectQuery(`SELECT "b"."team_id"`).WithArgs("deployment-a", "user-a").WillReturnError(fmt.Errorf("teams unavailable"))
+			}
+		}
+		w := httptest.NewRecorder()
+		New(a).Handler().ServeHTTP(w, r)
+		if w.Code != 500 {
+			t.Fatal(failure, w.Code, w.Body.String())
+		}
 	}
 }

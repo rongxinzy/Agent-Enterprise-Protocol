@@ -83,3 +83,27 @@ func TestIdentityFailuresFailClosed(t *testing.T) {
 		t.Fatal(value, err)
 	}
 }
+
+func TestIdentityFailureStopsInference(t *testing.T) {
+	for _, status := range []int{403, 500} {
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("failed identity forwarded to provider") }))
+		h, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 1024, IdentityURL: source.URL, LicenseStatusToken: "service-token"}, verifierStub{claims: &ModelClaims{DeploymentID: "a", SessionID: "s", ModelScopes: []string{"m"}, RegisteredClaims: jwt.RegisteredClaims{Subject: "u"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+		r.Header.Set("Authorization", "Bearer token")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		want := 503
+		if status == 403 {
+			want = 403
+		}
+		if w.Code != want {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		source.Close()
+		upstream.Close()
+	}
+}

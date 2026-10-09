@@ -27,7 +27,7 @@ func TestGatewayNativeEndpoints(t *testing.T) {
 	application.Config.GatewayPrometheusToken = "native-source"
 	application.Config.GatewayLokiToken = "native-source"
 	h := New(application).Handler()
-	for _, path := range []string{"metrics?metric=input_tokens", "requests?source=gateway", "requests/request-a?source=authorizer"} {
+	for _, path := range []string{"metrics?metric=input_tokens", "metrics?metric=input_tokens&modelId=catalog-alias", "requests?source=gateway", "requests/request-a?source=authorizer"} {
 		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/"+path+"&start=2026-10-08T00:00:00Z&end=2026-10-08T00:05:00Z", "")
 		if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "9.876543210123456789") || got.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("native: %d %s", got.Code, got.Body.String())
