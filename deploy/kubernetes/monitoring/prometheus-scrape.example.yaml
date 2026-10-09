@@ -1,0 +1,32 @@
+# Alternative for Prometheus WITHOUT the Operator. Merge this job into the
+# existing server's scrape_configs; do not also enable the PodMonitor overlay.
+# Grant that Prometheus service account get/list/watch on pods in higress-system.
+# Match app/higress to the rendered Helm gateway Pod labels if customized.
+scrape_configs:
+  - job_name: higress-gateway
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    metrics_path: /stats/prometheus
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [higress-system]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        regex: higress-gateway
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_higress]
+        regex: higress-system-higress-gateway
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: istio-prom
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_label_higress]
+        target_label: higress

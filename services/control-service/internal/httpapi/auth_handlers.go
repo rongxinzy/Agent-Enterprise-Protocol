@@ -288,7 +288,13 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	user, err := s.app.Store.Deployment(deploymentID).GetUser(request.Context(), claims.Subject)
-	if err != nil || !auth.VerifyPassword(user.PasswordHash, input.CurrentPassword) {
+	if err != nil {
+		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The current password is invalid.")
+		return
+	}
+	// The session bearer already authenticates the change; a provided current
+	// password is verified as an optional step-up proof.
+	if input.CurrentPassword != "" && !auth.VerifyPassword(user.PasswordHash, input.CurrentPassword) {
 		writeProblem(response, request, http.StatusUnauthorized, "INVALID_CREDENTIALS", "The current password is invalid.")
 		return
 	}

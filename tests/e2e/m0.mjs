@@ -43,6 +43,7 @@ async function runScenario() {
   await assertMultiTerminalControlEvent();
   await assertSessionClientIdentity(admin);
   await assertAdminSessionRevoke(admin);
+  await assertSelfPasswordResetRejected(admin);
 
   await assertPasswordSecurity();
 
@@ -236,6 +237,14 @@ async function findAdminSession(admin, sessionId) {
   return item;
 }
 
+async function assertSelfPasswordResetRejected(admin) {
+  const identity = await admin.getCurrentIdentity();
+  await assertProblem(
+    admin.resetUserPassword(identity.user.id, {temporaryPassword: 'e2e-self-reset-12345', requirePasswordChange: true}),
+    'SELF_PASSWORD_RESET_RESTRICTED',
+  );
+}
+
 function decodeJwtPayload(token) {
   const encoded = token.split('.')[1];
   assert(encoded, 'Access token payload is missing');
@@ -262,7 +271,7 @@ async function assertPasswordSecurity() {
   assert(identity.passwordChangeRequired === true && identity.sessionExpiresAt, 'Restricted identity state was incomplete');
   await assertProblem(client.listModels(), 'PASSWORD_CHANGE_REQUIRED');
 
-  const changed = await client.changePassword(temporaryPassword, changedPassword);
+  const changed = await client.changePassword({newPassword: changedPassword});
   assert(changed.passwordChangeRequired === false, 'Password change did not rotate to an unrestricted session');
   await client.listModels();
   await client.logout();

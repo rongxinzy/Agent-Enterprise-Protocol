@@ -551,6 +551,7 @@ paths:
       tags:
         - Admin Users
       operationId: resetPlatformUserPassword
+      description: Sets a temporary password and revokes the target user's sessions. Resetting the caller's own account with requirePasswordChange=true is rejected with 409 SELF_PASSWORD_RESET_RESTRICTED, because the forced change flag would lock the caller into a restricted session; use the self-service password change endpoint or pass requirePasswordChange=false.
       security:
         - aepBearerAuth: []
       parameters:
@@ -569,6 +570,8 @@ paths:
         '403':
           $ref: '#/components/responses/Problem'
         '404':
+          $ref: '#/components/responses/Problem'
+        '409':
           $ref: '#/components/responses/Problem'
   /aep/v1/admin/permissions:
     get:
@@ -1272,7 +1275,6 @@ components:
     PasswordChangeRequest:
       type: object
       required:
-        - currentPassword
         - newPassword
       properties:
         currentPassword:
@@ -1280,6 +1282,7 @@ components:
           minLength: 1
           maxLength: 1024
           writeOnly: true
+          description: Optional step-up proof. The session bearer already authenticates the change; when currentPassword is provided the server verifies it and rejects a mismatch with 401 INVALID_CREDENTIALS, when omitted the session alone authorizes the change.
         newPassword:
           type: string
           minLength: 12

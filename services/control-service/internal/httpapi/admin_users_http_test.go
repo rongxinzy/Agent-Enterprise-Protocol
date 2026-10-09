@@ -118,6 +118,34 @@ func TestAdminUserUpdateDisableAndResetPassword(t *testing.T) {
 	}
 }
 
+func TestAdminSelfPasswordResetCannotRequireChange(t *testing.T) {
+	application, mock, pool, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+
+	// The admin token subject is admin-user; flagging yourself would lock the
+	// caller into a restricted session, so both the explicit and the defaulted
+	// flag are rejected before any write happens.
+	for _, body := range []string{
+		`{"temporaryPassword":"another-long-password","requirePasswordChange":true}`,
+		`{"temporaryPassword":"another-long-password"}`,
+	} {
+		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users/admin-user/reset-password", body)
+		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "SELF_PASSWORD_RESET_RESTRICTED") {
+			t.Fatalf("self reset with forced change = %d %s", response.Code, response.Body.String())
+		}
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "users" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("admin-user").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	pool.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).WithArgs("admin-user").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	allowed := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users/admin-user/reset-password", `{"temporaryPassword":"another-long-password","requirePasswordChange":false}`)
+	if allowed.Code != http.StatusNoContent {
+		t.Fatalf("self reset without forced change = %d %s", allowed.Code, allowed.Body.String())
+	}
+}
+
 func TestAdminUserRBACReplacement(t *testing.T) {
 	application, mock, _, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()

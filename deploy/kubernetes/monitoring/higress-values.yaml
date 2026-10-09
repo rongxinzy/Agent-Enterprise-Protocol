@@ -1,0 +1,30 @@
+# Opt-in overlay for the existing Prometheus Operator. Not part of the AEP
+# kustomization. Apply after production/higress-values.yaml and BEFORE private
+# deployment values containing the live Prometheus podMonitorSelector labels.
+# Locally rendered with the official Higress 2.2.4 chart.
+global:
+  o11y:
+    enabled: false
+higress-console:
+  o11y:
+    enabled: false
+higress-core:
+  gateway:
+    # Use exactly one scrape path. This overlay chooses PodMonitor instead of
+    # a second, annotation-based job.
+    podAnnotations:
+      prometheus.io/scrape: "false"
+    metrics:
+      enabled: true
+      provider: monitoring.coreos.com
+      # Clear the upstream chart's guessed release=kube-prome default.
+      # Supply labels that match the EXISTING Prometheus selector privately.
+      podMonitorSelector:
+        release: null
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: false
+      relabelings:
+        # Required by the official Higress Grafana dashboard's gateway filter.
+        - sourceLabels: [__meta_kubernetes_pod_label_higress]
+          targetLabel: higress

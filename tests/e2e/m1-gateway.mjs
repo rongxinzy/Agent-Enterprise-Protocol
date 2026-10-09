@@ -8,17 +8,21 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const composeFiles = [
   path.join(root, 'deploy', 'compose', 'compose.yaml'),
   path.join(root, 'deploy', 'compose', 'gateway.yaml'),
+  path.join(root, 'tests', 'e2e', 'fixtures', 'higress-monitoring.compose.yaml'),
 ];
 const project = 'aep-m1-gateway-e2e';
 const controlPort = process.env.AEP_M1_GATEWAY_CONTROL_PORT ?? '18083';
 const gatewayPort = process.env.AEP_M1_GATEWAY_PORT ?? '19080';
 const controlBaseUrl = 'http://localhost:' + controlPort;
 const gatewayBaseUrl = 'http://localhost:' + gatewayPort + '/v1';
+const prometheusPort = process.env.AEP_M1_GATEWAY_PROMETHEUS_PORT ?? '19091';
+const prometheusBaseUrl = 'http://localhost:' + prometheusPort;
 const composeEnv = {
   AEP_PORT: controlPort,
   AEP_GATEWAY_PORT: gatewayPort,
   AEP_MINIO_CONSOLE_PORT: process.env.AEP_M1_GATEWAY_MINIO_CONSOLE_PORT ?? '19003',
   AEP_MODEL_ACCESS_TTL: process.env.AEP_M1_GATEWAY_TOKEN_TTL ?? '8s',
+  AEP_PROMETHEUS_PORT: prometheusPort,
 };
 const runId = Date.now().toString(36);
 
@@ -29,11 +33,12 @@ try {
   await Promise.all([
     waitForHealth(controlBaseUrl + '/healthz', 180_000),
     waitForHealth('http://localhost:' + gatewayPort + '/healthz', 180_000),
+    waitForHealth(prometheusBaseUrl + '/-/ready', 180_000),
   ]);
   await runScenario();
   console.log('AEP M1 Higress gateway scenario passed.');
 } catch (error) {
-  await compose('logs', '--no-color', '--tail=200', 'higress', 'gateway-authorizer', 'mock-openai', true);
+  await compose('logs', '--no-color', '--tail=200', 'higress', 'gateway-authorizer', 'mock-openai', 'prometheus', true);
   throw error;
 } finally {
   await compose('down', '-v', '--remove-orphans', true);
@@ -101,7 +106,7 @@ async function runScenario() {
   assert(completion.response.headers.get('x-mock-provider-auth') === 'accepted', 'Higress did not inject the provider credential');
   assert(!containsSecret(completion), 'Provider credentials were exposed in the client response');
 
-  const streaming = await inference(modelToken, {model: 'enterprise-chat', stream: true, messages: [{role: 'user', content: 'stream'}]});
+  const streaming = await inference(modelToken, {model: 'enterprise-chat', stream: true, stream_options: {include_usage: true}, messages: [{role: 'user', content: 'stream'}]});
   assert(streaming.response.status === 200, 'Streaming inference failed: ' + streaming.response.status + ' ' + streaming.text);
   assert(streaming.response.headers.get('content-type')?.startsWith('text/event-stream'), 'Streaming response was not SSE');
   assert(streaming.text.includes('Hello') && streaming.text.includes(' AEP') && streaming.text.includes('[DONE]'), 'Streaming chunks were incomplete');
@@ -128,6 +133,9 @@ async function runScenario() {
   assert(anthropicBody.content?.[0]?.text === 'anthropic passthrough ok bench-anthropic', 'Unexpected anthropic mock reply: ' + anthropic.text);
   assert(!containsSecret(anthropic), 'Provider credentials were exposed in the anthropic passthrough response');
 
+  const failed = await inference(modelToken, {model: 'enterprise-chat', messages: [{role: 'user', content: 'force upstream failure'}]});
+  assert(failed.response.status === 503, 'Upstream failure status was not preserved');
+
   await expectGatewayProblem(null, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken + 'invalid', {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await expectGatewayProblem(modelToken, {model: 'unassigned-chat'}, 403, 'MODEL_NOT_ALLOWED');
@@ -135,6 +143,86 @@ async function runScenario() {
   const expiresAt = decodeJwtPart(modelToken, 1).exp * 1000;
   await new Promise(resolve => setTimeout(resolve, Math.max(0, expiresAt - Date.now() + 250)));
   await expectGatewayProblem(modelToken, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
+  await verifyStatistics(modelToken);
+  await verifyPrometheus();
+}
+
+async function verifyPrometheus() {
+  const deadline = Date.now() + 45_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const targetsResponse = await fetch(prometheusBaseUrl + '/api/v1/targets', {signal: AbortSignal.timeout(5_000)});
+      assert(targetsResponse.ok, 'Prometheus targets API failed');
+      const targets = (await targetsResponse.json()).data.activeTargets;
+      assert(targets.length === 1 && targets[0].health === 'up', 'Expected one healthy Higress scrape target');
+      const selector = 'job="higress-gateway",higress="higress-system-higress-gateway"';
+      const input = 'route_upstream_model_consumer_metric_input_token';
+      const output = 'route_upstream_model_consumer_metric_output_token';
+      assert(await prometheusValue(`sum(${input}{${selector},ai_route="aep-model-gateway"})`) >= 3, 'Prometheus did not store OpenAI/SSE input usage');
+      assert(await prometheusValue(`sum(${output}{${selector},ai_route="aep-model-gateway"})`) >= 6, 'Prometheus did not store OpenAI/SSE output usage');
+      assert(await prometheusValue(`sum(${input}{${selector},ai_route="aep-anthropic-bench-anthropic"})`) >= 1, 'Prometheus did not store Anthropic input usage');
+      assert(await prometheusValue(`sum(route_upstream_model_consumer_metric_llm_failure_count{${selector}})`) >= 1, 'Prometheus did not store the upstream failure counter');
+      const end = Date.now() / 1_000;
+      const params = new URLSearchParams({query: `sum(${input}{${selector}})`, start: String(end - 10), end: String(end), step: '1'});
+      const rangeResponse = await fetch(prometheusBaseUrl + '/api/v1/query_range?' + params, {signal: AbortSignal.timeout(5_000)});
+      assert(rangeResponse.ok, 'Prometheus range API failed');
+      const range = await rangeResponse.json();
+      assert(range.status === 'success' && range.data.resultType === 'matrix' && range.data.result.some(series => series.values.length >= 2), 'Stored usage did not produce a time series');
+      console.log('Prometheus scraped one Higress target and queried stored OpenAI/SSE/Anthropic usage, failures and time series.');
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
+  throw lastError;
+}
+
+async function prometheusValue(query) {
+  const response = await fetch(prometheusBaseUrl + '/api/v1/query?' + new URLSearchParams({query}), {signal: AbortSignal.timeout(5_000)});
+  assert(response.ok, 'Prometheus query API failed');
+  const body = await response.json();
+  assert(body.status === 'success' && body.data.resultType === 'vector' && body.data.result.length === 1, 'Prometheus query returned no data: ' + query);
+  return Number(body.data.result[0].value[1]);
+}
+
+async function verifyStatistics(modelToken) {
+  const deadline = Date.now() + 45_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const metrics = await composeOutput('exec', '-T', 'higress', 'curl', '-fsS', '--max-time', '5', 'http://localhost:15020/stats/prometheus');
+      const value = (name, route) => metrics.split('\n').filter(line => line.startsWith(name + '{') && line.includes(`ai_route="${route}"`)).reduce((sum, line) => sum + Number(line.slice(line.lastIndexOf(' ') + 1)), 0);
+      const prefix = 'route_upstream_model_consumer_metric_';
+      assert(value(prefix + 'input_token', 'aep-model-gateway') >= 3, 'OpenAI input tokens were not exported, including streaming usage');
+      assert(value(prefix + 'output_token', 'aep-model-gateway') >= 6, 'OpenAI output tokens were not exported');
+      assert(value(prefix + 'llm_stream_duration_count', 'aep-model-gateway') >= 1, 'Streaming observations were not exported');
+      assert(value(prefix + 'input_token', 'aep-anthropic-bench-anthropic') >= 1, 'Anthropic input tokens were not exported');
+      assert(value(prefix + 'output_token', 'aep-anthropic-bench-anthropic') >= 2, 'Anthropic output tokens were not exported');
+      assert(!metrics.includes(modelToken) && !metrics.includes('m1-e2e-provider-secret') && !metrics.includes('Think through the request.'), 'Model content or credentials leaked into metrics');
+      console.log('Higress AI statistics exported OpenAI, SSE and Anthropic usage without model content or credentials.');
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
+  throw lastError;
+}
+
+function composeOutput(...args) {
+  return new Promise((resolve, reject) => {
+    const commandArgs = ['compose', '-p', project];
+    for (const file of composeFiles) commandArgs.push('-f', file);
+    commandArgs.push(...args);
+    const child = spawn('docker', commandArgs, {cwd: root, env: {...process.env, ...composeEnv}, stdio: ['ignore', 'pipe', 'pipe'], shell: false});
+    let result = '';
+    child.stdout.on('data', data => { result += data; });
+    child.stderr.resume();
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve(result) : reject(new Error('Higress metrics command failed with exit ' + code)));
+  });
 }
 
 async function inference(token, body) {

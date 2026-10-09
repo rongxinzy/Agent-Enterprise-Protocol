@@ -254,6 +254,45 @@ func TestChangePasswordAndCurrentIdentity(t *testing.T) {
 	}
 }
 
+func TestChangePasswordCurrentPasswordOptional(t *testing.T) {
+	application, mock, pool, _ := newUserHTTPApplication(t)
+	configureAuthHTTPApplication(application)
+	userToken := issueHTTPUserToken(t, application)
+	handler := New(application).Handler()
+	passwordHash, err := auth.HashPassword("current-password-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+
+	// A provided current password is still verified as a step-up proof.
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
+	mismatch := userRequest(handler, userToken, http.MethodPost, "/aep/v1/auth/password/change", `{"currentPassword":"wrong-password-456","newPassword":"replacement-password-456"}`)
+	if mismatch.Code != http.StatusUnauthorized || !strings.Contains(mismatch.Body.String(), `"code":"INVALID_CREDENTIALS"`) {
+		t.Fatalf("mismatched current password = %d %s", mismatch.Code, mismatch.Body.String())
+	}
+
+	// When it is omitted, the session bearer alone authorizes the change.
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "users" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 2"))
+	pool.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	expectHTTPModelScopes(pool, "deployment-a", "user-a", "chat-a")
+	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member")
+	expectHTTPSessionIssue(pool, "deployment-a", "user-a")
+	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs(
+		"deployment-a", "user-a", "password.changed", "success", nil, pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+	).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	changed := userRequest(handler, userToken, http.MethodPost, "/aep/v1/auth/password/change", `{"newPassword":"replacement-password-456"}`)
+	if changed.Code != http.StatusOK || !strings.Contains(changed.Body.String(), `"passwordChangeRequired":false`) || strings.Contains(changed.Body.String(), "replacement-password-456") {
+		t.Fatalf("session-only change password = %d %s", changed.Code, changed.Body.String())
+	}
+}
+
 func TestMockFederatedStartAndExchange(t *testing.T) {
 	application, mock, pool, _ := newUserHTTPApplication(t)
 	configureAuthHTTPApplication(application)

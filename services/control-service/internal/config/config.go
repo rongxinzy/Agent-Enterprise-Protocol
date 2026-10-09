@@ -48,6 +48,9 @@ type Config struct {
 	ModelAccessTTL            time.Duration
 	ModelGatewayBaseURL       string
 	AgentControlBaseURL       string
+	ModelHealthInterval       time.Duration
+	ModelHealthTimeout        time.Duration
+	ModelFallbackIDs          []string
 	DeploymentID              string
 	DeploymentName            string
 	DataPlaneReconcilerToken  string
@@ -160,6 +163,8 @@ func Load() (Config, error) {
 		{"AEP_MODEL_ACCESS_TTL", 15 * time.Minute, &cfg.ModelAccessTTL, false},
 		{"AEP_REFRESH_TTL", 30 * 24 * time.Hour, &cfg.RefreshTTL, false},
 		{"AEP_RETENTION_CLEANUP_INTERVAL", 15 * time.Minute, &cfg.RetentionCleanupInterval, true},
+		{"AEP_MODEL_HEALTH_INTERVAL", 2 * time.Minute, &cfg.ModelHealthInterval, true},
+		{"AEP_MODEL_HEALTH_TIMEOUT", 10 * time.Second, &cfg.ModelHealthTimeout, false},
 		{"AEP_OPERATIONAL_RETENTION", 30 * 24 * time.Hour, &cfg.OperationalRetention, true},
 		{"AEP_TELEMETRY_RETENTION", 90 * 24 * time.Hour, &cfg.TelemetryRetention, true},
 		{"AEP_AUDIT_RETENTION", 365 * 24 * time.Hour, &cfg.AuditRetention, true},
@@ -193,6 +198,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.TrustedProxyCIDRs, err = cidrList("AEP_TRUSTED_PROXY_CIDRS"); err != nil {
+		return Config{}, err
+	}
+	if cfg.ModelFallbackIDs, err = stringList("AEP_MODEL_FALLBACK_IDS", 8); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -388,6 +396,33 @@ func cidrList(key string) ([]netip.Prefix, error) {
 		prefixes = append(prefixes, prefix)
 	}
 	return prefixes, nil
+}
+
+// stringList parses a comma-separated environment value into a trimmed,
+// order-preserving, deduplicated list. An empty value yields nil so callers
+// can distinguish "not configured" from an explicit list.
+func stringList(key string, maxItems int) ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	values := make([]string, 0, strings.Count(raw, ",")+1)
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	if len(values) > maxItems {
+		return nil, fmt.Errorf("%s must contain at most %d comma-separated values", key, maxItems)
+	}
+	return values, nil
 }
 
 func absoluteURL(key, raw string, schemes ...string) (*url.URL, error) {
