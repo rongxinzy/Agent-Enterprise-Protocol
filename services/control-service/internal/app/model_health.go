@@ -135,6 +135,7 @@ ORDER BY deployment_id,id`)
 			slog.Log(ctx, level, "model health changed",
 				"model", row.modelID, "deployment", row.deploymentID,
 				"from", row.currentStatus, "to", outcome.Status, "detail", outcome.Detail)
+			a.notifyModelHealthChange(ctx, row.modelID, row.deploymentID, row.currentStatus, outcome.Status, outcome.Detail)
 		}
 	}
 	if skipped > 0 {
@@ -219,6 +220,59 @@ func (a *App) recordModelHealth(ctx context.Context, row modelProbeRow, outcome 
 		return fmt.Errorf("record model health for %s: %w", row.modelID, err)
 	}
 	return nil
+}
+
+// modelHealthNotificationLimit caps the notification text (runes) so an
+// upstream response echoed into the probe detail cannot exceed the receiver's
+// message limit.
+const modelHealthNotificationLimit = 800
+
+// notifyModelHealthChange pushes a best-effort notification when a model
+// changes health state. The payload is the WeCom group-robot text format (the
+// deployment's alert channel); an unset webhook is a no-op and delivery
+// failures are logged only — the persisted health columns and the audit trail
+// remain the source of truth. The notification runs synchronously with the
+// round context detached: a canceled probe round must not swallow the alert,
+// while a dead receiver delays the round by at most the notification timeout.
+// It fires only on transitions (the caller gates on a status change), so an
+// ongoing outage does not re-notify every round.
+func (a *App) notifyModelHealthChange(ctx context.Context, modelID, deploymentID, from, to, detail string) {
+	endpoint := strings.TrimSpace(a.Config.ModelHealthWebhookURL)
+	if endpoint == "" {
+		return
+	}
+	content := fmt.Sprintf("model health alert: %s (%s) %s -> %s", modelID, deploymentID, from, to)
+	if detail != "" {
+		content += ": " + detail
+	}
+	if runes := []rune(content); len(runes) > modelHealthNotificationLimit {
+		content = string(runes[:modelHealthNotificationLimit]) + "…"
+	}
+	payload, err := json.Marshal(map[string]any{"msgtype": "text", "text": map[string]string{"content": content}})
+	if err != nil {
+		slog.Warn("model health notification skipped", "error", err)
+		return
+	}
+	postContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(postContext, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		slog.Warn("model health notification skipped", "model", modelID, "error", err)
+		return
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		slog.Warn("model health notification failed", "model", modelID, "error", err)
+		return
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
+		_ = response.Body.Close()
+	}()
+	if response.StatusCode >= 300 {
+		slog.Warn("model health notification rejected", "model", modelID, "status", response.StatusCode)
+	}
 }
 
 // probeModel classifies one upstream call. openai-compatible endpoints are
