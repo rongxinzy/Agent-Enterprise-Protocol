@@ -1,0 +1,1117 @@
+"openapi": "3.1.0"
+"info":
+  "title": "AEP native model gateway management"
+  "version": "1.0.0"
+  "description": "Native Higress and monitoring integration. AEP performs authorization and source queries, never calculates usage or costs. P95/P99 and cost are excluded. Optional sources return explicit unavailable/unsupported problems rather than fabricated values."
+  "license":
+    "name": "Apache 2.0"
+    "identifier": "Apache-2.0"
+"servers":
+  - 
+    "url": "http://localhost:8080"
+"security":
+  - 
+    "bearerAuth": []
+"tags":
+  - 
+    "name": "Admin Model Gateway"
+    "description": "Read source results and manage native plugins within the authenticated deployment."
+"paths":
+  "/aep/v1/admin/model-gateway/capabilities":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayCapabilities"
+      "summary": "get Gateway Capabilities"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayCapabilities"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/metrics":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "queryGatewayMetrics"
+      "summary": "query Gateway Metrics"
+      "description": "Returns native values with an explicit metric definition. Catalog model and organization filters use Loki and can change calls/failures semantics. Set expectedDefinition to reject a definition change; clients must not combine series with different definitions."
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayMetricResult"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "expectedDefinition"
+          "in": "query"
+          "required": false
+          "description": "Pin a previously returned definition.id. A different selected definition returns 422 GATEWAY_METRIC_DEFINITION_MISMATCH without querying the source."
+          "schema":
+            "$ref": "#/components/schemas/GatewayMetricDefinitionId"
+        - 
+          "name": "start"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        - 
+          "name": "end"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        - 
+          "name": "step"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "minimum": 1
+            "maximum": 3600
+        - 
+          "name": "metric"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "enum":
+              - "input_tokens"
+              - "output_tokens"
+              - "calls"
+              - "failures"
+              - "first_token_duration"
+              - "service_duration"
+              - "downstream_qps"
+              - "upstream_qps"
+              - "downstream_success_rate"
+              - "upstream_success_rate"
+              - "auth_requests"
+        - 
+          "name": "groupBy"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "none"
+              - "model"
+              - "route"
+              - "user"
+              - "team"
+              - "role"
+        - 
+          "name": "modelId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "userId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "teamId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "roleId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+  "/aep/v1/admin/model-gateway/health":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayMonitoringHealth"
+      "summary": "get Gateway Monitoring Health"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayHealth"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/requests":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "searchGatewayRequests"
+      "summary": "search Gateway Requests"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayNativeResult"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "start"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        - 
+          "name": "end"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        - 
+          "name": "modelId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "userId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "teamId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "roleId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "source"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "all"
+              - "gateway"
+              - "authorizer"
+        - 
+          "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "minimum": 1
+            "maximum": 200
+        - 
+          "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{1,20}$"
+  "/aep/v1/admin/model-gateway/requests/{requestId}":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayRequest"
+      "summary": "get Gateway Request"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayNativeResult"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "requestId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "start"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        - 
+          "name": "end"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        - 
+          "name": "modelId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "userId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "teamId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "roleId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "source"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "all"
+              - "gateway"
+              - "authorizer"
+        - 
+          "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "minimum": 1
+            "maximum": 200
+        - 
+          "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{1,20}$"
+  "/aep/v1/admin/model-gateway/limits":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "listGatewayLimits"
+      "summary": "list Gateway Limits"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimitPage"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/limits/{ruleId}":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayLimit"
+      "summary": "get Gateway Limit"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimit"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "ruleId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+    "put":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "putGatewayLimit"
+      "summary": "put Gateway Limit"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimit"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "ruleId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayLimitWrite"
+    "delete":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "deleteGatewayLimit"
+      "summary": "delete Gateway Limit"
+      "responses":
+        "204":
+          "description": "Deleted"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "ruleId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        - 
+          "name": "expectedVersion"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "integer"
+            "minimum": 1
+  "/aep/v1/admin/model-gateway/limits/publish":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "publishGatewayLimits"
+      "summary": "publish Gateway Limits"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimitPublication"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/limits/status":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayLimitsStatus"
+      "summary": "get Gateway Limits Status"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimitStatus"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/quotas/{userId}":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayQuota"
+      "summary": "get Gateway Quota"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayQuota"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "userId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+  "/aep/v1/admin/model-gateway/quotas/{userId}/refresh":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "refreshGatewayQuota"
+      "summary": "refresh Gateway Quota"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayQuota"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "userId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayQuotaRefresh"
+  "/aep/v1/admin/model-gateway/quotas/{userId}/delta":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "changeGatewayQuota"
+      "summary": "change Gateway Quota"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayQuota"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "userId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayQuotaDelta"
+  "/aep/v1/admin/model-gateway/models/{modelId}/test-access":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "createGatewayTestAccess"
+      "summary": "create Gateway Test Access"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayTestAccess"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        - 
+          "name": "modelId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+"components":
+  "securitySchemes":
+    "bearerAuth":
+      "type": "http"
+      "scheme": "bearer"
+      "bearerFormat": "JWT"
+  "responses":
+    "Problem":
+      "$ref": "./aep-v1-authentication.openapi.yaml#/components/responses/Problem"
+  "schemas":
+    "GatewayCapabilities":
+      "type": "object"
+      "required":
+        - "sources"
+        - "dimensions"
+        - "metrics"
+        - "unsupported"
+      "additionalProperties": false
+      "properties":
+        "sources":
+          "type": "object"
+          "required":
+            - "prometheus"
+            - "loki"
+            - "quota"
+            - "testAccess"
+          "additionalProperties": false
+          "properties":
+            "prometheus":
+              "type": "boolean"
+            "loki":
+              "type": "boolean"
+            "quota":
+              "type": "boolean"
+            "testAccess":
+              "type": "boolean"
+        "dimensions":
+          "type": "array"
+          "items":
+            "type": "string"
+            "enum":
+              - "model"
+              - "route"
+              - "user"
+              - "team"
+              - "role"
+        "metrics":
+          "type": "array"
+          "items":
+            "type": "string"
+        "unsupported":
+          "type": "array"
+          "items":
+            "type": "string"
+    "GatewayMetricDefinitionId":
+      "type": "string"
+      "enum":
+        - "ai_input_tokens"
+        - "ai_output_tokens"
+        - "ai_usage_completed_calls"
+        - "ai_detected_failures"
+        - "ai_usage_mean_first_token_duration"
+        - "ai_usage_mean_service_duration"
+        - "gateway_log_input_tokens"
+        - "gateway_log_output_tokens"
+        - "gateway_access_requests"
+        - "gateway_http_errors"
+        - "gateway_log_mean_first_token_duration"
+        - "gateway_log_mean_service_duration"
+        - "envoy_downstream_qps"
+        - "envoy_upstream_qps"
+        - "envoy_downstream_non_5xx_ratio"
+        - "envoy_upstream_non_5xx_ratio"
+        - "authorizer_http_requests"
+    "GatewayMetricDefinition":
+      "type": "object"
+      "required": ["id", "unit", "aggregation", "windowSeconds", "groupBy", "modelDimension"]
+      "additionalProperties": false
+      "description": "Query metadata, not calculated telemetry. Counters are per-lookback-window values, not totals for the complete selected period. AEP does not aggregate returned points."
+      "properties":
+        "id":
+          "$ref": "#/components/schemas/GatewayMetricDefinitionId"
+        "unit":
+          "type": "string"
+          "enum": ["tokens", "requests", "milliseconds", "requests_per_second", "ratio"]
+        "aggregation":
+          "type": "string"
+          "enum": ["counter_increase", "log_count", "log_sum", "counter_rate_mean", "log_mean", "instantaneous_rate", "non_5xx_ratio"]
+        "windowSeconds":
+          "type": "integer"
+          "minimum": 1
+          "description": "Native query lookback; 120 for rate queries, otherwise the requested step (default 60). Distinct from the output sampling interval."
+        "groupBy":
+          "type": "string"
+          "enum": ["none", "model", "route", "user", "team", "role"]
+        "modelDimension":
+          "type": "string"
+          "enum": ["upstream_model", "catalog_model", "not_applicable"]
+    "GatewayMetricResult":
+      "type": "object"
+      "required": ["source", "queriedAt", "data", "definition"]
+      "additionalProperties": false
+      "properties":
+        "source":
+          "type": "string"
+          "enum": ["prometheus", "loki"]
+        "queriedAt":
+          "type": "string"
+          "format": "date-time"
+        "data":
+          "type": "object"
+          "additionalProperties": true
+        "definition":
+          "$ref": "#/components/schemas/GatewayMetricDefinition"
+    "GatewayNativeResult":
+      "type": "object"
+      "required":
+        - "source"
+        - "queriedAt"
+        - "data"
+      "additionalProperties": false
+      "properties":
+        "source":
+          "type": "string"
+          "enum":
+            - "prometheus"
+            - "loki"
+        "queriedAt":
+          "type": "string"
+          "format": "date-time"
+        "data":
+          "type": "object"
+          "additionalProperties": true
+    "GatewayHealth":
+      "type": "object"
+      "required":
+        - "sources"
+      "additionalProperties": false
+      "properties":
+        "sources":
+          "type": "array"
+          "items":
+            "type": "object"
+            "required":
+              - "source"
+              - "state"
+              - "checkedAt"
+              - "targets"
+            "additionalProperties": false
+            "properties":
+              "source":
+                "type": "string"
+                "enum":
+                  - "prometheus"
+                  - "loki"
+                  - "quota"
+              "state":
+                "type": "string"
+                "enum":
+                  - "disabled"
+                  - "healthy"
+                  - "unavailable"
+              "checkedAt":
+                "type": "string"
+                "format": "date-time"
+              "targets":
+                "type": "array"
+                "items":
+                  "type": "object"
+                  "required":
+                    - "health"
+                    - "lastScrape"
+                    - "lastScrapeDuration"
+                  "additionalProperties": false
+                  "properties":
+                    "health":
+                      "type": "string"
+                    "lastScrape":
+                      "type": "string"
+                    "lastScrapeDuration":
+                      "type": "number"
+    "GatewayLimitWrite":
+      "type": "object"
+      "required":
+        - "kind"
+        - "scopeType"
+        - "maximum"
+        - "interval"
+        - "enabled"
+        - "expectedVersion"
+      "additionalProperties": false
+      "properties":
+        "kind":
+          "type": "string"
+          "enum":
+            - "requests"
+            - "tokens"
+        "scopeType":
+          "type": "string"
+          "enum":
+            - "global"
+            - "model"
+            - "user"
+            - "team"
+            - "role"
+        "scopeId":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 200
+        "modelId":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 200
+        "maximum":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 1000000000000
+        "interval":
+          "type": "string"
+          "enum":
+            - "second"
+            - "minute"
+            - "hour"
+            - "day"
+        "enabled":
+          "type": "boolean"
+        "expectedVersion":
+          "type": "integer"
+          "minimum": 0
+    "GatewayLimit":
+      "type": "object"
+      "required":
+        - "id"
+        - "version"
+        - "configuration"
+        - "updatedAt"
+      "additionalProperties": false
+      "properties":
+        "id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "version":
+          "type": "integer"
+          "minimum": 1
+        "configuration":
+          "$ref": "#/components/schemas/GatewayLimitWrite"
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+    "GatewayLimitPage":
+      "type": "object"
+      "required":
+        - "items"
+      "additionalProperties": false
+      "properties":
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/GatewayLimit"
+    "GatewayLimitPublication":
+      "type": "object"
+      "required":
+        - "revision"
+        - "publishedAt"
+        - "items"
+      "additionalProperties": false
+      "properties":
+        "revision":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "publishedAt":
+          "type": "string"
+          "format": "date-time"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/GatewayLimit"
+    "GatewayLimitStatus":
+      "type": "object"
+      "required":
+        - "state"
+        - "revision"
+        - "runtimeVerified"
+      "additionalProperties": false
+      "properties":
+        "state":
+          "type": "string"
+          "enum":
+            - "unpublished"
+            - "pending"
+            - "applied"
+            - "error"
+        "revision":
+          "type":
+            - "string"
+            - "null"
+        "runtimeVerified":
+          "type": "boolean"
+    "GatewayQuota":
+      "type": "object"
+      "required":
+        - "consumer"
+        - "quota"
+      "additionalProperties": false
+      "properties":
+        "consumer":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "quota":
+          "type": "number"
+    "GatewayQuotaRefresh":
+      "type": "object"
+      "required":
+        - "quota"
+      "additionalProperties": false
+      "properties":
+        "quota":
+          "type": "integer"
+          "minimum": 0
+          "maximum": 1000000000000
+    "GatewayQuotaDelta":
+      "type": "object"
+      "required":
+        - "value"
+      "additionalProperties": false
+      "properties":
+        "value":
+          "type": "integer"
+          "minimum": -1000000000000
+          "maximum": 1000000000000
+    "GatewayTestAccess":
+      "type": "object"
+      "required":
+        - "modelId"
+        - "protocol"
+        - "baseUrl"
+        - "path"
+        - "modelAccessToken"
+        - "expiresAt"
+      "additionalProperties": false
+      "properties":
+        "modelId":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "protocol":
+          "type": "string"
+          "enum":
+            - "openai-compatible"
+            - "anthropic"
+        "baseUrl":
+          "type": "string"
+          "format": "uri"
+        "path":
+          "type": "string"
+        "modelAccessToken":
+          "type": "string"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
