@@ -1,0 +1,55 @@
+# Transform/sink fragment for an EXISTING Vector collector. Connect only
+# trusted Higress/authorizer container logs to gateway_raw, not arbitrary pods.
+# Loki endpoint/authentication come from deployment environment/Secret.
+transforms:
+  gateway_metadata:
+    type: remap
+    inputs: [gateway_raw]
+    drop_on_abort: true
+    source: |
+      log = parse_json!(.message)
+      if log.aep_source != "gateway" && log.aep_source != "authorizer" { abort }
+      dep = string!(log.deployment_id)
+      if dep == "" || dep == "-" { abort }
+      usage = parse_json(string(log.ai_log) ?? "{}") ?? {}
+      . = {
+        "aep_source": log.aep_source, "aep_deployment_id": dep,
+        "aep_dimension": "base", "request_id": log.request_id,
+        "user_id": log.user_id, "model_id": log.model_id,
+        "team_ids": log.team_ids, "role_ids": log.role_ids,
+        "route": log.route, "status": log.status,
+        "response_flags": log.response_flags,
+        "input_token": usage.input_token, "output_token": usage.output_token,
+        "llm_service_duration": usage.llm_service_duration,
+        "llm_first_token_duration": usage.llm_first_token_duration
+      }
+  gateway_teams:
+    type: remap
+    inputs: [gateway_metadata]
+    drop_on_abort: true
+    source: |
+      if .aep_source != "gateway" { abort }
+      .team_id = filter(split(string(.team_ids) ?? "", "|")) -> |_i, id| { id != "" }
+      .aep_dimension = "team"
+      . = unnest(.team_id)
+  gateway_roles:
+    type: remap
+    inputs: [gateway_metadata]
+    drop_on_abort: true
+    source: |
+      if .aep_source != "gateway" { abort }
+      .role_id = filter(split(string(.role_ids) ?? "", "|")) -> |_i, id| { id != "" }
+      .aep_dimension = "role"
+      . = unnest(.role_id)
+sinks:
+  gateway_loki:
+    type: loki
+    inputs: [gateway_metadata, gateway_teams, gateway_roles]
+    endpoint: '${AEP_LOKI_PUSH_URL}'
+    tenant_id: '{{ aep_deployment_id }}'
+    encoding:
+      codec: json
+    labels:
+      aep_source: '{{ aep_source }}'
+      aep_deployment_id: '{{ aep_deployment_id }}'
+      aep_dimension: '{{ aep_dimension }}'

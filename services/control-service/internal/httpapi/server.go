@@ -145,6 +145,7 @@ func (s *Server) mountInternal(router chi.Router) {
 	router.Get("/internal/data-plane/desired-state", s.internalDataPlane(s.getDataPlaneDesiredState))
 	router.Put("/internal/data-plane/status", s.internalDataPlane(s.putInternalDataPlaneStatus))
 	router.Get("/internal/gateway/licenses/{licenseId}", s.internalLicenseStatus)
+	router.Get("/internal/gateway/identity", s.internalGatewayIdentity)
 }
 
 // mountAdmin registers the enterprise management API behind session auth
