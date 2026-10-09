@@ -63,7 +63,7 @@ func (s *Server) gatewayMetrics(response http.ResponseWriter, request *http.Requ
 			gatewayQueryFailure(response, request, err)
 			return
 		}
-		s.gatewayNative(response, request, "loki", s.app.Config.GatewayLokiURL, s.app.Config.GatewayLokiToken, "/loki/api/v1/query_range", query)
+		s.gatewayMetricNative(response, request, "loki", s.app.Config.GatewayLokiURL, s.app.Config.GatewayLokiToken, "/loki/api/v1/query_range", query)
 		return
 	}
 	query, err := gatewaysource.MetricQuery(claimsFrom(request).DeploymentID, request.URL.Query())
@@ -74,7 +74,7 @@ func (s *Server) gatewayMetrics(response http.ResponseWriter, request *http.Requ
 		gatewayQueryFailure(response, request, err)
 		return
 	}
-	s.gatewayNative(response, request, "prometheus", s.app.Config.GatewayPrometheusURL, s.app.Config.GatewayPrometheusToken, "/api/v1/query_range", query)
+	s.gatewayMetricNative(response, request, "prometheus", s.app.Config.GatewayPrometheusURL, s.app.Config.GatewayPrometheusToken, "/api/v1/query_range", query)
 }
 
 func (s *Server) gatewayRequests(response http.ResponseWriter, request *http.Request) {
@@ -87,13 +87,34 @@ func (s *Server) gatewayRequests(response http.ResponseWriter, request *http.Req
 }
 
 func (s *Server) gatewayNative(response http.ResponseWriter, request *http.Request, source, endpoint, token, path string, values url.Values) {
+	s.gatewayNativeResult(response, request, source, endpoint, token, path, values, nil)
+}
+
+func (s *Server) gatewayMetricNative(response http.ResponseWriter, request *http.Request, source, endpoint, token, path string, values url.Values) {
+	definition, err := gatewaysource.DescribeMetric(source, request.URL.Query())
+	if err != nil {
+		gatewayQueryFailure(response, request, err)
+		return
+	}
+	if expected := request.URL.Query().Get("expectedDefinition"); expected != "" && expected != definition.ID {
+		writeProblem(response, request, http.StatusUnprocessableEntity, "GATEWAY_METRIC_DEFINITION_MISMATCH", "The selected native metric definition differs from expectedDefinition.")
+		return
+	}
+	s.gatewayNativeResult(response, request, source, endpoint, token, path, values, &definition)
+}
+
+func (s *Server) gatewayNativeResult(response http.ResponseWriter, request *http.Request, source, endpoint, token, path string, values url.Values, definition *gatewaysource.MetricDefinition) {
 	data, err := gatewaysource.Fetch(request.Context(), endpoint, token, claimsFrom(request).DeploymentID, path, http.MethodGet, values)
 	if err != nil {
 		writeProblem(response, request, http.StatusServiceUnavailable, "GATEWAY_SOURCE_UNAVAILABLE", "The configured gateway data source is unavailable.")
 		return
 	}
 	response.Header().Set("Cache-Control", "no-store")
-	writeJSON(response, http.StatusOK, map[string]any{"source": source, "queriedAt": time.Now().UTC(), "data": data})
+	result := map[string]any{"source": source, "queriedAt": time.Now().UTC(), "data": data}
+	if definition != nil {
+		result["definition"] = definition
+	}
+	writeJSON(response, http.StatusOK, result)
 }
 
 func (s *Server) gatewayHealth(response http.ResponseWriter, request *http.Request) {
