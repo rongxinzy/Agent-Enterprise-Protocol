@@ -273,11 +273,12 @@ func TestNativeRuleDatabaseFailures(t *testing.T) {
 				path = "/aep/v1/admin/model-gateway/limits/publish"
 				body = ""
 				q := pool.ExpectQuery(`SELECT id,version,configuration,updated_at`).WithArgs("deployment-a")
-				if failure == "publish-query" {
+				switch failure {
+				case "publish-query":
 					q.WillReturnError(errors.New("query unavailable"))
-				} else if failure == "publish-json" {
+				case "publish-json":
 					q.WillReturnRows(pgxmock.NewRows([]string{"id", "version", "configuration", "updated_at"}).AddRow("a", int64(1), []byte(`broken`), time.Now().UTC()))
-				} else {
+				default:
 					q.WillReturnRows(pgxmock.NewRows([]string{"id", "version", "configuration", "updated_at"}))
 					pool.ExpectQuery(`INSERT INTO gateway_limit_publications`).WithArgs("deployment-a", pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnError(errors.New("publish unavailable"))
 				}
