@@ -48,10 +48,22 @@ type Config struct {
 	ModelAccessTTL            time.Duration
 	ModelGatewayBaseURL       string
 	AgentControlBaseURL       string
+	ModelHealthInterval       time.Duration
+	ModelHealthTimeout        time.Duration
+	ModelHealthWebhookURL     string
+	ModelFallbackIDs          []string
 	DeploymentID              string
 	DeploymentName            string
 	DataPlaneReconcilerToken  string
 	GatewayLicenseStatusToken string
+	GatewayPrometheusURL      string
+	GatewayPrometheusToken    string
+	GatewayLokiURL            string
+	GatewayLokiToken          string
+	GatewayQuotaURL           string
+	GatewayQuotaToken         string
+	GatewayMetricsDeployment  string
+	GatewayOrganizationLogs   bool
 	MaxResidentAgents         int
 	CredentialMasterKeyBase64 string
 	CredentialMasterKeyFile   string
@@ -124,6 +136,7 @@ func Load() (Config, error) {
 		Issuer:                    value("AEP_ISSUER", "http://localhost:8080"),
 		SigningKeyBase64:          signingKey,
 		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
+		ModelHealthWebhookURL:     strings.TrimSpace(os.Getenv("AEP_MODEL_HEALTH_WEBHOOK")),
 		AgentControlBaseURL:       os.Getenv("AEP_AGENT_CONTROL_BASE_URL"),
 		DeploymentID:              value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo")),
 		DeploymentName:            value("AEP_DEPLOYMENT_NAME", value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Deployment")),
@@ -160,6 +173,8 @@ func Load() (Config, error) {
 		{"AEP_MODEL_ACCESS_TTL", 15 * time.Minute, &cfg.ModelAccessTTL, false},
 		{"AEP_REFRESH_TTL", 30 * 24 * time.Hour, &cfg.RefreshTTL, false},
 		{"AEP_RETENTION_CLEANUP_INTERVAL", 15 * time.Minute, &cfg.RetentionCleanupInterval, true},
+		{"AEP_MODEL_HEALTH_INTERVAL", 2 * time.Minute, &cfg.ModelHealthInterval, true},
+		{"AEP_MODEL_HEALTH_TIMEOUT", 10 * time.Second, &cfg.ModelHealthTimeout, false},
 		{"AEP_OPERATIONAL_RETENTION", 30 * 24 * time.Hour, &cfg.OperationalRetention, true},
 		{"AEP_TELEMETRY_RETENTION", 90 * 24 * time.Hour, &cfg.TelemetryRetention, true},
 		{"AEP_AUDIT_RETENTION", 365 * 24 * time.Hour, &cfg.AuditRetention, true},
@@ -195,6 +210,28 @@ func Load() (Config, error) {
 	if cfg.TrustedProxyCIDRs, err = cidrList("AEP_TRUSTED_PROXY_CIDRS"); err != nil {
 		return Config{}, err
 	}
+	if cfg.ModelFallbackIDs, err = stringList("AEP_MODEL_FALLBACK_IDS", 8); err != nil {
+		return Config{}, err
+	}
+	for _, item := range []struct {
+		key    string
+		target *string
+	}{
+		{"AEP_GATEWAY_PROMETHEUS_URL", &cfg.GatewayPrometheusURL},
+		{"AEP_GATEWAY_PROMETHEUS_TOKEN", &cfg.GatewayPrometheusToken},
+		{"AEP_GATEWAY_LOKI_URL", &cfg.GatewayLokiURL},
+		{"AEP_GATEWAY_LOKI_TOKEN", &cfg.GatewayLokiToken},
+		{"AEP_GATEWAY_QUOTA_URL", &cfg.GatewayQuotaURL},
+		{"AEP_GATEWAY_QUOTA_TOKEN", &cfg.GatewayQuotaToken},
+		{"AEP_GATEWAY_METRICS_DEPLOYMENT", &cfg.GatewayMetricsDeployment},
+	} {
+		if *item.target, err = secret(item.key, ""); err != nil {
+			return Config{}, err
+		}
+	}
+	if cfg.GatewayOrganizationLogs, err = boolean("AEP_GATEWAY_ORGANIZATION_LOGS", false); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -202,6 +239,18 @@ func Load() (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	for key, raw := range map[string]string{"AEP_GATEWAY_PROMETHEUS_URL": cfg.GatewayPrometheusURL, "AEP_GATEWAY_LOKI_URL": cfg.GatewayLokiURL, "AEP_GATEWAY_QUOTA_URL": cfg.GatewayQuotaURL} {
+		if raw == "" {
+			continue
+		}
+		parsed, err := absoluteURL(key, raw, "http", "https")
+		if err != nil {
+			return err
+		}
+		if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%s must not contain credentials, query, or fragment", key)
+		}
+	}
 	if cfg.Environment != "development" && cfg.Environment != "test" && cfg.Environment != "production" {
 		return errors.New("AEP_ENVIRONMENT must be development, test, or production")
 	}
@@ -223,6 +272,11 @@ func (cfg Config) Validate() error {
 			return err
 		}
 		if err := clientReachableGatewayHost(gatewayURL.Hostname(), cfg.Environment); err != nil {
+			return err
+		}
+	}
+	if cfg.ModelHealthWebhookURL != "" {
+		if _, err := absoluteURL("AEP_MODEL_HEALTH_WEBHOOK", cfg.ModelHealthWebhookURL, "http", "https"); err != nil {
 			return err
 		}
 	}
@@ -388,6 +442,33 @@ func cidrList(key string) ([]netip.Prefix, error) {
 		prefixes = append(prefixes, prefix)
 	}
 	return prefixes, nil
+}
+
+// stringList parses a comma-separated environment value into a trimmed,
+// order-preserving, deduplicated list. An empty value yields nil so callers
+// can distinguish "not configured" from an explicit list.
+func stringList(key string, maxItems int) ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	values := make([]string, 0, strings.Count(raw, ",")+1)
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	if len(values) > maxItems {
+		return nil, fmt.Errorf("%s must contain at most %d comma-separated values", key, maxItems)
+	}
+	return values, nil
 }
 
 func absoluteURL(key, raw string, schemes ...string) (*url.URL, error) {

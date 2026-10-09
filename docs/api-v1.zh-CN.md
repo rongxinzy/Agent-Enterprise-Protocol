@@ -120,7 +120,9 @@ HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token�
 
 ### `POST /auth/password/change`
 
-请求：`{"currentPassword":"old-password","newPassword":"new-long-password"}`。服务端修改当前
+请求：`{"newPassword":"new-long-password"}`。会话 bearer 令牌即完成身份认证。
+`currentPassword` 是可选的加强校验：提供时服务端会校验，不匹配返回
+`401 INVALID_CREDENTIALS`；省略时仅凭会话授权改密。服务端修改当前
 账号密码、撤销该账号的其他 refresh 会话，并返回
 `passwordChangeRequired` 为 false 的新 token 结构。
 
@@ -475,7 +477,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
 
 ### RBAC 与会话
 

@@ -76,6 +76,7 @@ services:
       - ./higress/mcpbridge.yaml:/data/mcpbridges/default.yaml:ro
       - ./higress/ingress.yaml:/data/ingresses/aep-model-gateway.yaml:ro
       - ./higress/ai-proxy.yaml:/data/wasmplugins/aep-ai-proxy.yaml:ro
+      - ./higress/ai-statistics.yaml:/data/wasmplugins/aep-ai-statistics.yaml:ro
       - ./higress/anthropic-ingress.yaml:/data/ingresses/aep-anthropic-bench-anthropic.yaml:ro
       - ./higress/anthropic-envoyfilter.yaml:/data/envoyfilters/aep-anthropic-bench-anthropic.yaml:ro
     healthcheck:

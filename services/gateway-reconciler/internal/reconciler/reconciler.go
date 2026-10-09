@@ -22,13 +22,18 @@ import (
 // rendered WasmPlugin references (oci:// tag).
 const aiProxyPluginVersion = "2.0.1"
 
+// Pin the official ai-statistics 2.0.1 OCI artifact, independently of the
+// gateway image and mutable plugin tags.
+const aiStatisticsPluginURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-statistics@sha256:9bebfc803f6ea92c0805670bd9a6e8a5bb727f2e1a86b133f20bb7002e71511e"
+
 type Config struct {
-	ControlURL string
-	Token      string
-	OutputDir  string
-	Tenants    []string
-	HTTPClient *http.Client
-	Applier    Applier
+	NativeGateway NativeGatewayConfig
+	ControlURL    string
+	Token         string
+	OutputDir     string
+	Tenants       []string
+	HTTPClient    *http.Client
+	Applier       Applier
 	// CredentialFetcher resolves credentialRef values for the rendered
 	// WasmPlugin (ai-proxy requires inline apiTokens). When nil, routes with
 	// credentialRefs render without tokens — ai-proxy then rejects requests
@@ -82,6 +87,9 @@ type Reconciler struct {
 }
 
 func New(config Config) (*Reconciler, error) {
+	if native := config.NativeGateway; native.Enabled && (native.RedisService == "" || native.RedisPort < 1 || native.RedisPort > 65535 || native.RedisDatabase < 0) {
+		return nil, errors.New("native gateway requires valid Redis configuration")
+	}
 	if strings.TrimRight(config.ControlURL, "/") == "" || config.Token == "" || config.OutputDir == "" || len(config.Tenants) == 0 {
 		return nil, errors.New("control URL, token, output directory, and at least one tenant are required")
 	}
@@ -121,6 +129,11 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if r.config.NativeGateway.Enabled {
+		if err := r.syncGatewayLimits(ctx, desired); err != nil {
+			return r.writeFailure(ctx, tenant, "GATEWAY_LIMITS_FAILED", errors.New("native gateway limits could not be applied"))
+		}
+	}
 	return r.writeStatus(ctx, tenant, Status{State: "ready", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, LastAppliedAt: &now, ResourceCount: len(desired.Routes)})
 }
 
@@ -219,6 +232,8 @@ const (
 	ResourceAnthropicIngress ResourceKind = "anthropicIngress"
 	ResourceEnvoyFilter      ResourceKind = "envoyFilter"
 	ResourceWasmPlugin       ResourceKind = "wasmPlugin"
+	ResourceAIStatistics     ResourceKind = "aiStatistics"
+	ResourceGatewayNative    ResourceKind = "gatewayNative"
 )
 
 // RenderedResource is one YAML document plus the Kubernetes API path it
@@ -233,7 +248,9 @@ type RenderedResource struct {
 // pinned order: the tenant's openai Ingress, then per anthropic route (sorted
 // by model ID) its Ingress + EnvoyFilter pair, then the ai-proxy WasmPlugin
 // (always present so disabling every openai route only empties its
-// matchRules). Anthropic routes never touch shared resources: the EnvoyFilter
+// matchRules), then the tenant-scoped ai-statistics WasmPlugin. Both plugins
+// remain present with empty matchRules when idle. Anthropic routes never touch
+// shared resources: the EnvoyFilter
 // declares its own upstream cluster and redirects the route to it, so nothing
 // outside the tenant's own names is written.
 func Render(desired DesiredState, credentialValues map[string]string) (string, []RenderedResource, string, error) {
@@ -292,6 +309,7 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 		)
 	}
 	resources = append(resources, RenderedResource{Kind: ResourceWasmPlugin, APIPath: wasmPluginAPIPath(suffix), Body: renderWasmPlugin(suffix, enabledOpenAI, credentialValues)})
+	resources = append(resources, RenderedResource{Kind: ResourceAIStatistics, APIPath: aiStatisticsAPIPath(suffix), Body: renderAIStatistics(suffix, enabledOpenAI, anthropic)})
 	var document strings.Builder
 	for index, resource := range resources {
 		if index > 0 {
@@ -334,6 +352,25 @@ func renderWasmPlugin(suffix string, enabled []Route, credentialValues map[strin
 			}
 		}
 		document.WriteString("      ingress:\n        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
+	}
+	return document.String()
+}
+
+func renderAIStatistics(suffix string, openAI, anthropic []Route) string {
+	var document strings.Builder
+	document.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-statistics-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar(aiStatisticsPluginURL) + "\n  failStrategy: FAIL_OPEN\n  phase: UNSPECIFIED_PHASE\n  priority: 200\n  defaultConfigDisable: true\n")
+	if len(openAI)+len(anthropic) == 0 {
+		document.WriteString("  matchRules: []\n")
+		return document.String()
+	}
+	// Never enable full default attributes: they include prompts, answers,
+	// tool arguments and reasoning. Observation must not capture model content.
+	document.WriteString("  matchRules:\n    - config:\n        use_default_attributes: false\n        use_default_response_attributes: true\n        enable_path_suffixes:\n          - /chat/completions\n          - /completions\n          - /responses\n          - /messages\n      configDisable: false\n      ingress:\n")
+	if len(openAI) > 0 {
+		document.WriteString("        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
+	}
+	for _, route := range anthropic {
+		document.WriteString("        - " + yamlScalar(anthropicResourceName(route.ModelID)) + "\n")
 	}
 	return document.String()
 }
@@ -470,6 +507,10 @@ func envoyFilterAPIPath(name string) string {
 
 func wasmPluginAPIPath(suffix string) string {
 	return "/apis/extensions.higress.io/v1alpha1/namespaces/higress-system/wasmplugins/aep-ai-proxy-" + suffix
+}
+
+func aiStatisticsAPIPath(suffix string) string {
+	return "/apis/extensions.higress.io/v1alpha1/namespaces/higress-system/wasmplugins/aep-ai-statistics-" + suffix
 }
 
 // ingressPath maps a route endpoint to the Ingress path prefix. Endpoints

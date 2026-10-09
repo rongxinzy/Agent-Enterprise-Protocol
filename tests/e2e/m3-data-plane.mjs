@@ -98,7 +98,7 @@ try {
   const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
   await waitForReady(admin, 'rev-1');
   await waitForHealth('/readyz', 200);
-  assert(resources.size === 2, 'Ingress and WasmPlugin were not both applied');
+  assert(resources.size === 3, 'Ingress, ai-proxy and ai-statistics were not all applied');
   const firstCount = applyCount;
   const firstResources = snapshot();
   assert(firstResources.includes("type: 'deepseek'"), 'DeepSeek provider type was not rendered');
@@ -211,7 +211,7 @@ try {
   const derivedAnthropicRoute = anthropicPublished.routes.find(candidate => candidate.modelId === 'bench-anthropic');
   assert(derivedAnthropicRoute?.protocol === 'anthropic' && !derivedAnthropicRoute.providerType, `anthropic derived route = ${JSON.stringify(derivedAnthropicRoute)}`);
   await waitForReady(admin, anthropicPublished.revision);
-  assert(resources.size === 4, `expected openai ingress + anthropic ingress + envoyfilter + wasmplugin, got ${[...resources.keys()]}`);
+  assert(resources.size === 5, `expected openai ingress + anthropic ingress + envoyfilter + both wasmplugins, got ${[...resources.keys()]}`);
   const anthropicName = `aep-anthropic-${suffixOf('bench-anthropic')}`;
   const filter = resources.get(`/apis/networking.istio.io/v1alpha3/namespaces/higress-system/envoyfilters/${anthropicName}`);
   const anthropicIngress = resources.get(`/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/${anthropicName}`);

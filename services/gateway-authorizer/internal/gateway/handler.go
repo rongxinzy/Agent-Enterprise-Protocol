@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 )
 
 type TokenVerifier interface {
@@ -31,6 +33,9 @@ type Handler struct {
 	proxy              *httputil.ReverseProxy
 	limit              int64
 	requireEntitlement bool
+	identityURL        string
+	identityToken      string
+	deploymentID       string
 }
 
 func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
@@ -54,7 +59,7 @@ func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
 		slog.Error("model gateway upstream failed", "request_id", requestID(request), "error", err)
 		writeProblem(response, request, http.StatusBadGateway, "GATEWAY_UPSTREAM_UNAVAILABLE", "The model gateway upstream is unavailable.")
 	}
-	return &Handler{verifier: verifier, proxy: proxy, limit: config.RequestLimit, requireEntitlement: config.RequireEntitlement}, nil
+	return &Handler{verifier: verifier, proxy: proxy, limit: config.RequestLimit, requireEntitlement: config.RequireEntitlement, identityURL: config.IdentityURL, identityToken: config.LicenseStatusToken, deploymentID: config.DeploymentID}, nil
 }
 
 func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -81,6 +86,16 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	rawToken, ok := bearerToken(request.Header.Get("Authorization"))
+	wrapped := middleware.NewWrapResponseWriter(response, request.ProtoMajor)
+	response = wrapped
+	logDeployment, logUser, logModel, logTeams, logRoles := h.deploymentID, "", "", "", ""
+	defer func() {
+		status := wrapped.Status()
+		if status == 0 {
+			status = http.StatusOK
+		}
+		slog.Info("gateway access", "aep_source", "authorizer", "deployment_id", logDeployment, "user_id", logUser, "model_id", logModel, "team_ids", logTeams, "role_ids", logRoles, "request_id", requestID(request), "status", status)
+	}()
 	if !ok {
 		response.Header().Set("WWW-Authenticate", "Bearer")
 		writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "A model bearer token is required.")
@@ -92,6 +107,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusUnauthorized, "TOKEN_INVALID", "The model token is invalid or expired.")
 		return
 	}
+	logDeployment, logUser = claims.DeploymentID, claims.Subject
 	if h.requireEntitlement && claims.TokenUse != "entitlement" {
 		writeProblem(response, request, http.StatusForbidden, "ENTITLEMENT_REQUIRED", "An active enterprise entitlement token is required.")
 		return
@@ -110,6 +126,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	model = strings.TrimSpace(model)
+	logModel = model
 	if model == "" || len(model) > 256 || !contains(claims.ModelScopes, model) {
 		writeProblem(response, request, http.StatusForbidden, "MODEL_NOT_ALLOWED", "The model token does not grant access to the requested model.")
 		return
@@ -130,9 +147,34 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		}
 	}
 	request.Body = io.NopCloser(bytes.NewReader(body))
+	identity, err := h.identity(request.Context(), claims, model)
+	if err != nil {
+		if errors.Is(err, ErrEntitlementInactive) {
+			writeProblem(response, request, http.StatusForbidden, "GATEWAY_IDENTITY_INACTIVE", "The inference session or model assignment is inactive.")
+		} else {
+			writeProblem(response, request, http.StatusServiceUnavailable, "GATEWAY_IDENTITY_UNAVAILABLE", "The inference identity could not be checked.")
+		}
+		return
+	}
+	logTeams, _ = membershipHeader(identity.Teams)
+	logRoles, _ = membershipHeader(identity.Roles)
+	policyHeaders, err := gatewaypolicy.Headers(model, claims.Subject, identity.Teams, identity.Roles)
+	if err != nil {
+		writeProblem(response, request, http.StatusServiceUnavailable, "GATEWAY_IDENTITY_UNAVAILABLE", "The inference identity cannot be represented safely.")
+		return
+	}
 	request.ContentLength = int64(len(body))
 	request.Header.Del("Authorization")
 	removeUntrustedAEPHeaders(request.Header)
+	request.Header.Del("Connection")
+	request.Header.Del("Proxy-Connection")
+	request.Header.Del("X-Mse-Consumer")
+	setTrustedHeader(request.Header, "X-Mse-Consumer", identity.Consumer)
+	setTrustedHeader(request.Header, "X-AEP-Team-IDs", logTeams)
+	setTrustedHeader(request.Header, "X-AEP-Role-IDs", logRoles)
+	for name, value := range policyHeaders {
+		setTrustedHeader(request.Header, name, value)
+	}
 	setTrustedHeader(request.Header, "X-AEP-Deployment-ID", claims.DeploymentID)
 	setTrustedHeader(request.Header, "X-AEP-User-ID", claims.Subject)
 	setTrustedHeader(request.Header, "X-AEP-Session-ID", claims.SessionID)

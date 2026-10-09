@@ -416,13 +416,17 @@ func skillAssignmentEventScope(subjectType, subjectID string) (string, *string) 
 
 func (s *Server) skillManifest(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
+	// "latest" is the most recently published version, not the lexicographically
+	// largest version string: version is free-form text, so `version DESC` would
+	// pick 1.9.0 over 1.10.0. published_at (set by PublishSkillVersion) is the
+	// only monotonic key; version DESC is a deterministic tie-break.
 	rows, err := s.app.Database().Query(request.Context(), `WITH authorized AS (
-SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes
+SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes,sv.published_at
 FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
 JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
 JOIN users u ON u.id=$2
 WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
-), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,version DESC)
+), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,published_at DESC NULLS LAST,version DESC)
 SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.DeploymentID, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)

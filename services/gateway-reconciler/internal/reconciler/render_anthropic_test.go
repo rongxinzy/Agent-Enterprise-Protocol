@@ -21,10 +21,10 @@ func TestRenderAnthropicPassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resources) != 3 {
+	if len(resources) != 4 {
 		t.Fatalf("resources = %#v", resources)
 	}
-	if resources[0].Kind != ResourceAnthropicIngress || resources[1].Kind != ResourceEnvoyFilter || resources[2].Kind != ResourceWasmPlugin {
+	if resources[0].Kind != ResourceAnthropicIngress || resources[1].Kind != ResourceEnvoyFilter || resources[2].Kind != ResourceWasmPlugin || resources[3].Kind != ResourceAIStatistics {
 		t.Fatalf("resource order = %#v", resources)
 	}
 	if resources[0].APIPath != ingressAPIPath(anthropicResourceName("bench-anthropic")) || resources[1].APIPath != envoyFilterAPIPath(anthropicResourceName("bench-anthropic")) {
@@ -64,9 +64,9 @@ func TestRenderAnthropicPassthrough(t *testing.T) {
 		t.Fatalf("idle wasm plugin = %s", resources[2].Body)
 	}
 
-	// The document joins all three bodies in resource order and the digest is
+	// The document joins all four bodies in resource order and the digest is
 	// stable across renders.
-	if strings.Count(document, "---\n") != 2 {
+	if strings.Count(document, "---\n") != 3 {
 		t.Fatalf("document separator count wrong: %s", document)
 	}
 	again, _, againDigest, err := Render(desired, map[string]string{"aep-credential-bigmodel/api-key": "bigmodel-secret"})
@@ -115,7 +115,7 @@ func TestRenderAnthropicMultipleModelsAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resources) != 5 { // ingress+filter per model, then the wasm plugin
+	if len(resources) != 6 { // ingress+filter per model, then both wasm plugins
 		t.Fatalf("multi-model resources = %#v", resources)
 	}
 	if !strings.Contains(resources[0].Body, "path: '/alpha-anthropic'") || !strings.Contains(resources[2].Body, "path: '/beta-anthropic'") {
@@ -150,7 +150,7 @@ func TestRenderMixedProtocolsKeepOpenAIShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resources[0].Kind != ResourceOpenAIIngress || resources[1].Kind != ResourceAnthropicIngress || resources[2].Kind != ResourceEnvoyFilter || resources[3].Kind != ResourceWasmPlugin {
+	if resources[0].Kind != ResourceOpenAIIngress || resources[1].Kind != ResourceAnthropicIngress || resources[2].Kind != ResourceEnvoyFilter || resources[3].Kind != ResourceWasmPlugin || resources[4].Kind != ResourceAIStatistics {
 		t.Fatalf("pinned resource order = %#v", resources)
 	}
 	if !strings.Contains(resources[0].Body, "path: '/v1'") || !strings.Contains(document, "matchRules:\n    - config:") {
@@ -227,12 +227,13 @@ func TestKubernetesApplierDeletesAnthropicPairWhenRouteDisabled(t *testing.T) {
 		"DELETE " + envoyFilterAPIPath(name),
 		"DELETE " + openAIIngressAPIPath(resourceSuffix("demo")),
 		"PATCH " + wasmPluginAPIPath(resourceSuffix("demo")),
+		"PATCH " + aiStatisticsAPIPath(resourceSuffix("demo")),
 	} {
 		if !seen[path] {
 			t.Fatalf("missing %q in %#v", path, operations)
 		}
 	}
-	if len(operations) != 4 {
+	if len(operations) != 5 {
 		t.Fatalf("operations = %#v", operations)
 	}
 }

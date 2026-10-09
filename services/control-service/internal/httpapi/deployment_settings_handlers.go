@@ -17,6 +17,7 @@ import (
 )
 
 const maxDeploymentSettingValueLength = 2048
+const maxDeploymentFallbackModels = 8
 
 // deploymentSettingState is the wire form of one deployment-level runtime
 // setting: the stored override plus the resolved value and its origin.
@@ -26,9 +27,19 @@ type deploymentSettingState struct {
 	Source         string  `json:"source"`
 }
 
+// deploymentListSettingState is the wire form of one ordered deployment-level
+// runtime setting. Override distinguishes "no override" (null — the
+// environment-configured value applies) from an explicit list.
+type deploymentListSettingState struct {
+	Override       *[]string `json:"override"`
+	EffectiveValue []string  `json:"effectiveValue"`
+	Source         string    `json:"source"`
+}
+
 type deploymentSettings struct {
-	ModelGatewayBaseURL deploymentSettingState `json:"modelGatewayBaseUrl"`
-	AgentControlBaseURL deploymentSettingState `json:"agentControlBaseUrl"`
+	ModelGatewayBaseURL deploymentSettingState     `json:"modelGatewayBaseUrl"`
+	AgentControlBaseURL deploymentSettingState     `json:"agentControlBaseUrl"`
+	ModelFallbackIDs    deploymentListSettingState `json:"modelFallbackIds"`
 }
 
 // deploymentSettingsUpdate tracks field presence so an omitted field stays
@@ -40,6 +51,8 @@ type deploymentSettingsUpdate struct {
 	HasModelGatewayBaseURL bool
 	AgentControlBaseURL    *string
 	HasAgentControlBaseURL bool
+	ModelFallbackIDs       *[]string
+	HasModelFallbackIDs    bool
 }
 
 func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
@@ -48,8 +61,37 @@ func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	for key := range fields {
-		if key != "modelGatewayBaseUrl" && key != "agentControlBaseUrl" {
+		if key != "modelGatewayBaseUrl" && key != "agentControlBaseUrl" && key != "modelFallbackIds" {
 			return fmt.Errorf("unknown field %q", key)
+		}
+	}
+	if raw, present := fields["modelFallbackIds"]; present {
+		update.HasModelFallbackIDs = true
+		if string(raw) != "null" {
+			var values []string
+			if err := json.Unmarshal(raw, &values); err != nil {
+				return fmt.Errorf("modelFallbackIds must be an array of model ids or null")
+			}
+			normalized := make([]string, 0, len(values))
+			seen := make(map[string]struct{}, len(values))
+			for _, value := range values {
+				trimmed := strings.TrimSpace(value)
+				if trimmed == "" {
+					return fmt.Errorf("modelFallbackIds must not contain empty entries")
+				}
+				if len(trimmed) > 200 {
+					return fmt.Errorf("modelFallbackIds entries must be at most 200 characters")
+				}
+				if _, exists := seen[trimmed]; exists {
+					continue
+				}
+				seen[trimmed] = struct{}{}
+				normalized = append(normalized, trimmed)
+			}
+			if len(normalized) > maxDeploymentFallbackModels {
+				return fmt.Errorf("modelFallbackIds must contain at most %d model ids", maxDeploymentFallbackModels)
+			}
+			update.ModelFallbackIDs = &normalized
 		}
 	}
 	if raw, present := fields["modelGatewayBaseUrl"]; present {
@@ -87,6 +129,45 @@ func resolveDeploymentSetting(override *string, environmentValue string) deploym
 	return deploymentSettingState{Source: "unset"}
 }
 
+func resolveDeploymentListSetting(override *[]string, environmentValue []string) deploymentListSettingState {
+	state := deploymentListSettingState{EffectiveValue: []string{}}
+	if override != nil {
+		state.Override = override
+		state.EffectiveValue = *override
+		state.Source = "override"
+		return state
+	}
+	if len(environmentValue) > 0 {
+		state.EffectiveValue = environmentValue
+		state.Source = "env"
+		return state
+	}
+	state.Source = "unset"
+	return state
+}
+
+// deploymentListSettingOverride reads one nullable list setting; nil means no
+// override is stored (NULL row or NULL column).
+func (s *Server) deploymentListSettingOverride(request *http.Request, column string) (*[]string, error) {
+	database := s.app.Database()
+	if database == nil {
+		return nil, errors.New("database unavailable")
+	}
+	var present bool
+	var values []string
+	err := database.QueryRow(request.Context(), `SELECT `+column+` IS NOT NULL, COALESCE(`+column+`,'{}') FROM deployment_settings WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&present, &values)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
+	return &values, nil
+}
+
 func (s *Server) deploymentSettingOverride(request *http.Request, column string) (*string, error) {
 	database := s.app.Database()
 	if database == nil {
@@ -117,9 +198,15 @@ func (s *Server) getDeploymentSettings(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	fallbackOverride, err := s.deploymentListSettingOverride(request, "model_fallback_ids")
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	writeJSON(response, http.StatusOK, deploymentSettings{
 		ModelGatewayBaseURL: resolveDeploymentSetting(override, s.app.Config.ModelGatewayBaseURL),
 		AgentControlBaseURL: resolveDeploymentSetting(agentOverride, s.app.Config.AgentControlBaseURL),
+		ModelFallbackIDs:    resolveDeploymentListSetting(fallbackOverride, s.app.Config.ModelFallbackIDs),
 	})
 }
 
@@ -133,37 +220,66 @@ func (s *Server) updateDeploymentSettings(response http.ResponseWriter, request 
 		databaseFailure(response, request, errors.New("database unavailable"))
 		return
 	}
-	if input.HasModelGatewayBaseURL {
-		var stored any
-		if input.ModelGatewayBaseURL != nil {
-			value := *input.ModelGatewayBaseURL
-			if problem := validateModelGatewayBaseURL(value, s.app.Config.Environment); problem != "" {
-				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+	// Validate every field before writing any of them: a rejected field must
+	// not leave its siblings half-applied.
+	var gatewayStored any
+	if input.HasModelGatewayBaseURL && input.ModelGatewayBaseURL != nil {
+		value := *input.ModelGatewayBaseURL
+		if problem := validateModelGatewayBaseURL(value, s.app.Config.Environment); problem != "" {
+			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+			return
+		}
+		gatewayStored = value
+	}
+	var agentStored any
+	if input.HasAgentControlBaseURL && input.AgentControlBaseURL != nil {
+		value := *input.AgentControlBaseURL
+		// Unlike the model gateway, the agent-control endpoint may be a
+		// cluster-internal hostname when a split deployment fronts it with
+		// an ingress; only the absolute-URL shape is enforced here.
+		if problem := validateAbsoluteSettingURL(value, "agent control base URL"); problem != "" {
+			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
+			return
+		}
+		agentStored = value
+	}
+	var fallbackStored any
+	if input.HasModelFallbackIDs && input.ModelFallbackIDs != nil {
+		ids := *input.ModelFallbackIDs
+		if len(ids) > 0 {
+			var matched int
+			// The referential check mirrors the prober's own selection so a
+			// chain can only contain models that can ever be observed
+			// healthy: enabled gateway models with a complete absolute endpoint
+			// and upstream model.
+			if err := database.QueryRow(request.Context(), `SELECT count(*) FROM models WHERE deployment_id=$1 AND enabled AND source_type='gateway' AND endpoint IS NOT NULL AND endpoint<>'' AND upstream_model IS NOT NULL AND upstream_model<>'' AND endpoint ~ '^https?://' AND id = ANY($2)`, claimsFrom(request).DeploymentID, ids).Scan(&matched); err != nil {
+				databaseFailure(response, request, err)
 				return
 			}
-			stored = value
+			if matched != len(ids) {
+				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", "Every modelFallbackIds entry must reference an enabled gateway model with a complete endpoint and upstream model.")
+				return
+			}
 		}
+		fallbackStored = ids
+	}
+	if input.HasModelGatewayBaseURL {
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,model_gateway_base_url) VALUES ($1,$2)
-ON CONFLICT (deployment_id) DO UPDATE SET model_gateway_base_url=EXCLUDED.model_gateway_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, stored); err != nil {
+ON CONFLICT (deployment_id) DO UPDATE SET model_gateway_base_url=EXCLUDED.model_gateway_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, gatewayStored); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
 	}
 	if input.HasAgentControlBaseURL {
-		var stored any
-		if input.AgentControlBaseURL != nil {
-			value := *input.AgentControlBaseURL
-			// Unlike the model gateway, the agent-control endpoint may be a
-			// cluster-internal hostname when a split deployment fronts it with
-			// an ingress; only the absolute-URL shape is enforced here.
-			if problem := validateAbsoluteSettingURL(value, "agent control base URL"); problem != "" {
-				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", problem)
-				return
-			}
-			stored = value
-		}
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,agent_control_base_url) VALUES ($1,$2)
-ON CONFLICT (deployment_id) DO UPDATE SET agent_control_base_url=EXCLUDED.agent_control_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, stored); err != nil {
+ON CONFLICT (deployment_id) DO UPDATE SET agent_control_base_url=EXCLUDED.agent_control_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, agentStored); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	if input.HasModelFallbackIDs {
+		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,model_fallback_ids) VALUES ($1,$2)
+ON CONFLICT (deployment_id) DO UPDATE SET model_fallback_ids=EXCLUDED.model_fallback_ids,updated_at=now()`, claimsFrom(request).DeploymentID, fallbackStored); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}

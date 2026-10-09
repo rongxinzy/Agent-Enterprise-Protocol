@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -85,6 +86,15 @@ func loadConfig() (serverConfig, error) {
 		return serverConfig{}, err
 	}
 	workerConfig := reconciler.Config{ControlURL: os.Getenv("AEP_RECONCILER_CONTROL_URL"), Token: token, OutputDir: value("AEP_RECONCILER_OUTPUT_DIR", "/var/lib/aep-reconciler"), Tenants: tenants}
+	if path := os.Getenv("AEP_RECONCILER_NATIVE_GATEWAY_CONFIG_FILE"); path != "" {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil || len(data) > 64<<10 {
+			return serverConfig{}, errors.New("native gateway configuration file unavailable")
+		}
+		if json.Unmarshal(data, &workerConfig.NativeGateway) != nil {
+			return serverConfig{}, errors.New("invalid native gateway configuration")
+		}
+	}
 	if kubernetesURL := os.Getenv("AEP_RECONCILER_KUBERNETES_URL"); kubernetesURL != "" {
 		kubernetesToken, err := secret("AEP_RECONCILER_KUBERNETES_TOKEN")
 		if err != nil {

@@ -75,6 +75,18 @@ describe('AepClient SDK gate', () => {
     expect(server.loginBodies.at(-1)).not.toHaveProperty('client');
   });
 
+  test('changes the password with the session alone or with an optional current password', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await client.changePassword({newPassword: 'fresh-password-123'});
+    expect(server.passwordChangeBodies.at(-1)).toEqual({newPassword: 'fresh-password-123'});
+
+    await client.changePassword({newPassword: 'fresh-password-456', currentPassword: 'fresh-password-123'});
+    expect(server.passwordChangeBodies.at(-1)).toEqual({
+      newPassword: 'fresh-password-456',
+      currentPassword: 'fresh-password-123',
+    });
+  });
+
   test('supports user-session clients without Agent headers', async () => {
     const sessionClient = new AepClient({
       baseUrl: server.baseUrl,

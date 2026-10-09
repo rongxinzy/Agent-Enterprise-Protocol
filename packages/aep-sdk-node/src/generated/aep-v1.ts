@@ -419,6 +419,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Sets a temporary password and revokes the target user's sessions. Resetting the caller's own account with requirePasswordChange=true is rejected with 409 SELF_PASSWORD_RESET_RESTRICTED, because the forced change flag would lock the caller into a restricted session; use the self-service password change endpoint or pass requirePasswordChange=false. */
         post: operations["resetPlatformUserPassword"];
         delete?: never;
         options?: never;
@@ -1128,6 +1129,232 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/model-gateway/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** get Gateway Capabilities */
+        get: operations["getGatewayCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * query Gateway Metrics
+         * @description Returns native values with an explicit metric definition. Catalog model and organization filters use Loki and can change calls/failures semantics. Set expectedDefinition to reject a definition change; clients must not combine series with different definitions.
+         */
+        get: operations["queryGatewayMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** get Gateway Monitoring Health */
+        get: operations["getGatewayMonitoringHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** search Gateway Requests */
+        get: operations["searchGatewayRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/requests/{requestId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** get Gateway Request */
+        get: operations["getGatewayRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** list Gateway Limits */
+        get: operations["listGatewayLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/limits/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** get Gateway Limit */
+        get: operations["getGatewayLimit"];
+        /** put Gateway Limit */
+        put: operations["putGatewayLimit"];
+        post?: never;
+        /** delete Gateway Limit */
+        delete: operations["deleteGatewayLimit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/limits/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** publish Gateway Limits */
+        post: operations["publishGatewayLimits"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/limits/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** get Gateway Limits Status */
+        get: operations["getGatewayLimitsStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/quotas/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** get Gateway Quota */
+        get: operations["getGatewayQuota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/quotas/{userId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** refresh Gateway Quota */
+        post: operations["refreshGatewayQuota"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/quotas/{userId}/delta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** change Gateway Quota */
+        post: operations["changeGatewayQuota"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/model-gateway/models/{modelId}/test-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** create Gateway Test Access */
+        post: operations["createGatewayTestAccess"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/data-plane/desired-state": {
         parameters: {
             query?: never;
@@ -1232,6 +1459,97 @@ export interface components {
         PasswordChangeRequest: {
             currentPassword: string;
             newPassword: string;
+        };
+        GatewayCapabilities: {
+            sources: {
+                prometheus: boolean;
+                loki: boolean;
+                quota: boolean;
+                testAccess: boolean;
+            };
+            dimensions: ("model" | "route" | "user" | "team" | "role")[];
+            metrics: string[];
+            unsupported: string[];
+        };
+        GatewayNativeResult: {
+            /** @enum {string} */
+            source: "prometheus" | "loki";
+            /** Format: date-time */
+            queriedAt: string;
+            data: {
+                [key: string]: unknown;
+            };
+        };
+        GatewayHealth: {
+            sources: {
+                /** @enum {string} */
+                source: "prometheus" | "loki" | "quota";
+                /** @enum {string} */
+                state: "disabled" | "healthy" | "unavailable";
+                /** Format: date-time */
+                checkedAt: string;
+                targets: {
+                    health: string;
+                    lastScrape: string;
+                    lastScrapeDuration: number;
+                }[];
+            }[];
+        };
+        GatewayLimitWrite: {
+            /** @enum {string} */
+            kind: "requests" | "tokens";
+            /** @enum {string} */
+            scopeType: "global" | "model" | "user" | "team" | "role";
+            scopeId?: string | null;
+            modelId?: string | null;
+            maximum: number;
+            /** @enum {string} */
+            interval: "second" | "minute" | "hour" | "day";
+            enabled: boolean;
+            expectedVersion: number;
+        };
+        GatewayLimit: {
+            id: string;
+            version: number;
+            configuration: components["schemas"]["GatewayLimitWrite"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        GatewayLimitPage: {
+            items: components["schemas"]["GatewayLimit"][];
+        };
+        GatewayLimitPublication: {
+            revision: string;
+            /** Format: date-time */
+            publishedAt: string;
+            items: components["schemas"]["GatewayLimit"][];
+        };
+        GatewayLimitStatus: {
+            /** @enum {string} */
+            state: "unpublished" | "pending" | "applied" | "error";
+            revision: string | null;
+            runtimeVerified: boolean;
+        };
+        GatewayQuota: {
+            consumer: string;
+            quota: number;
+        };
+        GatewayQuotaRefresh: {
+            quota: number;
+        };
+        GatewayQuotaDelta: {
+            value: number;
+        };
+        GatewayTestAccess: {
+            modelId: string;
+            /** @enum {string} */
+            protocol: "openai-compatible" | "anthropic";
+            /** Format: uri */
+            baseUrl: string;
+            path: string;
+            modelAccessToken: string;
+            /** Format: date-time */
+            expiresAt: string;
         };
         DataPlaneSecretReference: {
             name: string;
@@ -2296,6 +2614,23 @@ export interface components {
         };
         AdminModel: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
+            /**
+             * @description Latest active-probe result for this model. The control plane periodically calls the upstream endpoint with the stored credential to classify reachability, credential validity, and upstream model availability. Server-computed; read-only.
+             * @enum {string}
+             */
+            readonly healthStatus?: "unknown" | "healthy" | "credential_invalid" | "denied" | "model_missing" | "unreachable" | "error";
+            /**
+             * Format: date-time
+             * @description When the latest probe finished; null before the first probe.
+             */
+            readonly healthCheckedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description When the current healthStatus began (set on transitions). Consumers derive hysteresis from this — e.g. fail over only after N minutes of continuous unhealth. Server-computed; read-only.
+             */
+            readonly healthSince?: string | null;
+            /** @description Short human-readable probe outcome (status code, missing model id, transport error). */
+            readonly healthDetail?: string | null;
         };
         AdminModelList: {
             models: components["schemas"]["AdminModel"][];
@@ -2360,6 +2695,32 @@ export interface components {
              */
             expiresAt?: string | null;
         };
+        /** @enum {string} */
+        GatewayMetricDefinitionId: "ai_input_tokens" | "ai_output_tokens" | "ai_usage_completed_calls" | "ai_detected_failures" | "ai_usage_mean_first_token_duration" | "ai_usage_mean_service_duration" | "gateway_log_input_tokens" | "gateway_log_output_tokens" | "gateway_access_requests" | "gateway_http_errors" | "gateway_log_mean_first_token_duration" | "gateway_log_mean_service_duration" | "envoy_downstream_qps" | "envoy_upstream_qps" | "envoy_downstream_non_5xx_ratio" | "envoy_upstream_non_5xx_ratio" | "authorizer_http_requests";
+        /** @description Query metadata, not calculated telemetry. Counters are per-lookback-window values, not totals for the complete selected period. AEP does not aggregate returned points. */
+        GatewayMetricDefinition: {
+            id: components["schemas"]["GatewayMetricDefinitionId"];
+            /** @enum {string} */
+            unit: "tokens" | "requests" | "milliseconds" | "requests_per_second" | "ratio";
+            /** @enum {string} */
+            aggregation: "counter_increase" | "log_count" | "log_sum" | "counter_rate_mean" | "log_mean" | "instantaneous_rate" | "non_5xx_ratio";
+            /** @description Native query lookback; 120 for rate queries, otherwise the requested step (default 60). Distinct from the output sampling interval. */
+            windowSeconds: number;
+            /** @enum {string} */
+            groupBy: "none" | "model" | "route" | "user" | "team" | "role";
+            /** @enum {string} */
+            modelDimension: "upstream_model" | "catalog_model" | "not_applicable";
+        };
+        GatewayMetricResult: {
+            /** @enum {string} */
+            source: "prometheus" | "loki";
+            /** Format: date-time */
+            queriedAt: string;
+            data: {
+                [key: string]: unknown;
+            };
+            definition: components["schemas"]["GatewayMetricDefinition"];
+        };
         /** @description One deployment-level runtime setting with its override and resolution state. */
         DeploymentSettingValue: {
             /** @description Runtime override stored in the control plane; null when no override is set. */
@@ -2372,15 +2733,31 @@ export interface components {
              */
             source: "override" | "env" | "unset";
         };
+        /** @description One deployment-level ordered runtime setting with its override and resolution state. */
+        DeploymentListSettingValue: {
+            /** @description Runtime override stored in the control plane; null when no override is set. */
+            override: string[] | null;
+            /** @description Value currently in effect — the runtime override when set, otherwise the environment-configured value; an empty array when neither exists. */
+            effectiveValue: string[];
+            /**
+             * @description Origin of the effective value.
+             * @enum {string}
+             */
+            source: "override" | "env" | "unset";
+        };
         /** @description Deployment-level runtime settings maintained through the administration API. */
         DeploymentSettings: {
             /** @description Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata. */
             modelGatewayBaseUrl: components["schemas"]["DeploymentSettingValue"];
+            /** @description Ordered fallback model chain used by platform failover: when an employee's default model is unhealthy, the first healthy model in this list takes over (and the original is restored once it recovers). Empty disables automatic failover. */
+            modelFallbackIds: components["schemas"]["DeploymentListSettingValue"];
         };
         /** @description Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback. */
         DeploymentSettingsUpdate: {
             /** @description New model gateway runtime override. It must be an absolute http or https URL whose hostname is not cluster-internal; production deployments additionally reject loopback addresses. Null clears the override so the AEP_MODEL_GATEWAY_BASE_URL environment value applies again. */
             modelGatewayBaseUrl?: string | null;
+            /** @description New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete absolute endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain. */
+            modelFallbackIds?: string[] | null;
         };
     };
     responses: {
@@ -3256,6 +3633,7 @@ export interface operations {
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
         };
     };
     listPermissions: {
@@ -4750,6 +5128,471 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    getGatewayCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayCapabilities"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    queryGatewayMetrics: {
+        parameters: {
+            query: {
+                /** @description Pin a previously returned definition.id. A different selected definition returns 422 GATEWAY_METRIC_DEFINITION_MISMATCH without querying the source. */
+                expectedDefinition?: components["schemas"]["GatewayMetricDefinitionId"];
+                start: string;
+                end: string;
+                step?: number;
+                metric: "input_tokens" | "output_tokens" | "calls" | "failures" | "first_token_duration" | "service_duration" | "downstream_qps" | "upstream_qps" | "downstream_success_rate" | "upstream_success_rate" | "auth_requests";
+                groupBy?: "none" | "model" | "route" | "user" | "team" | "role";
+                modelId?: string;
+                userId?: string;
+                teamId?: string;
+                roleId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayMetricResult"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGatewayMonitoringHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayHealth"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    searchGatewayRequests: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                modelId?: string;
+                userId?: string;
+                teamId?: string;
+                roleId?: string;
+                source?: "all" | "gateway" | "authorizer";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayNativeResult"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGatewayRequest: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                modelId?: string;
+                userId?: string;
+                teamId?: string;
+                roleId?: string;
+                source?: "all" | "gateway" | "authorizer";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayNativeResult"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listGatewayLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayLimitPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGatewayLimit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayLimit"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putGatewayLimit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayLimitWrite"];
+            };
+        };
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayLimit"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteGatewayLimit: {
+        parameters: {
+            query: {
+                expectedVersion: number;
+            };
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    publishGatewayLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayLimitPublication"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGatewayLimitsStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayLimitStatus"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getGatewayQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayQuota"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    refreshGatewayQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayQuotaRefresh"];
+            };
+        };
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayQuota"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    changeGatewayQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayQuotaDelta"];
+            };
+        };
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayQuota"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    createGatewayTestAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Native source result or managed configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayTestAccess"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getDataPlaneDesiredState: {
