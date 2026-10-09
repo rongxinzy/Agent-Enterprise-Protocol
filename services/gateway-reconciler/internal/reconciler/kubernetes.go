@@ -124,6 +124,12 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 			return err
 		}
 	}
+	return a.ApplyGatewayNative(ctx, resources)
+}
+
+// ApplyGatewayNative applies only supplied resources. Disabled/tombstone rules
+// render disabled plugins instead of deleting unrelated routes or resources.
+func (a *KubernetesApplier) ApplyGatewayNative(ctx context.Context, resources []RenderedResource) error {
 	for _, resource := range resources {
 		query := url.Values{"fieldManager": {fieldManager}, "force": {"true"}}
 		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, a.baseURL+resource.APIPath+"?"+query.Encode(), strings.NewReader(resource.Body))

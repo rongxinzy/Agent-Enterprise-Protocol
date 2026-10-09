@@ -29,6 +29,17 @@ func ConsumerPrefix(deployment string) string {
 // Fetch never forwards browser credentials, follows redirects, or exposes the
 // source's errors (which may contain tokens, internal URLs, or model content).
 func Fetch(ctx context.Context, endpoint, token, tenant, path, method string, values url.Values) (json.RawMessage, error) {
+	return fetch(ctx, endpoint, token, tenant, path, method, values, true)
+}
+
+// MutateQuota accepts ai-quota's native plain-text success response, then the
+// caller reads the native balance. It sends exactly once and never retries.
+func MutateQuota(ctx context.Context, endpoint, token, tenant, path string, values url.Values) error {
+	_, err := fetch(ctx, endpoint, token, tenant, path, http.MethodPost, values, false)
+	return err
+}
+
+func fetch(ctx context.Context, endpoint, token, tenant, path, method string, values url.Values, jsonRequired bool) (json.RawMessage, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, ErrUnavailable
@@ -61,7 +72,13 @@ func Fetch(ctx context.Context, endpoint, token, tenant, path, method string, va
 		return nil, ErrUnavailable
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, (4<<20)+1))
-	if err != nil || len(data) > 4<<20 || !json.Valid(data) {
+	if err != nil || len(data) > 4<<20 {
+		return nil, ErrUnavailable
+	}
+	if !jsonRequired {
+		return nil, nil
+	}
+	if !json.Valid(data) {
 		return nil, ErrUnavailable
 	}
 	var envelope struct {

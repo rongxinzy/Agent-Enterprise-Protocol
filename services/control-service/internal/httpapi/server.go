@@ -146,6 +146,8 @@ func (s *Server) mountInternal(router chi.Router) {
 	router.Put("/internal/data-plane/status", s.internalDataPlane(s.putInternalDataPlaneStatus))
 	router.Get("/internal/gateway/licenses/{licenseId}", s.internalLicenseStatus)
 	router.Get("/internal/gateway/identity", s.internalGatewayIdentity)
+	router.Get("/internal/data-plane/gateway-limits", s.internalDataPlane(s.internalGatewayLimits))
+	router.Put("/internal/data-plane/gateway-limits/status", s.internalDataPlane(s.internalGatewayLimitStatus))
 }
 
 // mountAdmin registers the enterprise management API behind session auth
@@ -157,6 +159,15 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Use(s.requireAdmin)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
 			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
+			admin.Get("/aep/v1/admin/model-gateway/limits", s.gatewayLimits)
+			admin.Get("/aep/v1/admin/model-gateway/quotas/{userId}", s.gatewayQuota)
+			admin.Post("/aep/v1/admin/model-gateway/quotas/{userId}/refresh", s.gatewayQuota)
+			admin.Post("/aep/v1/admin/model-gateway/quotas/{userId}/delta", s.gatewayQuota)
+			admin.Get("/aep/v1/admin/model-gateway/limits/status", s.gatewayLimitStatus)
+			admin.Post("/aep/v1/admin/model-gateway/limits/publish", s.publishGatewayLimits)
+			admin.Get("/aep/v1/admin/model-gateway/limits/{ruleId}", s.gatewayLimits)
+			admin.Put("/aep/v1/admin/model-gateway/limits/{ruleId}", s.putGatewayLimit)
+			admin.Delete("/aep/v1/admin/model-gateway/limits/{ruleId}", s.deleteGatewayLimit)
 			admin.Get("/aep/v1/admin/model-gateway/metrics", s.gatewayMetrics)
 			admin.Get("/aep/v1/admin/model-gateway/health", s.gatewayHealth)
 			admin.Get("/aep/v1/admin/model-gateway/requests", s.gatewayRequests)

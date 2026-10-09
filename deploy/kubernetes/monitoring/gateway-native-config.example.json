@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "redisService": "redis.higress-system.svc.cluster.local",
+  "redisPort": 6379,
+  "redisUsername": "default",
+  "redisDatabase": 0,
+  "redisPasswordRef": {"name": "gateway-redis", "key": "password", "namespace": "higress-system"},
+  "quotaAdminCredentialRef": {"name": "gateway-quota-admin", "key": "token", "namespace": "higress-system"}
+}

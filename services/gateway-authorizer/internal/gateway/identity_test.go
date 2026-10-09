@@ -10,10 +10,14 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaysource"
 )
 
 func TestCallTimeIdentityAndConsumer(t *testing.T) {
+	team, foreign := "team-a", "foreign-team"
+	teamHeader := gatewaypolicy.Header(gatewaypolicy.Configuration{ScopeType: "team", ScopeID: &team})
+	foreignHeader := gatewaypolicy.Header(gatewaypolicy.Configuration{ScopeType: "team", ScopeID: &foreign})
 	calls := 0
 	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -24,6 +28,9 @@ func TestCallTimeIdentityAndConsumer(t *testing.T) {
 	}))
 	defer identity.Close()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(teamHeader) != "1" || r.Header.Get(foreignHeader) != "" {
+			t.Error("native policy subject presence was not trusted")
+		}
 		if r.Header.Get("X-Mse-Consumer") != gatewaysource.Consumer("deployment-a", "user-a") || r.Header.Get("X-AEP-Team-IDs") != "|dGVhbS1h|dGVhbS1i|" || r.Header.Get("X-AEP-Role-IDs") != "|cm9sZS1h|" {
 			t.Errorf("trusted metadata: %v", r.Header)
 		}
@@ -42,6 +49,8 @@ func TestCallTimeIdentityAndConsumer(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer model-token")
 		r.Header.Set("X-Mse-Consumer", "quota-admin")
 		r.Header.Set("X-AEP-Team-IDs", "forged")
+		r.Header.Set(teamHeader, "forged")
+		r.Header.Set(foreignHeader, "1")
 		r.Header.Set("Connection", "X-Mse-Consumer, X-AEP-Team-IDs")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)

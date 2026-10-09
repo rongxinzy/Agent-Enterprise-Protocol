@@ -36,6 +36,32 @@ func TestLoadConfigReadsMountedToken(t *testing.T) {
 	}
 }
 
+func TestLoadNativeGatewayConfigFile(t *testing.T) {
+	t.Setenv("AEP_RECONCILER_KUBERNETES_URL", "")
+	t.Setenv("AEP_RECONCILER_CONTROL_URL", "http://control:8080")
+	t.Setenv("AEP_RECONCILER_TENANTS", "demo")
+	t.Setenv("AEP_DATA_PLANE_RECONCILER_TOKEN", "local-fixture")
+	t.Setenv("AEP_DATA_PLANE_RECONCILER_TOKEN_FILE", "")
+	file := filepath.Join(t.TempDir(), "native.json")
+	t.Setenv("AEP_RECONCILER_NATIVE_GATEWAY_CONFIG_FILE", file)
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("missing config accepted")
+	}
+	if err := os.WriteFile(file, []byte(`invalid`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("invalid config accepted")
+	}
+	if err := os.WriteFile(file, []byte(`{"enabled":true,"redisService":"redis.internal","redisPort":6379}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig()
+	if err != nil || !cfg.worker.NativeGateway.Enabled || cfg.worker.NativeGateway.RedisService != "redis.internal" {
+		t.Fatal(cfg, err)
+	}
+}
+
 func TestLoadConfigRejectsAmbiguousToken(t *testing.T) {
 	t.Setenv("AEP_RECONCILER_KUBERNETES_URL", "")
 	t.Setenv("AEP_RECONCILER_CONTROL_URL", "http://control-service:8080")
