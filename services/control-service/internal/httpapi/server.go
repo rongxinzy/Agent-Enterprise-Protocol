@@ -145,6 +145,9 @@ func (s *Server) mountInternal(router chi.Router) {
 	router.Get("/internal/data-plane/desired-state", s.internalDataPlane(s.getDataPlaneDesiredState))
 	router.Put("/internal/data-plane/status", s.internalDataPlane(s.putInternalDataPlaneStatus))
 	router.Get("/internal/gateway/licenses/{licenseId}", s.internalLicenseStatus)
+	router.Get("/internal/gateway/identity", s.internalGatewayIdentity)
+	router.Get("/internal/data-plane/gateway-limits", s.internalDataPlane(s.internalGatewayLimits))
+	router.Put("/internal/data-plane/gateway-limits/status", s.internalDataPlane(s.internalGatewayLimitStatus))
 }
 
 // mountAdmin registers the enterprise management API behind session auth
@@ -155,6 +158,21 @@ func (s *Server) mountAdmin(router chi.Router) {
 		protected.Group(func(admin chi.Router) {
 			admin.Use(s.requireAdmin)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
+			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
+			admin.Post("/aep/v1/admin/model-gateway/models/{modelId}/test-access", s.gatewayTestAccess)
+			admin.Get("/aep/v1/admin/model-gateway/limits", s.gatewayLimits)
+			admin.Get("/aep/v1/admin/model-gateway/quotas/{userId}", s.gatewayQuota)
+			admin.Post("/aep/v1/admin/model-gateway/quotas/{userId}/refresh", s.gatewayQuota)
+			admin.Post("/aep/v1/admin/model-gateway/quotas/{userId}/delta", s.gatewayQuota)
+			admin.Get("/aep/v1/admin/model-gateway/limits/status", s.gatewayLimitStatus)
+			admin.Post("/aep/v1/admin/model-gateway/limits/publish", s.publishGatewayLimits)
+			admin.Get("/aep/v1/admin/model-gateway/limits/{ruleId}", s.gatewayLimits)
+			admin.Put("/aep/v1/admin/model-gateway/limits/{ruleId}", s.putGatewayLimit)
+			admin.Delete("/aep/v1/admin/model-gateway/limits/{ruleId}", s.deleteGatewayLimit)
+			admin.Get("/aep/v1/admin/model-gateway/metrics", s.gatewayMetrics)
+			admin.Get("/aep/v1/admin/model-gateway/health", s.gatewayHealth)
+			admin.Get("/aep/v1/admin/model-gateway/requests", s.gatewayRequests)
+			admin.Get("/aep/v1/admin/model-gateway/requests/{requestId}", s.gatewayRequests)
 			admin.Get("/aep/v1/admin/roles", s.listRoles)
 			admin.Post("/aep/v1/admin/roles", s.createRole)
 			admin.Get("/aep/v1/admin/roles/{roleId}", s.getRole)
@@ -372,6 +390,17 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 
 func requiredAdminPermission(method, path string) []string {
 	switch {
+	case strings.HasPrefix(path, "/aep/v1/admin/model-gateway"):
+		if strings.HasSuffix(path, "/test-access") {
+			return []string{"models.read"}
+		}
+		if strings.Contains(path, "/requests") {
+			return []string{"events.read"}
+		}
+		if method == http.MethodGet {
+			return []string{"models.read"}
+		}
+		return []string{"data_plane.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/permissions") || strings.HasPrefix(path, "/aep/v1/admin/roles"):
 		if method == http.MethodGet {
 			return []string{"roles.read"}

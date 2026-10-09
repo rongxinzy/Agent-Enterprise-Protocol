@@ -32,6 +32,8 @@ type Config struct {
 	LicenseStatusURL      string
 	LicenseStatusToken    string
 	LicenseStatusTTL      time.Duration
+	IdentityURL           string
+	DeploymentID          string
 }
 
 const maxProductionLicenseStatusTTL = 15 * time.Second
@@ -51,6 +53,8 @@ func LoadConfig() (Config, error) {
 		JWKSURL:          value("AEP_GATEWAY_JWKS_URL", "http://localhost:8080/.well-known/jwks.json"),
 		Issuer:           value("AEP_GATEWAY_ISSUER", "http://localhost:8080"),
 		LicenseStatusURL: value("AEP_GATEWAY_LICENSE_STATUS_URL", ""),
+		IdentityURL:      value("AEP_GATEWAY_IDENTITY_URL", ""),
+		DeploymentID:     value("AEP_DEPLOYMENT_ID", ""),
 	}
 	var err error
 	if cfg.LicenseStatusToken, err = secret("AEP_GATEWAY_LICENSE_STATUS_TOKEN", ""); err != nil {
@@ -95,6 +99,12 @@ func LoadConfig() (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if cfg.IdentityURL != "" {
+		parsed, err := url.Parse(cfg.IdentityURL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || cfg.LicenseStatusToken == "" {
+			return errors.New("gateway identity requires an absolute HTTP URL and a service token")
+		}
+	}
 	if cfg.Environment != "development" && cfg.Environment != "test" && cfg.Environment != "production" {
 		return errors.New("AEP_ENVIRONMENT must be development, test, or production")
 	}

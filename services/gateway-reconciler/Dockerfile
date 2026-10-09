@@ -4,6 +4,7 @@ COPY go.mod go.sum ./
 ARG GOPROXY=https://proxy.golang.org,direct
 RUN GOPROXY="${GOPROXY}" go mod download
 COPY services/gateway-reconciler ./services/gateway-reconciler
+COPY services/internal ./services/internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/aep-gateway-reconciler ./services/gateway-reconciler/cmd/server \
     && mkdir -p /out/state && touch /out/state/.keep
 

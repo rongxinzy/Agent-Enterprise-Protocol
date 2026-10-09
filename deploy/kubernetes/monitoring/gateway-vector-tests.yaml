@@ -1,0 +1,25 @@
+sources:
+  gateway_raw:
+    type: stdin
+    decoding:
+      codec: bytes
+tests:
+  - name: redact model content and copy every call-time membership
+    inputs:
+      - insert_at: gateway_metadata
+        type: log
+        log_fields:
+          message: '{"aep_source":"gateway","deployment_id":"deployment-a","request_id":"req-a","user_id":"user-a","model_id":"model-a","team_ids":"|dGVhbS1h|dGVhbS1i|","role_ids":"|cm9sZS1h|","status":"200","ai_log":"{\"input_token\":\"7\",\"output_token\":\"9\",\"question\":\"sensitive\",\"answer\":\"sensitive\"}","authorization":"secret"}'
+    outputs:
+      - extract_from: gateway_metadata
+        conditions:
+          - type: vrl
+            source: '.input_token == "7" && .output_token == "9" && .aep_dimension == "base" && !exists(.question) && !exists(.answer) && !exists(.authorization) && !exists(.ai_log)'
+      - extract_from: gateway_teams
+        conditions:
+          - type: vrl
+            source: '.aep_dimension == "team" && (.team_id == "dGVhbS1h" || .team_id == "dGVhbS1i")'
+      - extract_from: gateway_roles
+        conditions:
+          - type: vrl
+            source: '.aep_dimension == "role" && .role_id == "cm9sZS1h"'
