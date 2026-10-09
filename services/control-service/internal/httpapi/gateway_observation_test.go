@@ -1,12 +1,69 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaysource"
 )
+
+func TestGatewayMetricDefinitionGuard(t *testing.T) {
+	application, token, _ := testHTTPApplication(t)
+	var sourceCalls atomic.Int32
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceCalls.Add(1)
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"values":[[1,"9.876543210123456789"]]}]}}`)
+	}))
+	defer source.Close()
+	application.Config.GatewayPrometheusURL = source.URL
+	application.Config.GatewayLokiURL = source.URL
+	application.Config.GatewayOrganizationLogs = true
+	h := New(application).Handler()
+	window := "&start=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + "&end=" + time.Now().UTC().Format(time.RFC3339) + "&step=300"
+	for _, tc := range []struct{ query, source, id string }{
+		{"metric=calls", "prometheus", "ai_usage_completed_calls"},
+		{"metric=failures", "prometheus", "ai_detected_failures"},
+		{"metric=calls&groupBy=team", "loki", "gateway_access_requests"},
+		{"metric=failures&roleId=role-a", "loki", "gateway_http_errors"},
+		{"metric=calls&modelId=catalog-alias", "loki", "gateway_access_requests"},
+		{"metric=failures&modelId=catalog-alias", "loki", "gateway_http_errors"},
+	} {
+		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+tc.query+window+"&expectedDefinition="+tc.id, "")
+		var result struct {
+			Source     string                         `json:"source"`
+			Definition gatewaysource.MetricDefinition `json:"definition"`
+		}
+		if err := json.Unmarshal(got.Body.Bytes(), &result); err != nil || got.Code != http.StatusOK || result.Source != tc.source || result.Definition.ID != tc.id || result.Definition.WindowSeconds != 300 || !strings.Contains(got.Body.String(), "9.876543210123456789") {
+			t.Fatalf("metric definition/native precision: %d %s %v", got.Code, got.Body.String(), err)
+		}
+	}
+	before := sourceCalls.Load()
+	for _, query := range []string{
+		"metric=calls&groupBy=team&expectedDefinition=ai_usage_completed_calls",
+		"metric=failures&roleId=role-a&expectedDefinition=ai_detected_failures",
+		"metric=calls&expectedDefinition=gateway_access_requests",
+		"metric=calls&modelId=catalog-alias&expectedDefinition=ai_usage_completed_calls",
+		"metric=failures&modelId=catalog-alias&expectedDefinition=ai_detected_failures",
+	} {
+		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+query+window, "")
+		if got.Code != http.StatusUnprocessableEntity || !strings.Contains(got.Body.String(), "GATEWAY_METRIC_DEFINITION_MISMATCH") {
+			t.Fatalf("definition change accepted: %d %s", got.Code, got.Body.String())
+		}
+	}
+	if sourceCalls.Load() != before {
+		t.Fatal("definition mismatch contacted the source")
+	}
+	got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/requests?source=gateway"+window, "")
+	if got.Code != http.StatusOK || strings.Contains(got.Body.String(), `"definition"`) {
+		t.Fatalf("log result changed: %d %s", got.Code, got.Body.String())
+	}
+}
 
 func TestGatewayNativeEndpoints(t *testing.T) {
 	application, token, _ := testHTTPApplication(t)
