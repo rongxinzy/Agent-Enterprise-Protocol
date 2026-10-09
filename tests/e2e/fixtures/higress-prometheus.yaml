@@ -8,3 +8,4 @@ scrape_configs:
       - targets: [higress:15020]
         labels:
           higress: higress-system-higress-gateway
+          aep_deployment_id: demo
