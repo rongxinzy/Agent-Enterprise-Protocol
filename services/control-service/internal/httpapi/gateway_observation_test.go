@@ -31,6 +31,8 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 		{"metric=failures", "prometheus", "ai_detected_failures"},
 		{"metric=calls&groupBy=team", "loki", "gateway_access_requests"},
 		{"metric=failures&roleId=role-a", "loki", "gateway_http_errors"},
+		{"metric=calls&modelId=catalog-alias", "loki", "gateway_access_requests"},
+		{"metric=failures&modelId=catalog-alias", "loki", "gateway_http_errors"},
 	} {
 		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+tc.query+window+"&expectedDefinition="+tc.id, "")
 		var result struct {
@@ -46,6 +48,8 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 		"metric=calls&groupBy=team&expectedDefinition=ai_usage_completed_calls",
 		"metric=failures&roleId=role-a&expectedDefinition=ai_detected_failures",
 		"metric=calls&expectedDefinition=gateway_access_requests",
+		"metric=calls&modelId=catalog-alias&expectedDefinition=ai_usage_completed_calls",
+		"metric=failures&modelId=catalog-alias&expectedDefinition=ai_detected_failures",
 	} {
 		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+query+window, "")
 		if got.Code != http.StatusUnprocessableEntity || !strings.Contains(got.Body.String(), "GATEWAY_METRIC_DEFINITION_MISMATCH") {

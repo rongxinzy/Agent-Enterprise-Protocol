@@ -50,7 +50,7 @@ func (s *Server) gatewayMetrics(response http.ResponseWriter, request *http.Requ
 			gatewayQueryFailure(response, request, err)
 			return
 		}
-		s.gatewayNative(response, request, "loki", s.app.Config.GatewayLokiURL, s.app.Config.GatewayLokiToken, "/loki/api/v1/query_range", query)
+		s.gatewayMetricNative(response, request, "loki", s.app.Config.GatewayLokiURL, s.app.Config.GatewayLokiToken, "/loki/api/v1/query_range", query)
 		return
 	}
 	if values.Get("teamId") != "" || values.Get("roleId") != "" || values.Get("groupBy") == "team" || values.Get("groupBy") == "role" {
