@@ -50,6 +50,7 @@ type Config struct {
 	AgentControlBaseURL       string
 	ModelHealthInterval       time.Duration
 	ModelHealthTimeout        time.Duration
+	ModelHealthWebhookURL     string
 	ModelFallbackIDs          []string
 	DeploymentID              string
 	DeploymentName            string
@@ -135,6 +136,7 @@ func Load() (Config, error) {
 		Issuer:                    value("AEP_ISSUER", "http://localhost:8080"),
 		SigningKeyBase64:          signingKey,
 		ModelGatewayBaseURL:       os.Getenv("AEP_MODEL_GATEWAY_BASE_URL"),
+		ModelHealthWebhookURL:     strings.TrimSpace(os.Getenv("AEP_MODEL_HEALTH_WEBHOOK")),
 		AgentControlBaseURL:       os.Getenv("AEP_AGENT_CONTROL_BASE_URL"),
 		DeploymentID:              value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo")),
 		DeploymentName:            value("AEP_DEPLOYMENT_NAME", value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Deployment")),
@@ -270,6 +272,11 @@ func (cfg Config) Validate() error {
 			return err
 		}
 		if err := clientReachableGatewayHost(gatewayURL.Hostname(), cfg.Environment); err != nil {
+			return err
+		}
+	}
+	if cfg.ModelHealthWebhookURL != "" {
+		if _, err := absoluteURL("AEP_MODEL_HEALTH_WEBHOOK", cfg.ModelHealthWebhookURL, "http", "https"); err != nil {
 			return err
 		}
 	}
