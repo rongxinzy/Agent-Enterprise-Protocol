@@ -159,6 +159,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Use(s.requireAdmin)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
 			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
+			admin.Post("/aep/v1/admin/model-gateway/models/{modelId}/test-access", s.gatewayTestAccess)
 			admin.Get("/aep/v1/admin/model-gateway/limits", s.gatewayLimits)
 			admin.Get("/aep/v1/admin/model-gateway/quotas/{userId}", s.gatewayQuota)
 			admin.Post("/aep/v1/admin/model-gateway/quotas/{userId}/refresh", s.gatewayQuota)
@@ -390,6 +391,9 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 func requiredAdminPermission(method, path string) []string {
 	switch {
 	case strings.HasPrefix(path, "/aep/v1/admin/model-gateway"):
+		if strings.HasSuffix(path, "/test-access") {
+			return []string{"models.read"}
+		}
 		if strings.Contains(path, "/requests") {
 			return []string{"events.read"}
 		}

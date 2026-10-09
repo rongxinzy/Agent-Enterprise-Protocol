@@ -145,6 +145,64 @@ async function runScenario() {
   await expectGatewayProblem(modelToken, {model: 'enterprise-chat'}, 401, 'TOKEN_INVALID');
   await verifyStatistics(modelToken);
   await verifyPrometheus();
+  await verifyGatewayManagement(agent, user.id);
+}
+
+async function verifyGatewayManagement(client, userId) {
+  const access = await client.createGatewayTestAccess('enterprise-chat');
+  const claims = decodeJwtPart(access.modelAccessToken, 1);
+  assert(access.baseUrl === gatewayBaseUrl && access.path === '/chat/completions', 'Test access did not use the configured gateway');
+  assert(claims.sub === userId && claims.model_scopes.length === 1 && claims.model_scopes[0] === 'enterprise-chat' && claims.exp - claims.iat <= 120, 'Test access is not bound to one model/session with a two-minute limit');
+  assert(Date.parse(access.expiresAt) === claims.exp * 1_000, 'Test access expiry disagrees with the JWT');
+  const completion = await inference(access.modelAccessToken, {model: 'enterprise-chat', messages: [{role: 'user', content: 'test access'}]});
+  assert(completion.response.status === 200 && !containsSecret(completion), 'Test access failed through authorizer and Higress');
+  const streaming = await inference(access.modelAccessToken, {model: 'enterprise-chat', stream: true, stream_options: {include_usage: true}, messages: [{role: 'user', content: 'stream'}]});
+  assert(streaming.response.status === 200 && streaming.text.includes('[DONE]') && streaming.text.includes('reasoning_content'), 'Test access did not preserve SSE/reasoning');
+  await expectGatewayProblem(access.modelAccessToken, {model: 'bench-anthropic'}, 403, 'MODEL_NOT_ALLOWED');
+  await expectAepProblem(() => client.createGatewayTestAccess('unassigned-chat'), 403);
+  const anthropicAccess = await client.createGatewayTestAccess('bench-anthropic');
+  assert(anthropicAccess.baseUrl === 'http://localhost:' + gatewayPort + '/bench-anthropic' && anthropicAccess.path === '/v1/messages', 'Anthropic test access lost the per-model route');
+  const anthropic = await anthropicInference(anthropicAccess.modelAccessToken, {model: 'bench-anthropic', max_tokens: 64, messages: [{role: 'user', content: 'test access'}]});
+  assert(anthropic.response.status === 200 && !containsSecret(anthropic), 'Anthropic test access failed');
+
+  const capabilities = await client.getGatewayCapabilities();
+  assert(capabilities.sources.prometheus && capabilities.sources.testAccess && !capabilities.sources.loki && capabilities.unsupported.includes('cost') && capabilities.unsupported.includes('p95'), 'Gateway capabilities do not reflect configured native sources');
+  const health = await client.getGatewayMonitoringHealth();
+  assert(health.sources.some(source => source.source === 'prometheus' && source.state === 'healthy' && source.targets.length === 1), 'Native gateway target health is missing');
+  const end = new Date().toISOString();
+  const start = new Date(Date.now() - 60_000).toISOString();
+  for (const metric of ['input_tokens', 'output_tokens', 'calls', 'failures', 'first_token_duration', 'service_duration']) {
+    const result = await client.queryGatewayMetrics({metric, start, end, step: 10, groupBy: 'user', userId});
+    assert(result.source === 'prometheus' && result.data.status === 'success' && result.data.data.resultType === 'matrix', 'Gateway metrics did not return native Prometheus data: ' + metric);
+  }
+  await expectAepProblem(() => client.searchGatewayRequests({start, end, limit: 10}), 503);
+  await expectAepProblem(() => client.queryGatewayMetrics({metric: 'calls', start, end, groupBy: 'team'}), 422);
+
+  const id = 'test-limit-' + runId;
+  const rule = {kind: 'requests', scopeType: 'user', scopeId: userId, maximum: 20, interval: 'minute', enabled: true, expectedVersion: 0};
+  const created = await client.putGatewayLimit(id, rule);
+  assert(created.version === 1 && (await client.getGatewayLimit(id)).configuration.scopeId === userId, 'Gateway rule CRUD failed');
+  await expectAepProblem(() => client.putGatewayLimit(id, rule), 409);
+  const updated = await client.putGatewayLimit(id, {...rule, maximum: 30, expectedVersion: 1});
+  assert(updated.version === 2, 'Gateway rule update did not advance the version');
+  const publication = await client.publishGatewayLimits();
+  const status = await client.getGatewayLimitsStatus();
+  assert(publication.revision === status.revision && status.state === 'pending' && !status.runtimeVerified, 'Configuration publication claimed unverified runtime enforcement');
+  await client.deleteGatewayLimit(id, updated.version);
+  assert(!(await client.listGatewayLimits()).items.some(item => item.id === id), 'Deleted gateway rule remains visible');
+  await client.publishGatewayLimits();
+  await expectAepProblem(() => client.getGatewayQuota(userId), 503);
+  console.log('Gateway management APIs passed with PostgreSQL, native Higress inference/identity and Prometheus; unconfigured sources remain unavailable.');
+}
+
+async function expectAepProblem(action, status) {
+  try {
+    await action();
+  } catch (error) {
+    assert(error.status === status, 'Expected AEP status ' + status + ', got ' + error.status);
+    return;
+  }
+  throw new Error('Expected AEP status ' + status);
 }
 
 async function verifyPrometheus() {

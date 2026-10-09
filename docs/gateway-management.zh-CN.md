@@ -47,3 +47,17 @@ Loki 访问日志流需要 `aep_deployment_id` 和 `aep_source=gateway|authorize
 仅采集部署指南允许的元数据。查询只输出请求/模型/用户、成员关系、状态、token 和
 原生耗时字段；不返回提示词、回答、工具参数、凭据或自由文本的供应商错误。
 AEP 不另存监控历史。
+
+## 主动模型测试
+
+`POST models/{modelId}/test-access` 要求 `models.read` 权限、有效会话及当前模型
+分配。管理员同样不能绕过模型分配。仅支持已启用的网关模型；不会接受客户端传入
+测试地址。返回部署配置的网关地址、协议路径和单模型访问凭证，有效期最多两分钟。
+生产环境复用已登记、未吊销、包含 `enterprise.models` 的 License 及 entitlement
+校验；有效期还受 License 到期/宽限期约束。开发环境允许现有模型 JWT 协议。
+
+浏览器 Admin Console 使用凭证直接调用 authorizer → Higress → provider，测试
+结束后丢弃，不写入日志或持久存储。Electron renderer 仍遵守原有主进程令牌边界。
+OpenAI 测试调用 `baseUrl + /chat/completions`，Anthropic 调用返回的模型路径
+`baseUrl + /v1/messages`。AEP 不生成模型响应、不计算 token，也不伪装成新的
+Higress 原生测试插件；此接口只为既有推理链路签发受限凭证。

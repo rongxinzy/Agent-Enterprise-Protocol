@@ -78,6 +78,24 @@ func (s *Service) ParseModel(raw string) (*Claims, error) {
 	return s.parse(raw, "model-gateway", "model")
 }
 
+// IssueModelTestAccess uses the existing model JWT protocol with one scope and
+// a hard two-minute lifetime. It cannot create administrator or access tokens.
+func (s *Service) IssueModelTestAccess(userID, deploymentID, sessionID, modelID string) (string, time.Time, error) {
+	if userID == "" || deploymentID == "" || sessionID == "" || modelID == "" {
+		return "", time.Time{}, errors.New("invalid model test session")
+	}
+	ttl := 2 * time.Minute
+	raw, err := s.sign(userID, deploymentID, sessionID, false, false, nil, []string{modelID}, "model", "model-gateway", ttl)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	claims, err := s.ParseModel(raw)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return raw, claims.ExpiresAt.Time, nil
+}
+
 func (s *Service) IssueEntitlement(userID, deploymentID, sessionID, licenseID, licenseDigest string, features, modelScopes []string, licenseExpiresAt *time.Time) (string, time.Time, error) {
 	now := time.Now().UTC()
 	if userID == "" || deploymentID == "" || sessionID == "" || licenseID == "" || licenseDigest == "" {

@@ -69,3 +69,22 @@ be ingested into these streams. The query renders only request/model/user,
 membership, status/flags, tokens and native duration fields; prompts,
 responses, tool arguments, credentials and free-form provider errors are not
 returned. AEP stores no copy of the monitoring history.
+
+## Active model tests
+
+`POST models/{modelId}/test-access` requires `models.read`, an active session,
+and a current model assignment. Administrator status does not bypass model
+assignment. Only enabled gateway models are accepted; callers cannot supply
+an endpoint. The response contains the deployment-configured gateway URL,
+protocol path, and a single-model credential valid for at most two minutes.
+Production reuses the registered, non-revoked License with `enterprise.models`
+and the existing entitlement protocol. License expiry/grace bounds the test
+expiry as well. Development may use the existing model JWT protocol.
+
+The standalone browser Admin Console calls authorizer → Higress → provider
+directly, discards credentials after testing, and must not log or persist them.
+The Electron renderer's existing main-process credential boundary is unchanged.
+OpenAI tests use `baseUrl + /chat/completions`; Anthropic tests use the returned
+model path `baseUrl + /v1/messages`. AEP neither generates model responses nor
+counts tokens. This endpoint issues restricted credentials for the existing
+inference path; it is not a new Higress-native testing plugin.
