@@ -27,12 +27,13 @@ const aiProxyPluginVersion = "2.0.1"
 const aiStatisticsPluginURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-statistics@sha256:9bebfc803f6ea92c0805670bd9a6e8a5bb727f2e1a86b133f20bb7002e71511e"
 
 type Config struct {
-	ControlURL string
-	Token      string
-	OutputDir  string
-	Tenants    []string
-	HTTPClient *http.Client
-	Applier    Applier
+	NativeGateway NativeGatewayConfig
+	ControlURL    string
+	Token         string
+	OutputDir     string
+	Tenants       []string
+	HTTPClient    *http.Client
+	Applier       Applier
 	// CredentialFetcher resolves credentialRef values for the rendered
 	// WasmPlugin (ai-proxy requires inline apiTokens). When nil, routes with
 	// credentialRefs render without tokens — ai-proxy then rejects requests
@@ -86,6 +87,9 @@ type Reconciler struct {
 }
 
 func New(config Config) (*Reconciler, error) {
+	if native := config.NativeGateway; native.Enabled && (native.RedisService == "" || native.RedisPort < 1 || native.RedisPort > 65535 || native.RedisDatabase < 0) {
+		return nil, errors.New("native gateway requires valid Redis configuration")
+	}
 	if strings.TrimRight(config.ControlURL, "/") == "" || config.Token == "" || config.OutputDir == "" || len(config.Tenants) == 0 {
 		return nil, errors.New("control URL, token, output directory, and at least one tenant are required")
 	}
@@ -125,6 +129,11 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if r.config.NativeGateway.Enabled {
+		if err := r.syncGatewayLimits(ctx, desired); err != nil {
+			return r.writeFailure(ctx, tenant, "GATEWAY_LIMITS_FAILED", errors.New("native gateway limits could not be applied"))
+		}
+	}
 	return r.writeStatus(ctx, tenant, Status{State: "ready", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, LastAppliedAt: &now, ResourceCount: len(desired.Routes)})
 }
 
@@ -224,6 +233,7 @@ const (
 	ResourceEnvoyFilter      ResourceKind = "envoyFilter"
 	ResourceWasmPlugin       ResourceKind = "wasmPlugin"
 	ResourceAIStatistics     ResourceKind = "aiStatistics"
+	ResourceGatewayNative    ResourceKind = "gatewayNative"
 )
 
 // RenderedResource is one YAML document plus the Kubernetes API path it

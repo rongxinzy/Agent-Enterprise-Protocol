@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 )
 
 type TokenVerifier interface {
@@ -157,6 +158,11 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	}
 	logTeams, _ = membershipHeader(identity.Teams)
 	logRoles, _ = membershipHeader(identity.Roles)
+	policyKeys, err := gatewaypolicy.Keys(model, claims.Subject, identity.Teams, identity.Roles)
+	if err != nil {
+		writeProblem(response, request, http.StatusServiceUnavailable, "GATEWAY_IDENTITY_UNAVAILABLE", "The inference identity cannot be represented safely.")
+		return
+	}
 	request.ContentLength = int64(len(body))
 	request.Header.Del("Authorization")
 	removeUntrustedAEPHeaders(request.Header)
@@ -166,6 +172,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	setTrustedHeader(request.Header, "X-Mse-Consumer", identity.Consumer)
 	setTrustedHeader(request.Header, "X-AEP-Team-IDs", logTeams)
 	setTrustedHeader(request.Header, "X-AEP-Role-IDs", logRoles)
+	setTrustedHeader(request.Header, "X-AEP-Limit-Keys", policyKeys)
 	setTrustedHeader(request.Header, "X-AEP-Deployment-ID", claims.DeploymentID)
 	setTrustedHeader(request.Header, "X-AEP-User-ID", claims.Subject)
 	setTrustedHeader(request.Header, "X-AEP-Session-ID", claims.SessionID)
