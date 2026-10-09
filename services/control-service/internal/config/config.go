@@ -55,6 +55,14 @@ type Config struct {
 	DeploymentName            string
 	DataPlaneReconcilerToken  string
 	GatewayLicenseStatusToken string
+	GatewayPrometheusURL      string
+	GatewayPrometheusToken    string
+	GatewayLokiURL            string
+	GatewayLokiToken          string
+	GatewayQuotaURL           string
+	GatewayQuotaToken         string
+	GatewayMetricsDeployment  string
+	GatewayOrganizationLogs   bool
 	MaxResidentAgents         int
 	CredentialMasterKeyBase64 string
 	CredentialMasterKeyFile   string
@@ -203,6 +211,25 @@ func Load() (Config, error) {
 	if cfg.ModelFallbackIDs, err = stringList("AEP_MODEL_FALLBACK_IDS", 8); err != nil {
 		return Config{}, err
 	}
+	for _, item := range []struct {
+		key    string
+		target *string
+	}{
+		{"AEP_GATEWAY_PROMETHEUS_URL", &cfg.GatewayPrometheusURL},
+		{"AEP_GATEWAY_PROMETHEUS_TOKEN", &cfg.GatewayPrometheusToken},
+		{"AEP_GATEWAY_LOKI_URL", &cfg.GatewayLokiURL},
+		{"AEP_GATEWAY_LOKI_TOKEN", &cfg.GatewayLokiToken},
+		{"AEP_GATEWAY_QUOTA_URL", &cfg.GatewayQuotaURL},
+		{"AEP_GATEWAY_QUOTA_TOKEN", &cfg.GatewayQuotaToken},
+		{"AEP_GATEWAY_METRICS_DEPLOYMENT", &cfg.GatewayMetricsDeployment},
+	} {
+		if *item.target, err = secret(item.key, ""); err != nil {
+			return Config{}, err
+		}
+	}
+	if cfg.GatewayOrganizationLogs, err = boolean("AEP_GATEWAY_ORGANIZATION_LOGS", false); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -210,6 +237,18 @@ func Load() (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	for key, raw := range map[string]string{"AEP_GATEWAY_PROMETHEUS_URL": cfg.GatewayPrometheusURL, "AEP_GATEWAY_LOKI_URL": cfg.GatewayLokiURL, "AEP_GATEWAY_QUOTA_URL": cfg.GatewayQuotaURL} {
+		if raw == "" {
+			continue
+		}
+		parsed, err := absoluteURL(key, raw, "http", "https")
+		if err != nil {
+			return err
+		}
+		if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%s must not contain credentials, query, or fragment", key)
+		}
+	}
 	if cfg.Environment != "development" && cfg.Environment != "test" && cfg.Environment != "production" {
 		return errors.New("AEP_ENVIRONMENT must be development, test, or production")
 	}

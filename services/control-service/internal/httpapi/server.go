@@ -155,6 +155,11 @@ func (s *Server) mountAdmin(router chi.Router) {
 		protected.Group(func(admin chi.Router) {
 			admin.Use(s.requireAdmin)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
+			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
+			admin.Get("/aep/v1/admin/model-gateway/metrics", s.gatewayMetrics)
+			admin.Get("/aep/v1/admin/model-gateway/health", s.gatewayHealth)
+			admin.Get("/aep/v1/admin/model-gateway/requests", s.gatewayRequests)
+			admin.Get("/aep/v1/admin/model-gateway/requests/{requestId}", s.gatewayRequests)
 			admin.Get("/aep/v1/admin/roles", s.listRoles)
 			admin.Post("/aep/v1/admin/roles", s.createRole)
 			admin.Get("/aep/v1/admin/roles/{roleId}", s.getRole)
@@ -372,6 +377,14 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 
 func requiredAdminPermission(method, path string) []string {
 	switch {
+	case strings.HasPrefix(path, "/aep/v1/admin/model-gateway"):
+		if strings.Contains(path, "/requests") {
+			return []string{"events.read"}
+		}
+		if method == http.MethodGet {
+			return []string{"models.read"}
+		}
+		return []string{"data_plane.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/permissions") || strings.HasPrefix(path, "/aep/v1/admin/roles"):
 		if method == http.MethodGet {
 			return []string{"roles.read"}
