@@ -1,0 +1,39 @@
+# Opt-in alongside the existing Higress chart with enableIstioAPI=true.
+# Higress must only be reachable from the trusted authorizer; client-supplied
+# identity headers are not trustworthy on a publicly exposed Higress listener.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: aep-gateway-metadata-access-log
+  namespace: higress-system
+spec:
+  configPatches:
+    - applyTo: NETWORK_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+      patch:
+        operation: MERGE
+        value:
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+            access_log:
+              - name: envoy.access_loggers.stdout
+                typed_config:
+                  '@type': type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                  log_format:
+                    json_format:
+                      aep_source: gateway
+                      deployment_id: '%REQ(X-AEP-DEPLOYMENT-ID)%'
+                      request_id: '%REQ(X-REQUEST-ID)%'
+                      user_id: '%REQ(X-AEP-USER-ID)%'
+                      model_id: '%REQ(X-AEP-MODEL-ID)%'
+                      team_ids: '%REQ(X-AEP-TEAM-IDS)%'
+                      role_ids: '%REQ(X-AEP-ROLE-IDS)%'
+                      route: '%ROUTE_NAME%'
+                      status: '%RESPONSE_CODE%'
+                      response_flags: '%RESPONSE_FLAGS%'
+                      ai_log: '%FILTER_STATE(wasm.ai_log:PLAIN)%'

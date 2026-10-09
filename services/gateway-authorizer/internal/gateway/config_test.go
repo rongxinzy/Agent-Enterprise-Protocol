@@ -16,6 +16,25 @@ var gatewayEnvironmentKeys = []string{
 	"AEP_GATEWAY_HTTP_MAX_HEADER_BYTES",
 	"AEP_GATEWAY_REQUIRE_ENTITLEMENT",
 	"AEP_GATEWAY_LICENSE_STATUS_URL", "AEP_GATEWAY_LICENSE_STATUS_TOKEN", "AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE", "AEP_GATEWAY_LICENSE_STATUS_TTL",
+	"AEP_GATEWAY_IDENTITY_URL", "AEP_DEPLOYMENT_ID",
+}
+
+func TestIdentityConfiguration(t *testing.T) {
+	clearGatewayEnvironment(t)
+	t.Setenv("AEP_GATEWAY_IDENTITY_URL", "http://control/identity")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("identity configured without service token")
+	}
+	t.Setenv("AEP_GATEWAY_LICENSE_STATUS_TOKEN", "service-token")
+	if _, err := LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{"relative", "file:///tmp/a", "http://user:pass@control/identity", "http://control/identity?q=1", "http://control/identity#fragment"} {
+		t.Setenv("AEP_GATEWAY_IDENTITY_URL", endpoint)
+		if _, err := LoadConfig(); err == nil {
+			t.Fatal(endpoint)
+		}
+	}
 }
 
 func TestLoadConfigDefaultsAndProductionLogging(t *testing.T) {

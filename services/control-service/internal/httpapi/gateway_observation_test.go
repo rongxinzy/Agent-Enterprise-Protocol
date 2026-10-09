@@ -31,6 +31,8 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 		{"metric=failures", "prometheus", "ai_detected_failures"},
 		{"metric=calls&groupBy=team", "loki", "gateway_access_requests"},
 		{"metric=failures&roleId=role-a", "loki", "gateway_http_errors"},
+		{"metric=calls&modelId=catalog-alias", "loki", "gateway_access_requests"},
+		{"metric=failures&modelId=catalog-alias", "loki", "gateway_http_errors"},
 	} {
 		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+tc.query+window+"&expectedDefinition="+tc.id, "")
 		var result struct {
@@ -46,6 +48,8 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 		"metric=calls&groupBy=team&expectedDefinition=ai_usage_completed_calls",
 		"metric=failures&roleId=role-a&expectedDefinition=ai_detected_failures",
 		"metric=calls&expectedDefinition=gateway_access_requests",
+		"metric=calls&modelId=catalog-alias&expectedDefinition=ai_usage_completed_calls",
+		"metric=failures&modelId=catalog-alias&expectedDefinition=ai_detected_failures",
 	} {
 		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+query+window, "")
 		if got.Code != http.StatusUnprocessableEntity || !strings.Contains(got.Body.String(), "GATEWAY_METRIC_DEFINITION_MISMATCH") {
@@ -80,7 +84,7 @@ func TestGatewayNativeEndpoints(t *testing.T) {
 	application.Config.GatewayPrometheusToken = "native-source"
 	application.Config.GatewayLokiToken = "native-source"
 	h := New(application).Handler()
-	for _, path := range []string{"metrics?metric=input_tokens", "requests?source=gateway", "requests/request-a?source=authorizer"} {
+	for _, path := range []string{"metrics?metric=input_tokens", "metrics?metric=input_tokens&modelId=catalog-alias", "requests?source=gateway", "requests/request-a?source=authorizer"} {
 		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/"+path+"&start=2026-10-08T00:00:00Z&end=2026-10-08T00:05:00Z", "")
 		if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "9.876543210123456789") || got.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("native: %d %s", got.Code, got.Body.String())
