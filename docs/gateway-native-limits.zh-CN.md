@@ -4,8 +4,11 @@ AEP PostgreSQL 仅保存规则、乐观版本与发布快照，不保存计数�
 调用 `POST .../limits/publish` 后才进入 reconciler。删除保留禁用 tombstone，以确保
 旧插件失效；单部署最多 100 个规则 ID，后续策略调整应复用禁用规则，不重置 Redis。
 
-先启用身份指南中的调用时成员查询。authorizer 的可信 `X-AEP-Limit-Keys` 表达
-用户、模型、全部有效团队/角色及模型限定组合。每条规则独立渲染为固定 OCI digest
+先启用身份指南中的调用时成员查询。authorizer 为用户、模型、有效团队/角色及模型
+限定组合生成独立的可信 `X-AEP-Limit-<SHA256>` 存在标记（值固定为 `1`）。原生
+`limit_by_header` 精确匹配标记，共享团队计数不会因用户、模型或其他成员关系分裂。
+每次调用最多 80 个标记，即最多 38 个不同团队/角色成员关系；超过上限拒绝调用，
+为 Envoy 默认的 100 个请求头限制保留标准请求头空间。每条规则独立渲染为固定 OCI digest
 的 `cluster-key-rate-limit` / `ai-token-ratelimit`，不依赖插件内部多条规则的短路行为。
 执行和计数由原生插件与 Redis 负责，AEP 不实现本地 token 计数或限流引擎。
 

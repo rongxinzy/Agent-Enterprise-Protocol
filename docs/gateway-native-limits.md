@@ -9,8 +9,13 @@ changes. Deleted identities remain tombstones to ensure deactivation and
 cannot silently reset or evade native Redis counters.
 
 Enable the authorizer's call-time identity endpoint from the identity guide.
-It emits a bounded trusted `X-AEP-Limit-Keys` header for user/model/team/role
-memberships and combinations. Each published rule becomes a separate pinned
+It emits a trusted `X-AEP-Limit-<SHA256>` presence header with constant value `1`
+for each user/model/team/role subject and model-bound combination. Native
+`limit_by_header` uses exact matches. Shared team counters therefore do not
+split by user, model or unrelated memberships. Up to 80 subject headers (38
+distinct team/role memberships) are allowed per call; excess membership fails
+closed, reserving room below Envoy's default 100-header limit for standard
+headers. Each published rule becomes a separate pinned
 `cluster-key-rate-limit` or `ai-token-ratelimit` WasmPlugin. All enabled rules
 can therefore act independently regardless of an artifact's first-match or
 all-match behavior within `rule_items`. Request thresholds use `query_per_*`;

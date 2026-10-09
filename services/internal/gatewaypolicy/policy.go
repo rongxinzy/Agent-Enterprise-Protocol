@@ -76,7 +76,11 @@ func key(kind, id, model string) string {
 	return kind + "." + base64.RawURLEncoding.EncodeToString([]byte(id)) + "." + modelPart
 }
 
-func Pattern(c Configuration) string {
+// Header identifies a single shared subject, including an optional model.
+// Every matching request carries the constant value "1". Native plugins use
+// the actual header value as the Redis key: a composite membership value would
+// split a team's counter by user/model even when a regexp matched the subject.
+func Header(c Configuration) string {
 	model := ""
 	if c.ModelID != nil {
 		model = *c.ModelID
@@ -86,24 +90,33 @@ func Pattern(c Configuration) string {
 		id = *c.ScopeID
 	}
 	if c.ScopeType == "model" {
-		return "regexp:.*" + regexp.QuoteMeta("|"+key("global", "", id)+"|") + ".*"
+		return subjectHeader("global", "", id)
 	}
-	return "regexp:.*" + regexp.QuoteMeta("|"+key(c.ScopeType, id, model)+"|") + ".*"
+	return subjectHeader(c.ScopeType, id, model)
 }
 
-// Keys supplies exact trusted membership keys. One native plugin per rule
-// means overlapping rules are independent even on first-match artifacts.
-func Keys(model, user string, teams, roles []string) (string, error) {
-	parts := []string{key("global", "", ""), key("global", "", model), key("user", user, ""), key("user", user, model)}
+func subjectHeader(kind, id, model string) string {
+	sum := sha256.Sum256([]byte(key(kind, id, model)))
+	return "x-aep-limit-" + hex.EncodeToString(sum[:])
+}
+
+// Headers contains only trusted subject presence, never counters. Keep room
+// below Envoy's default 100-header bound for the standard inference headers.
+func Headers(model, user string, teams, roles []string) (map[string]string, error) {
+	headers := make(map[string]string)
+	add := func(kind, id string) {
+		headers[subjectHeader(kind, id, "")] = "1"
+		headers[subjectHeader(kind, id, model)] = "1"
+	}
+	add("global", "")
+	add("user", user)
 	for kind, ids := range map[string][]string{"team": teams, "role": roles} {
 		for _, id := range ids {
-			parts = append(parts, key(kind, id, ""), key(kind, id, model))
+			add(kind, id)
 		}
 	}
-	sort.Strings(parts)
-	value := "|" + strings.Join(parts, "|") + "|"
-	if len(value) > 32<<10 {
-		return "", errors.New("too many gateway policy memberships")
+	if len(headers) > 80 {
+		return nil, errors.New("too many gateway policy memberships")
 	}
-	return value, nil
+	return headers, nil
 }

@@ -83,8 +83,8 @@ func RenderGatewayLimits(desired DesiredState, publication gatewaypolicy.Publica
 			if item.Configuration.ScopeType == "global" && item.Configuration.ModelID == nil {
 				config["global_threshold"] = threshold
 			} else {
-				threshold["key"] = gatewaypolicy.Pattern(item.Configuration)
-				config["rule_items"] = []any{map[string]any{"limit_by_header": "x-aep-limit-keys", "limit_keys": []any{threshold}}}
+				threshold["key"] = "1"
+				config["rule_items"] = []any{map[string]any{"limit_by_header": gatewaypolicy.Header(item.Configuration), "limit_keys": []any{threshold}}}
 			}
 			encoded, _ := json.Marshal(config)
 			out.WriteString("  matchRules:\n    - config: " + string(encoded) + "\n      configDisable: false\n      ingress:\n")

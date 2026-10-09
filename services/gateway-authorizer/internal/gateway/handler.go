@@ -158,7 +158,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	}
 	logTeams, _ = membershipHeader(identity.Teams)
 	logRoles, _ = membershipHeader(identity.Roles)
-	policyKeys, err := gatewaypolicy.Keys(model, claims.Subject, identity.Teams, identity.Roles)
+	policyHeaders, err := gatewaypolicy.Headers(model, claims.Subject, identity.Teams, identity.Roles)
 	if err != nil {
 		writeProblem(response, request, http.StatusServiceUnavailable, "GATEWAY_IDENTITY_UNAVAILABLE", "The inference identity cannot be represented safely.")
 		return
@@ -172,7 +172,9 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	setTrustedHeader(request.Header, "X-Mse-Consumer", identity.Consumer)
 	setTrustedHeader(request.Header, "X-AEP-Team-IDs", logTeams)
 	setTrustedHeader(request.Header, "X-AEP-Role-IDs", logRoles)
-	setTrustedHeader(request.Header, "X-AEP-Limit-Keys", policyKeys)
+	for name, value := range policyHeaders {
+		setTrustedHeader(request.Header, name, value)
+	}
 	setTrustedHeader(request.Header, "X-AEP-Deployment-ID", claims.DeploymentID)
 	setTrustedHeader(request.Header, "X-AEP-User-ID", claims.Subject)
 	setTrustedHeader(request.Header, "X-AEP-Session-ID", claims.SessionID)

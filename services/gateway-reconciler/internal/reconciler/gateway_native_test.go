@@ -24,7 +24,7 @@ func nativeText(value string) *string { return &value }
 func TestRenderNativeLimitsAndQuota(t *testing.T) {
 	d, p, cfg := nativeFixture()
 	resources, err := RenderGatewayLimits(d, p, cfg, "disposable-redis-fixture")
-	if err != nil || len(resources) != 2 || !strings.Contains(resources[0].Body, requestLimitURL) || !strings.Contains(resources[1].Body, tokenLimitURL) || !strings.Contains(resources[1].Body, "token_per_minute") || !strings.Contains(resources[1].Body, "x-aep-limit-keys") {
+	if err != nil || len(resources) != 2 || !strings.Contains(resources[0].Body, requestLimitURL) || !strings.Contains(resources[1].Body, tokenLimitURL) || !strings.Contains(resources[1].Body, "token_per_minute") || !strings.Contains(resources[1].Body, gatewaypolicy.Header(p.Items[1].Configuration)) || strings.Contains(resources[1].Body, "regexp:") {
 		t.Fatal(resources, err)
 	}
 	if resources[0].APIPath == resources[1].APIPath {

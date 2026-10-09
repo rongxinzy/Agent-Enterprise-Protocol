@@ -1,14 +1,14 @@
 package gatewaypolicy
 
 import (
-	"regexp"
+	"fmt"
 	"strings"
 	"testing"
 )
 
 func text(value string) *string { return &value }
 func TestNativeRuleKeys(t *testing.T) {
-	keys, err := Keys("model-a", "user-a", []string{"team-a", "team-b"}, []string{"role-a", "role-b"})
+	headers, err := Headers("model-a", "user-a", []string{"team-a", "team-b"}, []string{"role-a", "role-b"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,25 +20,52 @@ func TestNativeRuleKeys(t *testing.T) {
 		if !c.Valid() {
 			t.Fatal(c)
 		}
-		if !regexp.MustCompile(strings.TrimPrefix(Pattern(c), "regexp:")).MatchString(keys) {
-			t.Fatal("native selector did not match", c, keys)
+		if headers[Header(c)] != "1" {
+			t.Fatal("native selector did not match", c, headers)
 		}
 		if scope.kind != "model" {
 			c.ModelID = text("model-a")
-			if !regexp.MustCompile(strings.TrimPrefix(Pattern(c), "regexp:")).MatchString(keys) {
+			if headers[Header(c)] != "1" {
 				t.Fatal("model restriction did not match")
 			}
 			c.ModelID = text("model-b")
-			if regexp.MustCompile(strings.TrimPrefix(Pattern(c), "regexp:")).MatchString(keys) {
+			if headers[Header(c)] != "" {
 				t.Fatal("model scope escaped")
 			}
 		}
 	}
-	if _, err := Keys(strings.Repeat("m", 256), "u", make([]string, 1000), nil); err == nil {
+	teams := make([]string, 39)
+	for i := range teams {
+		teams[i] = fmt.Sprint(i)
+	}
+	if _, err := Headers("m", "u", teams, nil); err == nil {
 		t.Fatal("unbounded headers")
 	}
 	if Revision([]Limit{{ID: "b"}, {ID: "a"}}) != Revision([]Limit{{ID: "a"}, {ID: "b"}}) {
 		t.Fatal("unstable publication")
+	}
+}
+
+func TestTeamCounterIdentitySurvivesOtherMemberships(t *testing.T) {
+	c := Configuration{ScopeType: "team", ScopeID: text("shared")}
+	first, err := Headers("model-a", "user-a", []string{"shared", "other"}, []string{"admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Headers("model-b", "user-b", []string{"shared"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[Header(c)] != "1" || second[Header(c)] != "1" {
+		t.Fatal("shared team counter partitioned by user/model/other membership")
+	}
+	c.ModelID = text("model-a")
+	if first[Header(c)] != "1" || second[Header(c)] != "" {
+		t.Fatal("model-bound team counter escaped its model")
+	}
+	user := Configuration{ScopeType: "user", ScopeID: text("user-a")}
+	if first[Header(user)] != "1" || second[Header(user)] != "" {
+		t.Fatal("user counter escaped its subject")
 	}
 }
 
