@@ -16,9 +16,12 @@ import (
 
 const (
 	requestLimitURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/cluster-key-rate-limit@sha256:8f704ae666222d1cc8e67ea72a7342ba5f08db1dd1cb8f5344e3700924f87ce5"
-	tokenLimitURL   = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-token-ratelimit@sha256:4296bf8d213f4558ca96a0dd380aebc9d18071f5ff3ac0fa67089208d1b52fad"
-	quotaURL        = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-quota@sha256:21c1ea624d316d9baf8de8ba3fa9ddc8ff3492e28f4e227fbfaa7d8f12bc5922"
-	quotaAuthURL    = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/key-auth@sha256:18587fac5be178a2260c37ed74eb7abb9ed9b24915d3e2f037b69983772a4700"
+	// Higress plugin snapshot 2.2.5, plugin version 2.0.3, source
+	// 2b837c0ada8dbfb3e4bd92fc3f18ea532d269cb1. Older 2025 artifacts lack
+	// global_threshold and Anthropic quota path/usage support.
+	tokenLimitURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-token-ratelimit@sha256:9276a7d4cbd7afef668fd1aaf41212e663fd7fa98661c619398a7f2fb2736679"
+	quotaURL      = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-quota@sha256:2684810410de2803200f21d4971fe30161a7c0060c39ccab3906f6bcd4b8a509"
+	quotaAuthURL  = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/key-auth@sha256:18587fac5be178a2260c37ed74eb7abb9ed9b24915d3e2f037b69983772a4700"
 )
 
 type NativeGatewayConfig struct {
