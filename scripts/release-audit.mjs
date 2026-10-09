@@ -85,7 +85,7 @@ const sdkClient = await readText("packages/aep-sdk-node/src/client.ts");
 assert(sdkClient.includes("restoreSession()"), "SDK cold-start session restoration is missing");
 
 const goModule = await readText("go.mod");
-assert(/^go\s+1\.26\.6$/m.test(goModule), "patched Go 1.26.6 baseline is not pinned");
+assert(/^go\s+1\.26\.9$/m.test(goModule), "patched Go 1.26.9 baseline is not pinned");
 
 const controlConfig = await readText("services/control-service/internal/config/config.go");
 assert(controlConfig.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH must be false in production"), "production mock federated-auth guard is missing");

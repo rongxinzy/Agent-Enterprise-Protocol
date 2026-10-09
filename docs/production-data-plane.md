@@ -29,11 +29,54 @@ kubectl -n aep-system rollout status deployment/aep-gateway-authorizer
 kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 ```
 
-The two reconciler replicas have independent audit volumes and a disruption budget. Both use Kubernetes server-side apply with the `aep-gateway-reconciler` field manager. Because every object name and body is deterministic, concurrent replicas have safe write ownership without a leader lease. A `ready` status is written only after both live Kubernetes operations succeed. Any partial failure reports `KUBERNETES_APPLY_FAILED` and is retried with bounded exponential backoff.
+The two reconciler replicas have independent audit volumes and a disruption budget. Both use Kubernetes server-side apply with the `aep-gateway-reconciler` field manager. Because every object name and body is deterministic, concurrent replicas have safe write ownership without a leader lease. A `ready` status is written only after all live Kubernetes operations succeed. Any partial failure reports `KUBERNETES_APPLY_FAILED` and is retried with bounded exponential backoff.
 
 The reconciler Role and RoleBinding are deliberately scoped to Ingress, `extensions.higress.io/wasmplugins`, and `networking.istio.io/envoyfilters` in `higress-system`. The service-account token and cluster CA come from projected Kubernetes files. Validate the installed Higress CRD group and resource names before rollout.
 
 Run `npm run test:e2e:m3-data-plane` for control-plane and fault convergence, and `npm run test:e2e:m3-kubernetes` for the real Kubernetes API Server and Higress-compatible CRD gate.
+
+## AI Usage Statistics
+
+The reconciler also applies `aep-ai-statistics-<deployment-suffix>`, using the
+official open-source `ai-statistics` 2.0.1 OCI artifact pinned to
+`sha256:9bebfc803f6ea92c0805670bd9a6e8a5bb727f2e1a86b133f20bb7002e71511e`.
+Priority 200 runs observation before ai-proxy. `defaultConfigDisable: true`
+restricts observation to the current deployment's enabled OpenAI and Anthropic
+Ingress names; disabling every route leaves an empty match set. No global
+plugin or unrelated gateway route is modified.
+
+Lightweight response attributes collect model/usage metadata without enabling
+full prompt, answer, tool-argument or reasoning attributes. `FAIL_OPEN` lets
+inference continue if the observation plugin cannot load. Reconciler `ready`
+confirms Kubernetes apply, not plugin loading or metrics collection; validate
+real observations after rollout. The gateway must be able to fetch the pinned
+OCI artifact, or the delivery system must mirror that exact artifact.
+
+The gateway exposes Prometheus metrics at the internal endpoint
+`http://<gateway-pod-ip>:15020/stats/prometheus`. Input/output Token counters,
+request duration and streaming first-token duration come from Higress; values
+depend on upstream usage reporting. Missing usage is not a zero-cost request.
+This stage does not install Prometheus/Grafana, capture request content, add
+user/team/role labels, calculate prices, or provide durable request logs.
+
+Local verification uses the same pinned artifact in the isolated Compose
+gateway fixture:
+
+```sh
+npm ci
+npm run build --workspace @aep/sdk-node
+npm run test:e2e:m1-gateway
+```
+
+The scenario checks actual exported counters for OpenAI non-streaming/SSE and
+Anthropic non-streaming mock responses, preserves upstream 503 and authorization
+behavior, and checks that credentials and model content do not enter metrics.
+The container's metrics port stays internal. This is local evidence, not an
+acceptance result for a production cluster or untested provider/protocol modes.
+
+When rolling back to an older reconciler, remove its deployment-scoped
+`aep-ai-statistics-<deployment-suffix>` object explicitly: older binaries do not
+own or clear the newly introduced plugin. No database migration is involved.
 
 ## Catalog-Derived Publication
 

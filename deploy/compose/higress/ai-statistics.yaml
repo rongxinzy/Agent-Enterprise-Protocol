@@ -1,0 +1,26 @@
+apiVersion: extensions.higress.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: aep-ai-statistics
+  namespace: higress-system
+  resourceVersion: "1"
+spec:
+  # Official ai-statistics 2.0.1; same immutable artifact as the reconciler.
+  url: oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-statistics@sha256:9bebfc803f6ea92c0805670bd9a6e8a5bb727f2e1a86b133f20bb7002e71511e
+  failStrategy: FAIL_OPEN
+  phase: UNSPECIFIED_PHASE
+  priority: 200
+  defaultConfigDisable: true
+  matchRules:
+    - config:
+        use_default_attributes: false
+        use_default_response_attributes: true
+        enable_path_suffixes:
+          - /chat/completions
+          - /completions
+          - /responses
+          - /messages
+      configDisable: false
+      ingress:
+        - aep-model-gateway
+        - aep-anthropic-bench-anthropic

@@ -60,12 +60,17 @@ try {
 
   const ingressName = `aep-model-gateway-${suffix('demo')}`;
   const pluginName = `aep-ai-proxy-${suffix('demo')}`;
+  const statisticsName = `aep-ai-statistics-${suffix('demo')}`;
   const ingress = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'ingress', ingressName, '-o', 'json']));
   assert(ingress.spec.rules[0].http.paths[0].path === '/v1/chat', 'real Kubernetes Ingress route was incorrect');
   const plugin = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', pluginName, '-o', 'json']));
   assert(plugin.spec.matchRules[0].config.provider.type === 'deepseek', 'Higress resource did not select the DeepSeek provider');
   assert(plugin.spec.matchRules[0].config.provider.apiTokens?.[0] === providerSecretValue, 'resolved Secret value was not inlined as an ai-proxy apiToken');
   assert(!('credentialRef' in plugin.spec.matchRules[0].config), 'credentialRef leaked into the rendered Higress resource');
+  const statistics = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', statisticsName, '-o', 'json']));
+  assert(statistics.spec.defaultConfigDisable === true && statistics.spec.failStrategy === 'FAIL_OPEN', 'statistics must be opt-in per route and fail open');
+  assert(statistics.spec.matchRules[0].ingress[0] === ingressName, 'statistics did not match the managed OpenAI ingress');
+  assert(!JSON.stringify(statistics).includes(providerSecretValue), 'statistics contains a provider credential');
 
   controlAvailable = false;
   await waitForHealth('/readyz', 503);
@@ -83,6 +88,8 @@ try {
   await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-2', `status is ${JSON.stringify(observed)}`));
   const disabled = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', pluginName, '-o', 'json']));
   assert(disabled.spec.matchRules === null || disabled.spec.matchRules.length === 0, 'disabled route remained in Higress match rules');
+  const disabledStatistics = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', statisticsName, '-o', 'json']));
+  assert(disabledStatistics.spec.matchRules.length === 0, 'statistics kept matching a disabled route');
 
   // Anthropic passthrough: a per-model Ingress plus a self-contained
   // EnvoyFilter (own upstream cluster + route redirect + credential).
@@ -103,6 +110,8 @@ try {
   assert(routePatch?.patch?.value?.route?.regex_rewrite?.substitution === '/api/anthropic/\\1', 'path rewrite was incorrect');
   assert((routePatch?.patch?.value?.request_headers_to_add ?? []).some(header => header.header.key === 'x-api-key' && header.header.value === providerSecretValue), 'credential was not injected server-side');
   assert(!JSON.stringify(envoyFilter).includes('credentialRef'), 'credentialRef leaked into the EnvoyFilter');
+  const anthropicStatistics = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'wasmplugin', statisticsName, '-o', 'json']));
+  assert(anthropicStatistics.spec.matchRules[0].ingress.includes(anthropicName), 'statistics omitted the managed Anthropic ingress');
 
   desired = state('rev-kind-4', [desired.routes.find(route => route.modelId === 'chat'), {...anthropicRoute, enabled: false}]);
   await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-4', `status is ${JSON.stringify(observed)}`));

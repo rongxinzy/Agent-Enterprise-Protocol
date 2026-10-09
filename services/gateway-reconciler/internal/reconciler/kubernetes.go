@@ -89,8 +89,8 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 // Apply server-side-applies every rendered resource and first deletes what
 // the desired state no longer owns: the tenant's openai Ingress when no
 // openai-compatible route is enabled, and the per-route anthropic
-// Ingress+EnvoyFilter pair for every disabled anthropic route. The WasmPlugin
-// is always present in the render (with empty matchRules when idle) and is
+// Ingress+EnvoyFilter pair for every disabled anthropic route. Both WasmPlugins
+// are always present in the render (with empty matchRules when idle) and are
 // therefore always applied, never deleted.
 func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, resources []RenderedResource) error {
 	if !hasResourceKind(resources, ResourceWasmPlugin) {
