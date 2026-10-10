@@ -29,3 +29,26 @@ ai-quota 原生要求的 `/v1/chat/completions/quota` 后缀，客户端不能�
 原生写操作返回文本后，AEP 再读原生余额，不自行加减。如果 delta 已发送但后续读取
 失败，结果可能不确定，禁止自动重试。原生 Token/配额继承插件完成请求后的计数及
 并发语义，不宣称是交易级账本。部署配置为可选，不更改默认生产拓扑。
+
+Token 限流及配额固定到 Higress 官方插件 **2.0.3**，来源为
+[2.2.5 发布快照](https://github.com/higress-group/higress/blob/2ba624cc479dd28bb88a853d6889e7931b993537/plugins/release/snapshots/2.2.5.json)，
+构建源码为 `2b837c0ada8dbfb3e4bd92fc3f18ea532d269cb1`：
+
+| 插件 | OCI manifest digest |
+| --- | --- |
+| ai-token-ratelimit | `sha256:9276a7d4cbd7afef668fd1aaf41212e663fd7fa98661c619398a7f2fb2736679` |
+| ai-quota | `sha256:2684810410de2803200f21d4971fe30161a7c0060c39ccab3906f6bcd4b8a509` |
+
+此前 2025 年 6 月的 Token 产物不支持 `global_threshold`，报 `missing rule_items`
+并通过 FAIL_CLOSE 返回 500；旧配额产物不识别 Anthropic 路径和 usage，零余额也能调用。
+新版配额产物包含上游非流式扣减修复及原生 Anthropic 支持，计数、扣减、拦截仍由插件
+与 Redis 执行，AEP 不增加计算逻辑。
+
+运行 `npm run test:e2e:gateway-native`：使用生产渲染器、真实 Higress 2.2.4 与 Redis、
+mock OpenAI/Anthropic 上游，验证 JSON/SSE 配额扣减、零余额拒绝、全局/团队共享
+Token 限流、禁用恢复和 Redis 故障。该命令已纳入标准 Compose E2E 门禁；只适配
+standalone 测试路由与服务发现，不等同于 Kubernetes Pod 通信或生产监控部署验收。
+
+新版 Token 插件采用累计计数及不同 Redis 键布局，旧版剩余额度计数的周期窗口不会
+继承，升级应由运维选择发布窗口。配额沿用 `aep_quota:` 和原 Consumer 编码，不迁移
+余额或自行加减。实际部署验收前，`runtimeVerified` 保持 false。
