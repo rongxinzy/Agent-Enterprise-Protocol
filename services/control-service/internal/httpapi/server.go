@@ -157,6 +157,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 		protected.Use(s.authenticate)
 		protected.Group(func(admin chi.Router) {
 			admin.Use(s.requireAdmin)
+			admin.Use(s.auditAdminWrites)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
 			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
 			admin.Post("/aep/v1/admin/model-gateway/models/{modelId}/test-access", s.gatewayTestAccess)
@@ -215,6 +216,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Post("/aep/v1/admin/licenses/{licenseId}/revoke", s.revokeLicense)
 			admin.Get("/aep/v1/admin/events", s.searchTelemetryEvents)
 			admin.Get("/aep/v1/admin/audit/authentication", s.listAuthenticationAudit)
+			admin.Get("/aep/v1/admin/audit/operations", s.listAdminAudit)
 			admin.Get("/aep/v1/admin/models", s.listModels)
 			admin.Post("/aep/v1/admin/models", s.createModel)
 			admin.Get("/aep/v1/admin/models/{modelId}", s.getModel)
