@@ -50,6 +50,19 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     const body = await readJSON(request);
+    if (body.stream === true) {
+      response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
+      for (const event of [
+        {type: 'message_start', message: {id: 'msg-aep-m1-anthropic', type: 'message', role: 'assistant', model: body.model, content: [], stop_reason: null, usage: {input_tokens: 1, output_tokens: 0}}},
+        {type: 'content_block_start', index: 0, content_block: {type: 'text', text: ''}},
+        {type: 'content_block_delta', index: 0, delta: {type: 'text_delta', text: 'anthropic passthrough ok'}},
+        {type: 'content_block_stop', index: 0},
+        {type: 'message_delta', delta: {stop_reason: 'end_turn', stop_sequence: null}, usage: {output_tokens: 2}},
+        {type: 'message_stop'},
+      ]) response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      response.end();
+      return;
+    }
     sendJSON(response, 200, {
       id: 'msg-aep-m1-anthropic', type: 'message', role: 'assistant', model: body.model,
       content: [{type: 'text', text: `anthropic passthrough ok ${body.model}`}],
