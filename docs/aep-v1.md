@@ -187,6 +187,10 @@ also contain scripts, references, and assets. Paths MUST be relative and MUST
 NOT escape the extraction directory. The manifest digest is calculated over
 the exact ZIP bytes served by the asset service.
 
+The control service refuses an upload that is not a ZIP archive or that has no
+`SKILL.md` at its root: a package that every Agent would refuse is refused once,
+at upload time, instead of failing at every install.
+
 ### 8.4 Removal Semantics
 
 - Unassigning a Skill removes it from that subject's desired manifest.
