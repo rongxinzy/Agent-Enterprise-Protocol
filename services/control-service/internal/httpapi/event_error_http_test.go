@@ -127,3 +127,13 @@ func TestReportDeliveryResultMissingDelivery(t *testing.T) {
 		t.Fatalf("missing delivery result = %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestReportDeliveryResultLookupFailure(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries SET state=`).WithArgs("delivery-1", "session-user", "succeeded", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnError(errors.New("lookup failed"))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"succeeded"}`)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("result lookup failure = %d %s", response.Code, response.Body.String())
+	}
+}
