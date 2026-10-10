@@ -55,13 +55,13 @@ func TestSkillQueriesAndVersionLifecycle(t *testing.T) {
 		t.Fatalf("ListSkillVersions() = %#v, %v", versions, err)
 	}
 
-	mock.ExpectExec(`INSERT INTO skill_versions`).
+	mock.ExpectQuery(`INSERT INTO skill_versions`).
 		WithArgs("skill-a", "1.1.0", "skills/a-1.1.zip", "sha256:b", int64(256)).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	if err := store.UpsertSkillVersion(context.Background(), SkillVersion{
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(false))
+	if published, err := store.UpsertSkillVersion(context.Background(), SkillVersion{
 		SkillID: "skill-a", Version: "1.1.0", ObjectKey: "skills/a-1.1.zip", SHA256: "sha256:b", SizeBytes: 256,
-	}); err != nil {
-		t.Fatal(err)
+	}); err != nil || published {
+		t.Fatalf("UpsertSkillVersion() = %v, %v", published, err)
 	}
 
 	mock.ExpectBegin()

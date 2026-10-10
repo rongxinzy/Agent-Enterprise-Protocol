@@ -250,14 +250,20 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		databaseFailure(response, request, err)
 		return
 	}
-	err = s.app.Store.UpsertSkillVersion(request.Context(), repository.SkillVersion{
+	published, err := s.app.Store.UpsertSkillVersion(request.Context(), repository.SkillVersion{
 		SkillID: skillID, Version: version, ObjectKey: objectKey, SHA256: sha, SizeBytes: int64(len(archive)),
 	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"skillId": skillID, "version": version, "sha256": sha, "size": len(archive), "published": false})
+	// Re-uploading an existing version keeps its publication state, so report
+	// what is actually stored instead of assuming a draft.
+	state := "draft"
+	if published {
+		state = "published"
+	}
+	writeJSON(response, http.StatusCreated, map[string]any{"skillId": skillID, "version": version, "sha256": sha, "size": len(archive), "state": state, "published": published})
 }
 
 func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http.Request) {
