@@ -60,7 +60,7 @@
     "test:release-artifacts": "node tests/release-artifacts.mjs"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.6.0",
+    "@redocly/cli": "^2.59.0",
     "openapi-typescript": "^7.10.1"
   }
 }
