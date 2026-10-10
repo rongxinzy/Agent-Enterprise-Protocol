@@ -16,7 +16,6 @@ func RenderGatewayQuota(desired DesiredState, cfg NativeGatewayConfig, password,
 	name := "aep-quota-" + suffix
 	path := "/" + name + "/v1/chat/completions/quota"
 	ingresses := []string{name}
-	hasOpenAI := false
 	for _, route := range desired.Routes {
 		if !route.Enabled {
 			continue
@@ -24,11 +23,8 @@ func RenderGatewayQuota(desired DesiredState, cfg NativeGatewayConfig, password,
 		if route.Protocol == "anthropic" {
 			ingresses = append(ingresses, anthropicResourceName(route.ModelID))
 		} else {
-			hasOpenAI = true
+			ingresses = append(ingresses, openAIResourceName(desired.TenantID(), route.ModelID))
 		}
-	}
-	if hasOpenAI {
-		ingresses = append(ingresses, "aep-model-gateway-"+suffix)
 	}
 	sort.Strings(ingresses)
 	redis := map[string]any{"service_name": cfg.RedisService, "service_port": cfg.RedisPort, "timeout": 1000, "database": cfg.RedisDatabase}
