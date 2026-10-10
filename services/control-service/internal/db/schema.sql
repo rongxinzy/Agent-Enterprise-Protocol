@@ -343,6 +343,22 @@ CREATE INDEX IF NOT EXISTS idx_login_rate_limits_updated ON login_rate_limits (u
 CREATE INDEX IF NOT EXISTS idx_authentication_audit_deployment_time ON authentication_audit_events (deployment_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_authentication_audit_retention ON authentication_audit_events (created_at, cursor);
 
+CREATE TABLE IF NOT EXISTS admin_audit_events (
+  cursor bigserial PRIMARY KEY,
+  deployment_id text NOT NULL,
+  actor_user_id text,
+  action text NOT NULL,
+  resource_type text NOT NULL,
+  resource_id text,
+  result text NOT NULL CHECK (result IN ('success', 'failure')),
+  reason text,
+  payload jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_deployment_cursor ON admin_audit_events (deployment_id, cursor);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_deployment_time ON admin_audit_events (deployment_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS licenses (
   license_id text PRIMARY KEY,
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
