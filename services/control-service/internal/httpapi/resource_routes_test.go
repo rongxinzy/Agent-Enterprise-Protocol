@@ -145,7 +145,8 @@ func TestAdminResourceDeleteRoutes(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
 	handler := New(application).Handler()
 
-	expectSkillDeleteLock(mock, "skill-a", 0, 0)
+	expectSkillDeleteLock(mock, "skill-a")
+	expectSkillReferenceCounts(mock, "skill-a", 0, 0)
 	mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("skill-a").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	skill := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/skills/skill-a", "")

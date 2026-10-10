@@ -634,10 +634,10 @@ export class AepClient {
     });
   }
 
-  deleteSkill(skillId: string): Promise<void> {
+  deleteSkill(skillId: string, options: {force?: boolean} = {}): Promise<void> {
     return this.#send({
       method: HttpMethod.Delete,
-      path: `/aep/v1/admin/skills/${segment(skillId)}`,
+      path: `/aep/v1/admin/skills/${segment(skillId)}${options.force ? '?force=true' : ''}`,
       responseType: 'empty',
     });
   }

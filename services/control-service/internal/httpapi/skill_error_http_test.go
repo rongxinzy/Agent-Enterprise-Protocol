@@ -163,7 +163,8 @@ func TestAdminSkillCreateAndMutationFailureBoundaries(t *testing.T) {
 					WillReturnRows(sqlmock.NewRows(skillColumns()))
 				mock.ExpectRollback()
 			} else {
-				expectSkillDeleteLock(mock, "writer", 0, 0)
+				expectSkillDeleteLock(mock, "writer")
+				expectSkillReferenceCounts(mock, "writer", 0, 0)
 				mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer").WillReturnError(test.err)
 				mock.ExpectRollback()
 			}

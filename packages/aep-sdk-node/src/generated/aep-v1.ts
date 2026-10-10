@@ -747,6 +747,7 @@ export interface paths {
         get: operations["getSkill"];
         put?: never;
         post?: never;
+        /** @description Deletes a Skill and its versions. Refused with 409 SKILL_IN_USE while a digital employee binds it as its prompt Skill or while assignments reference it; pass force=true to delete it anyway and drop those references. */
         delete: operations["deleteSkill"];
         options?: never;
         head?: never;
@@ -4443,7 +4444,10 @@ export interface operations {
     };
     deleteSkill: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Delete even when the Skill is still referenced, dropping the prompt binding and the assignments. */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 skillId: components["parameters"]["SkillId"];

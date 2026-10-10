@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,15 +142,17 @@ func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request
 	if !requireSkillIdentifier(response, request, skillID) {
 		return
 	}
-	// A Skill that is still in use must not be deleted: the prompt Skill binding
-	// on agent profiles is ON DELETE SET NULL, so the delete would silently drop
-	// a digital employee's persona Skill, and Skill assignments would be cascade
-	// deleted. The store refuses under a row lock and reports the references.
-	references, err := s.app.Store.DeleteSkillIfUnreferenced(request.Context(), skillID)
+	// A Skill that is still in use is refused by default: the prompt Skill
+	// binding on agent profiles is ON DELETE SET NULL, so the delete would
+	// silently drop a digital employee's persona Skill, and Skill assignments
+	// would be cascade deleted. The store checks under a row lock and reports
+	// the references; ?force=true lets an administrator delete anyway.
+	force, _ := strconv.ParseBool(request.URL.Query().Get("force"))
+	references, err := s.app.Store.DeleteSkill(request.Context(), skillID, force)
 	switch {
 	case errors.Is(err, repository.ErrSkillInUse):
 		writeProblem(response, request, http.StatusConflict, "SKILL_IN_USE", fmt.Sprintf(
-			"The Skill cannot be deleted: %d digital-employee prompt binding(s) and %d assignment(s) still reference it.",
+			"The Skill cannot be deleted: %d digital-employee prompt binding(s) and %d assignment(s) still reference it. Retry with ?force=true to delete it and drop those references.",
 			references.PromptBindings, references.Assignments))
 		return
 	case errors.Is(err, repository.ErrNotFound):

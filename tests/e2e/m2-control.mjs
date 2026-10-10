@@ -113,6 +113,8 @@ async function runScenario() {
     promptSkillId,
   });
   await expectProblem(admin.deleteSkill(promptSkillId), 409, 'SKILL_IN_USE');
+  // An administrator can still delete it on purpose: the references are dropped.
+  await admin.deleteSkill(promptSkillId, {force: true});
 
   // Regression: the user manifest must return the latest *published* version,
   // not the lexicographically largest version string (1.10.0 must beat 1.9.0).
