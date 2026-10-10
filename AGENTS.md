@@ -176,6 +176,16 @@ the test or deleting data.
 - Model calls remain direct OpenAI-compatible requests using the model access
   token. Do not tunnel inference through SDK control APIs.
 
+## Monitoring Calculations
+
+- Prefer existing Higress/plugin/Prometheus metrics and native query functions.
+  Avoid handwritten complex statistical formulas or numerical aggregation in
+  AEP, SDKs, collectors, and frontends. Preserve source definitions and missing
+  values. For integer request/Token counter presentation, let Prometheus apply
+  `round()` after the native aggregation; keep QPS, ratios, and mean durations
+  fractional. Rounding an extrapolated increase does not make it an exact
+  event count or a billing ledger.
+
 ## Deployment and Operations
 
 Local Compose is for development and CI only. Production manifests must source
