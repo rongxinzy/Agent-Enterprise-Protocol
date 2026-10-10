@@ -944,19 +944,23 @@ components:
         type: {type: string, enum: [user, role, team]}
         id: {type: string}
     Assignment:
+      description: A Skill assignment. The Skill list is administrator-visible; expiresAt is null for a perpetual grant.
       type: object
-      required: [id, resourceType, resourceId, subject, createdAt]
+      required: [id, skillId, subject]
       properties:
         id: {type: string}
-        resourceType: {type: string, enum: [skill, credential, model]}
-        resourceId: {type: string}
+        skillId: {$ref: '#/components/schemas/SkillIdentifier'}
         subject: {$ref: '#/components/schemas/Subject'}
         createdAt: {type: string, format: date-time}
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: Temporary grant that stops authorizing at this time; null for a perpetual grant. Only an administrator can set it.
     AssignmentList:
       type: object
-      required: [assignments]
+      required: [items]
       properties:
-        assignments: {type: array, items: {$ref: '#/components/schemas/Assignment'}}
+        items: {type: array, items: {$ref: '#/components/schemas/Assignment'}}
     ModelSubject:
       type: object
       required: [type, id]

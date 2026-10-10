@@ -306,6 +306,9 @@ func (s *Server) listSkillAssignments(response http.ResponseWriter, request *htt
 			"id": assignment.ID, "skillId": assignment.SkillID,
 			"subject":   map[string]string{"type": assignment.SubjectType, "id": assignment.SubjectID},
 			"createdAt": assignment.CreatedAt,
+			// null = a perpetual grant. Clients need this to tell a live grant
+			// from an expired one; the manifest already filters expired rows.
+			"expiresAt": assignment.ExpiresAt,
 		})
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items})
@@ -355,7 +358,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": id, "skillId": input.SkillID, "subject": input.Subject})
+	writeJSON(response, http.StatusCreated, map[string]any{"id": id, "skillId": input.SkillID, "subject": input.Subject, "expiresAt": input.ExpiresAt})
 }
 
 func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *http.Request) {

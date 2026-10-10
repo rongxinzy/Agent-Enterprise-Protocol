@@ -251,11 +251,19 @@ func TestAdminSkillAssignmentLifecycle(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
+	expires := now.Truncate(time.Second).Add(24 * time.Hour)
 	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY id`).WithArgs("deployment-a").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "skill_id", "subject_type", "subject_id", "created_at"}).
-			AddRow("assignment-a", "deployment-a", "writer", "team", "engineering", now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "skill_id", "subject_type", "subject_id", "created_at", "expires_at"}).
+			AddRow("assignment-a", "deployment-a", "writer", "team", "engineering", now, expires).
+			AddRow("assignment-b", "deployment-a", "writer", "user", "user-a", now, nil))
 	listed := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/skill-assignments", "")
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"skillId":"writer"`) || !strings.Contains(listed.Body.String(), `"type":"team"`) {
+	if listed.Code != http.StatusOK ||
+		!strings.Contains(listed.Body.String(), `"skillId":"writer"`) ||
+		!strings.Contains(listed.Body.String(), `"type":"team"`) ||
+		// A temporary grant carries its expiry; a perpetual one is null. The
+		// console needs both to tell a live grant from an expired one.
+		!strings.Contains(listed.Body.String(), `"expiresAt":"`+expires.Format(time.RFC3339)+`"`) ||
+		!strings.Contains(listed.Body.String(), `"expiresAt":null`) {
 		t.Fatalf("list Skill assignments = %d %s", listed.Code, listed.Body.String())
 	}
 
@@ -263,8 +271,10 @@ func TestAdminSkillAssignmentLifecycle(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "team", "engineering", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	expectSkillAssignmentEvent(pool)
 	pool.ExpectCommit()
-	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/skill-assignments", `{"skillId":"writer","subject":{"type":"team","id":"engineering"}}`)
-	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"skillId":"writer"`) {
+	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/skill-assignments", `{"skillId":"writer","subject":{"type":"team","id":"engineering"},"expiresAt":"2026-12-31T00:00:00Z"}`)
+	if created.Code != http.StatusCreated ||
+		!strings.Contains(created.Body.String(), `"skillId":"writer"`) ||
+		!strings.Contains(created.Body.String(), `"expiresAt":"2026-12-31T00:00:00Z"`) {
 		t.Fatalf("create Skill assignment = %d %s", created.Code, created.Body.String())
 	}
 
