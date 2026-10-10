@@ -29,7 +29,7 @@ kubectl -n aep-system rollout status deployment/aep-gateway-authorizer
 kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 ```
 
-The two reconciler replicas have independent audit volumes and a disruption budget. Both use Kubernetes server-side apply with the `aep-gateway-reconciler` field manager. Because every object name and body is deterministic, concurrent replicas have safe write ownership without a leader lease. A `ready` status is written only after all live Kubernetes operations succeed. Any partial failure reports `KUBERNETES_APPLY_FAILED` and is retried with bounded exponential backoff.
+The two reconciler replicas have independent audit volumes and a disruption budget. Kubernetes mode elects a leader through the `aep-system/gateway-reconciler-leader` Lease. Only a replica that successfully acquires and renews it synchronizes; followers wait for takeover. Production RBAC allows Lease creation in `aep-system`, but get/update only for this fixed Lease name, without access to other Leases. Read/create/renewal rejection clears leadership and retries instead of panicking or continuing synchronization. The leader uses Kubernetes server-side apply with the `aep-gateway-reconciler` field manager. A `ready` status is written only after all live Kubernetes operations succeed. Any partial failure reports `KUBERNETES_APPLY_FAILED` and is retried with bounded exponential backoff.
 
 The reconciler Role and RoleBinding are deliberately scoped to Ingress, `extensions.higress.io/wasmplugins`, and `networking.istio.io/envoyfilters` in `higress-system`. The service-account token and cluster CA come from projected Kubernetes files. Validate the installed Higress CRD group and resource names before rollout.
 

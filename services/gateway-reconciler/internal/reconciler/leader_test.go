@@ -131,8 +131,7 @@ func TestLeaderElectionTakesOverExpiredLease(t *testing.T) {
 	if err := elector.acquireOrRenew(context.Background()); err != nil {
 		t.Fatalf("takeover: %v", err)
 	}
-	// acquireOrRenew itself only writes the lease; Run() flips isLeader on a
-	// nil error. Assert the takeover took effect server-side.
+	// Leadership requires a successful server-side takeover.
 	if api.put != 1 || api.lease.Spec.HolderIdentity != "instance-a" || api.lease.Spec.AcquireTime == "" {
 		t.Fatalf("after takeover: put=%d spec=%#v", api.put, api.lease.Spec)
 	}
@@ -146,7 +145,7 @@ func TestLeaderElectionRenewFailureDropsLeadership(t *testing.T) {
 		Spec: leaseSpec{HolderIdentity: "instance-a", LeaseDurationSeconds: 15, RenewTime: time.Now().UTC().Format(time.RFC3339Nano)},
 	}}
 	elector := newTestElector(t, api, "instance-a")
-	elector.isLeader = true
+	elector.isLeader.Store(true)
 
 	if err := elector.acquireOrRenew(context.Background()); err == nil {
 		t.Fatal("a failed renew must surface an error")
@@ -225,8 +224,7 @@ func TestLeaderElectorHandlesServerManagedLeaseMetadata(t *testing.T) {
 	if err := elector.acquireOrRenew(context.Background()); err != nil {
 		t.Fatalf("acquireOrRenew against a real-shaped lease failed: %v", err)
 	}
-	// Run() flips IsLeader from a nil error; acquireOrRenew itself proves the
-	// takeover through the server-side lease state.
+	// Verify the server-side takeover, not just the local leadership flag.
 	api.mutex.Lock()
 	holder := api.lease.Spec.HolderIdentity
 	api.mutex.Unlock()
