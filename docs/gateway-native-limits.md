@@ -58,3 +58,33 @@ concurrency semantics; they are not a transactional billing ledger.
 OCI digests for request limits, token limits, ai-quota and key-auth are pinned
 in the renderer. Validate the actual artifacts on a disposable deployment
 before enabling enforcement on production traffic.
+
+Token limits and quota use the official Higress plugin **2.0.3** artifacts from
+the [2.2.5 snapshot](https://github.com/higress-group/higress/blob/2ba624cc479dd28bb88a853d6889e7931b993537/plugins/release/snapshots/2.2.5.json),
+built from source `2b837c0ada8dbfb3e4bd92fc3f18ea532d269cb1`:
+
+| Plugin | OCI manifest digest |
+| --- | --- |
+| ai-token-ratelimit | `sha256:9276a7d4cbd7afef668fd1aaf41212e663fd7fa98661c619398a7f2fb2736679` |
+| ai-quota | `sha256:2684810410de2803200f21d4971fe30161a7c0060c39ccab3906f6bcd4b8a509` |
+
+The previous June 2025 token artifact rejected `global_threshold` with
+`missing rule_items`, causing fail-closed HTTP 500. The previous quota artifact
+ignored Anthropic paths and usage, allowing calls even with zero quota. The
+new quota artifact includes the upstream non-streaming deduction fix as well
+as native Anthropic path and usage support. AEP still delegates all checks and
+accounting to the plugins and Redis.
+
+Run `npm run test:e2e:gateway-native` to exercise the production renderer with
+real Higress 2.2.4 and Redis, mock OpenAI/Anthropic providers, JSON/SSE quota
+deduction and zero-balance denial, shared global/team Token limits, disabled
+rules and Redis outages. The command is included in the standard Compose E2E
+gate. It adapts only standalone fixture routes and service discovery; it does
+not validate Kubernetes Pod networking or a production monitoring deployment.
+
+The newer Token plugin uses an accumulated counter and a different Redis key
+layout from the old remaining-allowance artifact. Existing rate-limit windows
+are not carried over when upgrading: publish during an operator-controlled
+window. Quota balances keep the same `aep_quota:` prefix and encoded Consumer;
+no AEP balance migration or arithmetic is introduced. Runtime status remains
+`runtimeVerified: false` until the actual deployment is accepted.
