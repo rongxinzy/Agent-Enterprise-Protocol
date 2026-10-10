@@ -65,6 +65,11 @@ spec:
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef: {name: aep-gateway-reconciler-config}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - name: health
               containerPort: 8091

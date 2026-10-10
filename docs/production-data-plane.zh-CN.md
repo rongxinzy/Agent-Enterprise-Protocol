@@ -29,7 +29,7 @@ kubectl -n aep-system rollout status deployment/aep-gateway-authorizer
 kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 ```
 
-两个 reconciler 副本各自拥有审计副本目录，并配置了 PDB。两者都使用 field manager `aep-gateway-reconciler` 执行 Kubernetes server-side apply。因为对象名称和内容完全确定，多个副本无需 leader lease 也能安全持有相同写入字段。只有所有线上 Kubernetes 操作均成功后才会上报 `ready`；部分失败会返回 `KUBERNETES_APPLY_FAILED`，并按有界指数退避重试。
+两个 reconciler 副本各自拥有审计副本目录，并配置了 PDB。Kubernetes 模式通过 `aep-system/gateway-reconciler-leader` Lease 选主，只有成功持有并续租的副本执行同步；其余副本等待接管。生产 RBAC 允许在 `aep-system` 创建 Lease，仅允许读取和更新这个固定名称，不能修改其他 Lease。权限拒绝、创建冲突或续租失败均停止持有领导权并重试，不应崩溃或继续同步。持有领导权的副本使用 field manager `aep-gateway-reconciler` 执行 server-side apply，只有所有线上 Kubernetes 操作均成功后才会上报 `ready`；部分失败会返回 `KUBERNETES_APPLY_FAILED`，并按有界指数退避重试。
 
 reconciler 的 Role 和 RoleBinding 明确限定为 `higress-system` 中的 Ingress、`extensions.higress.io/wasmplugins` 与 `networking.istio.io/envoyfilters`。service-account token 与集群 CA 来自 Kubernetes 投射文件。上线前必须确认已安装 Higress CRD 的组和资源名。
 

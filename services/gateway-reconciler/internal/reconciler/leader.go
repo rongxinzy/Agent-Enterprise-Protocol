@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,7 @@ type LeaderElector struct {
 	identity  string
 	leaseDur  time.Duration
 	renewDur  time.Duration
-	isLeader  bool
+	isLeader  atomic.Bool
 }
 
 // NewLeaderElector creates a Lease-based elector reusing the applier's HTTP
@@ -54,21 +55,20 @@ func (l *LeaderElector) Run(ctx context.Context) {
 			l.release()
 			return
 		case <-ticker.C:
+			wasLeader := l.IsLeader()
 			if err := l.acquireOrRenew(ctx); err != nil {
-				if l.isLeader || os.Getenv("AEP_LEADER_ELECTION_DEBUG") != "" {
+				if wasLeader || os.Getenv("AEP_LEADER_ELECTION_DEBUG") != "" {
 					slog.Warn("leader election: lost lease", "error", err)
 				}
-				l.isLeader = false
-			} else if !l.isLeader {
+			} else if !wasLeader && l.IsLeader() {
 				slog.Info("leader election: acquired lease", "identity", l.identity)
-				l.isLeader = true
 			}
 		}
 	}
 }
 
 // IsLeader reports whether this instance holds the lease.
-func (l *LeaderElector) IsLeader() bool { return l.isLeader }
+func (l *LeaderElector) IsLeader() bool { return l.isLeader.Load() }
 
 type leaseSpec struct {
 	HolderIdentity       string `json:"holderIdentity"`
@@ -98,7 +98,12 @@ func (l *LeaderElector) leasePath() string {
 	return fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases/%s", l.namespace, l.leaseName)
 }
 
-func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
+func (l *LeaderElector) acquireOrRenew(ctx context.Context) (err error) {
+	defer func() {
+		if err != nil {
+			l.isLeader.Store(false)
+		}
+	}()
 	now := leaseTimestamp()
 
 	// Read the current lease (if any).
@@ -123,12 +128,9 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 		_, code, err := l.request(ctx, http.MethodPost,
 			fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases", l.namespace), body)
 		if err != nil || code != http.StatusCreated {
-			if err != nil {
-				slog.Warn("leader election: create lease failed", "error", err, "code", code)
-			}
-			return nil
+			return fmt.Errorf("create lease: status=%d error=%v", code, err)
 		}
-		l.isLeader = true
+		l.isLeader.Store(true)
 		return nil
 	}
 
@@ -137,6 +139,7 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 		renewTime, err := time.Parse(time.RFC3339Nano, current.Spec.RenewTime)
 		if err == nil && time.Since(renewTime) < l.leaseDur {
 			// Someone else holds a valid lease.
+			l.isLeader.Store(false)
 			return nil
 		}
 		// Lease expired — take over.
@@ -152,8 +155,9 @@ func (l *LeaderElector) acquireOrRenew(ctx context.Context) error {
 	body, _ := json.Marshal(current)
 	_, code, err = l.request(ctx, http.MethodPut, l.leasePath(), body)
 	if err != nil || code != http.StatusOK {
-		return fmt.Errorf("renew lease: code=%d err=%w", code, err)
+		return fmt.Errorf("renew lease: status=%d error=%v", code, err)
 	}
+	l.isLeader.Store(true)
 	return nil
 }
 
@@ -165,20 +169,19 @@ func leaseTimestamp() string {
 }
 
 func (l *LeaderElector) release() {
-	if !l.isLeader {
+	if !l.isLeader.Swap(false) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	// Best-effort: clear the holder so the follower can acquire immediately.
 	current, code, err := l.get(ctx)
-	if err != nil || code != http.StatusOK {
+	if err != nil || code != http.StatusOK || current.Spec.HolderIdentity != l.identity {
 		return
 	}
 	current.Spec.HolderIdentity = ""
 	body, _ := json.Marshal(current)
 	_, _, _ = l.request(ctx, http.MethodPut, l.leasePath(), body)
-	l.isLeader = false
 }
 
 func (l *LeaderElector) get(ctx context.Context) (*lease, int, error) {
@@ -187,7 +190,7 @@ func (l *LeaderElector) get(ctx context.Context) (*lease, int, error) {
 		return nil, code, err
 	}
 	if code != http.StatusOK {
-		return nil, code, nil
+		return nil, code, fmt.Errorf("lease request returned %d", code)
 	}
 	var result lease
 	if err := json.NewDecoder(strings.NewReader(string(body))).Decode(&result); err != nil {
