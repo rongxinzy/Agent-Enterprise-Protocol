@@ -1424,10 +1424,20 @@ paths:
       tags:
         - Admin Skills
       operationId: deleteSkill
+      description: Deletes a Skill and its versions. Refused with 409 SKILL_IN_USE while a digital employee binds it as its prompt Skill or while assignments reference it; pass force=true to delete it anyway and drop those references.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Delete even when the Skill is still referenced, dropping the prompt binding and the assignments.
       responses:
         '204':
-          description: Skill withdrawn
+          description: Skill deleted
         '400':
+          $ref: '#/components/responses/Problem-2'
+        '409':
           $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skills/{skillId}/versions:
     post:

@@ -657,7 +657,7 @@ Error codes:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET, POST | `/admin/skills` | List or create Skill metadata |
-| GET, PATCH, DELETE | `/admin/skills/{skillId}` | Read, update, or withdraw a Skill |
+| GET, PATCH, DELETE | `/admin/skills/{skillId}` | Read, update, or delete a Skill |
 | POST | `/admin/skills/{skillId}/versions` | Upload ZIP by multipart form data |
 | POST | `/admin/skills/{skillId}/versions/{version}/publish` | Publish a version |
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | Withdraw a version |

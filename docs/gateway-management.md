@@ -20,6 +20,13 @@ names mean `envoy_downstream_non_5xx_ratio` / `envoy_upstream_non_5xx_ratio`, in
 0–1 ratio units; they are not model business success rates.
 `authorizer_http_requests` counts authorizer HTTP requests grouped by status.
 
+For `health`, a dedicated Prometheus source bound to the authenticated deployment
+with `AEP_GATEWAY_METRICS_DEPLOYMENT` can report unlabeled scrape targets from
+the repository discovery job or PodMonitor. Shared sources must label targets
+with a matching `aep_deployment_id`. An explicit foreign label, or a source bound
+to another deployment, is excluded. Only native health, last scrape time and
+duration are returned; addresses, labels and free-text scrape errors stay private.
+
 Catalog `modelId` and organization queries use Loki. Prometheus model groups
 identify upstream models; Loki identifies AEP catalog models. `modelDimension`
 exposes that distinction. Pin a previously returned `expectedDefinition` to its

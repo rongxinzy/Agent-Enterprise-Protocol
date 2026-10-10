@@ -184,6 +184,17 @@ describe('AepClient SDK gate', () => {
     expect(server.requests.at(-1)?.method).toBe('DELETE');
   });
 
+  test('carries the force flag when deleting a referenced Skill', async () => {
+    await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
+    await expect(client.deleteSkill('review')).resolves.toBeUndefined();
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/admin/skills/review');
+    expect(server.requests.at(-1)?.search).toBe('');
+    expect(server.requests.at(-1)?.method).toBe('DELETE');
+    await expect(client.deleteSkill('review', {force: true})).resolves.toBeUndefined();
+    expect(server.requests.at(-1)?.path).toBe('/aep/v1/admin/skills/review');
+    expect(server.requests.at(-1)?.search).toBe('?force=true');
+  });
+
   test('publishes and observes data-plane desired state without secret values', async () => {
     await client.loginWithPassword({deploymentId: 'ent-1', username: 'demo', password: 'password'});
     const desired = await client.getDataPlaneDesiredState();

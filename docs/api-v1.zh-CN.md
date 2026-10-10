@@ -606,7 +606,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET, POST | `/admin/skills` | 查询或创建 Skill 元数据 |
-| GET, PATCH, DELETE | `/admin/skills/{skillId}` | 读取、更新或撤回 Skill |
+| GET, PATCH, DELETE | `/admin/skills/{skillId}` | 读取、更新或删除 Skill |
 | POST | `/admin/skills/{skillId}/versions` | 使用 multipart 上传 ZIP |
 | POST | `/admin/skills/{skillId}/versions/{version}/publish` | 发布版本 |
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | 撤回版本 |

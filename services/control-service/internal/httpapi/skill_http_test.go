@@ -169,12 +169,67 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 		t.Fatalf("delete Skill version = %d %s, deleted = %#v", deletedVersion.Code, deletedVersion.Body.String(), blobs.deleted)
 	}
 
-	mock.ExpectBegin()
+	expectSkillDeleteLock(mock, "writer")
+	expectSkillReferenceCounts(mock, "writer", 0, 0)
 	mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/skills/writer", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete Skill = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+// expectSkillDeleteLock queues the first step of the guarded Skill delete: the
+// transaction locks the Skill row before it is allowed to check references.
+func expectSkillDeleteLock(mock sqlmock.Sqlmock, skillID string) {
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1`).WithArgs(skillID, 1).
+		WillReturnRows(sqlmock.NewRows(skillColumns()).AddRow(skillID, "Skill", "", true, now, now))
+}
+
+// expectSkillReferenceCounts queues the two reference counts the non-forced
+// delete runs under that lock.
+func expectSkillReferenceCounts(mock sqlmock.Sqlmock, skillID string, promptBindings, assignments int64) {
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "agent_profiles" WHERE prompt_skill_id = \$1`).
+		WithArgs(skillID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(promptBindings))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "skill_assignments" WHERE skill_id = \$1`).
+		WithArgs(skillID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(assignments))
+}
+
+func TestAdminSkillDeleteRefusedWhileReferenced(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		prompt     int64
+		assignment int64
+	}{
+		{name: "digital employee prompt binding", prompt: 1, assignment: 0},
+		{name: "Skill assignment", prompt: 0, assignment: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application, mock, adminToken := newStoreBackedHTTPApplication(t)
+			expectSkillDeleteLock(mock, "skill-a")
+			expectSkillReferenceCounts(mock, "skill-a", test.prompt, test.assignment)
+			mock.ExpectRollback()
+			response := adminRequest(New(application).Handler(), adminToken, http.MethodDelete, "/aep/v1/admin/skills/skill-a", "")
+			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"SKILL_IN_USE"`) {
+				t.Fatalf("referenced Skill delete = %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestAdminSkillForceDeleteWhileReferenced(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	// force skips the reference counts entirely and deletes under the row lock.
+	expectSkillDeleteLock(mock, "skill-a")
+	mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("skill-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	response := adminRequest(New(application).Handler(), adminToken, http.MethodDelete, "/aep/v1/admin/skills/skill-a?force=true", "")
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("forced Skill delete = %d %s", response.Code, response.Body.String())
 	}
 }
 
