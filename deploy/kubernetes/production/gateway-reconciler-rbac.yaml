@@ -4,6 +4,36 @@ metadata:
   name: aep-gateway-reconciler
   namespace: aep-system
 ---
+# Lease creation addresses the collection; Kubernetes cannot restrict create
+# by resourceNames. Reading/updating is limited to this elector's named Lease.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-gateway-reconciler-leader
+  namespace: aep-system
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [gateway-reconciler-leader]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-gateway-reconciler-leader
+  namespace: aep-system
+subjects:
+  - kind: ServiceAccount
+    name: aep-gateway-reconciler
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-gateway-reconciler-leader
+---
 # The reconciler is granted only the Higress objects it owns. Its live
 # server-side apply implementation is introduced with the data-plane E2E gate.
 # Anthropic passthrough routes render an Istio EnvoyFilter per model, hence

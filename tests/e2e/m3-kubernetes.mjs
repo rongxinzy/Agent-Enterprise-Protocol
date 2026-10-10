@@ -46,6 +46,19 @@ try {
   await command(kind, ['delete', 'cluster', '--name', cluster], {}, true);
   await command(kind, ['create', 'cluster', '--name', cluster, '--wait', '120s']);
   await command('kubectl', ['--context', context, 'create', 'namespace', 'higress-system']);
+  await command('kubectl', ['--context', context, 'create', 'namespace', 'aep-system']);
+  await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'deploy/kubernetes/production/gateway-reconciler-rbac.yaml')]);
+  const serviceAccount = 'system:serviceaccount:aep-system:aep-gateway-reconciler';
+  for (const [verb, resource, expected] of [['create', 'leases', 'yes'], ['get', 'leases/gateway-reconciler-leader', 'yes'], ['update', 'leases/gateway-reconciler-leader', 'yes'], ['get', 'leases/unrelated', 'no'], ['update', 'leases/unrelated', 'no'], ['list', 'leases', 'no'], ['delete', 'leases/gateway-reconciler-leader', 'no']]) {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn('kubectl', ['--context', context, 'auth', 'can-i', verb, resource, '-n', 'aep-system', '--as', serviceAccount], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], shell: false});
+      let answer = '';
+      child.stdout.on('data', value => answer += value);
+      child.on('error', reject);
+      child.on('exit', code => code === 0 || code === 1 ? resolve(answer.trim()) : reject(new Error('authorization check failed')));
+    });
+    assert(result === expected, `production RBAC ${verb} ${resource}: expected ${expected}, got ${result}`);
+  }
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-wasmplugin-crd.yaml')]);
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-envoyfilter-crd.yaml')]);
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'service', 'clusterip', 'aep-model-gateway', '--tcp=80:8080']);
@@ -58,7 +71,7 @@ try {
   await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-1', `status is ${JSON.stringify(observed)}`));
   await waitForHealth('/readyz', 200);
 
-  const ingressName = `aep-model-gateway-${suffix('demo')}`;
+  const ingressName = `aep-openai-${suffix('demo/chat')}`;
   const pluginName = `aep-ai-proxy-${suffix('demo')}`;
   const statisticsName = `aep-ai-statistics-${suffix('demo')}`;
   const ingress = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'ingress', ingressName, '-o', 'json']));
@@ -139,7 +152,7 @@ function state(revision, routes) {
 }
 
 function suffix(value) {
-  return `${value}-${createHash('sha256').update(value).digest('hex').slice(0, 8)}`;
+  return `${value.replaceAll('/', '-')}-${createHash('sha256').update(value).digest('hex').slice(0, 8)}`;
 }
 
 function startReconciler(port, instance) {
@@ -158,7 +171,11 @@ function startReconciler(port, instance) {
 function waitForHealth(pathname, status) {
   return waitFor(async () => {
     const responses = await Promise.all([18095, 18096].map(port => fetch(`http://127.0.0.1:${port}${pathname}`)));
-    assert(responses.every(response => response.status === status), `${pathname} returned ${responses.map(response => response.status).join(', ')}, expected ${status}`);
+    const codes = responses.map(response => response.status);
+    // A dependency outage makes the active leader unready. Followers stay
+    // idle and ready; they must not run a second synchronization loop.
+    const healthy = status === 503 ? codes.filter(code => code === 503).length === 1 && codes.filter(code => code === 200).length === 1 : codes.every(code => code === status);
+    assert(healthy, `${pathname} returned ${codes.join(', ')}, expected ${status === 503 ? 'leader 503 and follower 200' : status}`);
   });
 }
 
