@@ -161,14 +161,15 @@ func TestLeaderElectionRunAcquiresAndReleases(t *testing.T) {
 	done := make(chan struct{})
 	go func() { elector.Run(ctx); close(done) }()
 
-	// Watch the lease API (mutex-guarded) instead of IsLeader(): the flag is
-	// written by the Run goroutine and must only be read once Run returns.
+	// The API stores the holder before its create response reaches the elector.
+	// Wait for both the server write and the atomic leadership flag so cancel
+	// exercises release of an acquired lease, not an in-flight acquisition.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		api.mutex.Lock()
 		acquired := api.lease != nil && api.lease.Spec.HolderIdentity == "instance-run"
 		api.mutex.Unlock()
-		if acquired {
+		if acquired && elector.IsLeader() {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -184,7 +185,7 @@ func TestLeaderElectionRunAcquiresAndReleases(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not stop after cancel")
 	}
-	// Reading IsLeader is race-free now that Run has returned.
+	// Run has finished releasing the acquired lease.
 	if elector.IsLeader() {
 		t.Fatal("release must clear leadership")
 	}
