@@ -2410,17 +2410,21 @@ export interface components {
             type: "user" | "role" | "team";
             id: string;
         };
+        /** @description A Skill assignment. The Skill list is administrator-visible; expiresAt is null for a perpetual grant. */
         Assignment: {
             id: string;
-            /** @enum {string} */
-            resourceType: "skill" | "credential" | "model";
-            resourceId: string;
+            skillId: components["schemas"]["SkillIdentifier"];
             subject: components["schemas"]["Subject"];
             /** Format: date-time */
-            createdAt: string;
+            createdAt?: string;
+            /**
+             * Format: date-time
+             * @description Temporary grant that stops authorizing at this time; null for a perpetual grant. Only an administrator can set it.
+             */
+            expiresAt?: string | null;
         };
         AssignmentList: {
-            assignments: components["schemas"]["Assignment"][];
+            items: components["schemas"]["Assignment"][];
         };
         SkillAssignmentWrite: {
             skillId: components["schemas"]["SkillIdentifier"];
