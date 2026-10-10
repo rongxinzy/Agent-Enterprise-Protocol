@@ -49,7 +49,7 @@ func InfrastructureQuery(values url.Values) (url.Values, error) {
 	case "upstream_success_rate":
 		query = success(rate("envoy_cluster_upstream_rq_total", upstream), rate("envoy_cluster_upstream_rq", strings.TrimSuffix(upstream, "}")+`,response_code_class="5xx"}`))
 	case "auth_requests":
-		query = `sum by (status)(increase(aep_gateway_authorizer_http_requests_total{route!~"/healthz|/readyz|/livez|/metrics"}[` + strconv.Itoa(step) + `s]))`
+		query = `round(sum by (status)(increase(aep_gateway_authorizer_http_requests_total{route!~"/healthz|/readyz|/livez|/metrics"}[` + strconv.Itoa(step) + `s])))`
 	default:
 		return nil, ErrDimension
 	}
@@ -107,7 +107,9 @@ func MetricQuery(tenant string, values url.Values) (url.Values, error) {
 	var query string
 	for key, counter := range map[string]string{"input_tokens": "input_token", "output_tokens": "output_token", "calls": "llm_duration_count", "failures": "llm_failure_count"} {
 		if metric == key {
-			query = aggregate("increase(" + prefix + counter + selector + "[" + strconv.Itoa(step) + "s])")
+			// Round the native aggregate, not each Pod's extrapolated increase.
+			// This is an integer presentation of an estimate, not an exact ledger.
+			query = "round(" + aggregate("increase("+prefix+counter+selector+"["+strconv.Itoa(step)+"s])") + ")"
 		}
 	}
 	if metric == "first_token_duration" || metric == "service_duration" {
