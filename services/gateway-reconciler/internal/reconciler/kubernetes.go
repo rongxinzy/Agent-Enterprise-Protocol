@@ -87,8 +87,8 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 }
 
 // Apply server-side-applies every rendered resource and first deletes what
-// the desired state no longer owns: disabled per-model OpenAI ingresses and
-// the per-route anthropic
+// the desired state no longer owns: disabled per-model OpenAI ingress/upstream
+// pairs, obsolete OpenAI absolute upstreams, and the per-route anthropic
 // Ingress+EnvoyFilter pair for every disabled anthropic route. Both WasmPlugins
 // are always present in the render (with empty matchRules when idle) and are
 // therefore always applied, never deleted.
@@ -110,8 +110,14 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 			}
 			continue
 		}
+		name := openAIResourceName(desired.TenantID(), route.ModelID)
 		if !route.Enabled {
-			deletions = append(deletions, ingressAPIPath(openAIResourceName(desired.TenantID(), route.ModelID)))
+			deletions = append(deletions, ingressAPIPath(name))
+		}
+		// Also remove the old absolute upstream when an enabled model switches
+		// back to a relative/preconfigured endpoint.
+		if !route.Enabled || !hasResourcePath(resources, envoyFilterAPIPath(name)) {
+			deletions = append(deletions, envoyFilterAPIPath(name))
 		}
 	}
 	sort.Strings(deletions)
@@ -126,6 +132,15 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	// Remove the legacy shared ingress only after replacement routes/plugins
 	// have been applied. It otherwise remains an unscoped fallback route.
 	return a.delete(ctx, openAIIngressAPIPath(resourceSuffix(desired.TenantID())))
+}
+
+func hasResourcePath(resources []RenderedResource, path string) bool {
+	for _, resource := range resources {
+		if resource.APIPath == path {
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyGatewayNative applies only supplied resources. Disabled/tombstone rules

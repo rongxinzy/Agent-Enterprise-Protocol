@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -55,7 +56,7 @@ type Route struct {
 	Protocol      string           `json:"protocol"`
 	ProviderType  string           `json:"providerType,omitempty"`
 	CredentialRef *SecretReference `json:"credentialRef,omitempty"`
-	// endpoint is the parsed absolute URL of an anthropic route; Render
+	// endpoint is the parsed absolute upstream URL; Render
 	// populates it during validation and it never serializes.
 	endpoint *url.URL `json:"-"`
 }
@@ -245,7 +246,7 @@ type RenderedResource struct {
 }
 
 // Render projects the desired state into Kubernetes/Higress resources in a
-// pinned order: per-model OpenAI ingresses, then per anthropic route (sorted
+// pinned order: per-model OpenAI ingress/upstream pairs, then per anthropic route (sorted
 // by model ID) its Ingress + EnvoyFilter pair, then the ai-proxy WasmPlugin
 // (always present so disabling every openai route only empties its
 // matchRules), then the tenant-scoped ai-statistics WasmPlugin. Both plugins
@@ -293,6 +294,19 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 		if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
 			return "", nil, "", fmt.Errorf("unsupported provider type %q for model %q", route.ProviderType, route.ModelID)
 		}
+		// Relative endpoints retain the deployment's preconfigured backend.
+		// An absolute URL must also select an actual upstream: ai-proxy only
+		// rewrites HTTP headers/body, it does not create an Envoy cluster.
+		if raw := strings.TrimSpace(route.Endpoint); raw != "" && !strings.HasPrefix(raw, "/") {
+			endpoint, err := parseAbsoluteEndpoint(raw)
+			if err != nil {
+				return "", nil, "", fmt.Errorf("openai model %q: %w", route.ModelID, err)
+			}
+			route.endpoint = endpoint
+		}
+		if strings.HasPrefix(strings.TrimSpace(route.Endpoint), "//") {
+			return "", nil, "", errors.New("endpoint must not be a scheme-relative URL")
+		}
 		if route.Enabled {
 			enabledOpenAI = append(enabledOpenAI, route)
 		}
@@ -301,6 +315,9 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 	for _, route := range enabledOpenAI {
 		name := openAIResourceName(desired.TenantID(), route.ModelID)
 		resources = append(resources, RenderedResource{Kind: ResourceOpenAIIngress, APIPath: ingressAPIPath(name), Body: renderOpenAIIngress(name, route)})
+		if route.endpoint != nil {
+			resources = append(resources, RenderedResource{Kind: ResourceEnvoyFilter, APIPath: envoyFilterAPIPath(name), Body: renderEnvoyFilter(name, route, nil)})
+		}
 	}
 	for _, route := range anthropic {
 		name := anthropicResourceName(route.ModelID)
@@ -330,7 +347,13 @@ func renderOpenAIIngress(name string, route Route) string {
 	// ai-proxy provider configuration even when models share a request path.
 	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: " + yamlScalar(name) + "\n  namespace: higress-system\n  annotations:\n    higress.io/exact-match-header-x-aep-model-id: " + yamlScalar(route.ModelID) + "\nspec:\n  ingressClassName: higress\n")
 	document.WriteString("  rules:\n    - http:\n        paths:\n")
-	document.WriteString("          - path: " + yamlScalar(ingressPath(route.Endpoint)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
+	path := ingressPath(route.Endpoint)
+	if route.endpoint != nil {
+		// Client URLs stay OpenAI-compatible regardless of provider base path;
+		// ai-proxy rehomes /v1/... under openaiCustomUrl.
+		path = "/v1"
+	}
+	document.WriteString("          - path: " + yamlScalar(path) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
 	return document.String()
 }
 
@@ -385,11 +408,11 @@ func renderAnthropicIngress(name string, route Route) string {
 	return document.String()
 }
 
-// renderEnvoyFilter emits the self-contained passthrough: one STRICT_DNS
+// renderEnvoyFilter emits a per-model upstream: one STRICT_DNS
 // cluster for the upstream endpoint (with TLS + SNI when the endpoint is
 // https) plus a route merge that redirects the ingress route to that cluster,
-// rewrites the host, strips the model path prefix in favor of the endpoint
-// path, and injects the credential server-side. request_headers_to_add must
+// rewrites the host. OpenAI retains ai-proxy path and credential handling;
+// Anthropic strips its model prefix and injects credentials. request_headers_to_add must
 // stay at the Route level — nested under `route` istiod drops it silently.
 // Without a resolved credential the headers are omitted and the upstream
 // answers 401 itself.
@@ -414,6 +437,13 @@ func renderEnvoyFilter(name string, route Route, credentialValues map[string]str
 	document.WriteString("    - applyTo: CLUSTER\n      patch:\n        operation: ADD\n        value:\n          name: " + yamlScalar(clusterName) + "\n          type: STRICT_DNS\n          connect_timeout: 10s\n          dns_lookup_family: V4_ONLY\n          load_assignment:\n            cluster_name: " + yamlScalar(clusterName) + "\n            endpoints:\n              - lb_endpoints:\n                  - endpoint:\n                      address:\n                        socket_address:\n                          address: " + yamlScalar(host) + "\n                          port_value: " + strconv.Itoa(port) + "\n")
 	if endpoint.Scheme == "https" {
 		document.WriteString("          transport_socket:\n            name: envoy.transport_sockets.tls\n            typed_config:\n              '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext\n              sni: " + yamlScalar(host) + "\n")
+		if route.Protocol != "anthropic" {
+			sanType := "DNS"
+			if net.ParseIP(host) != nil {
+				sanType = "IP_ADDRESS"
+			}
+			document.WriteString("              common_tls_context:\n                validation_context:\n                  trusted_ca:\n                    filename: /etc/ssl/certs/ca-certificates.crt\n                  match_typed_subject_alt_names:\n                    - san_type: " + sanType + "\n                      matcher:\n                        exact: " + yamlScalar(host) + "\n")
+		}
 	}
 	document.WriteString("    - applyTo: HTTP_ROUTE\n      match:\n        context: GATEWAY\n        routeConfiguration:\n          vhost:\n            route:\n              name: " + yamlScalar(name) + "\n      patch:\n        operation: MERGE\n        value:\n")
 	if route.CredentialRef != nil {
@@ -421,7 +451,15 @@ func renderEnvoyFilter(name string, route Route, credentialValues map[string]str
 			document.WriteString("          request_headers_to_add:\n            - header:\n                key: x-api-key\n                value: " + yamlScalar(value) + "\n              append: false\n            - header:\n                key: authorization\n                value: " + yamlScalar("Bearer "+value) + "\n              append: false\n")
 		}
 	}
-	document.WriteString("          route:\n            cluster: " + yamlScalar(clusterName) + "\n            host_rewrite_literal: " + yamlScalar(host) + "\n")
+	authority := host
+	if route.Protocol != "anthropic" {
+		authority = endpoint.Host
+	}
+	document.WriteString("          route:\n            cluster: " + yamlScalar(clusterName) + "\n            host_rewrite_literal: " + yamlScalar(authority) + "\n")
+	if route.Protocol != "anthropic" {
+		// Keep ai-proxy's protocol-specific path and credential transformation.
+		return document.String()
+	}
 	substitution := anthropicRewrite(endpoint.Path)
 	document.WriteString("            regex_rewrite:\n              pattern:\n                google_re2: {}\n                regex: " + yamlScalar("^/"+anthropicSlug(route.ModelID)+"/(.*)$") + "\n              substitution: " + yamlScalar(substitution) + "\n")
 	return document.String()
@@ -443,12 +481,21 @@ func yamlScalar(value string) string {
 	return "'" + value + "'"
 }
 
-// parseAbsoluteEndpoint validates the endpoint an anthropic passthrough
-// derives everything from: it must carry scheme and host.
+// parseAbsoluteEndpoint validates an upstream URL without exposing its
+// contents in validation errors (malformed URLs may contain credentials).
 func parseAbsoluteEndpoint(raw string) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return nil, fmt.Errorf("endpoint must be an absolute http(s) URL, got %q", raw)
+		return nil, errors.New("endpoint must be an absolute http(s) URL")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.Hostname() == "" {
+		return nil, errors.New("endpoint must not contain credentials, query, or fragment")
+	}
+	if port := parsed.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return nil, errors.New("endpoint port must be between 1 and 65535")
+		}
 	}
 	return parsed, nil
 }
