@@ -97,6 +97,22 @@ async function runScenario() {
   const userClient = new AepClient({baseUrl, tokenStore: userStore});
   await userClient.loginWithPassword({deploymentId: 'demo', username, password});
 
+  // Regression: the user manifest must return the latest *published* version,
+  // not the lexicographically largest version string (1.10.0 must beat 1.9.0).
+  const orderSkillId = (await admin.createSkill({
+    name: 'M2 version order ' + runId, description: 'Skill manifest ordering regression',
+  })).id;
+  for (const version of ['1.9.0', '1.10.0']) {
+    await admin.uploadSkillVersion(orderSkillId, version, new Uint8Array(Buffer.from('package-' + version)));
+    await admin.publishSkillVersion(orderSkillId, version);
+  }
+  await admin.createSkillAssignment({skillId: orderSkillId, subject: {type: 'user', id: user.id}});
+  const orderedManifest = await userClient.getUserSkillManifest();
+  const orderedItem = orderedManifest.notModified
+    ? undefined
+    : orderedManifest.manifest.skills.find(item => item.id === orderSkillId);
+  assert(orderedItem?.version === '1.10.0', `Skill manifest picked ${orderedItem?.version} instead of the latest published 1.10.0`);
+
   const readOnlyTokens = await userStore.get();
   const deniedLicenseImport = await fetch(baseUrl + '/aep/v1/admin/licenses/import', {
     method: 'POST',
