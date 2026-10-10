@@ -141,8 +141,14 @@ func (s *Server) gatewayHealth(response http.ResponseWriter, request *http.Reque
 				}
 				if json.Unmarshal(data, &document) == nil {
 					targets := make([]map[string]any, 0)
+					deployment := claimsFrom(request).DeploymentID
+					binding := s.app.Config.GatewayMetricsDeployment
 					for _, target := range document.Data.Targets {
-						if target.Labels["aep_deployment_id"] == claimsFrom(request).DeploymentID {
+						label := target.Labels["aep_deployment_id"]
+						// A dedicated source is operator-bound to one deployment.
+						// Discovery/PodMonitor targets need no extra label, but
+						// shared sources require one. Never override a foreign label.
+						if (binding == "" || binding == deployment) && (label == deployment || (label == "" && binding == deployment)) {
 							targets = append(targets, map[string]any{"health": target.Health, "lastScrape": target.LastScrape, "lastScrapeDuration": target.Duration})
 						}
 					}
