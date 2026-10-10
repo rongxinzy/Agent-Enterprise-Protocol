@@ -218,6 +218,8 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Get("/aep/v1/admin/models", s.listModels)
 			admin.Post("/aep/v1/admin/models", s.createModel)
 			admin.Get("/aep/v1/admin/models/{modelId}", s.getModel)
+			admin.Get("/aep/v1/admin/models/{modelId}/pricing", s.getModelPricing)
+			admin.Put("/aep/v1/admin/models/{modelId}/pricing", s.putModelPricing)
 			admin.Patch("/aep/v1/admin/models/{modelId}", s.updateModel)
 			admin.Delete("/aep/v1/admin/models/{modelId}", s.deleteModel)
 			admin.Get("/aep/v1/admin/model-assignments", s.listModelAssignments)
