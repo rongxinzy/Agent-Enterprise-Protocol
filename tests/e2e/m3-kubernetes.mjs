@@ -139,7 +139,7 @@ function state(revision, routes) {
 }
 
 function suffix(value) {
-  return `${value}-${createHash('sha256').update(value).digest('hex').slice(0, 8)}`;
+  return `${value.replaceAll('/', '-')}-${createHash('sha256').update(value).digest('hex').slice(0, 8)}`;
 }
 
 function startReconciler(port, instance) {
