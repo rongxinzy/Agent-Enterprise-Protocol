@@ -634,10 +634,11 @@ export class AepClient {
     });
   }
 
-  deleteSkill(skillId: string): Promise<void> {
+  deleteSkill(skillId: string, options: {force?: boolean} = {}): Promise<void> {
+    const search = query({force: options.force || undefined});
     return this.#send({
       method: HttpMethod.Delete,
-      path: `/aep/v1/admin/skills/${segment(skillId)}`,
+      path: `/aep/v1/admin/skills/${segment(skillId)}${search ? `?${search}` : ''}`,
       responseType: 'empty',
     });
   }

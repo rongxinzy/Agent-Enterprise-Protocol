@@ -33,10 +33,26 @@ func TestSkillResourceWriteLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1`).WithArgs("writer", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "enabled", "created_at", "updated_at"}).AddRow("writer", name, "Updated", enabled, now, now))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "agent_profiles" WHERE prompt_skill_id = \$1`).WithArgs("writer").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "skill_assignments" WHERE skill_id = \$1`).WithArgs("writer").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	if err := store.DeleteSkill(context.Background(), "writer"); err != nil {
+	if _, err := store.DeleteSkill(context.Background(), "writer", false); err != nil {
 		t.Fatalf("DeleteSkill() = %v", err)
+	}
+
+	// force skips the reference counts and deletes under the same row lock.
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "skills" WHERE id = \$1`).WithArgs("writer", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "enabled", "created_at", "updated_at"}).AddRow("writer", name, "Updated", enabled, now, now))
+	mock.ExpectExec(`DELETE FROM "skills" WHERE id = \$1`).WithArgs("writer").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if _, err := store.DeleteSkill(context.Background(), "writer", true); err != nil {
+		t.Fatalf("DeleteSkill(force) = %v", err)
 	}
 }
 
