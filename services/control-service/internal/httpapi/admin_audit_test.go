@@ -46,12 +46,23 @@ func TestMaskAuditPayloadRedactsSecrets(t *testing.T) {
 	if !ok {
 		t.Fatalf("masked payload = %#v", masked)
 	}
-	if record["password"] != "[redacted]" || record["displayName"] != "New Name" {
+	// Only allowlisted fields keep their value; every other key is withheld.
+	if record["displayName"] != "New Name" || record["password"] != "[redacted]" || record["config"] != "[redacted]" {
 		t.Fatalf("masked payload = %#v", record)
 	}
-	config, ok := record["config"].(map[string]any)
-	if !ok || config["apiKey"] != "[redacted]" || config["region"] != "cn" {
-		t.Fatalf("masked config = %#v", record["config"])
+}
+
+func TestMaskAuditPayloadRedactsCredentialValue(t *testing.T) {
+	masked := maskAuditPayload([]byte(`{"name":"prod","service":"openai","deliveryMode":"server_only","value":"sk-secret","enabled":true}`))
+	record, ok := masked.(map[string]any)
+	if !ok {
+		t.Fatalf("masked payload = %#v", masked)
+	}
+	if record["value"] != "[redacted]" {
+		t.Fatalf("credential value leaked: %#v", record)
+	}
+	if record["name"] != "prod" || record["service"] != "openai" || record["enabled"] != true {
+		t.Fatalf("allowlisted fields changed: %#v", record)
 	}
 }
 

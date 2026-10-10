@@ -18,23 +18,44 @@ import (
 // the audit trail; a runaway payload must not become an audit row.
 const auditPayloadLimit = 64 << 10
 
-// auditSensitiveKeys are replaced before a body is stored. Comparison is
-// case-insensitive and exact, so unrelated identifiers are preserved.
-var auditSensitiveKeys = map[string]struct{}{
-	"password":        {},
-	"currentpassword": {},
-	"newpassword":     {},
-	"secret":          {},
-	"clientsecret":    {},
-	"apikey":          {},
-	"apisecret":       {},
-	"token":           {},
-	"accesstoken":     {},
-	"refreshtoken":    {},
-	"privatekey":      {},
-	"signingkey":      {},
-	"webhookurl":      {},
-	"privatekeypem":   {},
+// auditSafeKeys is a fail-closed allowlist: only these request fields keep
+// their value, and every other key is redacted. A denylist would leak any
+// sensitive field it did not name (a credential "value", for example), so the
+// default is to withhold. Comparison is case-insensitive.
+var auditSafeKeys = map[string]struct{}{
+	"name":         {},
+	"displayname":  {},
+	"description":  {},
+	"enabled":      {},
+	"status":       {},
+	"kind":         {},
+	"type":         {},
+	"protocol":     {},
+	"subjecttype":  {},
+	"subjectid":    {},
+	"roleids":      {},
+	"teamids":      {},
+	"userids":      {},
+	"modelid":      {},
+	"modelids":     {},
+	"resourcetype": {},
+	"resourceid":   {},
+	"revision":     {},
+	"scopes":       {},
+	"tags":         {},
+	"parentid":     {},
+	"expiresat":    {},
+	"service":      {},
+	"deliverymode": {},
+	"capabilities": {},
+	"reason":       {},
+	"quota":        {},
+	"action":       {},
+	"sourcetype":   {},
+	"identifier":   {},
+	"version":      {},
+	"title":        {},
+	"path":         {},
 }
 
 type auditStatusWriter struct {
@@ -127,7 +148,7 @@ func maskAuditValue(value any) any {
 	case map[string]any:
 		masked := make(map[string]any, len(typed))
 		for key, item := range typed {
-			if _, sensitive := auditSensitiveKeys[strings.ToLower(key)]; sensitive {
+			if _, safe := auditSafeKeys[strings.ToLower(key)]; !safe {
 				masked[key] = "[redacted]"
 				continue
 			}
