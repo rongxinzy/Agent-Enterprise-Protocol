@@ -28,15 +28,26 @@ func InfrastructureQuery(values url.Values) (url.Values, error) {
 		return nil, ErrDimension
 	}
 	var query string
+	// Higress standalone uses "http"; Kubernetes listeners use
+	// "outbound_<address>_<port>". Never include admin/agent/stats listeners.
+	downstream := `{http_conn_manager_prefix=~"http|outbound_.*"}`
+	upstream := `{cluster_name!~"agent|prometheus_stats|xds-grpc(\\.internal)?|sds-grpc(\\.internal)?"}`
+	rate := func(metric, selector string) string { return "sum(irate(" + metric + selector + "[2m]))" }
+	// The response-class metric is native Envoy output. If no 5xx series
+	// exists, use a zero derived from the present total in Prometheus; omit
+	// idle/absent totals instead of returning NaN or inventing a success rate.
+	success := func(total, failures string) string {
+		return "(1 - (" + failures + " or (0 * " + total + ")) / " + total + ") and (" + total + " > 0)"
+	}
 	switch values.Get("metric") {
 	case "downstream_qps":
-		query = `sum(irate(envoy_http_downstream_rq_total{http_conn_manager_prefix="http"}[2m]))`
+		query = rate("envoy_http_downstream_rq_total", downstream)
 	case "upstream_qps":
-		query = `sum(irate(envoy_cluster_upstream_rq_total{cluster_name!~"agent|prometheus_stats|xds-grpc|sds-grpc"}[2m]))`
+		query = rate("envoy_cluster_upstream_rq_total", upstream)
 	case "downstream_success_rate":
-		query = `1 - sum(irate(envoy_http_downstream_rq_5xx{http_conn_manager_prefix="http"}[2m])) / sum(irate(envoy_http_downstream_rq_total{http_conn_manager_prefix="http"}[2m]))`
+		query = success(rate("envoy_http_downstream_rq_total", downstream), rate("envoy_http_downstream_rq", strings.TrimSuffix(downstream, "}")+`,response_code_class="5xx"}`))
 	case "upstream_success_rate":
-		query = `1 - sum(irate(envoy_cluster_upstream_rq_5xx{cluster_name!~"agent|prometheus_stats|xds-grpc|sds-grpc"}[2m])) / sum(irate(envoy_cluster_upstream_rq_total{cluster_name!~"agent|prometheus_stats|xds-grpc|sds-grpc"}[2m]))`
+		query = success(rate("envoy_cluster_upstream_rq_total", upstream), rate("envoy_cluster_upstream_rq", strings.TrimSuffix(upstream, "}")+`,response_code_class="5xx"}`))
 	case "auth_requests":
 		query = `sum by (status)(increase(aep_gateway_authorizer_http_requests_total{route!~"/healthz|/readyz|/livez|/metrics"}[` + strconv.Itoa(step) + `s]))`
 	default:

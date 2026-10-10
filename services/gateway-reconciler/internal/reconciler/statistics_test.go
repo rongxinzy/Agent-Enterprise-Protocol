@@ -45,7 +45,7 @@ func TestStatisticsOnlyMatchesEnabledManagedIngresses(t *testing.T) {
 		t.Fatalf("match rules = %#v", plugin.Spec.MatchRules)
 	}
 	rule := plugin.Spec.MatchRules[0]
-	want := []string{"aep-model-gateway-" + resourceSuffix("demo"), anthropicResourceName("active")}
+	want := []string{openAIResourceName("demo", "chat"), anthropicResourceName("active")}
 	if rule.ConfigDisable || len(rule.Ingress) != len(want) || rule.Ingress[0] != want[0] || rule.Ingress[1] != want[1] {
 		t.Fatalf("statistics must only match enabled managed ingresses: %v", rule.Ingress)
 	}

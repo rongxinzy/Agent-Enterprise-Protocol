@@ -24,6 +24,10 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 	var mutex sync.Mutex
 	applied := make([]appliedResource, 0, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodDelete {
+			response.WriteHeader(http.StatusNotFound)
+			return
+		}
 		body, _ := io.ReadAll(request.Body)
 		mutex.Lock()
 		applied = append(applied, appliedResource{path: request.URL.Path, query: request.URL.RawQuery, contentType: request.Header.Get("Content-Type"), auth: request.Header.Get("Authorization"), body: string(body)})
@@ -60,7 +64,7 @@ func TestKubernetesApplierUsesServerSideApplyForHigressResources(t *testing.T) {
 			t.Fatal("service account token leaked into resource body")
 		}
 	}
-	if !strings.Contains(applied[0].path, "/ingresses/aep-model-gateway-demo-tenant-") || !strings.Contains(applied[1].path, "/wasmplugins/aep-ai-proxy-demo-tenant-") || !strings.Contains(applied[2].path, "/wasmplugins/aep-ai-statistics-demo-tenant-") {
+	if applied[0].path != ingressAPIPath(openAIResourceName("Demo Tenant", "chat")) || !strings.Contains(applied[1].path, "/wasmplugins/aep-ai-proxy-demo-tenant-") || !strings.Contains(applied[2].path, "/wasmplugins/aep-ai-statistics-demo-tenant-") {
 		t.Fatalf("unexpected resource paths: %#v", applied)
 	}
 }
@@ -125,10 +129,10 @@ func TestKubernetesApplierHandlesDeletedAndRejectedIngress(t *testing.T) {
 			}
 			err = applier.Apply(context.Background(), desired, resources)
 			if test.wantError {
-				if err == nil || !strings.Contains(err.Error(), "403") || len(methods) != 1 {
+				if err == nil || !strings.Contains(err.Error(), "403") || len(methods) != 3 {
 					t.Fatalf("Apply() = %v, methods = %v", err, methods)
 				}
-			} else if err != nil || len(methods) != 3 || methods[1] != http.MethodPatch || methods[2] != http.MethodPatch {
+			} else if err != nil || len(methods) != 3 || methods[0] != http.MethodPatch || methods[1] != http.MethodPatch || methods[2] != http.MethodDelete {
 				t.Fatalf("Apply() = %v, methods = %v", err, methods)
 			}
 		})
@@ -179,7 +183,7 @@ func TestKubernetesApplierDeletesIngressWhenAllRoutesAreDisabled(t *testing.T) {
 	if err := applier.Apply(context.Background(), desired, resources); err != nil {
 		t.Fatal(err)
 	}
-	if len(methods) != 3 || !strings.HasPrefix(methods[0], "DELETE ") || !strings.Contains(methods[0], "/ingresses/") || !strings.HasPrefix(methods[1], "PATCH ") || !strings.Contains(methods[1], "/wasmplugins/") || !strings.Contains(methods[2], "/wasmplugins/aep-ai-statistics-") {
+	if len(methods) != 4 || methods[0] != "DELETE "+ingressAPIPath(openAIResourceName("demo", "chat")) || !strings.HasPrefix(methods[1], "PATCH ") || !strings.Contains(methods[1], "/wasmplugins/") || !strings.Contains(methods[2], "/wasmplugins/aep-ai-statistics-") || methods[3] != "DELETE "+openAIIngressAPIPath(resourceSuffix("demo")) {
 		t.Fatalf("requests = %#v", methods)
 	}
 }
