@@ -1,5 +1,11 @@
 # 原生模型网关管理接口
 
+健康接口的 Prometheus 目标遵循数据源归属：通过
+`AEP_GATEWAY_METRICS_DEPLOYMENT` 绑定当前登录部署的专用源，可返回仓库 discovery
+示例或 PodMonitor 产生的无部署标签目标。共享源只返回 `aep_deployment_id` 匹配的
+目标；显式标记其他部署或绑定其他部署的源均不返回目标。仅透传原生健康状态、
+最近采集时间和耗时，不输出地址、标签或自由文本采集错误。
+
 ## 指标口径契约
 
 指标响应包含 `source` 和必填 `definition`：`id`、`unit`、`aggregation`、
