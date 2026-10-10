@@ -82,6 +82,37 @@ func TestAdminUserImportReportsPartialResults(t *testing.T) {
 	}
 }
 
+func TestAdminUserCreateAndImportAssignDefaultPassword(t *testing.T) {
+	application, mock, _, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+
+	// Create without a temporary password: the server assigns the default.
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	created := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users", `{"deploymentId":"deployment-a","username":"bob","displayName":"Bob","roleIds":["member"],"teamIds":["engineering"]}`)
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"username":"bob"`) || strings.Contains(created.Body.String(), "password") {
+		t.Fatalf("create without password = %d %s", created.Code, created.Body.String())
+	}
+
+	// Import: a row without a password gets the default; a padded row is
+	// rejected with a whitespace detail.
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	body := `{"deploymentId":"deployment-a","users":[` +
+		`{"externalRowId":"row-1","username":"alice","displayName":"Alice","roleIds":["member"],"teamIds":["engineering"]},` +
+		`{"externalRowId":"row-2","username":"padded","displayName":"Padded","temporaryPassword":" pad-password-123 ","roleIds":["member"],"teamIds":["engineering"]}]}`
+	imported := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users/import", body)
+	if imported.Code != http.StatusOK || !strings.Contains(imported.Body.String(), `"created":1`) || !strings.Contains(imported.Body.String(), `"rejected":1`) || !strings.Contains(imported.Body.String(), `"PASSWORD_POLICY_VIOLATION"`) || !strings.Contains(imported.Body.String(), "whitespace") {
+		t.Fatalf("import default and whitespace = %d %s", imported.Code, imported.Body.String())
+	}
+}
+
 func TestAdminUserUpdateDisableAndResetPassword(t *testing.T) {
 	application, mock, pool, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
@@ -177,6 +208,11 @@ func TestAdminUserCreateErrorsAreStable(t *testing.T) {
 	weakPassword := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users", `{"deploymentId":"deployment-a","temporaryPassword":"short",`+base+`}`)
 	if weakPassword.Code != http.StatusBadRequest || !strings.Contains(weakPassword.Body.String(), `"code":"PASSWORD_POLICY_VIOLATION"`) {
 		t.Fatalf("weak password = %d %s", weakPassword.Code, weakPassword.Body.String())
+	}
+
+	edgeWhitespace := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users", `{"deploymentId":"deployment-a","temporaryPassword":" pad-password-123 ",`+base+`}`)
+	if edgeWhitespace.Code != http.StatusBadRequest || !strings.Contains(edgeWhitespace.Body.String(), `"code":"PASSWORD_POLICY_VIOLATION"`) || !strings.Contains(edgeWhitespace.Body.String(), "whitespace") {
+		t.Fatalf("edge whitespace password = %d %s", edgeWhitespace.Code, edgeWhitespace.Body.String())
 	}
 
 	mock.ExpectBegin()

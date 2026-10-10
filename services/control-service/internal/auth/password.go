@@ -18,11 +18,16 @@ const (
 	argonParallelism      = 2
 	argonSaltLength       = 16
 	argonKeyLength        = 32
-	minimumPasswordLength = 12
+	minimumPasswordLength = 6
 	maximumPasswordLength = 1024
 )
 
-var ErrPasswordPolicy = errors.New("password must contain 12 to 1024 characters")
+// DefaultTemporaryPassword is assigned when user create or import omits the
+// temporary password.
+const DefaultTemporaryPassword = "123456"
+
+var ErrPasswordPolicy = errors.New("password must contain 6 to 1024 characters")
+var ErrPasswordEdgeWhitespace = errors.New("password must not start or end with whitespace")
 
 var dummyPasswordHash = encodePassword("aep-dummy-password", make([]byte, argonSaltLength))
 
@@ -32,6 +37,18 @@ func ValidatePassword(password string) error {
 		return ErrPasswordPolicy
 	}
 	return nil
+}
+
+// EdgeWhitespace reports whether the password carries leading or trailing
+// whitespace. New passwords reject it so the stored secret matches what the
+// operator typed; verification paths trim instead (see TrimPassword).
+func EdgeWhitespace(password string) bool {
+	return strings.TrimSpace(password) != password
+}
+
+// TrimPassword strips leading and trailing whitespace before verification.
+func TrimPassword(password string) string {
+	return strings.TrimSpace(password)
 }
 
 func HashPassword(password string) (string, error) {

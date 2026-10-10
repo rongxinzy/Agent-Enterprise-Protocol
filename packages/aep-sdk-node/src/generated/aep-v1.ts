@@ -1670,6 +1670,7 @@ export interface components {
             deploymentId: string;
             sessionId?: string;
             username: string;
+            /** @description Leading and trailing whitespace is trimmed before verification. */
             password: string;
             /** @description Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent. */
             client?: components["schemas"]["ClientIdentity"];
@@ -2063,7 +2064,8 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
-            temporaryPassword: string;
+            /** @description Defaults to `123456` when omitted or empty. Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise. */
+            temporaryPassword?: string;
             teamIds: string[];
             roleIds: string[];
             /** @default true */
@@ -2075,7 +2077,8 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
-            temporaryPassword: string;
+            /** @description Defaults to `123456` when omitted or empty. Must not start or end with whitespace; the row is rejected otherwise. */
+            temporaryPassword?: string;
             teamIds: string[];
             roleIds: string[];
             /** @default true */
@@ -2103,6 +2106,7 @@ export interface components {
             status?: "active" | "disabled";
         };
         ResetPasswordRequest: {
+            /** @description Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise. */
             temporaryPassword: string;
             /** @default true */
             requirePasswordChange: boolean;

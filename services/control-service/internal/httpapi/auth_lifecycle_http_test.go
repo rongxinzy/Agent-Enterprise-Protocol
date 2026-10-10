@@ -132,6 +132,31 @@ func TestPasswordLoginSuccessAndAudit(t *testing.T) {
 	}
 }
 
+func TestPasswordLoginTrimsWhitespace(t *testing.T) {
+	application, mock, pool, _ := newUserHTTPApplication(t)
+	configureAuthHTTPApplication(application)
+	handler := New(application).Handler()
+	// The assigned default temporary password logs in even with padded input.
+	passwordHash, err := auth.HashPassword(auth.DefaultTemporaryPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+
+	expectNoLoginThrottle(pool)
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND username = \$2 LIMIT \$3`).WithArgs("deployment-a", "alice", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
+	expectHTTPModelScopes(pool, "deployment-a", "user-a", "chat-a")
+	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member")
+	expectHTTPSessionIssue(pool, "deployment-a", "user-a")
+	expectLoginSuccessAudit(pool, "deployment-a", "user-a")
+
+	response := userRequest(handler, "", http.MethodPost, "/aep/v1/auth/password/login", `{"deploymentId":"deployment-a","username":"alice","password":"  123456  "}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("padded password login = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestPasswordLoginFailureAndActiveThrottle(t *testing.T) {
 	application, mock, pool, _ := newUserHTTPApplication(t)
 	configureAuthHTTPApplication(application)
@@ -290,6 +315,31 @@ func TestChangePasswordCurrentPasswordOptional(t *testing.T) {
 	changed := userRequest(handler, userToken, http.MethodPost, "/aep/v1/auth/password/change", `{"newPassword":"replacement-password-456"}`)
 	if changed.Code != http.StatusOK || !strings.Contains(changed.Body.String(), `"passwordChangeRequired":false`) || strings.Contains(changed.Body.String(), "replacement-password-456") {
 		t.Fatalf("session-only change password = %d %s", changed.Code, changed.Body.String())
+	}
+
+	// A padded but correct current password verifies after trimming.
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", "alice@example.com", passwordHash, "active", false, false, "human", now, now))
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "users" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 2"))
+	pool.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgconn.NewCommandTag("UPDATE 1"))
+	expectHTTPModelScopes(pool, "deployment-a", "user-a", "chat-a")
+	expectHTTPUserRoles(mock, "deployment-a", "user-a", "member")
+	expectHTTPSessionIssue(pool, "deployment-a", "user-a")
+	pool.ExpectExec(`INSERT INTO authentication_audit_events`).WithArgs(
+		"deployment-a", "user-a", "password.changed", "success", nil, pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+	).WillReturnResult(pgconn.NewCommandTag("INSERT 0 1"))
+	padded := userRequest(handler, userToken, http.MethodPost, "/aep/v1/auth/password/change", `{"currentPassword":"  current-password-123  ","newPassword":"replacement-password-456"}`)
+	if padded.Code != http.StatusOK || !strings.Contains(padded.Body.String(), `"passwordChangeRequired":false`) {
+		t.Fatalf("padded current password change = %d %s", padded.Code, padded.Body.String())
+	}
+
+	// Edge whitespace on the new password is rejected before any write.
+	whitespace := userRequest(handler, userToken, http.MethodPost, "/aep/v1/auth/password/change", `{"newPassword":" replacement-password-456 "}`)
+	if whitespace.Code != http.StatusBadRequest || !strings.Contains(whitespace.Body.String(), `"code":"PASSWORD_POLICY_VIOLATION"`) || !strings.Contains(whitespace.Body.String(), "whitespace") {
+		t.Fatalf("edge whitespace new password = %d %s", whitespace.Code, whitespace.Body.String())
 	}
 }
 
