@@ -5,8 +5,12 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 min="${1:-80}"
 
 coverprofile="$(mktemp -t cover.XXXXXX)"
-trap 'rm -f "$coverprofile"' EXIT
-go test ./... -coverpkg=./... -coverprofile="$coverprofile" >/dev/null
+test_output="$(mktemp -t cover-test.XXXXXX)"
+trap 'rm -f "$coverprofile" "$test_output"' EXIT
+if ! go test ./... -coverpkg=./... -coverprofile="$coverprofile" >"$test_output"; then
+  cat "$test_output"
+  exit 1
+fi
 
 # -coverpkg writes one block per test binary; merge to the max hit.
 merged="$(mktemp -t cover-merged.XXXXXX)"
