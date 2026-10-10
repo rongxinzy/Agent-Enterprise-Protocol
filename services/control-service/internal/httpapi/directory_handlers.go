@@ -41,7 +41,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 		return
 	}
 	if err := auth.ValidatePassword(input.Password); err != nil {
-		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 12 to 1024 characters.")
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 6 to 1024 characters.")
 		return
 	}
 	if input.HomeTeamID == "" {
@@ -171,7 +171,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 	}
 	passwordHash, err := auth.HashPassword(input.Password)
 	if err != nil {
-		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 12 to 1024 characters.")
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Agent passwords must contain 6 to 1024 characters.")
 		return
 	}
 	record, err := store.CreateUser(request.Context(), repository.CreateUserParams{

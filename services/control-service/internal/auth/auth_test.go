@@ -30,8 +30,30 @@ func TestPasswordPolicyAndDummyVerification(t *testing.T) {
 	if err := ValidatePassword("十二个字符的安全密码测试值"); err != nil {
 		t.Fatalf("Unicode password was rejected: %v", err)
 	}
+	if err := ValidatePassword("123456"); err != nil {
+		t.Fatalf("six-character password was rejected: %v", err)
+	}
+	if err := ValidatePassword("12345"); err == nil {
+		t.Fatal("five-character password was accepted")
+	}
 	if VerifyPasswordOrDummy("", "not-a-real-password") {
 		t.Fatal("dummy password verification returned true")
+	}
+}
+
+func TestPasswordWhitespaceAndDefault(t *testing.T) {
+	if !EdgeWhitespace(" 123456") || !EdgeWhitespace("123456 ") || EdgeWhitespace("123456") {
+		t.Fatal("EdgeWhitespace misclassified edge whitespace")
+	}
+	if got := TrimPassword("  123456\t"); got != "123456" {
+		t.Fatalf("TrimPassword = %q", got)
+	}
+	if err := ValidatePassword(DefaultTemporaryPassword); err != nil {
+		t.Fatalf("default temporary password violates the policy: %v", err)
+	}
+	hash, err := HashPassword(DefaultTemporaryPassword)
+	if err != nil || !VerifyPassword(hash, TrimPassword(" 123456 ")) {
+		t.Fatalf("default temporary password does not verify after trimming: %v", err)
 	}
 }
 

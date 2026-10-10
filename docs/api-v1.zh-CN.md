@@ -108,7 +108,8 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 }
 ```
 
-账号由管理员手动创建或批量导入，不代表开放自助注册。任何部署阶段的密码登录都可以使用
+账号由管理员手动创建或批量导入，不代表开放自助注册。`password` 的前后空白字符在
+校验前会被去除。任何部署阶段的密码登录都可以使用
 HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token，因此在可信内网之外
 强烈建议使用 HTTPS。
 
@@ -121,8 +122,9 @@ HTTP 或 HTTPS。明文 HTTP 会暴露传输中的账号密码和 bearer token�
 ### `POST /auth/password/change`
 
 请求：`{"newPassword":"new-long-password"}`。会话 bearer 令牌即完成身份认证。
-`currentPassword` 是可选的加强校验：提供时服务端会校验，不匹配返回
-`401 INVALID_CREDENTIALS`；省略时仅凭会话授权改密。服务端修改当前
+`currentPassword` 是可选的加强校验：提供时先去除前后空白再校验，不匹配返回
+`401 INVALID_CREDENTIALS`；省略时仅凭会话授权改密。`newPassword` 不允许
+前后空白字符（`PASSWORD_POLICY_VIOLATION`）。服务端修改当前
 账号密码、撤销该账号的其他 refresh 会话，并返回
 `passwordChangeRequired` 为 false 的新 token 结构。
 
@@ -477,7 +479,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符。临时密码的前后空白：创建或重置时拒绝（`PASSWORD_POLICY_VIOLATION`）；导入时则去除（trim），因为导入行来自导出文件和电子表格。创建或导入未提供临时密码（或导入 trim 后为空）时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
 
 ### RBAC 与会话
 
@@ -604,7 +606,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET, POST | `/admin/skills` | 查询或创建 Skill 元数据 |
-| GET, PATCH, DELETE | `/admin/skills/{skillId}` | 读取、更新或撤回 Skill |
+| GET, PATCH, DELETE | `/admin/skills/{skillId}` | 读取、更新或删除 Skill |
 | POST | `/admin/skills/{skillId}/versions` | 使用 multipart 上传 ZIP |
 | POST | `/admin/skills/{skillId}/versions/{version}/publish` | 发布版本 |
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | 撤回版本 |

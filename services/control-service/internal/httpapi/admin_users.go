@@ -63,8 +63,12 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	}
 	user, err := s.insertUser(request, input)
 	if err != nil {
+		if errors.Is(err, auth.ErrPasswordEdgeWhitespace) {
+			writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must not start or end with whitespace.")
+			return
+		}
 		if errors.Is(err, auth.ErrPasswordPolicy) {
-			writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 12 to 1024 characters.")
+			writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 6 to 1024 characters.")
 			return
 		}
 		if isUniqueViolation(err) {
@@ -119,13 +123,20 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 			errorsResult = append(errorsResult, map[string]string{"externalRowId": item.ExternalRowID, "code": code, "detail": detail})
 			continue
 		}
+		// Imported rows come from exports and spreadsheets: edge whitespace is
+		// data noise, so trim instead of rejecting the row. A whitespace-only
+		// password falls through to the default below.
+		item.TemporaryPassword = auth.TrimPassword(item.TemporaryPassword)
 		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: item.TeamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
 		if err != nil {
 			code := "USER_IMPORT_FAILED"
 			detail := "The account could not be created."
-			if errors.Is(err, auth.ErrPasswordPolicy) {
+			if errors.Is(err, auth.ErrPasswordEdgeWhitespace) {
 				code = "PASSWORD_POLICY_VIOLATION"
-				detail = "Temporary passwords must contain 12 to 1024 characters."
+				detail = "Temporary passwords must not start or end with whitespace."
+			} else if errors.Is(err, auth.ErrPasswordPolicy) {
+				code = "PASSWORD_POLICY_VIOLATION"
+				detail = "Temporary passwords must contain 6 to 1024 characters."
 			}
 			errorsResult = append(errorsResult, map[string]string{"externalRowId": item.ExternalRowID, "code": code, "detail": detail})
 			continue
@@ -159,6 +170,12 @@ func userMembershipProblem(roleIDs, teamIDs []string) (string, string) {
 }
 
 func (s *Server) insertUser(request *http.Request, input createUserRequest) (repository.UserRecord, error) {
+	if input.TemporaryPassword == "" {
+		input.TemporaryPassword = auth.DefaultTemporaryPassword
+	}
+	if auth.EdgeWhitespace(input.TemporaryPassword) {
+		return repository.UserRecord{}, auth.ErrPasswordEdgeWhitespace
+	}
 	hash, err := auth.HashPassword(input.TemporaryPassword)
 	if err != nil {
 		return repository.UserRecord{}, err
@@ -223,8 +240,12 @@ func (s *Server) resetUserPassword(response http.ResponseWriter, request *http.R
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	if auth.EdgeWhitespace(input.TemporaryPassword) {
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must not start or end with whitespace.")
+		return
+	}
 	if err := auth.ValidatePassword(input.TemporaryPassword); err != nil {
-		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 12 to 1024 characters.")
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 6 to 1024 characters.")
 		return
 	}
 	hash, err := auth.HashPassword(input.TemporaryPassword)

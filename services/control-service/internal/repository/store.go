@@ -9,6 +9,7 @@ import (
 
 var (
 	ErrNotFound          = gorm.ErrRecordNotFound
+	ErrSkillInUse        = errors.New("the skill is still referenced")
 	ErrUnknownPermission = errors.New("unknown permission")
 	ErrUnknownRole       = errors.New("unknown role")
 	ErrUnknownTeam       = errors.New("unknown team")

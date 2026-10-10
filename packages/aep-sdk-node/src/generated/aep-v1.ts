@@ -747,6 +747,7 @@ export interface paths {
         get: operations["getSkill"];
         put?: never;
         post?: never;
+        /** @description Deletes a Skill and its versions. Refused with 409 SKILL_IN_USE while a digital employee binds it as its prompt Skill or while assignments reference it; pass force=true to delete it anyway and drop those references. */
         delete: operations["deleteSkill"];
         options?: never;
         head?: never;
@@ -1670,6 +1671,7 @@ export interface components {
             deploymentId: string;
             sessionId?: string;
             username: string;
+            /** @description Leading and trailing whitespace is trimmed before verification. */
             password: string;
             /** @description Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent. */
             client?: components["schemas"]["ClientIdentity"];
@@ -2063,7 +2065,8 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
-            temporaryPassword: string;
+            /** @description Defaults to `123456` when omitted or empty. Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise. */
+            temporaryPassword?: string;
             teamIds: string[];
             roleIds: string[];
             /** @default true */
@@ -2075,7 +2078,8 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
-            temporaryPassword: string;
+            /** @description Leading and trailing whitespace is trimmed (imports come from exports and spreadsheets). Defaults to `123456` when omitted, empty, or reduced to empty after trimming. */
+            temporaryPassword?: string;
             teamIds: string[];
             roleIds: string[];
             /** @default true */
@@ -2103,6 +2107,7 @@ export interface components {
             status?: "active" | "disabled";
         };
         ResetPasswordRequest: {
+            /** @description Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise. */
             temporaryPassword: string;
             /** @default true */
             requirePasswordChange: boolean;
@@ -4447,7 +4452,10 @@ export interface operations {
     };
     deleteSkill: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Delete even when the Skill is still referenced, dropping the prompt binding and the assignments. */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 skillId: components["parameters"]["SkillId"];
@@ -4456,7 +4464,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Skill withdrawn */
+            /** @description Skill deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -4464,6 +4472,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
         };
     };
     updateSkill: {

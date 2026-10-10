@@ -925,10 +925,20 @@ paths:
       tags:
         - Admin Skills
       operationId: deleteSkill
+      description: Deletes a Skill and its versions. Refused with 409 SKILL_IN_USE while a digital employee binds it as its prompt Skill or while assignments reference it; pass force=true to delete it anyway and drop those references.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Delete even when the Skill is still referenced, dropping the prompt binding and the assignments.
       responses:
         '204':
-          description: Skill withdrawn
+          description: Skill deleted
         '400':
+          $ref: '#/components/responses/Problem-2'
+        '409':
           $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skills/{skillId}/versions:
     post:
@@ -1567,6 +1577,7 @@ components:
           minLength: 1
           maxLength: 1024
           writeOnly: true
+          description: Leading and trailing whitespace is trimmed before verification.
         client:
           description: Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent.
           $ref: '#/components/schemas/ClientIdentity'
@@ -2448,7 +2459,6 @@ components:
         - deploymentId
         - username
         - displayName
-        - temporaryPassword
         - teamIds
         - roleIds
       properties:
@@ -2469,9 +2479,10 @@ components:
           format: email
         temporaryPassword:
           type: string
-          minLength: 12
+          minLength: 6
           maxLength: 1024
           writeOnly: true
+          description: Defaults to `123456` when omitted or empty. Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise.
         teamIds:
           type: array
           minItems: 1
@@ -2495,7 +2506,6 @@ components:
         - externalRowId
         - username
         - displayName
-        - temporaryPassword
         - teamIds
         - roleIds
       properties:
@@ -2516,9 +2526,10 @@ components:
           format: email
         temporaryPassword:
           type: string
-          minLength: 12
+          minLength: 6
           maxLength: 1024
           writeOnly: true
+          description: Leading and trailing whitespace is trimmed (imports come from exports and spreadsheets). Defaults to `123456` when omitted, empty, or reduced to empty after trimming.
         teamIds:
           type: array
           minItems: 1
@@ -2603,9 +2614,10 @@ components:
       properties:
         temporaryPassword:
           type: string
-          minLength: 12
+          minLength: 6
           maxLength: 1024
           writeOnly: true
+          description: Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise.
         requirePasswordChange:
           type: boolean
           default: true
