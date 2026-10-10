@@ -239,6 +239,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses~1{licenseId}~1revoke'
   /aep/v1/admin/events:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1events'
+  /aep/v1/admin/audit/authentication:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1audit~1authentication'
   /aep/v1/admin/credentials:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1credentials'
   /aep/v1/admin/credentials/{credentialId}:

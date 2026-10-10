@@ -982,6 +982,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/audit/authentication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the persisted authentication audit trail (login success, failure, throttle, and password change) recorded by the control service, newest first. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        get: operations["listAuthenticationAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/credentials": {
         parameters: {
             query?: never;
@@ -2573,6 +2590,25 @@ export interface components {
         };
         EventSearchResult: {
             items: components["schemas"]["StoredEvent"][];
+            nextCursor: string | null;
+        };
+        /** @enum {string} */
+        AuthenticationAuditEventType: "login.succeeded" | "login.failed" | "login.throttled" | "password.changed";
+        /** @enum {string} */
+        AuthenticationAuditOutcome: "success" | "failure" | "denied";
+        AuthenticationAuditRecord: {
+            cursor: string;
+            userId?: string | null;
+            eventType: components["schemas"]["AuthenticationAuditEventType"];
+            outcome: components["schemas"]["AuthenticationAuditOutcome"];
+            reason?: string | null;
+            /** @description One-way fingerprint of the login source; the raw address is never returned. */
+            sourceHash: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AuthenticationAuditPage: {
+            items: components["schemas"]["AuthenticationAuditRecord"][];
             nextCursor: string | null;
         };
         CredentialCreate: {
@@ -4841,6 +4877,36 @@ export interface operations {
                     "application/json": components["schemas"]["EventSearchResult"];
                 };
             };
+        };
+    };
+    listAuthenticationAudit: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+                eventType?: components["schemas"]["AuthenticationAuditEventType"];
+                outcome?: components["schemas"]["AuthenticationAuditOutcome"];
+                userId?: string;
+                createdAfter?: string;
+                createdBefore?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authentication audit result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthenticationAuditPage"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
         };
     };
     listCredentials: {
