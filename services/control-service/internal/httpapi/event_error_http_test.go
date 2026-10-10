@@ -117,3 +117,13 @@ func TestReportDeliveryResultStateBoundaries(t *testing.T) {
 		t.Fatalf("invalid result status = %d %s", invalid.Code, invalid.Body.String())
 	}
 }
+
+func TestReportDeliveryResultMissingDelivery(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries SET state=`).WithArgs("delivery-1", "session-user", "succeeded", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnRows(pgxmock.NewRows([]string{"state"}))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"succeeded"}`)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing delivery result = %d %s", response.Code, response.Body.String())
+	}
+}

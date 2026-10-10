@@ -83,3 +83,20 @@ func TestControlEventDeliveriesPaginate(t *testing.T) {
 		t.Fatalf("deliveries page = %d %s", got.Code, got.Body.String())
 	}
 }
+
+func TestAdminControlEventsRejectInvalidCursor(t *testing.T) {
+	application, _, adminToken, _ := newRuntimeHTTPApplication(t)
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/control-events?cursor=not-a-cursor", "")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid event cursor = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestControlEventDeliveriesRejectInvalidCursor(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("evt-1", "deployment-a").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/control-events/evt-1/deliveries?cursor=abc", "")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid delivery cursor = %d %s", response.Code, response.Body.String())
+	}
+}
