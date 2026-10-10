@@ -104,7 +104,8 @@ func (s *Server) listAuthenticationAudit(response http.ResponseWriter, request *
 	lastCursor := ""
 	for rows.Next() {
 		var cursor int64
-		var userID, eventType, outcome, sourceHash string
+		var userID pgtype.Text
+		var eventType, outcome, sourceHash string
 		var reason pgtype.Text
 		var createdAt time.Time
 		if err := rows.Scan(&cursor, &userID, &eventType, &outcome, &reason, &sourceHash, &createdAt); err != nil {
@@ -119,7 +120,7 @@ func (s *Server) listAuthenticationAudit(response http.ResponseWriter, request *
 		}
 		items = append(items, map[string]any{
 			"cursor":     strconv.FormatInt(cursor, 10),
-			"userId":     userID,
+			"userId":     nullablePGText(userID),
 			"eventType":  eventType,
 			"outcome":    outcome,
 			"reason":     nullablePGText(reason),

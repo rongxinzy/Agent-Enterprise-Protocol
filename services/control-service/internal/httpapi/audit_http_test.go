@@ -80,3 +80,21 @@ func TestListAuthenticationAuditRequiresPermission(t *testing.T) {
 		t.Fatalf("unauthorized audit read = %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestListAuthenticationAuditHandlesNullUserID(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+	// Unknown-username failures and throttling persist a NULL user_id; the row
+	// must scan and serialize instead of failing the whole page.
+	pool.ExpectQuery(authenticationAuditQuery).WithArgs("deployment-a", 51).
+		WillReturnRows(authenticationAuditRows().
+			AddRow(int64(9), nil, "login.throttled", "denied", "backoff_active", "src", now))
+
+	response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/audit/authentication", "")
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"userId":null`) ||
+		!strings.Contains(response.Body.String(), `"eventType":"login.throttled"`) {
+		t.Fatalf("null user id audit = %d %s", response.Code, response.Body.String())
+	}
+}
