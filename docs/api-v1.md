@@ -113,7 +113,8 @@ Example: `GET /auth/methods?deploymentHint=deployment_001`
 ```
 
 The account is created or batch-imported by an administrator. Public
-registration is not implied. Password login may use HTTP or HTTPS in every
+registration is not implied. Leading and trailing whitespace in `password` is
+trimmed before verification. Password login may use HTTP or HTTPS in every
 deployment stage. HTTPS is strongly recommended outside a trusted private
 network because plain HTTP exposes credentials and bearer tokens in transit.
 
@@ -129,10 +130,12 @@ These values are self-reported administrative hints, not verified claims.
 
 Request: `{"newPassword":"new-long-password"}`. The session bearer authenticates
 the change. `currentPassword` is an optional step-up proof: when provided it is
-verified and a mismatch fails with `401 INVALID_CREDENTIALS`; when omitted the
-session alone authorizes the change. The account password is replaced, its other
-refresh sessions are revoked, and the response returns a fresh token structure
-with `passwordChangeRequired` set to false.
+trimmed of leading and trailing whitespace, verified, and a mismatch fails with
+`401 INVALID_CREDENTIALS`; when omitted the session alone authorizes the change.
+`newPassword` must not start or end with whitespace (`PASSWORD_POLICY_VIOLATION`).
+The account password is replaced, its other refresh sessions are revoked, and
+the response returns a fresh token structure with `passwordChangeRequired` set
+to false.
 
 ### `POST /auth/federated/start`
 
@@ -507,7 +510,7 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
-Every user must have at least one role and one team when created or imported. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
+Every user must have at least one role and one team when created or imported. Passwords must contain 6 to 1024 characters. Temporary passwords must not start or end with whitespace: create and reset reject it (`PASSWORD_POLICY_VIOLATION`), while import trims it because imported rows come from exports and spreadsheets. When create or import omits the temporary password (or import trims it to empty), the server assigns the default `123456`. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
 
 ### RBAC and sessions
 

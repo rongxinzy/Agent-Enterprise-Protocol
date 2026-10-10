@@ -176,10 +176,16 @@ components:
           writeOnly: true
           description: >-
             Optional step-up proof. The session bearer already authenticates
-            the change; when currentPassword is provided the server verifies it
-            and rejects a mismatch with 401 INVALID_CREDENTIALS, when omitted
-            the session alone authorizes the change.
-        newPassword: {type: string, minLength: 12, maxLength: 1024, writeOnly: true}
+            the change; when currentPassword is provided the server trims
+            leading and trailing whitespace, verifies it, and rejects a
+            mismatch with 401 INVALID_CREDENTIALS; when omitted the session
+            alone authorizes the change.
+        newPassword:
+          type: string
+          minLength: 6
+          maxLength: 1024
+          writeOnly: true
+          description: Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise.
     JsonWebKeySet:
       type: object
       required: [keys]

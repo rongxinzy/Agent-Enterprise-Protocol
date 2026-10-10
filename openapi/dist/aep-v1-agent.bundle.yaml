@@ -666,6 +666,7 @@ components:
           minLength: 1
           maxLength: 1024
           writeOnly: true
+          description: Leading and trailing whitespace is trimmed before verification.
         client:
           description: Optional client identity recorded on the issued session. When omitted, the server derives a coarse label from User-Agent.
           $ref: '#/components/schemas/ClientIdentity'
@@ -717,12 +718,13 @@ components:
           minLength: 1
           maxLength: 1024
           writeOnly: true
-          description: Optional step-up proof. The session bearer already authenticates the change; when currentPassword is provided the server verifies it and rejects a mismatch with 401 INVALID_CREDENTIALS, when omitted the session alone authorizes the change.
+          description: Optional step-up proof. The session bearer already authenticates the change; when currentPassword is provided the server trims leading and trailing whitespace, verifies it, and rejects a mismatch with 401 INVALID_CREDENTIALS; when omitted the session alone authorizes the change.
         newPassword:
           type: string
-          minLength: 12
+          minLength: 6
           maxLength: 1024
           writeOnly: true
+          description: Must not start or end with whitespace; rejected with PASSWORD_POLICY_VIOLATION otherwise.
     FederatedLoginStartRequest:
       type: object
       required:

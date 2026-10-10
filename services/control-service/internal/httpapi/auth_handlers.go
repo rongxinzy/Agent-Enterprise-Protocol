@@ -63,6 +63,7 @@ func (s *Server) passwordLogin(response http.ResponseWriter, request *http.Reque
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	input.Password = auth.TrimPassword(input.Password)
 	if input.Client != nil && !input.Client.valid() {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The client identity is invalid.")
 		return
@@ -277,8 +278,13 @@ func (s *Server) changePassword(response http.ResponseWriter, request *http.Requ
 	if !decodeJSON(response, request, &input) {
 		return
 	}
+	input.CurrentPassword = auth.TrimPassword(input.CurrentPassword)
+	if auth.EdgeWhitespace(input.NewPassword) {
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "The new password must not start or end with whitespace.")
+		return
+	}
 	if err := auth.ValidatePassword(input.NewPassword); err != nil {
-		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "The new password must contain 12 to 1024 characters.")
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "The new password must contain 6 to 1024 characters.")
 		return
 	}
 	claims := claimsFrom(request)
