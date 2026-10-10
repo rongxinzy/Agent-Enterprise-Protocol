@@ -71,8 +71,13 @@ async function render() {
     const doc = yaml.load(resource.Body);
     // Adapt production resource names to the existing standalone fixture only.
     if (doc.kind === 'Ingress') doc.metadata.annotations = {'higress.io/destination': 'mock-openai.dns'};
-    for (const match of doc.spec.matchRules ?? []) match.ingress = match.ingress.map(name =>
-      name.startsWith('aep-model-gateway-') ? 'aep-model-gateway' : name.startsWith('aep-anthropic-') ? 'aep-anthropic-bench-anthropic' : name);
+    for (const match of doc.spec.matchRules ?? []) {
+      match.ingress = match.ingress.map(name =>
+        name.startsWith('aep-openai-') ? 'aep-model-gateway' : name.startsWith('aep-anthropic-') ? 'aep-anthropic-bench-anthropic' : name);
+      for (const name of match.ingress) assert(
+        ['aep-model-gateway', 'aep-anthropic-bench-anthropic', 'aep-quota-' + suffix].includes(name),
+        'Native plugin references an ingress absent from the standalone fixture: ' + name);
+    }
     await writeFile(path.join(doc.kind === 'Ingress' ? ingressDir : pluginDir, doc.metadata.name + '.yaml'), JSON.stringify(doc));
   }
   if (running) {
