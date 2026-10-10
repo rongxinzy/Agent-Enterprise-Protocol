@@ -58,7 +58,7 @@ try {
   await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-1', `status is ${JSON.stringify(observed)}`));
   await waitForHealth('/readyz', 200);
 
-  const ingressName = `aep-model-gateway-${suffix('demo')}`;
+  const ingressName = `aep-openai-${suffix('demo/chat')}`;
   const pluginName = `aep-ai-proxy-${suffix('demo')}`;
   const statisticsName = `aep-ai-statistics-${suffix('demo')}`;
   const ingress = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'ingress', ingressName, '-o', 'json']));
@@ -139,7 +139,7 @@ function state(revision, routes) {
 }
 
 function suffix(value) {
-  return `${value}-${createHash('sha256').update(value).digest('hex').slice(0, 8)}`;
+  return `${value.replaceAll('/', '-')}-${createHash('sha256').update(value).digest('hex').slice(0, 8)}`;
 }
 
 function startReconciler(port, instance) {

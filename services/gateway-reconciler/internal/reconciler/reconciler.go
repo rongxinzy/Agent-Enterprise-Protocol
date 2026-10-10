@@ -245,7 +245,7 @@ type RenderedResource struct {
 }
 
 // Render projects the desired state into Kubernetes/Higress resources in a
-// pinned order: the tenant's openai Ingress, then per anthropic route (sorted
+// pinned order: per-model OpenAI ingresses, then per anthropic route (sorted
 // by model ID) its Ingress + EnvoyFilter pair, then the ai-proxy WasmPlugin
 // (always present so disabling every openai route only empties its
 // matchRules), then the tenant-scoped ai-statistics WasmPlugin. Both plugins
@@ -298,8 +298,9 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 		}
 	}
 	resources := make([]RenderedResource, 0, 4)
-	if len(enabledOpenAI) > 0 {
-		resources = append(resources, RenderedResource{Kind: ResourceOpenAIIngress, APIPath: openAIIngressAPIPath(suffix), Body: renderOpenAIIngress(suffix, enabledOpenAI)})
+	for _, route := range enabledOpenAI {
+		name := openAIResourceName(desired.TenantID(), route.ModelID)
+		resources = append(resources, RenderedResource{Kind: ResourceOpenAIIngress, APIPath: ingressAPIPath(name), Body: renderOpenAIIngress(name, route)})
 	}
 	for _, route := range anthropic {
 		name := anthropicResourceName(route.ModelID)
@@ -308,8 +309,8 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 			RenderedResource{Kind: ResourceEnvoyFilter, APIPath: envoyFilterAPIPath(name), Body: renderEnvoyFilter(name, route, credentialValues)},
 		)
 	}
-	resources = append(resources, RenderedResource{Kind: ResourceWasmPlugin, APIPath: wasmPluginAPIPath(suffix), Body: renderWasmPlugin(suffix, enabledOpenAI, credentialValues)})
-	resources = append(resources, RenderedResource{Kind: ResourceAIStatistics, APIPath: aiStatisticsAPIPath(suffix), Body: renderAIStatistics(suffix, enabledOpenAI, anthropic)})
+	resources = append(resources, RenderedResource{Kind: ResourceWasmPlugin, APIPath: wasmPluginAPIPath(suffix), Body: renderWasmPlugin(desired.TenantID(), enabledOpenAI, credentialValues)})
+	resources = append(resources, RenderedResource{Kind: ResourceAIStatistics, APIPath: aiStatisticsAPIPath(suffix), Body: renderAIStatistics(desired.TenantID(), enabledOpenAI, anthropic)})
 	var document strings.Builder
 	for index, resource := range resources {
 		if index > 0 {
@@ -322,17 +323,19 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 	return canonical, resources, hex.EncodeToString(digest[:]), nil
 }
 
-func renderOpenAIIngress(suffix string, enabled []Route) string {
+func renderOpenAIIngress(name string, route Route) string {
 	var document strings.Builder
-	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: " + yamlScalar("aep-model-gateway-"+suffix) + "\n  namespace: higress-system\nspec:\n  ingressClassName: higress\n")
+	// The authorizer strips caller-supplied identity headers and stamps the
+	// validated catalog model. Native Higress header matching isolates each
+	// ai-proxy provider configuration even when models share a request path.
+	document.WriteString("apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: " + yamlScalar(name) + "\n  namespace: higress-system\n  annotations:\n    higress.io/exact-match-header-x-aep-model-id: " + yamlScalar(route.ModelID) + "\nspec:\n  ingressClassName: higress\n")
 	document.WriteString("  rules:\n    - http:\n        paths:\n")
-	for _, route := range enabled {
-		document.WriteString("          - path: " + yamlScalar(ingressPath(route.Endpoint)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
-	}
+	document.WriteString("          - path: " + yamlScalar(ingressPath(route.Endpoint)) + "\n            pathType: Prefix\n            backend:\n              service:\n                name: aep-model-gateway\n                port:\n                  number: 80\n")
 	return document.String()
 }
 
-func renderWasmPlugin(suffix string, enabled []Route, credentialValues map[string]string) string {
+func renderWasmPlugin(deployment string, enabled []Route, credentialValues map[string]string) string {
+	suffix := resourceSuffix(deployment)
 	var document strings.Builder
 	document.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar("oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-proxy:"+aiProxyPluginVersion) + "\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
 	if len(enabled) == 0 {
@@ -351,12 +354,13 @@ func renderWasmPlugin(suffix string, enabled []Route, credentialValues map[strin
 				document.WriteString("          apiTokens:\n            - " + yamlScalar(value) + "\n")
 			}
 		}
-		document.WriteString("      ingress:\n        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
+		document.WriteString("      ingress:\n        - " + yamlScalar(openAIResourceName(deployment, route.ModelID)) + "\n")
 	}
 	return document.String()
 }
 
-func renderAIStatistics(suffix string, openAI, anthropic []Route) string {
+func renderAIStatistics(deployment string, openAI, anthropic []Route) string {
+	suffix := resourceSuffix(deployment)
 	var document strings.Builder
 	document.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-statistics-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar(aiStatisticsPluginURL) + "\n  failStrategy: FAIL_OPEN\n  phase: UNSPECIFIED_PHASE\n  priority: 200\n  defaultConfigDisable: true\n")
 	if len(openAI)+len(anthropic) == 0 {
@@ -366,8 +370,8 @@ func renderAIStatistics(suffix string, openAI, anthropic []Route) string {
 	// Never enable full default attributes: they include prompts, answers,
 	// tool arguments and reasoning. Observation must not capture model content.
 	document.WriteString("  matchRules:\n    - config:\n        use_default_attributes: false\n        use_default_response_attributes: true\n        enable_path_suffixes:\n          - /chat/completions\n          - /completions\n          - /responses\n          - /messages\n      configDisable: false\n      ingress:\n")
-	if len(openAI) > 0 {
-		document.WriteString("        - " + yamlScalar("aep-model-gateway-"+suffix) + "\n")
+	for _, route := range openAI {
+		document.WriteString("        - " + yamlScalar(openAIResourceName(deployment, route.ModelID)) + "\n")
 	}
 	for _, route := range anthropic {
 		document.WriteString("        - " + yamlScalar(anthropicResourceName(route.ModelID)) + "\n")
@@ -491,6 +495,10 @@ func anthropicRewrite(endpointPath string) string {
 // stays within the 63-character object name limit.
 func anthropicResourceName(modelID string) string {
 	return "aep-anthropic-" + resourceSuffix(modelID)
+}
+
+func openAIResourceName(deployment, modelID string) string {
+	return "aep-openai-" + resourceSuffix(deployment+"/"+modelID)
 }
 
 func openAIIngressAPIPath(suffix string) string {
