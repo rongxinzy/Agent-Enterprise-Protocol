@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -147,7 +146,7 @@ func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request
 	// silently drop a digital employee's persona Skill, and Skill assignments
 	// would be cascade deleted. The store checks under a row lock and reports
 	// the references; ?force=true lets an administrator delete anyway.
-	force, _ := strconv.ParseBool(request.URL.Query().Get("force"))
+	force := request.URL.Query().Get("force") == "true"
 	references, err := s.app.Store.DeleteSkill(request.Context(), skillID, force)
 	switch {
 	case errors.Is(err, repository.ErrSkillInUse):

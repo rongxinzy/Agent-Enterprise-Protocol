@@ -113,8 +113,10 @@ async function runScenario() {
     promptSkillId,
   });
   await expectProblem(admin.deleteSkill(promptSkillId), 409, 'SKILL_IN_USE');
-  // An administrator can still delete it on purpose: the references are dropped.
+  // An administrator can still delete it on purpose; the references are dropped.
   await admin.deleteSkill(promptSkillId, {force: true});
+  assert((await postgres(`SELECT count(*) FROM skills WHERE id='${promptSkillId}'`)) === '0', 'Forced Skill delete left the Skill row behind');
+  assert((await postgres(`SELECT count(*) FROM agent_profiles WHERE prompt_skill_id='${promptSkillId}'`)) === '0', 'Forced Skill delete did not clear the prompt binding');
 
   // Regression: the user manifest must return the latest *published* version,
   // not the lexicographically largest version string (1.10.0 must beat 1.9.0).
