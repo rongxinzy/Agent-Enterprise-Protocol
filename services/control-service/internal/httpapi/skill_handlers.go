@@ -235,6 +235,10 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusRequestEntityTooLarge, "PACKAGE_TOO_LARGE", "The Skill package exceeds 32 MiB.")
 		return
 	}
+	if err := validateSkillPackage(archive); err != nil {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
+		return
+	}
 	digest := sha256.Sum256(archive)
 	sha := hex.EncodeToString(digest[:])
 	objectKey, ok := skillObjectKey(skillID, version, sha)
@@ -484,6 +488,10 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 	defer func() { _ = object.Close() }()
 	response.Header().Set("Content-Type", "application/zip")
 	response.Header().Set("Cache-Control", "private, no-store")
+	// A client that saves the package to disk needs a name for it. The Skill
+	// and version identifiers are already restricted to a filename-safe
+	// character set, so the name needs no escaping.
+	response.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", skillID+"-"+version+".zip"))
 	_, _ = io.Copy(response, object)
 }
 
