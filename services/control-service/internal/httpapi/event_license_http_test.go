@@ -114,7 +114,7 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	pool.ExpectQuery(`SELECT e.event_id,e.type,e.scope_type`).WithArgs("deployment-a", "", int32(50)).WillReturnRows(
+	pool.ExpectQuery(`SELECT e.event_id,e.type,e.scope_type`).WithArgs("deployment-a", "", 51).WillReturnRows(
 		pgxmock.NewRows([]string{"event_id", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "expires_at", "state", "created_at", "created_by", "pending", "received", "running", "succeeded", "failed", "expired", "superseded"}).
 			AddRow("event-1", "skill.manifest.changed", "global", nil, nil, nil, nil, "skill.reconcile", now.Add(time.Hour), "active", now, "admin-user", int64(1), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0)))
 	adminEvents := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/control-events", "")
@@ -124,7 +124,7 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 
 	pool.ExpectExec(`UPDATE control_events SET state='cancelled'`).WithArgs("event-1", "deployment-a").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE session_control_deliveries SET state='superseded'`).WithArgs("event-1").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-	pool.ExpectQuery(`SELECT e.event_id,e.type,e.scope_type`).WithArgs("deployment-a", "event-1", int32(50)).WillReturnRows(
+	pool.ExpectQuery(`SELECT e.event_id,e.type,e.scope_type`).WithArgs("deployment-a", "event-1", 1).WillReturnRows(
 		pgxmock.NewRows([]string{"event_id", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "expires_at", "state", "created_at", "created_by", "pending", "received", "running", "succeeded", "failed", "expired", "superseded"}).
 			AddRow("event-1", "skill.manifest.changed", "global", nil, nil, nil, nil, "skill.reconcile", now.Add(time.Hour), "cancelled", now, "admin-user", int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(1)))
 	cancelled := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events/event-1/cancel", "")
@@ -133,9 +133,9 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 	}
 
 	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("event-1", "deployment-a").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
-	pool.ExpectQuery(`SELECT d.delivery_id,d.event_id,d.session_id,d.state`).WithArgs("event-1", "deployment-a", int32(50)).WillReturnRows(
-		pgxmock.NewRows([]string{"delivery_id", "event_id", "session_id", "state", "attempt_count", "received_at", "completed_at", "updated_at", "error_code", "message"}).
-			AddRow("delivery-1", "event-1", nil, "superseded", 1, nil, nil, now, nil, nil))
+	pool.ExpectQuery(`SELECT d.cursor,d.delivery_id,d.event_id,d.session_id,d.state`).WithArgs("event-1", "deployment-a", int64(0), 51).WillReturnRows(
+		pgxmock.NewRows([]string{"cursor", "delivery_id", "event_id", "session_id", "state", "attempt_count", "received_at", "completed_at", "updated_at", "error_code", "message"}).
+			AddRow(int64(1), "delivery-1", "event-1", nil, "superseded", 1, nil, nil, now, nil, nil))
 	deliveries := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/control-events/event-1/deliveries", "")
 	if deliveries.Code != http.StatusOK || !strings.Contains(deliveries.Body.String(), `"deliveryId":"delivery-1"`) {
 		t.Fatalf("deliveries = %d %s", deliveries.Code, deliveries.Body.String())
@@ -398,5 +398,19 @@ func TestTelemetryBatchLimitAndLicenseHelperSafety(t *testing.T) {
 	}
 	if got := licenseJSON(licenseRecord{LicenseID: "lic-1", Payload: []byte("not-json")}, true); got["payload"] != nil {
 		t.Fatal("invalid license payload was exposed")
+	}
+}
+
+func TestTelemetryBatchRejectionsIncludeMessage(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`INSERT INTO telemetry_events`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnError(errors.New("store unavailable"))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch",
+		`{"events":[{"eventId":"e1","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`)
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"code":"INTERNAL_ERROR"`) ||
+		!strings.Contains(response.Body.String(), `"message":"The telemetry batch could not be stored."`) {
+		t.Fatalf("telemetry rejection = %d %s", response.Code, response.Body.String())
 	}
 }

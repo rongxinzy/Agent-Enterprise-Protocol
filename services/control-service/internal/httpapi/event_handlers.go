@@ -194,12 +194,28 @@ func (s *Server) reportControlEventResult(response http.ResponseWriter, request 
 }
 
 func (s *Server) reportUserSessionDeliveryResult(response http.ResponseWriter, request *http.Request, deliveryID, sessionID, status string, startedAt, completedAt *time.Time, appliedRevision, errorCode, message *string) {
-	result, err := s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries SET state=$3,started_at=CASE WHEN $3='running' THEN COALESCE($4,now()) ELSE COALESCE($4,started_at) END,completed_at=CASE WHEN $3='running' THEN NULL ELSE COALESCE($5,completed_at) END,applied_revision=CASE WHEN $3='running' THEN NULL ELSE COALESCE($6,applied_revision) END,error_code=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($7,error_code) END,message=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($8,message) END,updated_at=now() WHERE delivery_id=$1 AND session_id=$2 AND (state IN ('received','running') OR state=$3)`, deliveryID, sessionID, status, startedAt, completedAt, appliedRevision, errorCode, message)
+	result, err := s.app.Database().Exec(request.Context(), `UPDATE session_control_deliveries SET state=$3,started_at=CASE WHEN $3='running' THEN COALESCE($4,now()) ELSE COALESCE($4,started_at) END,completed_at=CASE WHEN $3='running' THEN NULL ELSE COALESCE($5,completed_at) END,applied_revision=CASE WHEN $3='running' THEN NULL ELSE COALESCE($6,applied_revision) END,error_code=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($7,error_code) END,message=CASE WHEN $3 IN ('running','succeeded') THEN NULL ELSE COALESCE($8,message) END,updated_at=now() WHERE delivery_id=$1 AND session_id=$2 AND state IN ('received','running','failed')`, deliveryID, sessionID, status, startedAt, completedAt, appliedRevision, errorCode, message)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	if result.RowsAffected() == 0 {
+		var state string
+		err = s.app.Database().QueryRow(request.Context(), `SELECT state FROM session_control_deliveries WHERE delivery_id=$1 AND session_id=$2`, deliveryID, sessionID).Scan(&state)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The delivery was not found.")
+			return
+		}
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		// A recorded success is immutable: a repeat report is a no-op rather
+		// than an overwrite of the evidence (completed_at, applied_revision).
+		if state == "succeeded" {
+			response.WriteHeader(http.StatusNoContent)
+			return
+		}
 		writeProblem(response, request, http.StatusConflict, "DELIVERY_STATE_CONFLICT", "The delivery cannot accept this result.")
 		return
 	}
@@ -306,15 +322,38 @@ func (s *Server) getAdminControlEvent(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) adminEvents(response http.ResponseWriter, request *http.Request, eventID string) {
-	rows, err := s.app.Database().Query(request.Context(), `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
+	conditions := []string{"e.deployment_id=$1", "($2='' OR e.event_id=$2)"}
+	args := []any{claimsFrom(request).DeploymentID, eventID}
+	if eventID == "" {
+		if raw := strings.TrimSpace(request.URL.Query().Get("cursor")); raw != "" {
+			cursor, err := decodePageCursor(raw)
+			if err != nil {
+				writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The control event cursor is invalid.")
+				return
+			}
+			args = append(args, cursor.OccurredAt, cursor.EventID)
+			conditions = append(conditions, fmt.Sprintf("(e.created_at,e.event_id) < ($%d,$%d)", len(args)-1, len(args)))
+		}
+	}
+	pageLimit := int(limit(request))
+	fetch := pageLimit + 1
+	if eventID != "" {
+		fetch = 1
+	}
+	args = append(args, fetch)
+	query := `SELECT e.event_id,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.expires_at,e.state,e.created_at,e.created_by,
 count(*) FILTER(WHERE d.state='pending'),count(*) FILTER(WHERE d.state='received'),count(*) FILTER(WHERE d.state='running'),count(*) FILTER(WHERE d.state='succeeded'),count(*) FILTER(WHERE d.state='failed'),count(*) FILTER(WHERE d.state='expired'),count(*) FILTER(WHERE d.state='superseded')
-FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.event_id WHERE e.deployment_id=$1 AND ($2='' OR e.event_id=$2) GROUP BY e.event_id ORDER BY e.created_at DESC LIMIT $3`, claimsFrom(request).DeploymentID, eventID, limit(request))
+FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.event_id WHERE ` + strings.Join(conditions, " AND ") + fmt.Sprintf(" GROUP BY e.event_id ORDER BY e.created_at DESC, e.event_id DESC LIMIT $%d", len(args))
+	rows, err := s.app.Database().Query(request.Context(), query, args...)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	defer rows.Close()
 	items := make([]map[string]any, 0)
+	var nextCursor *string
+	var lastCreatedAt time.Time
+	lastEventID := ""
 	for rows.Next() {
 		var id, eventType, scopeType, taskType, state, createdBy string
 		var scopeID, resourceType, resourceID, resourceRevision *string
@@ -324,8 +363,18 @@ FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.eve
 			databaseFailure(response, request, err)
 			return
 		}
+		if eventID == "" && len(items) == pageLimit {
+			value := encodePageCursor(pageCursor{OccurredAt: lastCreatedAt, EventID: lastEventID})
+			nextCursor = &value
+			break
+		}
 		item := map[string]any{"eventId": id, "type": eventType, "scope": map[string]any{"type": scopeType, "id": scopeID}, "resource": map[string]any{"type": resourceType, "id": resourceID, "revision": resourceRevision}, "task": map[string]string{"type": taskType}, "expiresAt": expiresAt, "state": state, "createdAt": createdAt, "createdBy": createdBy, "deliverySummary": map[string]int64{"pending": counts[0], "received": counts[1], "running": counts[2], "succeeded": counts[3], "failed": counts[4], "expired": counts[5], "superseded": counts[6]}}
 		items = append(items, item)
+		lastCreatedAt, lastEventID = createdAt, id
+	}
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
 	}
 	if eventID != "" {
 		if len(items) == 0 {
@@ -335,7 +384,7 @@ FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.eve
 		writeJSON(response, http.StatusOK, items[0])
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nil})
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) cancelControlEvent(response http.ResponseWriter, request *http.Request) {
@@ -361,27 +410,50 @@ func (s *Server) listControlEventDeliveries(response http.ResponseWriter, reques
 		databaseFailure(response, request, err)
 		return
 	}
-	rows, err := s.app.Database().Query(request.Context(), `SELECT d.delivery_id,d.event_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 ORDER BY d.cursor LIMIT $3`, eventID, tenant, limit(request))
+	after := int64(0)
+	if raw := strings.TrimSpace(request.URL.Query().Get("cursor")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The delivery cursor is invalid.")
+			return
+		}
+		after = parsed
+	}
+	pageLimit := int(limit(request))
+	rows, err := s.app.Database().Query(request.Context(), `SELECT d.cursor,d.delivery_id,d.event_id,d.session_id,d.state,d.attempt_count,d.received_at,d.completed_at,d.updated_at,d.error_code,d.message FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.event_id=$1 AND e.deployment_id=$2 AND d.cursor>$3 ORDER BY d.cursor LIMIT $4`, eventID, tenant, after, pageLimit+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	defer rows.Close()
 	items := make([]map[string]any, 0)
+	var nextCursor *string
+	lastCursor := ""
 	for rows.Next() {
-		var deliveryID, eventID, state string
+		var cursor int64
+		var deliveryID, rowEventID, state string
 		var sessionID pgtype.Text
 		var attempts int
 		var receivedAt, completedAt *time.Time
 		var updatedAt time.Time
 		var errorCode, message *string
-		if err := rows.Scan(&deliveryID, &eventID, &sessionID, &state, &attempts, &receivedAt, &completedAt, &updatedAt, &errorCode, &message); err != nil {
+		if err := rows.Scan(&cursor, &deliveryID, &rowEventID, &sessionID, &state, &attempts, &receivedAt, &completedAt, &updatedAt, &errorCode, &message); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
-		items = append(items, map[string]any{"deliveryId": deliveryID, "eventId": eventID, "sessionId": nullablePGText(sessionID), "state": state, "attemptCount": attempts, "receivedAt": receivedAt, "completedAt": completedAt, "updatedAt": updatedAt, "errorCode": errorCode, "message": message})
+		if len(items) == pageLimit {
+			value := lastCursor
+			nextCursor = &value
+			break
+		}
+		items = append(items, map[string]any{"deliveryId": deliveryID, "eventId": rowEventID, "sessionId": nullablePGText(sessionID), "state": state, "attemptCount": attempts, "receivedAt": receivedAt, "completedAt": completedAt, "updatedAt": updatedAt, "errorCode": errorCode, "message": message})
+		lastCursor = strconv.FormatInt(cursor, 10)
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nil})
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *http.Request) {
@@ -416,7 +488,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 	rows := make([][]any, 0, len(input.Events))
 	for _, event := range input.Events {
 		if claims.SessionID == "" {
-			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED"})
+			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED", "message": "A user session is required."})
 			continue
 		}
 		payload, _ := json.Marshal(event.Data)
@@ -444,7 +516,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			// rejects the whole insertable set at once.
 			accepted = accepted[:0]
 			for _, row := range rows {
-				rejected = append(rejected, map[string]string{"eventId": fmt.Sprint(row[0]), "code": "INTERNAL_ERROR"})
+				rejected = append(rejected, map[string]string{"eventId": fmt.Sprint(row[0]), "code": "INTERNAL_ERROR", "message": "The telemetry batch could not be stored."})
 			}
 		}
 	}
@@ -500,7 +572,7 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 		return
 	}
 	if rawCursor := strings.TrimSpace(filters.Get("cursor")); rawCursor != "" {
-		cursor, err := decodeTelemetryCursor(rawCursor)
+		cursor, err := decodePageCursor(rawCursor)
 		if err != nil {
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The telemetry cursor is invalid.")
 			return
@@ -519,7 +591,7 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	var nextCursor *string
-	var lastCursor telemetryCursor
+	var lastCursor pageCursor
 	for rows.Next() {
 		var eventID, userID, eventType string
 		var sessionID pgtype.Text
@@ -531,14 +603,14 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 			return
 		}
 		if len(items) == pageLimit {
-			value := encodeTelemetryCursor(lastCursor)
+			value := encodePageCursor(lastCursor)
 			nextCursor = &value
 			break
 		}
 		var data any
 		_ = json.Unmarshal(payload, &data)
 		items = append(items, map[string]any{"eventId": eventID, "userId": userID, "sessionId": nullablePGText(sessionID), "type": eventType, "resourceType": nullablePGText(resourceType), "resourceId": nullablePGText(resourceID), "result": nullablePGText(result), "data": data, "occurredAt": occurredAt, "receivedAt": receivedAt})
-		lastCursor = telemetryCursor{OccurredAt: occurredAt, EventID: eventID}
+		lastCursor = pageCursor{OccurredAt: occurredAt, EventID: eventID}
 	}
 	if err := rows.Err(); err != nil {
 		databaseFailure(response, request, err)
@@ -547,30 +619,30 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
 
-type telemetryCursor struct {
+type pageCursor struct {
 	OccurredAt time.Time
 	EventID    string
 }
 
-func encodeTelemetryCursor(cursor telemetryCursor) string {
+func encodePageCursor(cursor pageCursor) string {
 	value := cursor.OccurredAt.UTC().Format(time.RFC3339Nano) + "\x00" + cursor.EventID
 	return base64.RawURLEncoding.EncodeToString([]byte(value))
 }
 
-func decodeTelemetryCursor(raw string) (telemetryCursor, error) {
+func decodePageCursor(raw string) (pageCursor, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return telemetryCursor{}, err
+		return pageCursor{}, err
 	}
 	parts := strings.SplitN(string(decoded), "\x00", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return telemetryCursor{}, errors.New("invalid telemetry cursor")
+		return pageCursor{}, errors.New("invalid telemetry cursor")
 	}
 	occurredAt, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return telemetryCursor{}, err
+		return pageCursor{}, err
 	}
-	return telemetryCursor{OccurredAt: occurredAt, EventID: parts[1]}, nil
+	return pageCursor{OccurredAt: occurredAt, EventID: parts[1]}, nil
 }
 
 func nullablePGText(value pgtype.Text) any {

@@ -1964,7 +1964,7 @@ export interface components {
             occurredAt: string;
             resource?: components["schemas"]["EventResource"];
             result: components["schemas"]["EventResult"];
-            metadata?: {
+            data?: {
                 [key: string]: unknown;
             };
         };
