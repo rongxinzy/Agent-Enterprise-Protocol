@@ -197,7 +197,7 @@ func TestAdminSkillVersionFailureBoundaries(t *testing.T) {
 	t.Run("version upsert", func(t *testing.T) {
 		application, mock, _, token := newUserHTTPApplication(t)
 		application.Blobs = newMemorySkillBlobStore()
-		mock.ExpectExec(`INSERT INTO skill_versions`).WillReturnError(errors.New("version unavailable"))
+		mock.ExpectQuery(`INSERT INTO skill_versions`).WillReturnError(errors.New("version unavailable"))
 		response := uploadSkillRequest(t, New(application).Handler(), token, "/aep/v1/admin/skills/writer/versions", "1.0.0", []byte("archive"))
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})

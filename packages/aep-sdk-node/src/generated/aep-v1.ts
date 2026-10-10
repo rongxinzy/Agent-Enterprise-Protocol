@@ -2374,6 +2374,8 @@ export interface components {
             crossDepartmentReason?: string;
         };
         SkillVersion: {
+            /** @description Present on the upload response. */
+            skillId?: string;
             version: components["schemas"]["SkillVersionIdentifier"];
             /** @enum {string} */
             state: "draft" | "published" | "withdrawn";
@@ -2381,7 +2383,9 @@ export interface components {
             size: number;
             releaseNotes?: string;
             /** Format: date-time */
-            createdAt: string;
+            createdAt?: string;
+            /** @description Legacy boolean mirror of state (state == published); a re-upload keeps the stored value. */
+            published?: boolean;
         };
         AdminSkill: {
             id: components["schemas"]["SkillIdentifier"];

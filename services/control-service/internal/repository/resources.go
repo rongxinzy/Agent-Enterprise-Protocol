@@ -265,13 +265,19 @@ func (s *Store) DeleteSkill(ctx context.Context, id string, force bool) (SkillRe
 	return counts, err
 }
 
-func (s *Store) UpsertSkillVersion(ctx context.Context, version SkillVersion) error {
-	return s.db.WithContext(ctx).Exec(`
+// UpsertSkillVersion stores a version's package. The version number is the key,
+// so re-uploading an existing version replaces its content while keeping its
+// publication state - a published version stays published, a draft stays a
+// draft. It returns whether the stored version is published.
+func (s *Store) UpsertSkillVersion(ctx context.Context, version SkillVersion) (bool, error) {
+	var published bool
+	err := s.db.WithContext(ctx).Raw(`
 INSERT INTO skill_versions (skill_id,version,object_key,sha256,size_bytes,published,published_at)
 VALUES (?,?,?,?,?,false,NULL)
 ON CONFLICT (skill_id,version) DO UPDATE SET
-  object_key=EXCLUDED.object_key,sha256=EXCLUDED.sha256,size_bytes=EXCLUDED.size_bytes,
-  published=false,published_at=NULL`, version.SkillID, version.Version, version.ObjectKey, version.SHA256, version.SizeBytes).Error
+  object_key=EXCLUDED.object_key,sha256=EXCLUDED.sha256,size_bytes=EXCLUDED.size_bytes
+RETURNING published`, version.SkillID, version.Version, version.ObjectKey, version.SHA256, version.SizeBytes).Scan(&published).Error
+	return published, err
 }
 
 func (s *Store) PublishSkillVersion(ctx context.Context, skillID, version string) error {

@@ -929,14 +929,18 @@ components:
         state: {type: string, enum: [active, withdrawn]}
     SkillVersion:
       type: object
-      required: [version, state, sha256, size, createdAt]
+      required: [version, state, sha256, size]
       properties:
+        skillId: {type: string, description: Present on the upload response.}
         version: {$ref: '#/components/schemas/SkillVersionIdentifier'}
         state: {type: string, enum: [draft, published, withdrawn]}
         sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
         size: {type: integer, minimum: 0}
         releaseNotes: {type: string}
         createdAt: {type: string, format: date-time}
+        published:
+          type: boolean
+          description: Legacy boolean mirror of state (state == published); a re-upload keeps the stored value.
     Subject:
       type: object
       required: [type, id]
