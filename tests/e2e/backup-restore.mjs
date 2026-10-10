@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+import yazl from 'yazl';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const composeFile = path.join(root, 'deploy', 'compose', 'compose.yaml');
 const runId = (process.env.AEP_BACKUP_RUN_ID ?? `${Date.now().toString(36)}-${process.pid}`).toLowerCase().replace(/[^a-z0-9]/g, '').slice(-18);
@@ -97,7 +99,7 @@ async function seedSource() {
   const adminToken = await login(sourceBaseUrl, 'admin', 'change-this-admin-password');
   const username = `backup-user-${runId}`;
   const password = `Backup-${runId}-password`;
-  const archive = emptyZip();
+  const archive = await createSkillArchive();
   const sha256 = digest(archive);
 
   // Skill identifiers are server-generated slugs (uniqueness rides on the
@@ -197,8 +199,18 @@ function command(executable, args, extraEnv = {}, allowFailure = false) {
   });
 }
 
-function emptyZip() {
-  return new Uint8Array(Buffer.from('504b0506000000000000000000000000000000000000', 'hex'));
+// The control service refuses a package that is not a ZIP archive with
+// SKILL.md at its root, so the fixture package has to be a real one.
+function createSkillArchive() {
+  return new Promise((resolve, reject) => {
+    const archive = new yazl.ZipFile();
+    const chunks = [];
+    archive.outputStream.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    archive.outputStream.on('error', reject);
+    archive.outputStream.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
+    archive.addBuffer(Buffer.from('# Backup rehearsal Skill\n'), 'SKILL.md');
+    archive.end();
+  });
 }
 
 function digest(value) {
