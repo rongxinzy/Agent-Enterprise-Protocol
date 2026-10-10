@@ -32,6 +32,13 @@ Loki 表示 AEP 目录模型，响应通过 `modelDimension` 明确区分。维�
 `step`（默认 60 秒）。`step` 是输出采样间隔，两者不一定相同；计数曲线不是整个所选
 时间范围的总量，不能由前端求和充当汇总。缺失 usage、空序列和未知值不转为零。
 
+Prometheus 的调用、失败、输入/输出 Token 与鉴权请求增量使用
+`round(sum(increase(...)))`，分组查询则在 `sum by (...)` 后执行原生 `round()`。
+先聚合再取整，避免逐 Pod 取整造成偏差；AEP、SDK 和前端不重新计算来源值。
+`aggregation=counter_increase` 仍表示回看窗口的计数器增量，取整后的数值仍是采样
+外推估算，不是精确请求账本。QPS、非 5xx 比率与平均耗时保留小数；Loki 的原生
+日志计数与 usage 求和维持原有口径。优先复用已有指标和原生函数，避免手写复杂统计公式。
+
 本次补的是 AEP 接入契约。Higress/ai-statistics 已有原生观测输出，Prometheus/Loki
 提供查询，Console 已有插件配置、ai-quota 已有余额管理 API；不新增对应执行或统计引擎。
 

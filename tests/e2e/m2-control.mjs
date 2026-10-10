@@ -2,6 +2,8 @@ import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+import yazl from 'yazl';
+
 import {AepClient, MemoryTokenStore} from '../../packages/aep-sdk-node/dist/index.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -14,6 +16,20 @@ const composeEnv = {
   AEP_MINIO_CONSOLE_PORT: process.env.AEP_M2_CONTROL_MINIO_CONSOLE_PORT ?? '19005',
 };
 const runId = Date.now().toString(36);
+
+// The control service refuses a package that is not a ZIP archive with
+// SKILL.md at its root, so fixtures have to be real packages.
+function createSkillArchive() {
+  return new Promise((resolve, reject) => {
+    const archive = new yazl.ZipFile();
+    const chunks = [];
+    archive.outputStream.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    archive.outputStream.on('error', reject);
+    archive.outputStream.on('end', () => resolve(new Uint8Array(Buffer.concat(chunks))));
+    archive.addBuffer(Buffer.from('# M2 control E2E Skill\n'), 'SKILL.md');
+    archive.end();
+  });
+}
 
 try {
   await compose('up', '-d', '--build');
@@ -49,7 +65,8 @@ async function runScenario() {
     : undefined;
   assert(withdrawnSkill?.state === 'withdrawn', 'Admin Skill state update was not persisted');
   await admin.updateSkill(skillId, {state: 'active'});
-  await admin.uploadSkillVersion(skillId, '1.0.0', new Uint8Array(Buffer.from('skill-version-package')));
+  const archive = await createSkillArchive();
+  await admin.uploadSkillVersion(skillId, '1.0.0', archive);
   await admin.publishSkillVersion(skillId, '1.0.0');
   await admin.deleteSkillVersion(skillId, '1.0.0');
   assert((await postgres(`SELECT count(*) FROM skill_versions WHERE skill_id='${skillId}' AND version='1.0.0'`)) === '0', 'Withdrawn Skill version remained in PostgreSQL');
@@ -124,7 +141,7 @@ async function runScenario() {
     name: 'M2 version order ' + runId, description: 'Skill manifest ordering regression',
   })).id;
   for (const version of ['1.9.0', '1.10.0']) {
-    await admin.uploadSkillVersion(orderSkillId, version, new Uint8Array(Buffer.from('package-' + version)));
+    await admin.uploadSkillVersion(orderSkillId, version, archive);
     await admin.publishSkillVersion(orderSkillId, version);
   }
   await admin.createSkillAssignment({skillId: orderSkillId, subject: {type: 'user', id: user.id}});
