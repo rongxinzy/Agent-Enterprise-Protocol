@@ -38,6 +38,16 @@ otherwise `step` (default 60). `step` controls output sampling and may differ
 from the lookback. Counter series are not whole-period totals. Missing usage,
 empty series and unknown values are not zero-filled.
 
+Prometheus call, failure, input/output Token, and authorizer request increases
+use native `round(sum(increase(...)))`, or `round(sum by (...)(increase(...)))`
+for groups. Aggregate before rounding to avoid per-Pod rounding errors. AEP,
+SDKs, and clients do not recalculate native results. `counter_increase` still
+describes a lookback-window increase; a rounded extrapolation is not an exact
+event count or billing ledger. QPS, non-5xx ratios, and mean durations retain
+fractional values. Loki's native log counts and usage sums retain their existing
+semantics. Prefer existing metrics and native functions over handwritten complex
+statistical formulas.
+
 These are AEP adapters: Higress/ai-statistics already exports observations,
 Prometheus/Loki provides queries, Console manages plugin configuration and
 ai-quota exposes balance management. No new numeric or inference engine is added.
