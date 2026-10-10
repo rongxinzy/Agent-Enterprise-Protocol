@@ -59,7 +59,7 @@ func TestInfrastructureQueriesWithNativePrometheus(t *testing.T) {
 					t.Fatal(err)
 				}
 				var expected []map[string]any
-				if scenario != "absent" && !(scenario == "idle" && strings.Contains(metric, "success")) {
+				if scenario != "absent" && (scenario != "idle" || !strings.Contains(metric, "success")) {
 					value := qps
 					if strings.Contains(metric, "success") {
 						value = ratio
