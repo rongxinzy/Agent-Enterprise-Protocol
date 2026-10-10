@@ -136,6 +136,36 @@ try {
       assert(String(error).includes('not found'), `unexpected ${kindOf} read error: ${error}`);
     }
   }
+  // Absolute OpenAI endpoints must create real per-model upstream clusters,
+  // independent of ai-proxy's HTTP rewriting and the shared fixture Service.
+  const absoluteRoutes = [
+    {modelId: 'alpha', enabled: true, endpoint: 'https://alpha.example/api/v1', upstreamModel: 'same-upstream', protocol: 'openai-compatible'},
+    {modelId: 'beta', enabled: true, endpoint: 'http://beta.example:8000/v1', upstreamModel: 'same-upstream', protocol: 'openai-compatible'},
+  ];
+  desired = state('rev-kind-5', absoluteRoutes);
+  await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-5', 'absolute upstream revision not applied'));
+  for (const [index, route] of absoluteRoutes.entries()) {
+    const name = `aep-openai-${suffix(`demo/${route.modelId}`)}`;
+    const ingress = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'ingress', name, '-o', 'json']));
+    assert(ingress.spec.rules[0].http.paths[0].path === '/v1', 'provider path leaked into client ingress');
+    const filter = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'envoyfilter', name, '-o', 'json']));
+    const cluster = filter.spec.configPatches.find(patch => patch.applyTo === 'CLUSTER').patch.value;
+    const address = cluster.load_assignment.endpoints[0].lb_endpoints[0].endpoint.address.socket_address;
+    const endpoint = new URL(route.endpoint);
+    assert(address.address === endpoint.hostname && address.port_value === (index === 0 ? 443 : 8000), 'model selected another provider upstream');
+    const tls = cluster.transport_socket?.typed_config;
+    assert(index === 0 ? tls.sni === endpoint.hostname && tls.common_tls_context.validation_context.trusted_ca.filename === '/etc/ssl/certs/ca-certificates.crt' && tls.common_tls_context.validation_context.match_typed_subject_alt_names[0].matcher.exact === endpoint.hostname : !tls, 'upstream TLS validation/protocol missing');
+    const redirect = filter.spec.configPatches.find(patch => patch.applyTo === 'HTTP_ROUTE');
+    assert(redirect.match.routeConfiguration.vhost.route.name === name && redirect.patch.value.route.cluster === name, 'upstream redirect not bound to model');
+    assert(!redirect.patch.value.request_headers_to_add && !redirect.patch.value.route.regex_rewrite, 'OpenAI path/credentials must stay in ai-proxy');
+  }
+  desired = state('rev-kind-6', [{...absoluteRoutes[0], endpoint: '/v1'}, {...absoluteRoutes[1], enabled: false}]);
+  await waitFor(() => assert(observed.state === 'ready' && observed.observedRevision === 'rev-kind-6', 'upstream cleanup revision not applied'));
+  for (const route of absoluteRoutes) {
+    const name = `aep-openai-${suffix(`demo/${route.modelId}`)}`;
+    const remaining = JSON.parse(await output('kubectl', ['--context', context, '-n', 'higress-system', 'get', 'envoyfilter', name, '--ignore-not-found', '-o', 'json']) || 'null');
+    assert(!remaining, 'obsolete OpenAI upstream filter remained');
+  }
   console.log('AEP M3 kind/Higress-compatible server-side apply scenario passed.');
 } finally {
   for (const child of reconcilers) await stop(child);

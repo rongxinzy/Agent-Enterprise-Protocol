@@ -214,6 +214,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Post("/aep/v1/admin/licenses/import", s.importLicense)
 			admin.Post("/aep/v1/admin/licenses/{licenseId}/revoke", s.revokeLicense)
 			admin.Get("/aep/v1/admin/events", s.searchTelemetryEvents)
+			admin.Get("/aep/v1/admin/audit/authentication", s.listAuthenticationAudit)
 			admin.Get("/aep/v1/admin/models", s.listModels)
 			admin.Post("/aep/v1/admin/models", s.createModel)
 			admin.Get("/aep/v1/admin/models/{modelId}", s.getModel)
@@ -455,6 +456,8 @@ func requiredAdminPermission(method, path string) []string {
 			return []string{"licenses.write"}
 		}
 		return []string{"licenses.read"}
+	case strings.HasPrefix(path, "/aep/v1/admin/audit"):
+		return []string{"audit.read"}
 	case strings.HasPrefix(path, "/aep/v1/admin/events") || strings.HasPrefix(path, "/aep/v1/admin/control-events"):
 		if method == http.MethodGet {
 			return []string{"events.read"}
