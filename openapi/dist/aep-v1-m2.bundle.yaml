@@ -1966,6 +1966,55 @@ paths:
       responses:
         '204':
           description: Model removed
+  /aep/v1/admin/models/{modelId}/pricing:
+    parameters:
+      - $ref: '#/components/parameters/ModelId'
+    get:
+      tags:
+        - Admin Models
+      operationId: getModelPricing
+      description: Requires models.read. An existing model without configured prices returns version zero and null pricing.
+      responses:
+        '200':
+          description: Current reference prices; no runtime billing or historical cost calculation is implied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelPricing'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+    put:
+      tags:
+        - Admin Models
+      operationId: putModelPricing
+      description: Requires models.write. Saves reference prices in the authenticated deployment. expectedVersion prevents overwriting concurrent edits. Null pricing clears the configuration while retaining a monotonically increasing version. Prices are not automatically published to Higress or used to calculate costs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelPricingWrite'
+      responses:
+        '200':
+          description: Saved configuration and new version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelPricing'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/model-assignments:
     get:
       tags:
@@ -6224,6 +6273,72 @@ components:
           type: boolean
         enabled:
           type: boolean
+    ModelTokenPrice:
+      type: string
+      pattern: ^(0|[1-9][0-9]{0,8})(\.[0-9]{1,6})?$
+      maxLength: 16
+      description: Nonnegative exact decimal amount per one million tokens; zero is explicitly free, absence is unknown.
+    ModelPriceConfiguration:
+      type: object
+      additionalProperties: false
+      required:
+        - currency
+        - inputPricePerMillionTokens
+        - outputPricePerMillionTokens
+      properties:
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: Three-letter currency code; no currency conversion is performed.
+        inputPricePerMillionTokens:
+          $ref: '#/components/schemas/ModelTokenPrice'
+        outputPricePerMillionTokens:
+          $ref: '#/components/schemas/ModelTokenPrice'
+        cachedInputPricePerMillionTokens:
+          $ref: '#/components/schemas/ModelTokenPrice'
+        source:
+          type: string
+          maxLength: 200
+          description: Optional operator-supplied pricing reference or note, displayed as plain text.
+    ModelPricing:
+      type: object
+      additionalProperties: false
+      required:
+        - modelId
+        - version
+        - pricing
+        - updatedAt
+      properties:
+        modelId:
+          type: string
+        version:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        pricing:
+          oneOf:
+            - $ref: '#/components/schemas/ModelPriceConfiguration'
+            - type: 'null'
+        updatedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    ModelPricingWrite:
+      type: object
+      additionalProperties: false
+      required:
+        - pricing
+        - expectedVersion
+      properties:
+        pricing:
+          oneOf:
+            - $ref: '#/components/schemas/ModelPriceConfiguration'
+            - type: 'null'
+        expectedVersion:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
     ModelSubject:
       type: object
       required:

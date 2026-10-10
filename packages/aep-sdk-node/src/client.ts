@@ -9,6 +9,8 @@ import type {
   GatewayMetricQuery,
   GatewayRequestQuery,
   GatewayLimitWrite,
+  ModelPricing,
+  ModelPricingWrite,
   GatewayLimit,
   GatewayLimitPage,
   GatewayLimitPublication,
@@ -820,6 +822,14 @@ export class AepClient {
 
   getGatewayRequest(requestId: string, filters: GatewayRequestQuery): Promise<GatewayNativeResult> {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests/${segment(requestId)}?${query(filters)}`});
+  }
+
+  getModelPricing(modelId: string): Promise<ModelPricing> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/models/${segment(modelId)}/pricing`});
+  }
+
+  putModelPricing(modelId: string, input: ModelPricingWrite): Promise<ModelPricing> {
+    return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/models/${segment(modelId)}/pricing`, body: asJson(input), retry: false});
   }
 
   listGatewayLimits(): Promise<GatewayLimitPage> {
