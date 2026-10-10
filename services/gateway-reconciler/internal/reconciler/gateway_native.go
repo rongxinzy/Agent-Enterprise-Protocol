@@ -42,7 +42,6 @@ func RenderGatewayLimits(desired DesiredState, publication gatewaypolicy.Publica
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	resources := make([]RenderedResource, 0, len(items))
 	ingresses := make([]string, 0)
-	openAI := false
 	for _, route := range desired.Routes {
 		if !route.Enabled {
 			continue
@@ -50,11 +49,8 @@ func RenderGatewayLimits(desired DesiredState, publication gatewaypolicy.Publica
 		if route.Protocol == "anthropic" {
 			ingresses = append(ingresses, anthropicResourceName(route.ModelID))
 		} else {
-			openAI = true
+			ingresses = append(ingresses, openAIResourceName(desired.TenantID(), route.ModelID))
 		}
-	}
-	if openAI {
-		ingresses = append(ingresses, "aep-model-gateway-"+resourceSuffix(desired.TenantID()))
 	}
 	sort.Strings(ingresses)
 	for _, item := range items {
