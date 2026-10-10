@@ -1,5 +1,8 @@
 # Gateway Reconciler
 
+生产 Pod 通过 Downward API 从 `metadata.name` 注入 `POD_NAME`，作为不同副本的
+Lease 身份。多个容器中的进程可能都是 PID 1，不能使用本地 PID 回退作为副本身份。
+
 `services/gateway-reconciler` 是独立于 control-service 的进程。它按部署轮询内部数据面接口，写入 `applying`、`ready` 或 `error` 状态，并把确定性的 Higress 资源原子渲染到输出目录。
 
 必须配置 `AEP_RECONCILER_CONTROL_URL`、`AEP_DATA_PLANE_RECONCILER_TOKEN` 和 `AEP_RECONCILER_TENANTS`。共享 Token 只通过 `X-AEP-Data-Plane-Token` 发送，部署身份通过 `X-AEP-Deployment-ID` 发送。期望状态 schema 不接受供应商明文，渲染器也不会输出明文。
