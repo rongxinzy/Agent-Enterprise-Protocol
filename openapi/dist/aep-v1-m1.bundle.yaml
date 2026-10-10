@@ -1243,6 +1243,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventSearchResult'
+  /aep/v1/admin/audit/authentication:
+    get:
+      tags:
+        - Admin Audit
+      operationId: listAuthenticationAudit
+      description: Returns the persisted authentication audit trail (login success, failure, throttle, and password change) recorded by the control service, newest first. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+        - name: eventType
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuthenticationAuditEventType'
+        - name: outcome
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuthenticationAuditOutcome'
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: createdAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Authentication audit result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationAuditPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/models:
     get:
       tags:
@@ -3375,6 +3417,62 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StoredEvent'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    AuthenticationAuditEventType:
+      type: string
+      enum:
+        - login.succeeded
+        - login.failed
+        - login.throttled
+        - password.changed
+    AuthenticationAuditOutcome:
+      type: string
+      enum:
+        - success
+        - failure
+        - denied
+    AuthenticationAuditRecord:
+      type: object
+      required:
+        - cursor
+        - eventType
+        - outcome
+        - sourceHash
+        - createdAt
+      properties:
+        cursor:
+          type: string
+        userId:
+          type:
+            - string
+            - 'null'
+        eventType:
+          $ref: '#/components/schemas/AuthenticationAuditEventType'
+        outcome:
+          $ref: '#/components/schemas/AuthenticationAuditOutcome'
+        reason:
+          type:
+            - string
+            - 'null'
+        sourceHash:
+          type: string
+          description: One-way fingerprint of the login source; the raw address is never returned.
+        createdAt:
+          type: string
+          format: date-time
+    AuthenticationAuditPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthenticationAuditRecord'
         nextCursor:
           type:
             - string
