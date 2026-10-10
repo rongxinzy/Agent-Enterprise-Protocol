@@ -217,6 +217,12 @@ Standard telemetry event types include `auth.login`, `auth.logout`,
 `skill.sync.failed`, `credential.resolved`, `credential.resolve_failed`,
 `model.request.completed`, and `model.request.failed`.
 
+The control service additionally records administrative changes to Skills in
+the same store, so they show up in the operation log: `skill.created`,
+`skill.updated`, `skill.deleted`, `skill.version.uploaded`,
+`skill.version.published`, and `skill.version.withdrawn`. The `userId` is the
+acting administrator and `result` is `success` or `failure`.
+
 Telemetry metadata MUST NOT contain tokens, API keys, or complete model
 prompts and responses unless a separate enterprise policy explicitly enables it.
 
