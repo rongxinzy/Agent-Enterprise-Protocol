@@ -84,6 +84,24 @@ npm run test:e2e:m1-gateway
 
 ## DeepSeek 推理路由
 
+### OpenAI 兼容上游地址
+
+绝对 `http(s)` endpoint 为每个部署×模型生成独立的 OpenAI Ingress 和同名
+EnvoyFilter。EnvoyFilter 创建 STRICT_DNS 上游集群并将该模型路由绑定到配置的
+主机、端口和协议；仅设置 ai-proxy 的 `openaiCustomUrl` 不会创建实际上游。
+客户端仍访问 `/v1/...`，ai-proxy 负责供应商路径、模型映射和凭据注入。
+HTTPS 校验系统 CA 和 endpoint 的 DNS/IP 证书身份，并设置 SNI；Higress 网关镜像
+必须提供 `/etc/ssl/certs/ca-certificates.crt`，使用私有 CA 的交付环境应将完整信任
+包挂载到该路径。不能关闭证书验证来解决连接错误。
+
+相对 endpoint 保留预配置的 `aep-model-gateway` 服务。禁用路由时删除其
+Ingress 和 EnvoyFilter；由绝对 URL 切回相对路径时删除旧 EnvoyFilter。
+endpoint 不接受内嵌用户名/密码、查询串、fragment 或无效端口。
+升级先更新 reconciler，再发布并验证实际供应商请求。回滚到旧 reconciler 前，
+显式清理新增的 `aep-openai-<suffix>` EnvoyFilter，旧版本不会管理这些上游资源。
+
+### 原生 DeepSeek provider
+
 路由使用 Higress 原生 DeepSeek provider 时，必须在期望状态中显式设置 `providerType`。未携带该字段的历史路由仍按 `openai` 处理。目录派生的 openai-compatible 路由一律使用 `openai`，因此原生 DeepSeek 路由需要使用手工逃生口，并且在目录获得 provider 类型元数据之前会一直出现在 `mismatched` 中。
 
 ~~~json
