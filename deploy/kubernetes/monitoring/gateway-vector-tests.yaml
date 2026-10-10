@@ -23,3 +23,33 @@ tests:
         conditions:
           - type: vrl
             source: '.aep_dimension == "role" && .role_id == "cm9sZS1h"'
+  - name: decode native Higress escaped filter state and preserve usage
+    inputs:
+      - insert_at: gateway_metadata
+        type: log
+        log_fields:
+          message: '{"aep_source":"gateway","deployment_id":"deployment-a","request_id":"native-log","model_id":"catalog-alias","team_ids":"|dGVhbS1h|dGVhbS1i|","role_ids":"|cm9sZS1h|","status":"200","ai_log":"{\\\"input_token\\\":1,\\\"output_token\\\":2,\\\"llm_first_token_duration\\\":2,\\\"llm_service_duration\\\":43,\\\"question\\\":\\\"sensitive\\\",\\\"answer\\\":\\\"sensitive\\\"}"}'
+    outputs:
+      - extract_from: gateway_metadata
+        conditions:
+          - type: vrl
+            source: '.input_token == 1 && .output_token == 2 && .llm_first_token_duration == 2 && .llm_service_duration == 43 && .model_id == "catalog-alias" && !exists(.question) && !exists(.answer) && !exists(.ai_log)'
+      - extract_from: gateway_teams
+        conditions:
+          - type: vrl
+            source: '.input_token == 1 && .output_token == 2 && .llm_service_duration == 43 && (.team_id == "dGVhbS1h" || .team_id == "dGVhbS1i")'
+      - extract_from: gateway_roles
+        conditions:
+          - type: vrl
+            source: '.llm_first_token_duration == 2 && .role_id == "cm9sZS1h"'
+  - name: absent plugin usage remains absent
+    inputs:
+      - insert_at: gateway_metadata
+        type: log
+        log_fields:
+          message: '{"aep_source":"gateway","deployment_id":"deployment-a","status":"503","ai_log":"-"}'
+    outputs:
+      - extract_from: gateway_metadata
+        conditions:
+          - type: vrl
+            source: '.status == "503" && .input_token == null && .output_token == null && .llm_service_duration == null'
