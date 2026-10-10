@@ -184,6 +184,25 @@ try {
   assert(catalogRoute.credentialRef?.name === `aep-credential-${credential.id}` && catalogRoute.credentialRef?.key === 'api-key', 'publish did not map the Credential to the conventional Secret');
   assert(!JSON.stringify(published).includes('catalog-secret-value-a'), 'Secret value leaked into the publish response');
   await waitForReady(admin, published.revision);
+  const openaiName = `aep-openai-${suffixOf('demo/catalog-chat')}`;
+  const openaiFilterPath = `/apis/networking.istio.io/v1alpha3/namespaces/higress-system/envoyfilters/${openaiName}`;
+  const openaiIngressPath = `/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/${openaiName}`;
+  const openaiFilter = resources.get(openaiFilterPath);
+  const openaiIngress = resources.get(openaiIngressPath);
+  assert(resources.size === 4 && openaiFilter && openaiIngress, 'absolute OpenAI catalog endpoint must apply its ingress, upstream filter and both plugins');
+  assert(openaiIngress.includes("path: '/v1'") && openaiIngress.includes("higress.io/exact-match-header-x-aep-model-id: 'catalog-chat'"), 'OpenAI ingress lost its client path or model binding');
+  for (const expected of [
+    'type: STRICT_DNS',
+    "address: 'provider-catalog'",
+    'port_value: 80',
+    `name: '${openaiName}'`,
+    `cluster: '${openaiName}'`,
+    "host_rewrite_literal: 'provider-catalog'",
+  ]) {
+    assert(openaiFilter.includes(expected), `OpenAI catalog upstream is missing ${expected}`);
+  }
+  assert(!openaiFilter.includes('transport_socket:') && !openaiFilter.includes('regex_rewrite') && !openaiFilter.includes('request_headers_to_add'), 'HTTP OpenAI upstream must leave TLS off and path/credential handling to ai-proxy');
+  assert(!openaiFilter.includes('catalog-secret-value-a') && !openaiFilter.includes('credentialRef'), 'OpenAI upstream filter contains provider credential material');
   assert(snapshot().includes("'catalog-chat': 'provider-catalog-chat'"), 'catalog modelMapping was not rendered');
   assert(snapshot().includes("apiTokens:\n            - 'catalog-secret-value-a'"), 'derived credentialRef was not resolved and inlined');
   assert(!snapshot().includes('catalog-disabled') && !snapshot().includes('catalog-local'), 'non-publishable catalog models leaked into the gateway');
@@ -211,7 +230,8 @@ try {
   const derivedAnthropicRoute = anthropicPublished.routes.find(candidate => candidate.modelId === 'bench-anthropic');
   assert(derivedAnthropicRoute?.protocol === 'anthropic' && !derivedAnthropicRoute.providerType, `anthropic derived route = ${JSON.stringify(derivedAnthropicRoute)}`);
   await waitForReady(admin, anthropicPublished.revision);
-  assert(resources.size === 5, `expected openai ingress + anthropic ingress + envoyfilter + both wasmplugins, got ${[...resources.keys()]}`);
+  assert(resources.size === 6, `expected separate OpenAI/Anthropic ingress-filter pairs and both wasmplugins, got ${[...resources.keys()]}`);
+  assert(resources.get(openaiFilterPath) === openaiFilter && resources.get(openaiIngressPath) === openaiIngress, 'Anthropic publication changed the independent OpenAI upstream resources');
   const anthropicName = `aep-anthropic-${suffixOf('bench-anthropic')}`;
   const filter = resources.get(`/apis/networking.istio.io/v1alpha3/namespaces/higress-system/envoyfilters/${anthropicName}`);
   const anthropicIngress = resources.get(`/apis/networking.k8s.io/v1/namespaces/higress-system/ingresses/${anthropicName}`);
@@ -240,6 +260,7 @@ try {
   const disabledPublish = await admin.publishDataPlaneRoutes();
   await waitForReady(admin, disabledPublish.revision);
   assert(!snapshot().includes(anthropicName), 'disabled anthropic model left resources behind');
+  assert(resources.size === 4 && resources.get(openaiFilterPath) === openaiFilter && resources.get(openaiIngressPath) === openaiIngress, 'disabling Anthropic changed the independent OpenAI resource pair');
   assert(snapshot().includes("'catalog-chat': 'provider-catalog-chat'"), 'openai catalog route was disturbed by the anthropic leg');
   console.log('AEP M3 live data-plane automation scenario passed.');
 } catch (error) {

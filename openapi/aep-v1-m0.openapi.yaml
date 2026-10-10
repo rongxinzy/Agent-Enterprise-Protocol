@@ -141,6 +141,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1licenses~1{licenseId}~1revoke'
   /aep/v1/admin/events:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1events'
+  /aep/v1/admin/audit/authentication:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1audit~1authentication'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

@@ -183,8 +183,41 @@ func TestKubernetesApplierDeletesIngressWhenAllRoutesAreDisabled(t *testing.T) {
 	if err := applier.Apply(context.Background(), desired, resources); err != nil {
 		t.Fatal(err)
 	}
-	if len(methods) != 4 || methods[0] != "DELETE "+ingressAPIPath(openAIResourceName("demo", "chat")) || !strings.HasPrefix(methods[1], "PATCH ") || !strings.Contains(methods[1], "/wasmplugins/") || !strings.Contains(methods[2], "/wasmplugins/aep-ai-statistics-") || methods[3] != "DELETE "+openAIIngressAPIPath(resourceSuffix("demo")) {
+	if len(methods) != 5 || methods[0] != "DELETE "+envoyFilterAPIPath(openAIResourceName("demo", "chat")) || methods[1] != "DELETE "+ingressAPIPath(openAIResourceName("demo", "chat")) || !strings.HasPrefix(methods[2], "PATCH ") || !strings.Contains(methods[2], "/wasmplugins/") || !strings.Contains(methods[3], "/wasmplugins/aep-ai-statistics-") || methods[4] != "DELETE "+openAIIngressAPIPath(resourceSuffix("demo")) {
 		t.Fatalf("requests = %#v", methods)
+	}
+}
+
+func TestKubernetesApplierRemovesAbsoluteUpstreamOnRelativeTransition(t *testing.T) {
+	var operations []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		operations = append(operations, r.Method+" "+r.URL.Path)
+	}))
+	defer server.Close()
+	a, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "fixture", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{"https://api.example/v1", "/v1"} {
+		operations = nil
+		d := DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: endpoint}}}
+		_, resources, _, err := Render(d, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Apply(context.Background(), d, resources); err != nil {
+			t.Fatal(err)
+		}
+		path := envoyFilterAPIPath(openAIResourceName("demo", "chat"))
+		want := "PATCH " + path
+		forbidden := "DELETE " + path
+		if endpoint == "/v1" {
+			want, forbidden = forbidden, want
+		}
+		seen := strings.Join(operations, "\n")
+		if !strings.Contains(seen, want) || strings.Contains(seen, forbidden) || strings.Contains(seen, "DELETE "+ingressAPIPath(openAIResourceName("demo", "chat"))) {
+			t.Fatalf("unexpected lifecycle: %v", operations)
+		}
 	}
 }
 
