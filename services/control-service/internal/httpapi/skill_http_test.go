@@ -143,10 +143,10 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	digest := sha256.Sum256(archive)
 	sha := hex.EncodeToString(digest[:])
 	objectKey := "skills/writer/2.0.0/" + sha + ".zip"
-	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs("writer", "2.0.0", objectKey, sha, int64(len(archive))).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`INSERT INTO skill_versions`).WithArgs("writer", "2.0.0", objectKey, sha, int64(len(archive))).
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(false))
 	uploaded := uploadSkillRequest(t, handler, adminToken, "/aep/v1/admin/skills/writer/versions", "2.0.0", archive)
-	if uploaded.Code != http.StatusCreated || !strings.Contains(uploaded.Body.String(), `"sha256":"`+sha+`"`) || !bytes.Equal(blobs.objects[objectKey], archive) {
+	if uploaded.Code != http.StatusCreated || !strings.Contains(uploaded.Body.String(), `"sha256":"`+sha+`"`) || !strings.Contains(uploaded.Body.String(), `"state":"draft"`) || !bytes.Equal(blobs.objects[objectKey], archive) {
 		t.Fatalf("upload Skill version = %d %s, stored = %q", uploaded.Code, uploaded.Body.String(), blobs.objects[objectKey])
 	}
 
@@ -176,6 +176,28 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/skills/writer", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete Skill = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+// Re-uploading an existing version replaces its package; the version number is
+// the key, so its publication state must survive (it must not take the Skill
+// offline for every agent).
+func TestAdminSkillReuploadKeepsPublished(t *testing.T) {
+	application, mock, _, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+	application.Blobs = newMemorySkillBlobStore()
+
+	archive := skillArchive(t)
+	digest := sha256.Sum256(archive)
+	sha := hex.EncodeToString(digest[:])
+	objectKey := "skills/writer/1.0.0/" + sha + ".zip"
+	mock.ExpectQuery(`INSERT INTO skill_versions`).WithArgs("writer", "1.0.0", objectKey, sha, int64(len(archive))).
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(true))
+	response := uploadSkillRequest(t, handler, adminToken, "/aep/v1/admin/skills/writer/versions", "1.0.0", archive)
+	if response.Code != http.StatusCreated ||
+		!strings.Contains(response.Body.String(), `"state":"published"`) ||
+		!strings.Contains(response.Body.String(), `"published":true`) {
+		t.Fatalf("re-upload of a published version = %d %s", response.Code, response.Body.String())
 	}
 }
 
