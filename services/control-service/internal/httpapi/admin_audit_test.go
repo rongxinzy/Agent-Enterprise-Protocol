@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,6 +79,37 @@ func TestAuditAdminWritesRecordsSuccessfulWrite(t *testing.T) {
 
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("audited write = %d", response.Code)
+	}
+}
+
+func TestAuditAdminWritesLeavesLargeBodiesIntact(t *testing.T) {
+	application, pool, _, _ := newRuntimeHTTPApplication(t)
+	server := &Server{app: application}
+	token, _, err := application.Tokens.IssueWithDeploymentSession("admin-user", "deployment-a", "session-admin", true, false, []string{"admin"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := application.Tokens.ParseAccess(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs("deployment-a", "admin-user", "create", "user", nil, nil, nil).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	body := strings.Repeat("a", auditPayloadLimit+1024)
+	request := httptest.NewRequest(http.MethodPost, "/aep/v1/admin/users", strings.NewReader(body))
+	request = request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims))
+	read := 0
+	response := httptest.NewRecorder()
+	server.auditAdminWrites(http.HandlerFunc(func(writer http.ResponseWriter, incoming *http.Request) {
+		got, _ := io.ReadAll(incoming.Body)
+		read = len(got)
+		writer.WriteHeader(http.StatusCreated)
+	})).ServeHTTP(response, request)
+
+	if read != len(body) {
+		t.Fatalf("handler read %d of %d body bytes", read, len(body))
 	}
 }
 

@@ -69,8 +69,11 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 			return
 		}
 		var payload any
-		if request.Body != nil {
-			raw, err := io.ReadAll(io.LimitReader(request.Body, auditPayloadLimit))
+		// Only peek at bodies known to fit the capture limit. A larger or
+		// unknown-length body is left untouched, otherwise the handler would
+		// receive a truncated request.
+		if request.Body != nil && request.ContentLength > 0 && request.ContentLength <= auditPayloadLimit {
+			raw, err := io.ReadAll(request.Body)
 			_ = request.Body.Close()
 			request.Body = io.NopCloser(bytes.NewReader(raw))
 			if err == nil && len(raw) > 0 {
