@@ -139,14 +139,14 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 		t.Fatalf("update Skill = %d %s", updated.Code, updated.Body.String())
 	}
 
-	archive := []byte("PK\x03\x04test-skill-archive")
+	archive := skillArchive(t)
 	digest := sha256.Sum256(archive)
 	sha := hex.EncodeToString(digest[:])
 	objectKey := "skills/writer/2.0.0/" + sha + ".zip"
-	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs("writer", "2.0.0", objectKey, sha, int64(len(archive))).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`INSERT INTO skill_versions`).WithArgs("writer", "2.0.0", objectKey, sha, int64(len(archive))).
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(false))
 	uploaded := uploadSkillRequest(t, handler, adminToken, "/aep/v1/admin/skills/writer/versions", "2.0.0", archive)
-	if uploaded.Code != http.StatusCreated || !strings.Contains(uploaded.Body.String(), `"sha256":"`+sha+`"`) || !bytes.Equal(blobs.objects[objectKey], archive) {
+	if uploaded.Code != http.StatusCreated || !strings.Contains(uploaded.Body.String(), `"sha256":"`+sha+`"`) || !strings.Contains(uploaded.Body.String(), `"state":"draft"`) || !bytes.Equal(blobs.objects[objectKey], archive) {
 		t.Fatalf("upload Skill version = %d %s, stored = %q", uploaded.Code, uploaded.Body.String(), blobs.objects[objectKey])
 	}
 
@@ -176,6 +176,28 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/skills/writer", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete Skill = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+// Re-uploading an existing version replaces its package; the version number is
+// the key, so its publication state must survive (it must not take the Skill
+// offline for every agent).
+func TestAdminSkillReuploadKeepsPublished(t *testing.T) {
+	application, mock, _, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+	application.Blobs = newMemorySkillBlobStore()
+
+	archive := skillArchive(t)
+	digest := sha256.Sum256(archive)
+	sha := hex.EncodeToString(digest[:])
+	objectKey := "skills/writer/1.0.0/" + sha + ".zip"
+	mock.ExpectQuery(`INSERT INTO skill_versions`).WithArgs("writer", "1.0.0", objectKey, sha, int64(len(archive))).
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(true))
+	response := uploadSkillRequest(t, handler, adminToken, "/aep/v1/admin/skills/writer/versions", "1.0.0", archive)
+	if response.Code != http.StatusCreated ||
+		!strings.Contains(response.Body.String(), `"state":"published"`) ||
+		!strings.Contains(response.Body.String(), `"published":true`) {
+		t.Fatalf("re-upload of a published version = %d %s", response.Code, response.Body.String())
 	}
 }
 
@@ -330,8 +352,8 @@ func TestUserSkillManifestDownloadAndSync(t *testing.T) {
 	pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "writer", "2.0.0").
 		WillReturnRows(pgxmock.NewRows([]string{"object_key"}).AddRow("skills/writer/2.0.0/package.zip"))
 	download := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/skills/writer/versions/2.0.0/package", "")
-	if download.Code != http.StatusOK || download.Header().Get("Content-Type") != "application/zip" || download.Header().Get("Cache-Control") != "private, no-store" || download.Body.String() != "PK\x03\x04authorized-package" {
-		t.Fatalf("download Skill package = %d %q", download.Code, download.Body.String())
+	if download.Code != http.StatusOK || download.Header().Get("Content-Type") != "application/zip" || download.Header().Get("Cache-Control") != "private, no-store" || download.Header().Get("Content-Disposition") != `attachment; filename="writer-2.0.0.zip"` || download.Body.String() != "PK\x03\x04authorized-package" {
+		t.Fatalf("download Skill package = %d %q, disposition = %q", download.Code, download.Body.String(), download.Header().Get("Content-Disposition"))
 	}
 
 	pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "missing", "1.0.0").WillReturnError(pgx.ErrNoRows)

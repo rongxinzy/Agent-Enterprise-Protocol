@@ -2890,8 +2890,10 @@ components:
         - state
         - sha256
         - size
-        - createdAt
       properties:
+        skillId:
+          type: string
+          description: Present on the upload response.
         version:
           $ref: '#/components/schemas/SkillVersionIdentifier'
         state:
@@ -2911,6 +2913,9 @@ components:
         createdAt:
           type: string
           format: date-time
+        published:
+          type: boolean
+          description: Legacy boolean mirror of state (state == published); a re-upload keeps the stored value.
     AdminSkill:
       type: object
       required:

@@ -235,6 +235,10 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusRequestEntityTooLarge, "PACKAGE_TOO_LARGE", "The Skill package exceeds 32 MiB.")
 		return
 	}
+	if err := validateSkillPackage(archive); err != nil {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
+		return
+	}
 	digest := sha256.Sum256(archive)
 	sha := hex.EncodeToString(digest[:])
 	objectKey, ok := skillObjectKey(skillID, version, sha)
@@ -246,14 +250,20 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		databaseFailure(response, request, err)
 		return
 	}
-	err = s.app.Store.UpsertSkillVersion(request.Context(), repository.SkillVersion{
+	published, err := s.app.Store.UpsertSkillVersion(request.Context(), repository.SkillVersion{
 		SkillID: skillID, Version: version, ObjectKey: objectKey, SHA256: sha, SizeBytes: int64(len(archive)),
 	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"skillId": skillID, "version": version, "sha256": sha, "size": len(archive), "published": false})
+	// Re-uploading an existing version keeps its publication state, so report
+	// what is actually stored instead of assuming a draft.
+	state := "draft"
+	if published {
+		state = "published"
+	}
+	writeJSON(response, http.StatusCreated, map[string]any{"skillId": skillID, "version": version, "sha256": sha, "size": len(archive), "state": state, "published": published})
 }
 
 func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http.Request) {
@@ -484,6 +494,10 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 	defer func() { _ = object.Close() }()
 	response.Header().Set("Content-Type", "application/zip")
 	response.Header().Set("Cache-Control", "private, no-store")
+	// A client that saves the package to disk needs a name for it. The Skill
+	// and version identifiers are already restricted to a filename-safe
+	// character set, so the name needs no escaping.
+	response.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", skillID+"-"+version+".zip"))
 	_, _ = io.Copy(response, object)
 }
 

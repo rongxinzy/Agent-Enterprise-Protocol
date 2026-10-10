@@ -190,15 +190,15 @@ func TestAdminSkillVersionFailureBoundaries(t *testing.T) {
 	t.Run("blob upload", func(t *testing.T) {
 		application, _, _, token := newUserHTTPApplication(t)
 		application.Blobs = &memorySkillBlobStore{objects: make(map[string][]byte), putErr: errors.New("blob unavailable")}
-		response := uploadSkillRequest(t, New(application).Handler(), token, "/aep/v1/admin/skills/writer/versions", "1.0.0", []byte("archive"))
+		response := uploadSkillRequest(t, New(application).Handler(), token, "/aep/v1/admin/skills/writer/versions", "1.0.0", skillArchive(t))
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 
 	t.Run("version upsert", func(t *testing.T) {
 		application, mock, _, token := newUserHTTPApplication(t)
 		application.Blobs = newMemorySkillBlobStore()
-		mock.ExpectExec(`INSERT INTO skill_versions`).WillReturnError(errors.New("version unavailable"))
-		response := uploadSkillRequest(t, New(application).Handler(), token, "/aep/v1/admin/skills/writer/versions", "1.0.0", []byte("archive"))
+		mock.ExpectQuery(`INSERT INTO skill_versions`).WillReturnError(errors.New("version unavailable"))
+		response := uploadSkillRequest(t, New(application).Handler(), token, "/aep/v1/admin/skills/writer/versions", "1.0.0", skillArchive(t))
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 
