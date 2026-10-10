@@ -479,7 +479,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符；创建、导入或重置时设置的临时密码不允许前后空白字符（`PASSWORD_POLICY_VIOLATION`）。创建或导入未提供临时密码时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符。临时密码的前后空白：创建或重置时拒绝（`PASSWORD_POLICY_VIOLATION`）；导入时则去除（trim），因为导入行来自导出文件和电子表格。创建或导入未提供临时密码（或导入 trim 后为空）时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
 
 ### RBAC 与会话
 

@@ -97,19 +97,23 @@ func TestAdminUserCreateAndImportAssignDefaultPassword(t *testing.T) {
 		t.Fatalf("create without password = %d %s", created.Code, created.Body.String())
 	}
 
-	// Import: a row without a password gets the default; a padded row is
-	// rejected with a whitespace detail.
-	mock.ExpectBegin()
-	mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(`INSERT INTO "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(`INSERT INTO "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
+	// Import: a row without a password gets the default; padded and
+	// whitespace-only passwords are trimmed (and fall back to the default when
+	// nothing remains), so all three rows are created.
+	for range 3 {
+		mock.ExpectBegin()
+		mock.ExpectExec(`INSERT INTO "users"`).WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec(`INSERT INTO "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec(`INSERT INTO "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+	}
 	body := `{"deploymentId":"deployment-a","users":[` +
 		`{"externalRowId":"row-1","username":"alice","displayName":"Alice","roleIds":["member"],"teamIds":["engineering"]},` +
-		`{"externalRowId":"row-2","username":"padded","displayName":"Padded","temporaryPassword":" pad-password-123 ","roleIds":["member"],"teamIds":["engineering"]}]}`
+		`{"externalRowId":"row-2","username":"padded","displayName":"Padded","temporaryPassword":" pad-password-123 ","roleIds":["member"],"teamIds":["engineering"]},` +
+		`{"externalRowId":"row-3","username":"spaces","displayName":"Spaces","temporaryPassword":"   ","roleIds":["member"],"teamIds":["engineering"]}]}`
 	imported := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users/import", body)
-	if imported.Code != http.StatusOK || !strings.Contains(imported.Body.String(), `"created":1`) || !strings.Contains(imported.Body.String(), `"rejected":1`) || !strings.Contains(imported.Body.String(), `"PASSWORD_POLICY_VIOLATION"`) || !strings.Contains(imported.Body.String(), "whitespace") {
-		t.Fatalf("import default and whitespace = %d %s", imported.Code, imported.Body.String())
+	if imported.Code != http.StatusOK || !strings.Contains(imported.Body.String(), `"created":3`) || !strings.Contains(imported.Body.String(), `"rejected":0`) {
+		t.Fatalf("import default and trim = %d %s", imported.Code, imported.Body.String())
 	}
 }
 

@@ -2077,7 +2077,7 @@ export interface components {
             displayName: string;
             /** Format: email */
             email?: string | null;
-            /** @description Defaults to `123456` when omitted or empty. Must not start or end with whitespace; the row is rejected otherwise. */
+            /** @description Leading and trailing whitespace is trimmed (imports come from exports and spreadsheets). Defaults to `123456` when omitted, empty, or reduced to empty after trimming. */
             temporaryPassword?: string;
             teamIds: string[];
             roleIds: string[];

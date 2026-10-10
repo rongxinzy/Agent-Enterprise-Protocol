@@ -123,6 +123,10 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 			errorsResult = append(errorsResult, map[string]string{"externalRowId": item.ExternalRowID, "code": code, "detail": detail})
 			continue
 		}
+		// Imported rows come from exports and spreadsheets: edge whitespace is
+		// data noise, so trim instead of rejecting the row. A whitespace-only
+		// password falls through to the default below.
+		item.TemporaryPassword = auth.TrimPassword(item.TemporaryPassword)
 		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: item.TeamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
 		if err != nil {
 			code := "USER_IMPORT_FAILED"
