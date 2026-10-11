@@ -252,7 +252,7 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 		resourceID = &input.Resource.ID
 		resourceRevision = &input.Resource.Revision
 	}
-	_, err = tx.Exec(request.Context(), `INSERT INTO control_events (event_id,deployment_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, eventID, claims.DeploymentID, input.Type, input.Scope.Type, input.Scope.ID, resourceType, resourceID, resourceRevision, input.Task.Type, input.SupersedesKey, input.ExpiresAt, claims.Subject)
+	_, err = tx.Exec(request.Context(), `INSERT INTO control_events (event_id,deployment_id,type,scope_type,scope_id,resource_type,resource_id,resource_revision,task_type,supersedes_key,expires_at,created_by,include_descendants) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, eventID, claims.DeploymentID, input.Type, input.Scope.Type, input.Scope.ID, resourceType, resourceID, resourceRevision, input.Task.Type, input.SupersedesKey, input.ExpiresAt, claims.Subject, input.Scope.IncludeDescendants)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -272,20 +272,25 @@ func (s *Server) createControlEvent(response http.ResponseWriter, request *http.
 	// and re-inserted it row by row — 135ms at 383 sessions, growing
 	// linearly. RowsAffected counts deliveries actually created, which is
 	// the pending summary (ON CONFLICT dedupes; session_id is unique).
-	tag, err := tx.Exec(request.Context(), `INSERT INTO session_control_deliveries (delivery_id,event_id,session_id)
+	tag, err := tx.Exec(request.Context(), `WITH RECURSIVE scope_teams(id) AS (
+  SELECT t.id FROM teams t WHERE t.deployment_id=$2 AND t.id=$4
+  UNION ALL
+  SELECT c.id FROM teams c JOIN scope_teams p ON c.parent_team_id=p.id WHERE c.deployment_id=$2 AND $5
+)
+INSERT INTO session_control_deliveries (delivery_id,event_id,session_id)
 SELECT gen_random_uuid()::text,$1,s.session_id
 FROM user_sessions s
 JOIN users u ON u.id=s.user_id AND u.deployment_id=$2
 WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
   AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (
     SELECT 1 FROM user_team_bindings utb
-    WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4
+    WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id IN (SELECT id FROM scope_teams)
   )) OR ($3='role' AND EXISTS (
     SELECT 1 FROM user_role_bindings urb
     JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
     WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4
   )))
-ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, claims.DeploymentID, input.Scope.Type, input.Scope.ID)
+ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, claims.DeploymentID, input.Scope.Type, input.Scope.ID, input.Scope.IncludeDescendants)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
