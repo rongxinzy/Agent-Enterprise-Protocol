@@ -99,6 +99,12 @@ func skillVersionColumns() []string {
 	return []string{"skill_id", "version", "object_key", "sha256", "size_bytes", "published", "created_at", "published_at"}
 }
 
+func expectSkillAdminAudit(pool pgxmock.PgxPoolIface, action, skillID string) {
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs("deployment-a", "admin-user", action, "skill", nullableString(skillID), nil, pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+}
+
 func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	application, mock, pool, adminToken := newUserHTTPApplication(t)
 	blobs := newMemorySkillBlobStore()
@@ -118,6 +124,7 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "skills"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
+	expectSkillAdminAudit(pool, "create", "")
 	created := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/skills", `{"name":"Writer","description":"Draft content","enabled":true}`)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"id":"writer"`) || !strings.Contains(created.Body.String(), `"state":"active"`) {
 		t.Fatalf("create Skill = %d %s", created.Code, created.Body.String())
@@ -142,6 +149,7 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO telemetry_events`).
 		WithArgs(pgxmock.AnyArg(), "deployment-a", "admin-user", "session-admin", "skill.updated", "skill", "writer", "success", pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSkillAdminAudit(pool, "update", "writer")
 	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/skills/writer", `{"name":"Writer 2","description":"Updated","state":"withdrawn"}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"state":"withdrawn"`) || !strings.Contains(updated.Body.String(), `"enabled":false`) {
 		t.Fatalf("update Skill = %d %s", updated.Code, updated.Body.String())
@@ -151,13 +159,14 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	digest := sha256.Sum256(archive)
 	sha := hex.EncodeToString(digest[:])
 	objectKey := "skills/writer/2.0.0/" + sha + ".zip"
-	mock.ExpectExec(`INSERT INTO skill_versions`).WithArgs("writer", "2.0.0", objectKey, sha, int64(len(archive))).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`INSERT INTO skill_versions`).WithArgs("writer", "2.0.0", objectKey, sha, int64(len(archive))).
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(false))
 	pool.ExpectExec(`INSERT INTO telemetry_events`).
 		WithArgs(pgxmock.AnyArg(), "deployment-a", "admin-user", "session-admin", "skill.version.uploaded", "skill", "writer", "success", pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSkillAdminAudit(pool, "create", "writer")
 	uploaded := uploadSkillRequest(t, handler, adminToken, "/aep/v1/admin/skills/writer/versions", "2.0.0", archive)
-	if uploaded.Code != http.StatusCreated || !strings.Contains(uploaded.Body.String(), `"sha256":"`+sha+`"`) || !bytes.Equal(blobs.objects[objectKey], archive) {
+	if uploaded.Code != http.StatusCreated || !strings.Contains(uploaded.Body.String(), `"sha256":"`+sha+`"`) || !strings.Contains(uploaded.Body.String(), `"state":"draft"`) || !bytes.Equal(blobs.objects[objectKey], archive) {
 		t.Fatalf("upload Skill version = %d %s, stored = %q", uploaded.Code, uploaded.Body.String(), blobs.objects[objectKey])
 	}
 
@@ -168,6 +177,7 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO telemetry_events`).
 		WithArgs(pgxmock.AnyArg(), "deployment-a", "admin-user", "session-admin", "skill.version.published", "skill", "writer", "success", pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSkillAdminAudit(pool, "publish", "writer")
 	published := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/skills/writer/versions/2.0.0/publish", "")
 	if published.Code != http.StatusOK || !strings.Contains(published.Body.String(), `"published":true`) {
 		t.Fatalf("publish Skill version = %d %s", published.Code, published.Body.String())
@@ -181,6 +191,7 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO telemetry_events`).
 		WithArgs(pgxmock.AnyArg(), "deployment-a", "admin-user", "session-admin", "skill.version.withdrawn", "skill", "writer", "success", pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSkillAdminAudit(pool, "delete", "writer")
 	deletedVersion := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/skills/writer/versions/2.0.0", "")
 	if deletedVersion.Code != http.StatusNoContent || len(blobs.deleted) != 1 || blobs.deleted[0] != objectKey {
 		t.Fatalf("delete Skill version = %d %s, deleted = %#v", deletedVersion.Code, deletedVersion.Body.String(), blobs.deleted)
@@ -193,9 +204,36 @@ func TestAdminSkillResourceAndVersionLifecycle(t *testing.T) {
 	pool.ExpectExec(`INSERT INTO telemetry_events`).
 		WithArgs(pgxmock.AnyArg(), "deployment-a", "admin-user", "session-admin", "skill.deleted", "skill", "writer", "success", pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSkillAdminAudit(pool, "delete", "writer")
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/skills/writer", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete Skill = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+// Re-uploading an existing version replaces its package; the version number is
+// the key, so its publication state must survive (it must not take the Skill
+// offline for every agent).
+func TestAdminSkillReuploadKeepsPublished(t *testing.T) {
+	application, mock, pool, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+	application.Blobs = newMemorySkillBlobStore()
+
+	archive := skillArchive(t)
+	digest := sha256.Sum256(archive)
+	sha := hex.EncodeToString(digest[:])
+	objectKey := "skills/writer/1.0.0/" + sha + ".zip"
+	mock.ExpectQuery(`INSERT INTO skill_versions`).WithArgs("writer", "1.0.0", objectKey, sha, int64(len(archive))).
+		WillReturnRows(sqlmock.NewRows([]string{"published"}).AddRow(true))
+	pool.ExpectExec(`INSERT INTO telemetry_events`).
+		WithArgs(pgxmock.AnyArg(), "deployment-a", "admin-user", "session-admin", "skill.version.uploaded", "skill", "writer", "success", pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSkillAdminAudit(pool, "create", "writer")
+	response := uploadSkillRequest(t, handler, adminToken, "/aep/v1/admin/skills/writer/versions", "1.0.0", archive)
+	if response.Code != http.StatusCreated ||
+		!strings.Contains(response.Body.String(), `"state":"published"`) ||
+		!strings.Contains(response.Body.String(), `"published":true`) {
+		t.Fatalf("re-upload of a published version = %d %s", response.Code, response.Body.String())
 	}
 }
 
