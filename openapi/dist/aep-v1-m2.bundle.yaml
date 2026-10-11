@@ -4188,7 +4188,7 @@ components:
           $ref: '#/components/schemas/EventResource'
         result:
           $ref: '#/components/schemas/EventResult'
-        metadata:
+        data:
           type: object
           additionalProperties: true
     EventBatchRequest:

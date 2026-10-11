@@ -816,7 +816,7 @@ components:
         occurredAt: {type: string, format: date-time}
         resource: {$ref: '#/components/schemas/EventResource'}
         result: {$ref: '#/components/schemas/EventResult'}
-        metadata: {type: object, additionalProperties: true}
+        data: {type: object, additionalProperties: true}
     EventResource:
       type: object
       required: [type, id]
