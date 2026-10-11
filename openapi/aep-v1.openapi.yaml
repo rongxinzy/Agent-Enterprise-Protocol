@@ -452,6 +452,8 @@ paths:
       operationId: deleteModel
       responses:
         '204': {description: Model removed}
+  /admin/models/{modelId}/pricing:
+    $ref: './aep-v1-model-pricing.openapi.yaml#/paths/~1admin~1models~1{modelId}~1pricing'
   /admin/model-assignments:
     get:
       tags: [Admin Models]

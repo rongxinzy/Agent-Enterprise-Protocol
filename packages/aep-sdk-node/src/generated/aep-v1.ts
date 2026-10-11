@@ -1115,6 +1115,26 @@ export interface paths {
         patch: operations["updateModel"];
         trace?: never;
     };
+    "/aep/v1/admin/models/{modelId}/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        /** @description Requires models.read. An existing model without configured prices returns version zero and null pricing. */
+        get: operations["getModelPricing"];
+        /** @description Requires models.write. Saves reference prices in the authenticated deployment. expectedVersion prevents overwriting concurrent edits. Null pricing clears the configuration while retaining a monotonically increasing version. Prices are not automatically published to Higress or used to calculate costs. */
+        put: operations["putModelPricing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/model-assignments": {
         parameters: {
             query?: never;
@@ -2717,6 +2737,28 @@ export interface components {
             contextWindow?: number;
             isDefault?: boolean;
             enabled?: boolean;
+        };
+        /** @description Nonnegative exact decimal amount per one million tokens; zero is explicitly free, absence is unknown. */
+        ModelTokenPrice: string;
+        ModelPriceConfiguration: {
+            /** @description Three-letter currency code; no currency conversion is performed. */
+            currency: string;
+            inputPricePerMillionTokens: components["schemas"]["ModelTokenPrice"];
+            outputPricePerMillionTokens: components["schemas"]["ModelTokenPrice"];
+            cachedInputPricePerMillionTokens?: components["schemas"]["ModelTokenPrice"];
+            /** @description Optional operator-supplied pricing reference or note, displayed as plain text. */
+            source?: string;
+        };
+        ModelPricing: {
+            modelId: string;
+            version: number;
+            pricing: components["schemas"]["ModelPriceConfiguration"] | null;
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
+        ModelPricingWrite: {
+            pricing: components["schemas"]["ModelPriceConfiguration"] | null;
+            expectedVersion: number;
         };
         ModelSubject: {
             /** @enum {string} */
@@ -5162,6 +5204,62 @@ export interface operations {
         };
         responses: {
             200: components["responses"]["AdminModel"];
+        };
+    };
+    getModelPricing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current reference prices; no runtime billing or historical cost calculation is implied. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPricing"];
+                };
+            };
+            401: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    putModelPricing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modelId: components["parameters"]["ModelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelPricingWrite"];
+            };
+        };
+        responses: {
+            /** @description Saved configuration and new version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPricing"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            401: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
         };
     };
     listModelAssignments: {
