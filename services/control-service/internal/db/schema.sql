@@ -243,6 +243,7 @@ CREATE TABLE IF NOT EXISTS control_events (
   state text NOT NULL DEFAULT 'active',
   expires_at timestamptz NOT NULL,
   created_by text NOT NULL REFERENCES users(id),
+  include_descendants boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

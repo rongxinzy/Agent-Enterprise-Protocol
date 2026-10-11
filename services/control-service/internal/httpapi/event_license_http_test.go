@@ -88,6 +88,75 @@ func TestHeartbeatAndControlDeliveryLifecycle(t *testing.T) {
 	}
 }
 
+func TestCreateControlEventExpandsTeamDescendants(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	handler := New(application).Handler()
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+	pool.ExpectBegin()
+	pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
+		pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "team", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), true,
+	).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	// includeDescendants=true must fan out through the recursive team subtree.
+	pool.ExpectExec(`WITH RECURSIVE scope_teams`).WithArgs(pgxmock.AnyArg(), "deployment-a", "team", pgxmock.AnyArg(), true).WillReturnResult(pgxmock.NewResult("INSERT", 5))
+	pool.ExpectCommit()
+	created := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events",
+		`{"type":"skill.manifest.changed","scope":{"type":"team","id":"team-root","includeDescendants":true},"task":{"type":"skill.reconcile"},"expiresAt":"`+future+`"}`)
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"pending":5`) {
+		t.Fatalf("created descendant event = %d %s", created.Code, created.Body.String())
+	}
+}
+
+func TestCreateControlEventExactTeamResourceAndFanoutFailure(t *testing.T) {
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+
+	t.Run("exact team without descendants", func(t *testing.T) {
+		application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+		handler := New(application).Handler()
+		pool.ExpectBegin()
+		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
+			pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "team", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), false,
+		).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`WITH RECURSIVE scope_teams`).WithArgs(pgxmock.AnyArg(), "deployment-a", "team", pgxmock.AnyArg(), false).WillReturnResult(pgxmock.NewResult("INSERT", 2))
+		pool.ExpectCommit()
+		created := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events",
+			`{"type":"skill.manifest.changed","scope":{"type":"team","id":"team-leaf","includeDescendants":false},"task":{"type":"skill.reconcile"},"expiresAt":"`+future+`"}`)
+		if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"pending":2`) {
+			t.Fatalf("exact team event = %d %s", created.Code, created.Body.String())
+		}
+	})
+
+	t.Run("resource payload with descendant fan-out", func(t *testing.T) {
+		application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+		handler := New(application).Handler()
+		pool.ExpectBegin()
+		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
+			pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "team", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), true,
+		).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`WITH RECURSIVE scope_teams`).WithArgs(pgxmock.AnyArg(), "deployment-a", "team", pgxmock.AnyArg(), true).WillReturnResult(pgxmock.NewResult("INSERT", 3))
+		pool.ExpectCommit()
+		created := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events",
+			`{"type":"skill.manifest.changed","scope":{"type":"team","id":"team-root","includeDescendants":true},"resource":{"type":"skill","id":"skill-a","revision":"rev-1"},"task":{"type":"skill.reconcile"},"expiresAt":"`+future+`"}`)
+		if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"pending":3`) || !strings.Contains(created.Body.String(), `"id":"skill-a"`) {
+			t.Fatalf("resource descendant event = %d %s", created.Code, created.Body.String())
+		}
+	})
+
+	t.Run("descendant fan-out failure", func(t *testing.T) {
+		application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+		handler := New(application).Handler()
+		pool.ExpectBegin()
+		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
+			pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "team", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), true,
+		).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+		pool.ExpectExec(`WITH RECURSIVE scope_teams`).WithArgs(pgxmock.AnyArg(), "deployment-a", "team", pgxmock.AnyArg(), true).WillReturnError(errors.New("fan-out unavailable"))
+		failed := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events",
+			`{"type":"skill.manifest.changed","scope":{"type":"team","id":"team-root","includeDescendants":true},"task":{"type":"skill.reconcile"},"expiresAt":"`+future+`"}`)
+		if failed.Code != http.StatusInternalServerError {
+			t.Fatalf("fan-out failure = %d %s", failed.Code, failed.Body.String())
+		}
+	})
+}
+
 func TestControlEventValidationAndAdminQueries(t *testing.T) {
 	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
 	handler := New(application).Handler()
@@ -104,9 +173,9 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 
 	pool.ExpectBegin()
 	pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
-		pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "global", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+		pgxmock.AnyArg(), "deployment-a", "skill.manifest.changed", "global", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), "skill.reconcile", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), false,
 	).WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "global", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectExec(`INSERT INTO session_control_deliveries`).WithArgs(pgxmock.AnyArg(), "deployment-a", "global", pgxmock.AnyArg(), false).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectCommit()
 	created := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/control-events", `{"type":"skill.manifest.changed","scope":{"type":"global"},"task":{"type":"skill.reconcile"},"expiresAt":"`+future+`"}`)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"pending":1`) {
