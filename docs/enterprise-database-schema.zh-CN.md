@@ -289,6 +289,11 @@ UQ：`(event_id, session_id)`。
 
 `telemetry_events.event_id` 提供重复上报去重语义。
 
+`telemetry_events` 同时承载控制面自身写入的管理动作（如 Skill 生命周期：`skill.created`、
+`skill.updated`、`skill.deleted`、`skill.version.uploaded`、`skill.version.published`、
+`skill.version.withdrawn`）；这类行的 `user_id` 是操作管理员，`session_id` 是其会话。
+Agent 上报行的语义不变。
+
 ## 数据平面
 
 ### `data_plane_desired_states`

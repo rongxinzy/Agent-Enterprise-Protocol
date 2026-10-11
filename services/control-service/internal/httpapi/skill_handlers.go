@@ -67,12 +67,15 @@ func (s *Server) createSkill(response http.ResponseWriter, request *http.Request
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
+			s.recordSkillAudit(request, "skill.created", "skill", identifier, "failure", map[string]any{"name": input.Name, "code": "SKILL_ALREADY_EXISTS"})
 			writeProblem(response, request, http.StatusConflict, "SKILL_ALREADY_EXISTS", "The Skill already exists.")
 			return
 		}
+		s.recordSkillAudit(request, "skill.created", "skill", identifier, "failure", map[string]any{"name": input.Name, "code": "INTERNAL_ERROR"})
 		databaseFailure(response, request, err)
 		return
 	}
+	s.recordSkillAudit(request, "skill.created", "skill", skill.ID, "success", map[string]any{"name": skill.Name, "enabled": skill.Enabled})
 	writeJSON(response, http.StatusCreated, skillJSON(skill, nil))
 }
 
@@ -117,14 +120,17 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_STATE", err.Error())
 		return
 	}
+	changed := skillChangedFields(input.Name, input.Description, enabled)
 	skill, err := s.app.Store.UpdateSkill(request.Context(), skillID, repository.UpdateSkillParams{
 		Name: input.Name, Description: input.Description, Enabled: enabled,
 	})
 	if errors.Is(err, repository.ErrNotFound) {
+		s.recordSkillAudit(request, "skill.updated", "skill", skillID, "failure", map[string]any{"code": "RESOURCE_NOT_FOUND", "changed": changed})
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
 		return
 	}
 	if err != nil {
+		s.recordSkillAudit(request, "skill.updated", "skill", skillID, "failure", map[string]any{"code": "INTERNAL_ERROR", "changed": changed})
 		databaseFailure(response, request, err)
 		return
 	}
@@ -133,6 +139,7 @@ func (s *Server) updateSkill(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, versionErr)
 		return
 	}
+	s.recordSkillAudit(request, "skill.updated", "skill", skill.ID, "success", map[string]any{"changed": changed})
 	writeJSON(response, http.StatusOK, skillJSON(skill, versions))
 }
 
@@ -150,17 +157,26 @@ func (s *Server) deleteSkill(response http.ResponseWriter, request *http.Request
 	references, err := s.app.Store.DeleteSkill(request.Context(), skillID, force)
 	switch {
 	case errors.Is(err, repository.ErrSkillInUse):
+		s.recordSkillAudit(request, "skill.deleted", "skill", skillID, "failure", map[string]any{
+			"code": "SKILL_IN_USE", "force": force,
+			"promptBindings": references.PromptBindings, "assignments": references.Assignments,
+		})
 		writeProblem(response, request, http.StatusConflict, "SKILL_IN_USE", fmt.Sprintf(
 			"The Skill cannot be deleted: %d digital-employee prompt binding(s) and %d assignment(s) still reference it. Retry with ?force=true to delete it and drop those references.",
 			references.PromptBindings, references.Assignments))
 		return
 	case errors.Is(err, repository.ErrNotFound):
+		s.recordSkillAudit(request, "skill.deleted", "skill", skillID, "failure", map[string]any{"code": "RESOURCE_NOT_FOUND", "force": force})
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
 		return
 	case err != nil:
+		s.recordSkillAudit(request, "skill.deleted", "skill", skillID, "failure", map[string]any{"code": "INTERNAL_ERROR", "force": force})
 		databaseFailure(response, request, err)
 		return
 	}
+	s.recordSkillAudit(request, "skill.deleted", "skill", skillID, "success", map[string]any{
+		"force": force, "promptBindings": references.PromptBindings, "assignments": references.Assignments,
+	})
 	response.WriteHeader(http.StatusNoContent)
 }
 
@@ -254,9 +270,11 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		SkillID: skillID, Version: version, ObjectKey: objectKey, SHA256: sha, SizeBytes: int64(len(archive)),
 	})
 	if err != nil {
+		s.recordSkillAudit(request, "skill.version.uploaded", "skill", skillID, "failure", map[string]any{"version": version, "sha256": sha, "code": "INTERNAL_ERROR"})
 		databaseFailure(response, request, err)
 		return
 	}
+	s.recordSkillAudit(request, "skill.version.uploaded", "skill", skillID, "success", map[string]any{"version": version, "sha256": sha, "size": len(archive)})
 	// Re-uploading an existing version keeps its publication state, so report
 	// what is actually stored instead of assuming a draft.
 	state := "draft"
@@ -273,13 +291,16 @@ func (s *Server) publishSkillVersion(response http.ResponseWriter, request *http
 	}
 	err := s.app.Store.PublishSkillVersion(request.Context(), skillID, version)
 	if errors.Is(err, repository.ErrNotFound) {
+		s.recordSkillAudit(request, "skill.version.published", "skill", skillID, "failure", map[string]any{"version": version, "code": "RESOURCE_NOT_FOUND"})
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
 		return
 	}
 	if err != nil {
+		s.recordSkillAudit(request, "skill.version.published", "skill", skillID, "failure", map[string]any{"version": version, "code": "INTERNAL_ERROR"})
 		databaseFailure(response, request, err)
 		return
 	}
+	s.recordSkillAudit(request, "skill.version.published", "skill", skillID, "success", map[string]any{"version": version})
 	writeJSON(response, http.StatusOK, map[string]any{"skillId": skillID, "version": version, "published": true})
 }
 
@@ -290,13 +311,19 @@ func (s *Server) deleteSkillVersion(response http.ResponseWriter, request *http.
 	}
 	objectKey, err := s.app.Store.DeleteSkillVersion(request.Context(), skillID, version)
 	if errors.Is(err, repository.ErrNotFound) {
+		s.recordSkillAudit(request, "skill.version.withdrawn", "skill", skillID, "failure", map[string]any{"version": version, "code": "RESOURCE_NOT_FOUND"})
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill version was not found.")
 		return
 	}
 	if err != nil {
+		s.recordSkillAudit(request, "skill.version.withdrawn", "skill", skillID, "failure", map[string]any{"version": version, "code": "INTERNAL_ERROR"})
 		databaseFailure(response, request, err)
 		return
 	}
+	// The version row is the authoritative change agents reconcile against, so
+	// it is audited as soon as the delete commits; the package cleanup below
+	// only reclaims storage.
+	s.recordSkillAudit(request, "skill.version.withdrawn", "skill", skillID, "success", map[string]any{"version": version})
 	if err := s.app.Blobs.Delete(request.Context(), objectKey); err != nil {
 		databaseFailure(response, request, err)
 		return
