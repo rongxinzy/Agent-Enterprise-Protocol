@@ -96,14 +96,44 @@ func TestReportDeliveryResultStateBoundaries(t *testing.T) {
 
 	application, pool, _, userToken = newRuntimeHTTPApplication(t)
 	pool.ExpectExec(`UPDATE session_control_deliveries SET state=`).WithArgs("delivery-1", "session-user", "succeeded", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnRows(pgxmock.NewRows([]string{"state"}).AddRow("expired"))
 	conflict := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"succeeded"}`)
 	if conflict.Code != http.StatusConflict {
 		t.Fatalf("result state conflict = %d %s", conflict.Code, conflict.Body.String())
+	}
+
+	// A recorded success is immutable: a repeat report is a no-op, not a rewrite.
+	application, pool, _, userToken = newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries SET state=`).WithArgs("delivery-1", "session-user", "succeeded", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnRows(pgxmock.NewRows([]string{"state"}).AddRow("succeeded"))
+	repeat := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"succeeded"}`)
+	if repeat.Code != http.StatusNoContent {
+		t.Fatalf("repeat success = %d %s", repeat.Code, repeat.Body.String())
 	}
 
 	application, _, _, userToken = newRuntimeHTTPApplication(t)
 	invalid := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"unknown"}`)
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid result status = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestReportDeliveryResultMissingDelivery(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries SET state=`).WithArgs("delivery-1", "session-user", "succeeded", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnRows(pgxmock.NewRows([]string{"state"}))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"succeeded"}`)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing delivery result = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestReportDeliveryResultLookupFailure(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries SET state=`).WithArgs("delivery-1", "session-user", "succeeded", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnError(errors.New("lookup failed"))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/result", `{"status":"succeeded"}`)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("result lookup failure = %d %s", response.Code, response.Body.String())
 	}
 }

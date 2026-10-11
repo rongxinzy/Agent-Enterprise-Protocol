@@ -191,6 +191,11 @@ Agent 将可重试失败保留在本地 outbox 中。
 `credential.resolved`、`credential.resolve_failed`、`model.request.completed` 和
 `model.request.failed`。
 
+控制面还会把对 Skill 的管理动作写入同一存储，使其出现在操作日志中：`skill.created`、
+`skill.updated`、`skill.deleted`、`skill.version.uploaded`、
+`skill.version.published`、`skill.version.withdrawn`。这类事件的 `userId` 为操作管理员，
+`result` 为 `success` 或 `failure`。
+
 遥测事件元数据不得包含 token、API Key 或完整模型输入输出，除非另有企业策略明确启用。
 
 ### 9.2 管控事件作用域

@@ -491,12 +491,20 @@ func (a *App) IssueUserSession(ctx context.Context, user repository.User, client
 	// private delivery cursor. Acknowledging one terminal must never consume a
 	// sibling terminal's copy.
 	if _, err := tx.Exec(ctx, `
+WITH RECURSIVE event_teams(event_id,id) AS (
+  SELECT e.event_id, e.scope_id FROM control_events e
+  WHERE e.deployment_id=$2 AND e.state='active' AND e.expires_at>now() AND e.scope_type='team' AND e.include_descendants
+  UNION ALL
+  SELECT et.event_id, c.id FROM teams c JOIN event_teams et ON c.parent_team_id=et.id WHERE c.deployment_id=$2
+)
 INSERT INTO session_control_deliveries (delivery_id,event_id,session_id)
 SELECT gen_random_uuid()::text,e.event_id,$1
 FROM control_events e
 WHERE e.deployment_id=$2 AND e.state='active' AND e.expires_at>now()
   AND (e.scope_type='global' OR (e.scope_type='user' AND e.scope_id=$3)
-    OR (e.scope_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=$3 AND utb.team_id=e.scope_id))
+    OR (e.scope_type='team' AND (
+        (e.include_descendants AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN event_teams et ON et.event_id=e.event_id AND et.id=utb.team_id WHERE utb.deployment_id=$2 AND utb.user_id=$3))
+        OR (NOT e.include_descendants AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=$3 AND utb.team_id=e.scope_id))))
     OR (e.scope_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=$3 AND urb.role_id=e.scope_id)))
 ON CONFLICT (event_id,session_id) DO NOTHING`, sessionID, a.DeploymentID(), user.ID); err != nil {
 		return TokenResponse{}, err
