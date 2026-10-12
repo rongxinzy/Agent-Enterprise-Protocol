@@ -33,8 +33,16 @@ exposes that distinction. Pin a previously returned `expectedDefinition` to its
 `definition.id` when keeping the same semantics. A changed selected definition
 returns 422 `GATEWAY_METRIC_DEFINITION_MISMATCH` before any source request.
 
-`windowSeconds` is each point's native lookback: 120 seconds for rate queries,
-otherwise `step` (default 60). `step` controls output sampling and may differ
+`windowSeconds` is each point's native lookback: `max(step, 120)` seconds for AI
+mean durations, 120 seconds for infrastructure rates, otherwise `step` (default
+60). AI durations use Prometheus `sum(rate(duration[window])) /
+sum(rate(count[window]))` with matching label groups. This standard counter mean
+includes sparse completions across the window and handles counter resets, rather
+than depending on only the final two scrapes (`irate`). First Token duration uses
+the streaming-completion counter; non-streaming calls do not add first Token
+samples. Windows with no corresponding completions remain unknown; missing
+samples are never replaced with old values or zeros.
+`step` controls output sampling and may differ
 from the lookback. Counter series are not whole-period totals. Missing usage,
 empty series and unknown values are not zero-filled.
 

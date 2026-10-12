@@ -57,7 +57,7 @@ func DescribeMetric(source string, values url.Values) (MetricDefinition, error) 
 		definition.ID, definition.Unit, definition.Aggregation = "ai_detected_failures", "requests", "counter_increase"
 	case "first_token_duration", "service_duration":
 		definition.ID, definition.Unit, definition.Aggregation = "ai_usage_mean_"+metric, "milliseconds", "counter_rate_mean"
-		definition.WindowSeconds = 120
+		definition.WindowSeconds = durationWindow(step)
 	case "downstream_qps", "upstream_qps":
 		definition.ID, definition.Unit, definition.Aggregation = "envoy_"+metric, "requests_per_second", "instantaneous_rate"
 		definition.WindowSeconds = 120
