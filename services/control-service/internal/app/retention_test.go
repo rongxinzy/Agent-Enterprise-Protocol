@@ -26,6 +26,7 @@ func TestCleanupRetentionDeletesBoundedExpiredData(t *testing.T) {
 	expectRetentionDelete(pool, `DELETE FROM authentication_audit_events`, now.Add(-application.Config.AuditRetention), 100, 1)
 	expectRetentionDelete(pool, `DELETE FROM credential_resolution_audit`, now.Add(-application.Config.AuditRetention), 100, 2)
 	expectRetentionDelete(pool, `DELETE FROM license_audit_events`, now.Add(-application.Config.AuditRetention), 100, 3)
+	expectRetentionDelete(pool, `DELETE FROM admin_audit_events`, now.Add(-application.Config.AuditRetention), 100, 12)
 	expectRetentionDelete(pool, `DELETE FROM telemetry_events`, now.Add(-application.Config.TelemetryRetention), 100, 4)
 	expectRetentionDelete(pool, `DELETE FROM skill_sync_results`, now.Add(-application.Config.TelemetryRetention), 100, 5)
 	expectRetentionDelete(pool, `DELETE FROM session_control_deliveries`, now.Add(-application.Config.OperationalRetention), 100, 6)
@@ -45,7 +46,7 @@ func TestCleanupRetentionDeletesBoundedExpiredData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.LockAcquired || result.Total() != 55 || result.Sessions != 9 || result.LoginRateLimits != 10 {
+	if !result.LockAcquired || result.Total() != 67 || result.Sessions != 9 || result.LoginRateLimits != 10 || result.AdminAudit != 12 {
 		t.Fatalf("unexpected retention result: %#v", result)
 	}
 }

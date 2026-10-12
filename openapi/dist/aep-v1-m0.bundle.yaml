@@ -1272,6 +1272,52 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '403':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/audit/operations:
+    get:
+      tags:
+        - Admin Audit
+      operationId: listAdminAudit
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and the masked request payload), newest first. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: actorUserId
+          in: query
+          schema:
+            type: string
+        - name: createdAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Administrative audit result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuditPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
 components:
   securitySchemes:
     bearerAuth:
@@ -3247,6 +3293,59 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AuthenticationAuditRecord'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    AdminAuditRecord:
+      type: object
+      required:
+        - cursor
+        - action
+        - resourceType
+        - result
+        - createdAt
+      properties:
+        cursor:
+          type: string
+        actorUserId:
+          type:
+            - string
+            - 'null'
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type:
+            - string
+            - 'null'
+        result:
+          type: string
+          enum:
+            - success
+            - failure
+        reason:
+          type:
+            - string
+            - 'null'
+        changes:
+          type: object
+          additionalProperties: true
+          description: Only allowlisted request fields keep their value; every other key is redacted.
+        createdAt:
+          type: string
+          format: date-time
+    AdminAuditPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditRecord'
         nextCursor:
           type:
             - string

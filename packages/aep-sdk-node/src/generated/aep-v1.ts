@@ -999,6 +999,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/audit/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and the masked request payload), newest first. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        get: operations["listAdminAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/credentials": {
         parameters: {
             query?: never;
@@ -2633,6 +2650,26 @@ export interface components {
         };
         AuthenticationAuditPage: {
             items: components["schemas"]["AuthenticationAuditRecord"][];
+            nextCursor: string | null;
+        };
+        AdminAuditRecord: {
+            cursor: string;
+            actorUserId?: string | null;
+            action: string;
+            resourceType: string;
+            resourceId?: string | null;
+            /** @enum {string} */
+            result: "success" | "failure";
+            reason?: string | null;
+            /** @description Only allowlisted request fields keep their value; every other key is redacted. */
+            changes?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminAuditPage: {
+            items: components["schemas"]["AdminAuditRecord"][];
             nextCursor: string | null;
         };
         CredentialCreate: {
@@ -4949,6 +4986,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthenticationAuditPage"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    listAdminAudit: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+                action?: string;
+                resourceType?: string;
+                resourceId?: string;
+                actorUserId?: string;
+                createdAfter?: string;
+                createdBefore?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Administrative audit result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditPage"];
                 };
             };
             400: components["responses"]["Problem-2"];

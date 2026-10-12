@@ -141,3 +141,14 @@ func TestListAdminAudit(t *testing.T) {
 		t.Fatalf("admin audit = %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestMaskAuditPayloadKeepsUsername(t *testing.T) {
+	masked := maskAuditPayload([]byte(`{"username":"new-user","password":"hunter2"}`))
+	record, ok := masked.(map[string]any)
+	if !ok {
+		t.Fatalf("masked payload = %#v", masked)
+	}
+	if record["username"] != "new-user" || record["password"] != "[redacted]" {
+		t.Fatalf("masked payload = %#v", record)
+	}
+}
