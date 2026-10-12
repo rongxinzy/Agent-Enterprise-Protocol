@@ -705,6 +705,37 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 （`*.svc.cluster.local` 或无 `.` 的单段裸主机名）会被拒绝，生产部署还会
 禁止 localhost 等回环地址。非法取值返回 `422`，错误码为 `INVALID_DEPLOYMENT_SETTINGS`。
 
+三个设置项用于数字员工计算资源治理。`computeDefaultTier` 是员工运行实例的默认资源
+档位，写入时会对照计算档位目录校验，未知档位名返回 `422`；
+`computeIdleHibernateSeconds`（60-86400）是员工运行实例空闲多久后缩容到零；
+`computeConcurrencyCap`（1-10000）限制部署内并发员工运行实例数。与其他设置项一致，
+显式 `null` 会清除覆盖并回落到环境变量（`AEP_COMPUTE_DEFAULT_TIER`、
+`AEP_COMPUTE_IDLE_HIBERNATE_SECONDS`、`AEP_COMPUTE_CONCURRENCY_CAP`）。整数设置项以
+相同的 override/effectiveValue/source 结构返回整数值。
+
+### 计算治理
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/admin/compute/tiers` | 读取部署侧拥有的计算档位目录 |
+| GET | `/admin/compute/assignments` | 查询按 Agent 的计算档位分配 |
+| PUT | `/admin/compute/assignments/{agentId}` | 设置或清除单个 Agent 的计算档位覆盖 |
+
+两个 `GET` 都需要 `deployment.read` 权限；`PUT` 需要 `agents.compute.write` ——
+可委托的数字员工计算资源授权，不能操作真人账号（完整管理员始终具备）。
+
+档位由部署侧拥有，API 只读：控制面从 `AEP_COMPUTE_TIERS_FILE` 指向的 JSON 文件加载
+目录（对象包含 `items` 数组，条目为 `name`、可选 `description`、Kubernetes quantity
+语法的 `cpuRequest`/`cpuLimit`/`memoryRequest`/`memoryLimit`（如 `250m`、`512Mi`），
+以及固定为 `deployment` 的 `source`）。未配置目录文件时 `GET /admin/compute/tiers`
+返回空 `items`。
+
+每行分配返回 Agent、已存储的档位 `override`、经部署默认档位回落后的 `effective`，
+以及生效档位来源 `source`（`override` 或 `default`），存在覆盖时附带 `updatedAt`
+和 `updatedBy`。请求体 `{"tier": "standard"}` 写入覆盖；`{"tier": null}` 清除覆盖并
+回落到部署默认档位。写入会记录到部署审计轨迹，并在员工实例下次创建时生效——v1
+不就地变更运行中实例。未知 Agent 返回 `404`，不在目录中的档位名返回 `422`。
+
 ### 管控事件
 
 | 方法 | 路径 | 用途 |
