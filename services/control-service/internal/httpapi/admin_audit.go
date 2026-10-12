@@ -77,6 +77,10 @@ var auditSafeKeys = map[string]struct{}{
 	"startsat":       {},
 	"localsubjectid": {},
 	"externalid":     {},
+	"scopetype":      {},
+	"scopeid":        {},
+	"maximum":        {},
+	"interval":       {},
 }
 
 type auditStatusWriter struct {

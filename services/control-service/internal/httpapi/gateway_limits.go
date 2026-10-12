@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 func (s *Server) gatewayLimits(response http.ResponseWriter, request *http.Request) {
@@ -52,6 +54,9 @@ func (s *Server) putGatewayLimit(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
+	// Before-values: a missing or soft-deleted row means this is a new rule.
+	var beforeRaw []byte
+	_ = tx.QueryRow(request.Context(), `SELECT configuration FROM gateway_limits WHERE deployment_id=$1 AND id=$2 AND deleted=false`, tenant, id).Scan(&beforeRaw)
 	for _, subject := range []struct {
 		kind   string
 		target *string
@@ -93,15 +98,46 @@ func (s *Server) putGatewayLimit(response http.ResponseWriter, request *http.Req
 		writeProblem(response, request, 409, "GATEWAY_RULE_VERSION_CONFLICT", "The gateway rule version has changed.")
 		return
 	}
-	if err == nil {
-		err = tx.Commit(request.Context())
-	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	var beforeConfig gatewaypolicy.Configuration
+	if len(beforeRaw) > 0 {
+		_ = json.Unmarshal(beforeRaw, &beforeConfig)
+	}
+	if err = recordAdminAuditTx(request.Context(), tx, tenant, repository.AdminAuditEntry{
+		ActorUserID: claimsFrom(request).Subject, Action: "update", ResourceType: "gateway_limit", ResourceID: id, Result: "success",
+		Changes: map[string]any{"before": auditGatewayLimitSnapshot(beforeConfig), "after": auditGatewayLimitSnapshot(cfg)},
+	}); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err = tx.Commit(request.Context()); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	markAdminAuditRecorded(request)
 	slog.Info("gateway rule updated", "deployment_id", tenant, "user_id", claimsFrom(request).Subject, "rule_id", id, "version", item.Version)
 	writeJSON(response, http.StatusOK, item)
+}
+
+// auditGatewayLimitSnapshot reports the native gateway rule fields a write can
+// touch, masked by the same allowlist the request payload goes through. The
+// expectedVersion concurrency token is never part of the snapshot.
+func auditGatewayLimitSnapshot(cfg gatewaypolicy.Configuration) map[string]any {
+	snapshot := map[string]any{
+		"kind": cfg.Kind, "scopeType": cfg.ScopeType, "maximum": cfg.Maximum,
+		"interval": cfg.Interval, "enabled": cfg.Enabled,
+	}
+	if cfg.ScopeID != nil {
+		snapshot["scopeId"] = *cfg.ScopeID
+	}
+	if cfg.ModelID != nil {
+		snapshot["modelId"] = *cfg.ModelID
+	}
+	masked, _ := maskAuditValue(snapshot).(map[string]any)
+	return masked
 }
 
 func (s *Server) deleteGatewayLimit(response http.ResponseWriter, request *http.Request) {
@@ -121,7 +157,12 @@ func (s *Server) deleteGatewayLimit(response http.ResponseWriter, request *http.
 		databaseFailure(response, request, err)
 		return
 	}
-	result, err := tx.Exec(request.Context(), `UPDATE gateway_limits SET deleted=true,version=version+1,configuration=jsonb_set(configuration,'{enabled}','false'),updated_at=now() WHERE deployment_id=$1 AND id=$2 AND version=$3 AND deleted=false`, tenant, chi.URLParam(request, "ruleId"), version)
+	ruleID := chi.URLParam(request, "ruleId")
+	// Before-values: the rule being soft-deleted. A missing row is tolerated
+	// here; the version-guarded update below reports the conflict.
+	var beforeRaw []byte
+	_ = tx.QueryRow(request.Context(), `SELECT configuration FROM gateway_limits WHERE deployment_id=$1 AND id=$2 AND deleted=false`, tenant, ruleID).Scan(&beforeRaw)
+	result, err := tx.Exec(request.Context(), `UPDATE gateway_limits SET deleted=true,version=version+1,configuration=jsonb_set(configuration,'{enabled}','false'),updated_at=now() WHERE deployment_id=$1 AND id=$2 AND version=$3 AND deleted=false`, tenant, ruleID, version)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -130,10 +171,22 @@ func (s *Server) deleteGatewayLimit(response http.ResponseWriter, request *http.
 		writeProblem(response, request, 409, "GATEWAY_RULE_VERSION_CONFLICT", "The gateway rule version has changed.")
 		return
 	}
+	var beforeConfig gatewaypolicy.Configuration
+	if len(beforeRaw) > 0 {
+		_ = json.Unmarshal(beforeRaw, &beforeConfig)
+	}
+	if err = recordAdminAuditTx(request.Context(), tx, tenant, repository.AdminAuditEntry{
+		ActorUserID: claimsFrom(request).Subject, Action: "delete", ResourceType: "gateway_limit", ResourceID: ruleID, Result: "success",
+		Changes: map[string]any{"before": auditGatewayLimitSnapshot(beforeConfig)},
+	}); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	if err = tx.Commit(request.Context()); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
