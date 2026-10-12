@@ -45,6 +45,15 @@ func attachRuntimeDatabase(t *testing.T, application *app.App) pgxmock.PgxPoolIf
 	return pool
 }
 
+func expectAuditTx(pool pgxmock.PgxPoolIface) {
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+}
+
+func modelAssignmentRow(id, modelID, subjectType, subjectID string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "expires_at", "created_at"}).
+		AddRow(id, "deployment-a", modelID, subjectType, subjectID, nil, time.Now().UTC())
+}
+
 func modelRuntimeRow(id, displayName, credentialID string) *pgxmock.Rows {
 	now := time.Now().UTC()
 	return pgxmock.NewRows(modelRuntimeColumns()).AddRow(
@@ -157,8 +166,12 @@ func TestAdminModelLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "assignment-a", 1).
+		WillReturnRows(modelAssignmentRow("assignment-a", "enterprise-chat", "team", "engineering"))
 	mock.ExpectExec(`DELETE FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "assignment-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	revoked := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/model-assignments/assignment-a", "")
 	if revoked.Code != http.StatusNoContent {
@@ -335,9 +348,9 @@ func TestAdminModelErrorMappings(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "missing").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "missing", 1).WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectRollback()
 	deleteMissingAssignment := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/model-assignments/missing", "")
 	if deleteMissingAssignment.Code != http.StatusNotFound || !strings.Contains(deleteMissingAssignment.Body.String(), `"code":"RESOURCE_NOT_FOUND"`) {
 		t.Fatalf("delete missing model assignment = %d %s", deleteMissingAssignment.Code, deleteMissingAssignment.Body.String())

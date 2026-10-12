@@ -590,8 +590,25 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 }
 
 func (s *Server) deleteModelAssignment(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		DeleteModelAssignment(request.Context(), chi.URLParam(request, "assignmentId"))
+	claims := claimsFrom(request)
+	assignmentID := chi.URLParam(request, "assignmentId")
+	var removed repository.ModelAssignment
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetModelAssignment(request.Context(), assignmentID)
+		if err != nil {
+			return err
+		}
+		removed = before
+		if err := tx.DeleteModelAssignment(request.Context(), assignmentID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "model_assignment", ResourceID: assignmentID, Result: "success",
+			Changes: map[string]any{"before": map[string]any{
+				"modelId": removed.ModelID, "subjectType": removed.SubjectType, "subjectId": removed.SubjectID,
+			}},
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model assignment was not found.")
 		return
@@ -600,5 +617,6 @@ func (s *Server) deleteModelAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }

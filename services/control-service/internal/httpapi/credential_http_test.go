@@ -29,6 +29,11 @@ func credentialRows(id, name, service, deliveryMode, ciphertext, nonce, keyID, m
 		AddRow("deployment-a", id, name, service, "api_key", deliveryMode, []byte(ciphertext), []byte(nonce), keyID, maskedValue, enabled, now, now, now)
 }
 
+func credentialAssignmentRow(id, credentialID, subjectType, subjectID string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "deployment_id", "credential_id", "subject_type", "subject_id", "expires_at", "created_at"}).
+		AddRow(id, "deployment-a", credentialID, subjectType, subjectID, nil, time.Now().UTC())
+}
+
 func credentialRuntimeColumns() []string {
 	return []string{
 		"id", "name", "service", "type", "delivery_mode", "encrypted_value", "nonce",
@@ -106,8 +111,12 @@ func TestAdminCredentialLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "assignment-a", 1).
+		WillReturnRows(credentialAssignmentRow("assignment-a", "credential-a", "role", "operator"))
 	mock.ExpectExec(`DELETE FROM "credential_assignments" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "assignment-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	revoked := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/credential-assignments/assignment-a", "")
 	if revoked.Code != http.StatusNoContent {

@@ -544,8 +544,25 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		DeleteCredentialAssignment(request.Context(), chi.URLParam(request, "assignmentId"))
+	claims := claimsFrom(request)
+	assignmentID := chi.URLParam(request, "assignmentId")
+	var removed repository.CredentialAssignment
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetCredentialAssignment(request.Context(), assignmentID)
+		if err != nil {
+			return err
+		}
+		removed = before
+		if err := tx.DeleteCredentialAssignment(request.Context(), assignmentID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "credential_assignment", ResourceID: assignmentID, Result: "success",
+			Changes: map[string]any{"before": map[string]any{
+				"credentialId": removed.CredentialID, "subjectType": removed.SubjectType, "subjectId": removed.SubjectID,
+			}},
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential assignment was not found.")
 		return
@@ -554,6 +571,7 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
 

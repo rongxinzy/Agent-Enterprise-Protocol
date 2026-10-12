@@ -377,14 +377,16 @@ func TestAdminCredentialAssignmentFailureBoundaries(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			application, mock, token := newStoreBackedHTTPApplication(t)
 			mock.ExpectBegin()
+			mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+				WithArgs("deployment-a", "assignment-a", 1).
+				WillReturnRows(credentialAssignmentRow("assignment-a", "credential-a", "role", "operator"))
 			expectation := mock.ExpectExec(`DELETE FROM "credential_assignments" WHERE deployment_id = \$1 AND id = \$2`).WithArgs("deployment-a", "assignment-a")
 			if test.err != nil {
 				expectation.WillReturnError(test.err)
-				mock.ExpectRollback()
 			} else {
 				expectation.WillReturnResult(test.result)
-				mock.ExpectCommit()
 			}
+			mock.ExpectRollback()
 			response := adminRequest(New(application).Handler(), token, http.MethodDelete, "/aep/v1/admin/credential-assignments/assignment-a", "")
 			requireCredentialProblem(t, response.Code, response.Body.String(), test.status, test.problemCode)
 		})
