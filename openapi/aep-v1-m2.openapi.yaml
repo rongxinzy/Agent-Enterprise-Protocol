@@ -255,6 +255,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1models'
   /aep/v1/admin/models/{modelId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1models~1{modelId}'
+  /aep/v1/admin/models/{modelId}/pricing:
+    $ref: './aep-v1-model-pricing.openapi.yaml#/paths/~1admin~1models~1{modelId}~1pricing'
   /aep/v1/admin/model-assignments:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments'
   /aep/v1/admin/model-assignments/{assignmentId}:

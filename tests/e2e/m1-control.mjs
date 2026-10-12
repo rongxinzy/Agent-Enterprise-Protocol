@@ -106,6 +106,7 @@ async function runScenario() {
   const agentStore = new MemoryTokenStore();
   const agent = new AepClient({baseUrl, tokenStore: agentStore});
   await agent.loginWithPassword({deploymentId: 'demo', username, password});
+  await assertModelPricing(admin, agent, role.id, descriptors[0].modelId);
   const visible = (await agent.listModels()).models;
   assert(visible.length === 3, 'RBAC authorization union did not expose all models');
   assert(visible.every(model => !Object.hasOwn(model, 'credentialId')), 'Agent model catalog leaked credential metadata');
@@ -131,6 +132,7 @@ async function runScenario() {
   await assertModelToken(agentStore, descriptors.slice(0, 1).map(item => item.modelId));
 
   await admin.deleteModel(descriptors[1].modelId);
+  await expectProblem(admin.getModelPricing(descriptors[1].modelId), 404, 'RESOURCE_NOT_FOUND');
   assert((await admin.listModelAssignments()).assignments.length === 1, 'Deleting a model did not cascade its assignment');
   assert((await agent.listModels()).models.length === 1, 'Deleted model remained discoverable');
 
@@ -201,6 +203,44 @@ async function expectProblem(promise, status, code) {
     return;
   }
   throw new Error(`Expected ${status} ${code}`);
+}
+
+async function assertModelPricing(admin, user, roleId, modelId) {
+  const pricing = {currency: 'CNY', inputPricePerMillionTokens: '0.000001',
+    outputPricePerMillionTokens: '0', cachedInputPricePerMillionTokens: '0.01', source: 'Internal mock reference'};
+  const unset = await admin.getModelPricing(modelId);
+  assert(unset.version === 0 && unset.pricing === null && unset.updatedAt === null, 'Unset prices were invented');
+  await expectProblem(user.getModelPricing(modelId), 403, 'ACCESS_DENIED');
+  await expectProblem(user.putModelPricing(modelId, {pricing, expectedVersion: 0}), 403, 'ACCESS_DENIED');
+  const saved = await admin.putModelPricing(modelId, {pricing, expectedVersion: 0});
+  assert(saved.version === 1 && saved.pricing.inputPricePerMillionTokens === '0.000001'
+    && saved.pricing.outputPricePerMillionTokens === '0' && saved.updatedAt, 'Exact reference prices were not saved');
+  await admin.updateRole(roleId, {permissions: ['models.read']});
+  assert((await user.getModelPricing(modelId)).version === 1, 'Read-only price access denied');
+  await expectProblem(user.putModelPricing(modelId, {pricing: null, expectedVersion: 1}), 403, 'ACCESS_DENIED');
+  await admin.updateRole(roleId, {permissions: []});
+  assert(!(await user.listModels()).models.some(m => Object.hasOwn(m, 'pricing')), 'Prices leaked to runtime model descriptors');
+  const writes = await Promise.allSettled([
+    admin.putModelPricing(modelId, {pricing: {...pricing, currency: 'USD'}, expectedVersion: 1}),
+    admin.putModelPricing(modelId, {pricing: {...pricing, inputPricePerMillionTokens: '2.5'}, expectedVersion: 1}),
+  ]);
+  assert(writes.filter(r => r.status === 'fulfilled').length === 1, 'Concurrent prices overwrote each other');
+  const conflict = writes.find(r => r.status === 'rejected').reason;
+  assert(conflict.status === 409 && conflict.code === 'MODEL_PRICING_VERSION_CONFLICT', 'Version conflict missing');
+  const beforeRestart = await admin.getModelPricing(modelId);
+  await command('docker', ['compose', '-p', project, '-f', composeFile, 'restart', 'control-service'], composeEnv);
+  await waitForHealth();
+  assert(JSON.stringify(await admin.getModelPricing(modelId)) === JSON.stringify(beforeRestart), 'Prices lost after service restart');
+  const cleared = await admin.putModelPricing(modelId, {pricing: null, expectedVersion: 2});
+  assert(cleared.version === 3 && cleared.pricing === null, 'Clearing reset the concurrency version');
+  await expectProblem(admin.putModelPricing(modelId, {pricing, expectedVersion: 0}), 409, 'MODEL_PRICING_VERSION_CONFLICT');
+  await expectProblem(admin.putModelPricing(modelId, {pricing: {...pricing, inputPricePerMillionTokens: '-1'}, expectedVersion: 3}), 400, 'INVALID_MODEL_PRICING');
+  await commandOutput('docker', ['compose', '-p', project, '-f', composeFile, 'exec', '-T', 'postgres', 'psql', '-U', 'aep', '-d', 'aep', '-v', 'ON_ERROR_STOP=1', '-c',
+    "INSERT INTO deployments(id,name) VALUES('pricing-isolation','Pricing isolation'); INSERT INTO models(deployment_id,id,display_name,source_type,protocol) VALUES('pricing-isolation','pricing-foreign','Foreign price model','gateway','openai-compatible')"], composeEnv);
+  await expectProblem(admin.getModelPricing('pricing-foreign'), 404, 'RESOURCE_NOT_FOUND');
+  await expectProblem(admin.putModelPricing('pricing-foreign', {pricing, expectedVersion: 0}), 404, 'RESOURCE_NOT_FOUND');
+  await admin.putModelPricing(modelId, {pricing, expectedVersion: 3});
+  console.log('Model pricing: persistence, restart, exact decimals, RBAC, deployment isolation, concurrent updates and clear passed.');
 }
 
 async function waitForHealth() {
