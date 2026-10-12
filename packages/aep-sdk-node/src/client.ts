@@ -58,6 +58,9 @@ import type {
   CredentialMetadata,
   CredentialPatch,
   CredentialRotate,
+  ComputeAssignment,
+  ComputeAssignmentList,
+  ComputeTierCatalog,
   CurrentIdentity,
   DataPlaneDesiredState,
   DataPlaneDesiredStateWrite,
@@ -901,6 +904,22 @@ export class AepClient {
       method: HttpMethod.Put,
       path: '/aep/v1/admin/deployment/settings',
       body: asJson(input),
+    });
+  }
+
+  getComputeTierCatalog(): Promise<ComputeTierCatalog> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/compute/tiers'});
+  }
+
+  listComputeAssignments(): Promise<ComputeAssignmentList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/compute/assignments'});
+  }
+
+  updateComputeAssignment(agentId: string, tier: string | null): Promise<ComputeAssignment> {
+    return this.#send({
+      method: HttpMethod.Put,
+      path: `/aep/v1/admin/compute/assignments/${segment(agentId)}`,
+      body: asJson({tier}),
     });
   }
 
