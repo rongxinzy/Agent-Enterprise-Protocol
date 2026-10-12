@@ -159,6 +159,10 @@ func (s *Server) acknowledgeUserSessionDelivery(response http.ResponseWriter, re
 			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The delivery was not found.")
 			return
 		}
+		if err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
 		if state != "received" && state != "running" && state != "succeeded" && state != "failed" {
 			writeProblem(response, request, http.StatusConflict, "DELIVERY_STATE_CONFLICT", "The delivery cannot be acknowledged in its current state.")
 			return
@@ -483,17 +487,22 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 		return
 	}
 	claims := claimsFrom(request)
+	now := time.Now().UTC()
 	accepted := make([]string, 0, len(input.Events))
 	rejected := make([]map[string]string, 0)
 	// Rows land in ONE multi-VALUES statement: a single network round trip
 	// and a single transaction, where the per-row path autocommitted up to
 	// a hundred inserts per batch (571ms p50 per 100 rows at scale; see the
-	// scale-round findings). Duplicates stay "accepted" via ON CONFLICT
-	// DO NOTHING, matching the previous per-row semantics.
+	// scale-round findings).
 	rows := make([][]any, 0, len(input.Events))
+	batchIDs := make([]string, 0, len(input.Events))
 	for _, event := range input.Events {
 		if claims.SessionID == "" {
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED", "message": "A user session is required."})
+			continue
+		}
+		if code, message := telemetryEventProblem(event.EventID, event.Type, event.Result, event.OccurredAt, now); code != "" {
+			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": code, "message": message})
 			continue
 		}
 		payload, _ := json.Marshal(event.Data)
@@ -503,7 +512,7 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			resourceID = &event.Resource.ID
 		}
 		rows = append(rows, []any{event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt})
-		accepted = append(accepted, event.EventID)
+		batchIDs = append(batchIDs, event.EventID)
 	}
 	if len(rows) > 0 {
 		values := make([]string, 0, len(rows))
@@ -519,13 +528,71 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 		if _, err := s.app.Database().Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES `+strings.Join(values, ",")+` ON CONFLICT(event_id) DO NOTHING`, args...); err != nil {
 			// A single statement cannot fail per row, so a database error
 			// rejects the whole insertable set at once.
-			accepted = accepted[:0]
 			for _, row := range rows {
 				rejected = append(rejected, map[string]string{"eventId": fmt.Sprint(row[0]), "code": "INTERNAL_ERROR", "message": "The telemetry batch could not be stored."})
+			}
+		} else {
+			// ON CONFLICT skips an event_id owned by another deployment. Only
+			// ids present in this deployment count as accepted; a duplicate of
+			// our own event stays accepted so a retry is idempotent.
+			stored, err := s.app.Database().Query(request.Context(), `SELECT event_id FROM telemetry_events WHERE deployment_id=$1 AND event_id=ANY($2)`, claims.DeploymentID, batchIDs)
+			if err != nil {
+				databaseFailure(response, request, err)
+				return
+			}
+			present := make(map[string]struct{}, len(batchIDs))
+			for stored.Next() {
+				var id string
+				if err := stored.Scan(&id); err != nil {
+					stored.Close()
+					databaseFailure(response, request, err)
+					return
+				}
+				present[id] = struct{}{}
+			}
+			if err := stored.Err(); err != nil {
+				stored.Close()
+				databaseFailure(response, request, err)
+				return
+			}
+			stored.Close()
+			for _, id := range batchIDs {
+				if _, ok := present[id]; ok {
+					accepted = append(accepted, id)
+					continue
+				}
+				rejected = append(rejected, map[string]string{"eventId": id, "code": "EVENT_ID_CONFLICT", "message": "The event identifier already exists in another deployment."})
 			}
 		}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"accepted": accepted, "rejected": rejected})
+}
+
+// telemetryEventProblem validates a client-reported event before it is stored.
+// The client controls occurredAt (which orders the audit list and drives the
+// cursor) and result (which the console renders), so implausible or unknown
+// values are rejected instead of trusted.
+func telemetryEventProblem(eventID, eventType string, result *string, occurredAt, now time.Time) (string, string) {
+	if strings.TrimSpace(eventID) == "" {
+		return "INVALID_EVENT_ID", "The event identifier is required."
+	}
+	if strings.TrimSpace(eventType) == "" || len(eventType) > 128 {
+		return "INVALID_TYPE", "The event type must be between 1 and 128 characters."
+	}
+	if result != nil {
+		switch *result {
+		case "success", "failure", "info":
+		default:
+			return "INVALID_RESULT", "The event result must be success, failure, or info."
+		}
+	}
+	if occurredAt.IsZero() {
+		return "INVALID_OCCURRED_AT", "The event occurrence time is required."
+	}
+	if occurredAt.After(now.Add(5 * time.Minute)) {
+		return "INVALID_OCCURRED_AT", "The event occurrence time must not be in the future."
+	}
+	return "", ""
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {

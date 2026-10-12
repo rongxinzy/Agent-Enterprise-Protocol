@@ -220,6 +220,10 @@ func TestTelemetryUploadAndSearch(t *testing.T) {
 		"telemetry-1", "deployment-a", "user-a", "session-user", "skill.sync.completed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 		"telemetry-2", "deployment-a", "user-a", "session-user", "skill.sync.failed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 	).WillReturnResult(pgxmock.NewResult("INSERT", 2))
+	// Accepted ids are read back so an event_id owned by another deployment is
+	// reported instead of silently dropped.
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(
+		pgxmock.NewRows([]string{"event_id"}).AddRow("telemetry-1").AddRow("telemetry-2"))
 	upload := userRequest(handler, userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
 	if upload.Code != http.StatusOK || !strings.Contains(upload.Body.String(), `"accepted":["telemetry-1","telemetry-2"]`) {
 		t.Fatalf("telemetry upload = %d %s", upload.Code, upload.Body.String())
@@ -481,5 +485,34 @@ func TestTelemetryBatchRejectionsIncludeMessage(t *testing.T) {
 		!strings.Contains(response.Body.String(), `"code":"INTERNAL_ERROR"`) ||
 		!strings.Contains(response.Body.String(), `"message":"The telemetry batch could not be stored."`) {
 		t.Fatalf("telemetry rejection = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTelemetryUploadRejectsInvalidEvents(t *testing.T) {
+	application, _, _, userToken := newRuntimeHTTPApplication(t)
+	payload := `{"events":[
+		{"eventId":"","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"},
+		{"eventId":"e2","type":"","occurredAt":"2026-10-01T00:00:00Z","result":"success"},
+		{"eventId":"e3","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"bogus"},
+		{"eventId":"e4","type":"t","occurredAt":"2999-01-01T00:00:00Z","result":"success"}
+	]}`
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":[]`) {
+		t.Fatalf("invalid telemetry upload = %d %s", response.Code, response.Body.String())
+	}
+	for _, code := range []string{"INVALID_EVENT_ID", "INVALID_TYPE", "INVALID_RESULT", "INVALID_OCCURRED_AT"} {
+		if !strings.Contains(response.Body.String(), `"`+code+`"`) {
+			t.Fatalf("missing %s in %s", code, response.Body.String())
+		}
+	}
+}
+
+func TestTelemetryUploadReportsCrossDeploymentConflict(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", `{"events":[{"eventId":"e1","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"EVENT_ID_CONFLICT"`) || !strings.Contains(response.Body.String(), `"accepted":[]`) {
+		t.Fatalf("conflicting telemetry = %d %s", response.Code, response.Body.String())
 	}
 }
