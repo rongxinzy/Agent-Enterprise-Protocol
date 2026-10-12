@@ -12,7 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 // auditPayloadLimit bounds how much of a mutating request body is retained in
@@ -24,43 +27,49 @@ const auditPayloadLimit = 64 << 10
 // sensitive field it did not name (a credential "value", for example), so the
 // default is to withhold. Comparison is case-insensitive.
 var auditSafeKeys = map[string]struct{}{
-	"name":         {},
-	"displayname":  {},
-	"description":  {},
-	"enabled":      {},
-	"status":       {},
-	"kind":         {},
-	"type":         {},
-	"protocol":     {},
-	"subjecttype":  {},
-	"subjectid":    {},
-	"roleids":      {},
-	"teamids":      {},
-	"userids":      {},
-	"modelid":      {},
-	"modelids":     {},
-	"resourcetype": {},
-	"resourceid":   {},
-	"revision":     {},
-	"scopes":       {},
-	"tags":         {},
-	"parentid":     {},
-	"expiresat":    {},
-	"service":      {},
-	"deliverymode": {},
-	"capabilities": {},
-	"reason":       {},
-	"quota":        {},
-	"action":       {},
-	"sourcetype":   {},
-	"identifier":   {},
-	"version":      {},
-	"title":        {},
-	"path":         {},
-	"email":        {},
-	"before":       {},
-	"after":        {},
-	"rotated":      {},
+	"name":          {},
+	"displayname":   {},
+	"description":   {},
+	"enabled":       {},
+	"status":        {},
+	"kind":          {},
+	"type":          {},
+	"protocol":      {},
+	"subjecttype":   {},
+	"subjectid":     {},
+	"roleids":       {},
+	"teamids":       {},
+	"userids":       {},
+	"modelid":       {},
+	"modelids":      {},
+	"resourcetype":  {},
+	"resourceid":    {},
+	"revision":      {},
+	"scopes":        {},
+	"tags":          {},
+	"parentid":      {},
+	"expiresat":     {},
+	"service":       {},
+	"deliverymode":  {},
+	"capabilities":  {},
+	"reason":        {},
+	"quota":         {},
+	"action":        {},
+	"sourcetype":    {},
+	"identifier":    {},
+	"version":       {},
+	"title":         {},
+	"path":          {},
+	"email":         {},
+	"before":        {},
+	"after":         {},
+	"rotated":       {},
+	"endpoint":      {},
+	"upstreammodel": {},
+	"localmodelref": {},
+	"contextwindow": {},
+	"isdefault":     {},
+	"credentialid":  {},
 }
 
 type auditStatusWriter struct {
@@ -90,6 +99,24 @@ func (writer *auditStatusWriter) Write(body []byte) (int, error) {
 type auditRecorded struct{ done bool }
 
 const auditRecordedKey contextKey = "aep-audit-recorded"
+
+// recordAdminAuditTx appends an administrative audit row through an open pgx
+// transaction, so the row commits with the change it describes. Handlers that
+// own a raw pgx transaction use this instead of the store's gorm writer.
+func recordAdminAuditTx(ctx context.Context, tx pgx.Tx, deploymentID string, entry repository.AdminAuditEntry) error {
+	var payload any
+	if entry.Changes != nil {
+		raw, err := json.Marshal(entry.Changes)
+		if err != nil {
+			return err
+		}
+		payload = raw
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO admin_audit_events (deployment_id,actor_user_id,action,resource_type,resource_id,result,reason,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		deploymentID, nullableString(entry.ActorUserID), entry.Action, entry.ResourceType, nullableString(entry.ResourceID), entry.Result, nullableString(entry.Reason), payload)
+	return err
+}
 
 func markAdminAuditRecorded(request *http.Request) {
 	if flag, ok := request.Context().Value(auditRecordedKey).(*auditRecorded); ok {

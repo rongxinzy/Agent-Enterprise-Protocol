@@ -372,13 +372,21 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "At least one valid model field is required.")
 		return
 	}
-	tenant, modelID := claimsFrom(request).DeploymentID, chi.URLParam(request, "modelId")
+	claims := claimsFrom(request)
+	tenant, modelID := claims.DeploymentID, chi.URLParam(request, "modelId")
 	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
+	// Before-values: a missing model is not an error here; the update below
+	// reports the 404.
+	before, err := scanModel(tx.QueryRow(request.Context(), "SELECT "+modelColumns+" FROM models WHERE deployment_id=$1 AND id=$2", tenant, modelID))
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		databaseFailure(response, request, err)
+		return
+	}
 	if input.CredentialID.Set {
 		if exists, err := validateCredentialReference(request.Context(), tx, tenant, input.CredentialID.Value); err != nil {
 			databaseFailure(response, request, err)
@@ -440,16 +448,39 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "Anthropic models require an absolute http(s) endpoint and cannot carry reasoning compatibility.")
 		return
 	}
+	if err := recordAdminAuditTx(request.Context(), tx, tenant, repository.AdminAuditEntry{
+		ActorUserID: claims.Subject, Action: "update", ResourceType: "model", ResourceID: modelID, Result: "success",
+		Changes: auditModelChanges(before, model),
+	}); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	if err := tx.Commit(request.Context()); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, modelJSON(model, true))
 }
 
 func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		DeleteModel(request.Context(), chi.URLParam(request, "modelId"))
+	claims := claimsFrom(request)
+	modelID := chi.URLParam(request, "modelId")
+	var removed repository.Model
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetModel(request.Context(), modelID)
+		if err != nil {
+			return err
+		}
+		removed = before
+		if err := tx.DeleteModel(request.Context(), modelID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "model", ResourceID: modelID, Result: "success",
+			Changes: map[string]any{"before": auditModelSnapshot(removed)},
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model was not found.")
 		return
@@ -458,7 +489,39 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// auditModelChanges reports the model fields an update can touch, masked by
+// the same allowlist the request payload goes through.
+func auditModelChanges(before, after modelRecord) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": auditModelSnapshot(before), "after": auditModelSnapshot(after)}).(map[string]any)
+	return masked
+}
+
+func auditModelSnapshot(model modelRecord) map[string]any {
+	snapshot := map[string]any{
+		"displayName": model.DisplayName, "protocol": model.Protocol,
+		"enabled": model.Enabled, "isDefault": model.IsDefault,
+		"capabilities": []string(model.Capabilities),
+	}
+	if model.Endpoint.Valid {
+		snapshot["endpoint"] = model.Endpoint.String
+	}
+	if model.UpstreamModel.Valid {
+		snapshot["upstreamModel"] = model.UpstreamModel.String
+	}
+	if model.LocalModelRef.Valid {
+		snapshot["localModelRef"] = model.LocalModelRef.String
+	}
+	if model.CredentialID.Valid {
+		snapshot["credentialId"] = model.CredentialID.String
+	}
+	if model.ContextWindow.Valid {
+		snapshot["contextWindow"] = model.ContextWindow.Int32
+	}
+	return snapshot
 }
 
 func validModelSubject(subjectType string) bool {

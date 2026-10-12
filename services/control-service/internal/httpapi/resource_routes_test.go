@@ -155,8 +155,12 @@ func TestAdminResourceDeleteRoutes(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "chat-a", 1).
+		WillReturnRows(modelHTTPRow())
 	mock.ExpectExec(`DELETE FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "chat-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	model := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/chat-a", "")
 	if model.Code != http.StatusNoContent {
