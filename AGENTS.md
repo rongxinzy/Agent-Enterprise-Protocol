@@ -161,6 +161,12 @@ containers/volumes. For failures, inspect the scoped project with
 `docker compose ... ps` and `docker compose ... logs <service>` before changing
 the test or deleting data.
 
+PR CI selects E2E by reviewed dependency scopes; unknown/shared paths run all
+scenarios. Main and manual runs remain full. See
+[E2E selection policy](docs/ci-e2e-selection.md), and update the mapping when
+changing cross-component dependencies. Scoped E2E does not replace the existing
+unit, coverage, security, approval or release gates.
+
 ## SDK and Reference Agent Rules
 
 - `AepClient`, `AepTokenStore`, `AepTransport`, and `AepProblem` are public SDK

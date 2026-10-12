@@ -1,6 +1,7 @@
 'use strict';
 
-// Read-only PR metadata and existing-workflow aggregation; never publishes or deploys.
+// Trusted-default-branch CI aggregation. Only writes the gate check;
+// never checks out PR code, downloads artifacts, publishes packages or deploys.
 function validatePr(pr) {
   const errors = [];
   // Dependabot's generated release notes do not use our manual PR template.
@@ -78,13 +79,20 @@ function workflowApplies(workflow, files, branch) {
   return true;
 }
 
-function evaluateRuns(workflows, runs, sha) {
+function linkedRun(run, pr) {
+  return run.head_repository?.id === pr.head.repo?.id && run.head_branch === pr.head.ref &&
+    run.pull_requests?.some(link => link.number === pr.number && link.head?.sha === pr.head.sha &&
+      link.base?.ref === pr.base.ref);
+}
+
+function evaluateRuns(workflows, runs, sha, pr) {
   const waiting = [],
     failed = [];
   for (const workflow of workflows) {
     const latest = runs
       .filter(
-        (run) => run.head_sha === sha && run.event === 'pull_request' && run.path?.split('@')[0] === workflow.path,
+        (run) => run.head_sha === sha && run.event === 'pull_request' && run.path?.split('@')[0] === workflow.path &&
+          (!pr || linkedRun(run, pr)),
       )
       .sort((a, b) => b.id - a.id || b.run_attempt - a.run_attempt)[0];
     if (latest?.status !== 'completed') waiting.push(workflow.name);
@@ -93,15 +101,20 @@ function evaluateRuns(workflows, runs, sha) {
   return { waiting, failed };
 }
 
-async function run({
-  github,
-  context,
-  core,
-  config,
-  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-}) {
+function samePr(left, right) {
+  const snapshot = pr => JSON.stringify([
+    pr.number, pr.state, pr.head.sha, pr.head.repo?.id, pr.head.ref,
+    pr.base.ref, pr.title, pr.body, pr.changed_files,
+  ]);
+  return snapshot(left) === snapshot(right);
+}
+
+async function run({ github, context, core, config }) {
   const pr = context.payload.pull_request;
   if (!pr) throw new Error('This gate only runs for pull requests.');
+  const current = (await github.rest.pulls.get({ ...context.repo, pull_number: pr.number })).data;
+  if (!samePr(current, pr) || current.state !== 'open')
+    throw new Error('PR head changed, metadata changed or PR closed; use the newest gate event.');
   const errors = validatePr(pr);
   if (errors.length) throw new Error(errors.join('\n'));
   const files = await github.paginate(github.rest.pulls.listFiles, {
@@ -115,35 +128,87 @@ async function run({
   const expected = config.workflows.filter((workflow) =>
     workflowApplies(
       workflow,
-      files.map((file) => file.filename),
+      files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]),
       pr.base.ref,
     ),
   );
   core.info(
     `Required existing workflows: ${expected.map((workflow) => workflow.name).join(', ') || 'none for this diff'}`,
   );
-  for (let attempt = 0; attempt < 90; attempt++) {
-    const current = (await github.rest.pulls.get({ ...context.repo, pull_number: pr.number })).data;
-    if (current.head.sha !== pr.head.sha || current.state !== 'open')
-      throw new Error('PR head changed or PR closed; use the newest gate run.');
-    const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
-      ...context.repo,
-      event: 'pull_request',
-      head_sha: pr.head.sha,
-      per_page: 100,
-    });
-    const { waiting, failed } = evaluateRuns(expected, runs, pr.head.sha);
-    if (failed.length) throw new Error(failed.join('\n'));
-    if (!waiting.length) {
-      core.info('PR metadata and all applicable CI workflows passed.');
-      return;
-    }
-    if (attempt % 6 === 0) core.info(`Waiting for: ${waiting.join(', ')}`);
-    await sleep(20000);
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+    ...context.repo, event: 'pull_request', head_sha: pr.head.sha, per_page: 100,
+  });
+  const { waiting, failed } = evaluateRuns(expected, runs, pr.head.sha, pr);
+  if (failed.length) throw new Error(failed.join('\n'));
+  if (waiting.length) {
+    core.info(`Waiting for: ${waiting.join(', ')}; a workflow event will refresh this check.`);
+    return { status: 'queued', summary: `Waiting for: ${waiting.join(', ')}` };
   }
-  throw new Error(
-    'CI did not finish within 30 minutes. Rerun this gate after fixing or completing the required workflows.',
-  );
+  return { status: 'completed', conclusion: 'success', summary: 'PR metadata and all applicable CI workflows passed.' };
 }
 
-module.exports = { validatePr, globMatches, workflowApplies, evaluateRuns, run };
+async function eventPullNumbers({ github, context, config }) {
+  if (context.eventName === 'pull_request_target') return [context.payload.pull_request.number];
+  if (context.eventName === 'workflow_dispatch') {
+    if (context.ref !== 'refs/heads/' + context.payload.repository?.default_branch)
+      throw new Error('Manual gate refresh must use the default branch.');
+    const number = String(context.payload.inputs?.pull_request ?? '');
+    if (!/^[1-9][0-9]*$/.test(number) || !Number.isSafeInteger(Number(number)))
+      throw new Error('A valid pull request number is required.');
+    return [Number(number)];
+  }
+  if (context.eventName !== 'workflow_run') throw new Error('Unsupported gate event.');
+  // Fetch authoritative run metadata; the event's conclusion and PR hints are not authority.
+  const run = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.payload.workflow_run.id })).data;
+  if (run.event !== 'pull_request' || !config.workflows.some(workflow => workflow.path === run.path?.split('@')[0])) return [];
+  const numbers = [...new Set((run.pull_requests ?? []).map(pr => pr.number))];
+  const prs = numbers.length
+    ? await Promise.all(numbers.map(async number => (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data))
+    : await github.paginate(github.rest.pulls.list, { ...context.repo, state: 'open', per_page: 100 });
+  return prs.filter(pr => pr.state === 'open' && pr.head.sha === run.head_sha &&
+    pr.head.repo?.id === run.head_repository?.id && pr.head.ref === run.head_branch &&
+    (!numbers.length || linkedRun(run, pr))).map(pr => pr.number);
+}
+
+async function refresh({ github, context, core, config }) {
+  const numbers = await eventPullNumbers({ github, context, config });
+  for (const number of numbers) {
+    const pr = (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data;
+    if (pr.state !== 'open') continue;
+    const externalId = `devops-gate:${number}:${pr.head.sha}`;
+    const checks = await github.paginate(github.rest.checks.listForRef, {
+      ...context.repo, ref: pr.head.sha, check_name: 'ci-gate', filter: 'all', per_page: 100,
+    });
+    const owned = checks.filter(check => check.external_id === externalId && check.app?.slug === 'github-actions')
+      .sort((a, b) => b.id - a.id)[0];
+    const pending = {
+      ...context.repo, status: 'queued',
+      details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+      output: { title: 'CI aggregation pending', summary: 'Checking current PR metadata and applicable workflows.' },
+    };
+    // Reuse only our own check. Reset pending before taking a new snapshot;
+    // omit conclusion, since that field would force the API status to completed.
+    const check = (owned
+      ? await github.rest.checks.update({ ...pending, check_run_id: owned.id })
+      : await github.rest.checks.create({ ...pending, name: 'ci-gate', head_sha: pr.head.sha, external_id: externalId })).data;
+    let result;
+    try {
+      result = await run({ github, context: { ...context, payload: { pull_request: pr } }, core, config });
+    } catch (error) {
+      result = { status: 'completed', conclusion: 'failure', summary: String(error.message).slice(0, 20000) };
+    }
+    // Revalidate head and edited metadata immediately before publishing a result.
+    const current = (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data;
+    if (!samePr(current, pr) || current.state !== 'open')
+      result = { status: 'completed', conclusion: 'cancelled', summary: 'Superseded PR head or metadata; awaiting its gate event.' };
+    await github.rest.checks.update({
+      ...context.repo, check_run_id: check.id, status: result.status,
+      ...(result.conclusion ? { conclusion: result.conclusion } : {}),
+      output: { title: result.conclusion === 'success' ? 'CI aggregation passed' :
+        result.conclusion ? 'CI aggregation blocked' : 'CI aggregation pending', summary: result.summary },
+    });
+    core.info(`PR #${number}: ${result.conclusion ?? result.status}`);
+  }
+}
+
+module.exports = { validatePr, globMatches, workflowApplies, evaluateRuns, run, refresh, eventPullNumbers, samePr };

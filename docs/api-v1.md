@@ -765,6 +765,48 @@ hosts (`*.svc.cluster.local` or single-label names) are rejected, and
 production deployments additionally reject loopback addresses. Invalid values
 return `422` with code `INVALID_DEPLOYMENT_SETTINGS`.
 
+Three settings govern digital-employee compute. `computeDefaultTier` is the
+default resource tier for employee runtime instances; a `PUT` value is
+validated against the compute tier catalog at write time and unknown tier
+names are rejected with `422`. `computeIdleHibernateSeconds` (60-86400) is the
+idle duration before an employee runtime instance scales to zero, and
+`computeConcurrencyCap` (1-10000) caps concurrent employee runtime instances
+for the deployment. As with every setting, an explicit `null` clears the
+override and restores the environment fallback (`AEP_COMPUTE_DEFAULT_TIER`,
+`AEP_COMPUTE_IDLE_HIBERNATE_SECONDS`, `AEP_COMPUTE_CONCURRENCY_CAP`). Integer
+settings report the same override/effectiveValue/source shape with integer
+values.
+
+### Compute governance
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/compute/tiers` | Read the deployment-owned compute tier catalog |
+| GET | `/admin/compute/assignments` | List per-agent compute tier assignments |
+| PUT | `/admin/compute/assignments/{agentId}` | Set or clear one agent's compute tier override |
+
+Both `GET`s require the `deployment.read` permission; the `PUT` requires
+`agents.compute.write`, the delegable digital-employee compute grant that
+cannot touch human accounts (full administrators always qualify).
+
+Tiers are deployment-owned and read-only through the API: the control plane
+loads the catalog from the JSON file named by `AEP_COMPUTE_TIERS_FILE` (an
+object with an `items` array of tier entries: `name`, optional `description`,
+`cpuRequest`/`cpuLimit`/`memoryRequest`/`memoryLimit` in Kubernetes quantity
+syntax such as `250m` or `512Mi`, and `source` fixed to `deployment`). `GET
+/admin/compute/tiers` returns an empty `items` array when no catalog file is
+configured.
+
+Each assignment row reports the agent, its stored tier `override`, the
+`effective` tier after the deployment default tier, and the `source` of the
+effective tier (`override` or `default`), plus `updatedAt` and `updatedBy`
+when an override exists. A `PUT` body of `{"tier": "standard"}` stores the
+override; `{"tier": null}` clears it so the deployment default tier applies.
+The write is recorded in the deployment audit trail and takes effect at the
+employee instance's next creation — v1 does not mutate running instances in
+place. Unknown agents return `404`; tier names missing from the catalog return
+`422`.
+
 ### Control Events
 
 | Method | Path | Purpose |
