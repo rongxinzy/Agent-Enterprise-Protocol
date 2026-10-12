@@ -137,3 +137,13 @@ func TestReportDeliveryResultLookupFailure(t *testing.T) {
 		t.Fatalf("result lookup failure = %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestAcknowledgeLookupFailureIsServerError(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries SET state='received'`).WithArgs("delivery-1", "session-user", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT state FROM session_control_deliveries`).WithArgs("delivery-1", "session-user").WillReturnError(errors.New("lookup failed"))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/control-events/delivery-1/acknowledge", `{"status":"received"}`)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("ack lookup failure = %d %s", response.Code, response.Body.String())
+	}
+}

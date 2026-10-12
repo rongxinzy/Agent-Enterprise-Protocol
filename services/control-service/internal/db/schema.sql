@@ -416,6 +416,7 @@ CREATE INDEX IF NOT EXISTS idx_session_tokens_retention ON user_session_tokens (
 CREATE INDEX IF NOT EXISTS idx_user_sessions_retention ON user_sessions (GREATEST(last_seen_at, COALESCE(revoked_at, last_seen_at)), session_id);
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_type_time ON telemetry_events (deployment_id, type, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_deployment_time ON telemetry_events (deployment_id, occurred_at DESC, event_id DESC);
 
 CREATE TABLE IF NOT EXISTS identity_sources (
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
