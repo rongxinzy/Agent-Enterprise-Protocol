@@ -1,0 +1,69 @@
+name: DevOps gate tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devops-gate-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      bootstrap: ${{ steps.mode.outputs.bootstrap }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - name: Read the deployed gate mode from the trusted default branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted-gate
+          persist-credentials: false
+          sparse-checkout: .github
+      - id: mode
+        run: |
+          node -e "const fs = require('node:fs'); const config = require('./trusted-gate/.github/devops-ci.json'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'bootstrap=' + (config.eventDrivenGate !== true) + '\n');"
+      - name: Verify CI inventory and trusted workflow boundary
+        run: |
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+          python3 .github/check-devops-config.py
+          python3 .github/check-devops-config.test.py
+      - name: Test gate decisions and event transitions
+        run: node --test .github/devops-gate.test.cjs
+
+  # Only the installation PR uses the deployed legacy read-only gate. Once
+  # main declares eventDrivenGate, this job no longer has the required name.
+  bootstrap-gate:
+    needs: gate-tests
+    name: ${{ needs.gate-tests.outputs.bootstrap == 'true' && 'ci-gate' || 'gate-bootstrap-inactive' }}
+    if: github.event_name == 'pull_request' && needs.gate-tests.outputs.bootstrap == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github
+      - name: Preserve the existing gate during first installation
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/devops-gate.cjs`);
+            const config = require(`${process.env.GITHUB_WORKSPACE}/.github/devops-ci.json`);
+            if (config.eventDrivenGate === true) throw new Error('Gate already deployed; use the event-driven publisher.');
+            await gate.run({ github, context, core, config });
