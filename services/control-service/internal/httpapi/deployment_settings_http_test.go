@@ -12,6 +12,10 @@ import (
 )
 
 func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string, fallbackOverride *[]string) {
+	expectSettingsReadFull(pool, override, fallbackOverride, nil, nil, nil)
+}
+
+func expectSettingsReadFull(pool pgxmock.PgxPoolIface, override *string, fallbackOverride *[]string, tier *string, hibernate *int, cap *int) {
 	rows := pgxmock.NewRows([]string{"model_gateway_base_url"})
 	if override != nil {
 		rows.AddRow(*override)
@@ -28,6 +32,34 @@ func expectSettingsRead(pool pgxmock.PgxPoolIface, override *string, fallbackOve
 	}
 	pool.ExpectQuery(`SELECT model_fallback_ids IS NOT NULL`).
 		WithArgs("deployment-a").WillReturnRows(fallbackRows)
+	expectComputeSettingsRead(pool, tier, hibernate, cap)
+}
+
+func expectComputeSettingsRead(pool pgxmock.PgxPoolIface, tier *string, hibernate *int, cap *int) {
+	tierRows := pgxmock.NewRows([]string{"compute_default_tier"})
+	if tier != nil {
+		tierRows.AddRow(*tier)
+	} else {
+		tierRows.AddRow(nil)
+	}
+	pool.ExpectQuery(`SELECT compute_default_tier FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(tierRows)
+	hibernateRows := pgxmock.NewRows([]string{"compute_idle_hibernate_seconds"})
+	if hibernate != nil {
+		hibernateRows.AddRow(*hibernate)
+	} else {
+		hibernateRows.AddRow(nil)
+	}
+	pool.ExpectQuery(`SELECT compute_idle_hibernate_seconds FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(hibernateRows)
+	capRows := pgxmock.NewRows([]string{"compute_concurrency_cap"})
+	if cap != nil {
+		capRows.AddRow(*cap)
+	} else {
+		capRows.AddRow(nil)
+	}
+	pool.ExpectQuery(`SELECT compute_concurrency_cap FROM deployment_settings`).
+		WithArgs("deployment-a").WillReturnRows(capRows)
 }
 
 // The service metadata reads only the two advertised endpoints; it does not
@@ -400,5 +432,68 @@ func TestAdminDeploymentSettingsAgentControlOverride(t *testing.T) {
 	cleared := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"agentControlBaseUrl":null}`)
 	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"source":"env"`) {
 		t.Fatalf("cleared agent control override = %d %s", cleared.Code, cleared.Body.String())
+	}
+}
+
+func TestAdminDeploymentSettingsComputeGovernance(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	application.Config.ComputeDefaultTier = "env-tier"
+	application.Config.ComputeIdleHibernateSeconds = 120
+	application.Config.ComputeConcurrencyCap = 5
+	application.Config.ComputeTiersFile = writeTierCatalog(t, `{"items":[{"name":"standard","cpuRequest":"250m","cpuLimit":"1000m","memoryRequest":"512Mi","memoryLimit":"1Gi"}]}`)
+	handler := New(application).Handler()
+
+	// Environment fallbacks surface with the integer shape while nothing is stored.
+	expectSettingsRead(pool, nil, nil)
+	initial := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/deployment/settings", "")
+	if initial.Code != http.StatusOK ||
+		!strings.Contains(initial.Body.String(), `"computeDefaultTier":{"override":null,"effectiveValue":"env-tier","source":"env"}`) ||
+		!strings.Contains(initial.Body.String(), `"computeIdleHibernateSeconds":{"override":null,"effectiveValue":120,"source":"env"}`) ||
+		!strings.Contains(initial.Body.String(), `"computeConcurrencyCap":{"override":null,"effectiveValue":5,"source":"env"}`) {
+		t.Fatalf("initial compute settings = %d %s", initial.Code, initial.Body.String())
+	}
+
+	// A tier outside the configured catalog is rejected before any write.
+	rejected := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"computeDefaultTier":"platinum"}`)
+	if rejected.Code != http.StatusUnprocessableEntity || !strings.Contains(rejected.Body.String(), `"code":"INVALID_DEPLOYMENT_SETTINGS"`) {
+		t.Fatalf("unknown compute tier = %d %s", rejected.Code, rejected.Body.String())
+	}
+
+	// Range violations are rejected before any write.
+	outOfRange := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"computeIdleHibernateSeconds":59}`)
+	if outOfRange.Code != http.StatusUnprocessableEntity || !strings.Contains(outOfRange.Body.String(), `"code":"INVALID_DEPLOYMENT_SETTINGS"`) {
+		t.Fatalf("hibernate range = %d %s", outOfRange.Code, outOfRange.Body.String())
+	}
+
+	// Valid values are stored and echoed back with numeric fidelity.
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", "standard").
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", 300).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", 10).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	tier := "standard"
+	hibernate, cap := 300, 10
+	expectSettingsReadFull(pool, nil, nil, &tier, &hibernate, &cap)
+	updated := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"computeDefaultTier":"standard","computeIdleHibernateSeconds":300,"computeConcurrencyCap":10}`)
+	if updated.Code != http.StatusOK ||
+		!strings.Contains(updated.Body.String(), `"computeDefaultTier":{"override":"standard","effectiveValue":"standard","source":"override"}`) ||
+		!strings.Contains(updated.Body.String(), `"computeIdleHibernateSeconds":{"override":300,"effectiveValue":300,"source":"override"}`) ||
+		!strings.Contains(updated.Body.String(), `"computeConcurrencyCap":{"override":10,"effectiveValue":10,"source":"override"}`) {
+		t.Fatalf("updated compute settings = %d %s", updated.Code, updated.Body.String())
+	}
+
+	// Null clears the override so the environment value applies again.
+	pool.ExpectExec(`INSERT INTO deployment_settings`).
+		WithArgs("deployment-a", nil).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	expectSettingsRead(pool, nil, nil)
+	cleared := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/deployment/settings", `{"computeIdleHibernateSeconds":null}`)
+	if cleared.Code != http.StatusOK ||
+		!strings.Contains(cleared.Body.String(), `"computeIdleHibernateSeconds":{"override":null,"effectiveValue":120,"source":"env"}`) {
+		t.Fatalf("cleared hibernate override = %d %s", cleared.Code, cleared.Body.String())
 	}
 }
