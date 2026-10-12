@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -214,7 +215,7 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 func TestTelemetryUploadAndSearch(t *testing.T) {
 	application, pool, adminToken, userToken := newRuntimeHTTPApplication(t)
 	handler := New(application).Handler()
-	payload := `{"events":[{"eventId":"telemetry-1","type":"skill.sync.completed","occurredAt":"2026-09-11T10:00:00Z","data":{"version":"2"}},{"eventId":"telemetry-2","type":"skill.sync.failed","occurredAt":"2026-09-11T10:01:00Z","result":"failure","data":{}}]}`
+	payload := fmt.Sprintf(`{"events":[{"eventId":"telemetry-1","type":"skill.sync.completed","occurredAt":"%s","data":{"version":"2"}},{"eventId":"telemetry-2","type":"skill.sync.failed","occurredAt":"%s","result":"failure","data":{}}]}`, telemetryRecentTime(), telemetryRecentTime())
 	// One multi-VALUES statement carries the whole batch (10 args per row).
 	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(
 		"telemetry-1", "deployment-a", "user-a", "session-user", "skill.sync.completed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -480,7 +481,7 @@ func TestTelemetryBatchRejectionsIncludeMessage(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("store unavailable"))
 	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch",
-		`{"events":[{"eventId":"e1","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`)
+		fmt.Sprintf(`{"events":[{"eventId":"e1","type":"t","occurredAt":"%s","result":"success"}]}`, telemetryRecentTime()))
 	if response.Code != http.StatusOK ||
 		!strings.Contains(response.Body.String(), `"code":"INTERNAL_ERROR"`) ||
 		!strings.Contains(response.Body.String(), `"message":"The telemetry batch could not be stored."`) {
@@ -490,12 +491,12 @@ func TestTelemetryBatchRejectionsIncludeMessage(t *testing.T) {
 
 func TestTelemetryUploadRejectsInvalidEvents(t *testing.T) {
 	application, _, _, userToken := newRuntimeHTTPApplication(t)
-	payload := `{"events":[
-		{"eventId":"","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"},
-		{"eventId":"e2","type":"","occurredAt":"2026-10-01T00:00:00Z","result":"success"},
-		{"eventId":"e3","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"bogus"},
-		{"eventId":"e4","type":"t","occurredAt":"2000-01-01T00:00:00Z","result":"success"}
-	]}`
+	payload := fmt.Sprintf(`{"events":[
+		{"eventId":"","type":"t","occurredAt":"%s","result":"success"},
+		{"eventId":"e2","type":"","occurredAt":"%s","result":"success"},
+		{"eventId":"e3","type":"t","occurredAt":"%s","result":"bogus"},
+		{"eventId":"e4","type":"t","occurredAt":"%s","result":"success"}
+	]}`, telemetryRecentTime(), telemetryRecentTime(), telemetryRecentTime(), telemetryStaleTime())
 	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":[]`) {
 		t.Fatalf("invalid telemetry upload = %d %s", response.Code, response.Body.String())
@@ -511,7 +512,7 @@ func TestTelemetryUploadReportsCrossDeploymentConflict(t *testing.T) {
 	application, pool, _, userToken := newRuntimeHTTPApplication(t)
 	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 0))
 	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}))
-	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", `{"events":[{"eventId":"e1","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`)
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", fmt.Sprintf(`{"events":[{"eventId":"e1","type":"t","occurredAt":"%s","result":"success"}]}`, telemetryRecentTime()))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"EVENT_ID_CONFLICT"`) || !strings.Contains(response.Body.String(), `"accepted":[]`) {
 		t.Fatalf("conflicting telemetry = %d %s", response.Code, response.Body.String())
 	}
@@ -536,9 +537,33 @@ func TestTelemetryUploadDeduplicatesRepeatedEventID(t *testing.T) {
 	}
 	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(args...).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}).AddRow("dup"))
-	payload := `{"events":[{"eventId":"dup","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"},{"eventId":"dup","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`
+	payload := fmt.Sprintf(`{"events":[{"eventId":"dup","type":"t","occurredAt":"%s","result":"success"},{"eventId":"dup","type":"t","occurredAt":"%s","result":"success"}]}`, telemetryRecentTime(), telemetryRecentTime())
 	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":["dup"]`) || !strings.Contains(response.Body.String(), `"rejected":[]`) {
 		t.Fatalf("duplicate telemetry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+// telemetryRecentTime returns an occurrence time inside the accepted window so
+// the telemetry fixtures do not expire as the calendar advances.
+func telemetryRecentTime() string {
+	return time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+}
+
+// telemetryStaleTime returns an occurrence time older than the accepted window.
+func telemetryStaleTime() string {
+	return time.Now().UTC().Add(-100 * 24 * time.Hour).Format(time.RFC3339)
+}
+
+func TestTelemetryEventProblemBoundsOccurrenceTime(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	if code, _, at := telemetryEventProblem("e1", "t", nil, now.Add(48*time.Hour), now); code != "" || !at.Equal(now) {
+		t.Fatalf("future occurrence = (%q, %s), want clamped to %s", code, at, now)
+	}
+	if code, _, _ := telemetryEventProblem("e1", "t", nil, now.Add(-100*24*time.Hour), now); code != "INVALID_OCCURRED_AT" {
+		t.Fatalf("stale occurrence = %q, want INVALID_OCCURRED_AT", code)
+	}
+	if code, _, _ := telemetryEventProblem("e1", "t", nil, time.Time{}, now); code != "INVALID_OCCURRED_AT" {
+		t.Fatalf("missing occurrence = %q, want INVALID_OCCURRED_AT", code)
 	}
 }

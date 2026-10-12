@@ -584,8 +584,9 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 }
 
 // telemetryMaxAge bounds how far in the past a client-reported occurrence time
-// may be. It mirrors the default telemetry retention: an older event would be
-// swept on the next cleanup anyway.
+// may be. An event older than this is refused. The bound is deliberately
+// independent of AEP_TELEMETRY_RETENTION: changing the retention window does
+// not move it.
 const telemetryMaxAge = 90 * 24 * time.Hour
 
 // telemetryEventProblem validates a client-reported event and normalizes its
