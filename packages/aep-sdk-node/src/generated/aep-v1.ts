@@ -1466,6 +1466,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/compute/tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the compute tier catalog available to digital-employee runtime instances. Tiers are deployment-owned and read-only through the API: the control plane loads them from the JSON file named by the AEP_COMPUTE_TIERS_FILE environment variable (an object with an items array whose entries match ComputeTier). Requires the deployment.read permission. items is empty when no catalog file is configured. */
+        get: operations["getComputeTierCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/compute/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Lists per-agent compute tier assignments. Every assignment reports its stored runtime override, the effective tier after the deployment default tier, and the source of that effective tier. Requires the deployment.read permission. */
+        get: operations["listComputeAssignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/compute/assignments/{agentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Requires the agents.compute.write permission — the delegable digital-employee compute grant that cannot touch human accounts (full administrators always qualify). Stores a per-agent compute tier override; an explicit null tier clears the override so the deployment default tier applies again. The write is recorded in the deployment audit trail and takes effect at the employee instance's next creation: v1 does not mutate running instances in place. Unknown agents return 404; tier names that are not in the compute tier catalog return 422. */
+        put: operations["updateComputeAssignment"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2836,12 +2889,30 @@ export interface components {
              */
             source: "override" | "env" | "unset";
         };
+        /** @description One deployment-level integer runtime setting with its override and resolution state. */
+        DeploymentIntegerSettingValue: {
+            /** @description Runtime override stored in the control plane; null when no override is set. */
+            override: number | null;
+            /** @description Value currently in effect — the runtime override when set, otherwise the environment-configured value; null when neither exists. */
+            effectiveValue: number | null;
+            /**
+             * @description Origin of the effective value.
+             * @enum {string}
+             */
+            source: "override" | "env" | "unset";
+        };
         /** @description Deployment-level runtime settings maintained through the administration API. */
         DeploymentSettings: {
             /** @description Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata. */
             modelGatewayBaseUrl: components["schemas"]["DeploymentSettingValue"];
             /** @description Ordered fallback model chain used by platform failover: when an employee's default model is unhealthy, the first healthy model in this list takes over (and the original is restored once it recovers). Empty disables automatic failover. */
             modelFallbackIds: components["schemas"]["DeploymentListSettingValue"];
+            /** @description Default compute tier for digital-employee runtime instances; the effective value must name a tier from the compute tier catalog. Falls back to AEP_COMPUTE_DEFAULT_TIER. */
+            computeDefaultTier: components["schemas"]["DeploymentSettingValue"];
+            /** @description Idle duration in seconds before an employee runtime instance scales to zero. Falls back to AEP_COMPUTE_IDLE_HIBERNATE_SECONDS. */
+            computeIdleHibernateSeconds: components["schemas"]["DeploymentIntegerSettingValue"];
+            /** @description Maximum number of concurrent employee runtime instances for the deployment. Falls back to AEP_COMPUTE_CONCURRENCY_CAP. */
+            computeConcurrencyCap: components["schemas"]["DeploymentIntegerSettingValue"];
         };
         /** @description Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback. */
         DeploymentSettingsUpdate: {
@@ -2849,6 +2920,68 @@ export interface components {
             modelGatewayBaseUrl?: string | null;
             /** @description New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete absolute endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain. */
             modelFallbackIds?: string[] | null;
+            /** @description New default compute tier for digital-employee runtime instances. The value is validated against the compute tier catalog at write time; unknown tier names are rejected with 422. Null clears the override so the AEP_COMPUTE_DEFAULT_TIER environment value applies again. */
+            computeDefaultTier?: string | null;
+            /** @description New idle duration in seconds before an employee runtime instance scales to zero. Null clears the override so the AEP_COMPUTE_IDLE_HIBERNATE_SECONDS environment value applies again. */
+            computeIdleHibernateSeconds?: number | null;
+            /** @description New maximum number of concurrent employee runtime instances for the deployment. Null clears the override so the AEP_COMPUTE_CONCURRENCY_CAP environment value applies again. */
+            computeConcurrencyCap?: number | null;
+        };
+        /** @description One deployment-owned compute tier for digital-employee runtime instances. */
+        ComputeTier: {
+            /** @description Stable tier name referenced by computeDefaultTier and per-agent compute assignments. */
+            name: string;
+            /** @description Operator-facing explanation of the tier. */
+            description?: string;
+            /** @description Requested CPU in Kubernetes quantity syntax, for example 250m. */
+            cpuRequest: string;
+            /** @description CPU limit in Kubernetes quantity syntax, for example 1000m. */
+            cpuLimit: string;
+            /** @description Requested memory in Kubernetes quantity syntax, for example 512Mi. */
+            memoryRequest: string;
+            /** @description Memory limit in Kubernetes quantity syntax, for example 1Gi. */
+            memoryLimit: string;
+            /**
+             * @description Origin of the tier definition; tiers are always deployment-owned.
+             * @enum {string}
+             */
+            source: "deployment";
+        };
+        ComputeTierCatalog: {
+            items: components["schemas"]["ComputeTier"][];
+        };
+        /** @description One agent's compute tier assignment with its override and resolution state. */
+        ComputeAssignment: {
+            agentId: string;
+            /** @description Display title of the agent when it can be resolved. */
+            agentName?: string;
+            /** @description Tier resolution for this agent. */
+            tier: {
+                /** @description Runtime override stored in the control plane; null when no override is set. */
+                override: string | null;
+                /** @description Tier currently in effect — the runtime override when set, otherwise the deployment default tier. */
+                effective: string;
+                /**
+                 * @description Origin of the effective tier.
+                 * @enum {string}
+                 */
+                source: "override" | "default";
+            };
+            /**
+             * Format: date-time
+             * @description When the override was last changed; absent when no override was ever stored.
+             */
+            updatedAt?: string;
+            /** @description Operator user id that last changed the override. */
+            updatedBy?: string;
+        };
+        ComputeAssignmentList: {
+            items: components["schemas"]["ComputeAssignment"][];
+        };
+        /** @description Per-agent compute tier override update. */
+        ComputeAssignmentUpdate: {
+            /** @description Catalog tier name to store as the agent's override, validated against the compute tier catalog at write time; unknown names are rejected with 422. Null clears the override so the deployment default tier applies. */
+            tier: string | null;
         };
     };
     responses: {
@@ -5911,6 +6044,78 @@ export interface operations {
             };
             400: components["responses"]["Problem-2"];
             403: components["responses"]["Problem-2"];
+            422: components["responses"]["Problem-2"];
+        };
+    };
+    getComputeTierCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compute tier catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeTierCatalog"];
+                };
+            };
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    listComputeAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compute assignment list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeAssignmentList"];
+                };
+            };
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    updateComputeAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComputeAssignmentUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated compute assignment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeAssignment"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
             422: components["responses"]["Problem-2"];
         };
     };

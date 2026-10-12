@@ -364,6 +364,12 @@ paths:
               schema: {$ref: '#/components/schemas/DataPlaneStatus'}
   /aep/v1/admin/deployment/settings:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1deployment~1settings'
+  /aep/v1/admin/compute/tiers:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1tiers'
+  /aep/v1/admin/compute/assignments:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1assignments'
+  /aep/v1/admin/compute/assignments/{agentId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1assignments~1{agentId}'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
