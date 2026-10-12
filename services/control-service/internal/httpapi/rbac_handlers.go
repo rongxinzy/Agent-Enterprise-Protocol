@@ -410,8 +410,26 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 	if !s.authorizeTeamGrant(response, request, input.TeamIDs) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		ReplaceUserRBAC(request.Context(), userID, input.RoleIDs, input.TeamIDs)
+	claims := claimsFrom(request)
+	var before repository.UserRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		current, err := tx.GetUserRecord(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		before = current
+		if err := tx.ReplaceUserRBAC(request.Context(), userID, input.RoleIDs, input.TeamIDs); err != nil {
+			return err
+		}
+		masked, _ := maskAuditValue(map[string]any{
+			"before": map[string]any{"roleIds": before.RoleIDs, "teamIds": before.TeamIDs},
+			"after":  map[string]any{"roleIds": input.RoleIDs, "teamIds": input.TeamIDs},
+		}).(map[string]any)
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "user_rbac", ResourceID: userID, Result: "success",
+			Changes: masked,
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
 		return
@@ -428,6 +446,7 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, map[string]any{"userId": userID, "roleIds": input.RoleIDs, "teamIds": input.TeamIDs})
 }
 
