@@ -118,7 +118,7 @@ async function runScenario() {
   const telemetryClient = new AepClient({baseUrl, tokenStore: new MemoryTokenStore()});
   const telemetryTokens = await telemetryClient.loginWithPassword({deploymentId: 'demo', username, password});
   const duplicateEventId = `duplicate-${runId}`;
-  const duplicateTelemetry = {eventId: duplicateEventId, type: 'e2e.duplicate', occurredAt: new Date().toISOString(), result: 'succeeded', data: {}};
+  const duplicateTelemetry = {eventId: duplicateEventId, type: 'e2e.duplicate', occurredAt: new Date().toISOString(), result: 'success', data: {}};
   await telemetryClient.uploadEventBatch([duplicateTelemetry, duplicateTelemetry]);
   await telemetryClient.uploadEventBatch([duplicateTelemetry]);
   await telemetryClient.uploadEventBatch([{eventId: `filter-${runId}`, type: 'e2e.filter', occurredAt: new Date().toISOString(), result: 'success', resource: {type: 'skill', id: skillId}, data: {}}]);
