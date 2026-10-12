@@ -269,14 +269,17 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 	slugOwners := make(map[string]string)
 	for index := range routes {
 		route := routes[index]
-		if route.Protocol == "anthropic" {
-			if route.ProviderType != "" {
-				return "", nil, "", fmt.Errorf("provider type %q is not supported for anthropic model %q", route.ProviderType, route.ModelID)
-			}
-			endpoint, err := parseAbsoluteEndpoint(route.Endpoint)
-			if err != nil {
-				return "", nil, "", fmt.Errorf("anthropic model %q: %w", route.ModelID, err)
-			}
+		// Protocol knowledge (bucket, endpoint semantics) lives in the
+		// strategy implementations — see protocol.go.
+		strategy, err := strategyFor(route)
+		if err != nil {
+			return "", nil, "", err
+		}
+		endpoint, err := strategy.validateEndpoint(route)
+		if err != nil {
+			return "", nil, "", err
+		}
+		if strategy.bucket() == bucketAnthropic {
 			slug := anthropicSlug(route.ModelID)
 			if owner, taken := slugOwners[slug]; taken {
 				return "", nil, "", fmt.Errorf("anthropic models %q and %q share path prefix /%s", owner, route.ModelID, slug)
@@ -291,22 +294,7 @@ func Render(desired DesiredState, credentialValues map[string]string) (string, [
 		if route.ProviderType == "" {
 			route.ProviderType = "openai"
 		}
-		if route.ProviderType != "openai" && route.ProviderType != "deepseek" {
-			return "", nil, "", fmt.Errorf("unsupported provider type %q for model %q", route.ProviderType, route.ModelID)
-		}
-		// Relative endpoints retain the deployment's preconfigured backend.
-		// An absolute URL must also select an actual upstream: ai-proxy only
-		// rewrites HTTP headers/body, it does not create an Envoy cluster.
-		if raw := strings.TrimSpace(route.Endpoint); raw != "" && !strings.HasPrefix(raw, "/") {
-			endpoint, err := parseAbsoluteEndpoint(raw)
-			if err != nil {
-				return "", nil, "", fmt.Errorf("openai model %q: %w", route.ModelID, err)
-			}
-			route.endpoint = endpoint
-		}
-		if strings.HasPrefix(strings.TrimSpace(route.Endpoint), "//") {
-			return "", nil, "", errors.New("endpoint must not be a scheme-relative URL")
-		}
+		route.endpoint = endpoint
 		if route.Enabled {
 			enabledOpenAI = append(enabledOpenAI, route)
 		}
