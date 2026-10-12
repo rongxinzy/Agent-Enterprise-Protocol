@@ -591,6 +591,70 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
+  /admin/compute/tiers:
+    get:
+      tags: [Admin Deployment]
+      operationId: getComputeTierCatalog
+      description: >-
+        Returns the compute tier catalog available to digital-employee runtime
+        instances. Tiers are deployment-owned and read-only through the API:
+        the control plane loads them from the JSON file named by the
+        AEP_COMPUTE_TIERS_FILE environment variable (an object with an items
+        array whose entries match ComputeTier). Requires the deployment.read
+        permission. items is empty when no catalog file is configured.
+      responses:
+        '200':
+          description: Compute tier catalog
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputeTierCatalog'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/compute/assignments:
+    get:
+      tags: [Admin Deployment]
+      operationId: listComputeAssignments
+      description: >-
+        Lists per-agent compute tier assignments. Every assignment reports its
+        stored runtime override, the effective tier after the deployment
+        default tier, and the source of that effective tier. Requires the
+        deployment.read permission.
+      responses:
+        '200':
+          description: Compute assignment list
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputeAssignmentList'}
+        '403': {$ref: '#/components/responses/Problem'}
+  /admin/compute/assignments/{agentId}:
+    parameters:
+      - {$ref: '#/components/parameters/AgentId'}
+    put:
+      tags: [Admin Deployment]
+      operationId: updateComputeAssignment
+      description: >-
+        Requires the agents.compute.write permission — the delegable
+        digital-employee compute grant that cannot touch human accounts (full
+        administrators always qualify). Stores a per-agent compute tier
+        override; an explicit null tier clears the override so the deployment
+        default tier applies again. The write is recorded in the deployment
+        audit trail and takes effect at the employee instance's next creation:
+        v1 does not mutate running instances in place. Unknown agents return
+        404; tier names that are not in the compute tier catalog return 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ComputeAssignmentUpdate'}
+      responses:
+        '200':
+          description: Updated compute assignment
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputeAssignment'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -601,6 +665,7 @@ components:
     ModelId: {name: modelId, in: path, required: true, schema: {type: string}}
     AssignmentId: {name: assignmentId, in: path, required: true, schema: {type: string}}
     LicenseId: {name: licenseId, in: path, required: true, schema: {type: string}}
+    AgentId: {name: agentId, in: path, required: true, schema: {type: string}}
     Cursor: {name: cursor, in: query, schema: {type: [string, 'null']}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
   responses:
@@ -1282,10 +1347,25 @@ components:
           description: Origin of the effective value.
           type: string
           enum: [override, env, unset]
+    DeploymentIntegerSettingValue:
+      description: One deployment-level integer runtime setting with its override and resolution state.
+      type: object
+      required: [override, effectiveValue, source]
+      properties:
+        override:
+          description: Runtime override stored in the control plane; null when no override is set.
+          type: [integer, 'null']
+        effectiveValue:
+          description: Value currently in effect — the runtime override when set, otherwise the environment-configured value; null when neither exists.
+          type: [integer, 'null']
+        source:
+          description: Origin of the effective value.
+          type: string
+          enum: [override, env, unset]
     DeploymentSettings:
       description: Deployment-level runtime settings maintained through the administration API.
       type: object
-      required: [modelGatewayBaseUrl, modelFallbackIds]
+      required: [modelGatewayBaseUrl, modelFallbackIds, computeDefaultTier, computeIdleHibernateSeconds, computeConcurrencyCap]
       properties:
         modelGatewayBaseUrl:
           $ref: '#/components/schemas/DeploymentSettingValue'
@@ -1297,6 +1377,22 @@ components:
             employee's default model is unhealthy, the first healthy model in
             this list takes over (and the original is restored once it
             recovers). Empty disables automatic failover.
+        computeDefaultTier:
+          $ref: '#/components/schemas/DeploymentSettingValue'
+          description: >-
+            Default compute tier for digital-employee runtime instances; the
+            effective value must name a tier from the compute tier catalog.
+            Falls back to AEP_COMPUTE_DEFAULT_TIER.
+        computeIdleHibernateSeconds:
+          $ref: '#/components/schemas/DeploymentIntegerSettingValue'
+          description: >-
+            Idle duration in seconds before an employee runtime instance
+            scales to zero. Falls back to AEP_COMPUTE_IDLE_HIBERNATE_SECONDS.
+        computeConcurrencyCap:
+          $ref: '#/components/schemas/DeploymentIntegerSettingValue'
+          description: >-
+            Maximum number of concurrent employee runtime instances for the
+            deployment. Falls back to AEP_COMPUTE_CONCURRENCY_CAP.
     DeploymentSettingsUpdate:
       description: Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback.
       type: object
@@ -1319,6 +1415,121 @@ components:
           type: [array, 'null']
           items: {type: string, minLength: 1, maxLength: 200}
           maxItems: 8
+        computeDefaultTier:
+          description: >-
+            New default compute tier for digital-employee runtime instances.
+            The value is validated against the compute tier catalog at write
+            time; unknown tier names are rejected with 422. Null clears the
+            override so the AEP_COMPUTE_DEFAULT_TIER environment value applies
+            again.
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 200
+        computeIdleHibernateSeconds:
+          description: >-
+            New idle duration in seconds before an employee runtime instance
+            scales to zero. Null clears the override so the
+            AEP_COMPUTE_IDLE_HIBERNATE_SECONDS environment value applies again.
+          type: [integer, 'null']
+          minimum: 60
+          maximum: 86400
+        computeConcurrencyCap:
+          description: >-
+            New maximum number of concurrent employee runtime instances for
+            the deployment. Null clears the override so the
+            AEP_COMPUTE_CONCURRENCY_CAP environment value applies again.
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 10000
+    ComputeTier:
+      description: One deployment-owned compute tier for digital-employee runtime instances.
+      type: object
+      required: [name, cpuRequest, cpuLimit, memoryRequest, memoryLimit, source]
+      properties:
+        name:
+          description: Stable tier name referenced by computeDefaultTier and per-agent compute assignments.
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          description: Operator-facing explanation of the tier.
+          type: string
+        cpuRequest:
+          description: Requested CPU in Kubernetes quantity syntax, for example 250m.
+          type: string
+        cpuLimit:
+          description: CPU limit in Kubernetes quantity syntax, for example 1000m.
+          type: string
+        memoryRequest:
+          description: Requested memory in Kubernetes quantity syntax, for example 512Mi.
+          type: string
+        memoryLimit:
+          description: Memory limit in Kubernetes quantity syntax, for example 1Gi.
+          type: string
+        source:
+          description: Origin of the tier definition; tiers are always deployment-owned.
+          type: string
+          enum: [deployment]
+    ComputeTierCatalog:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ComputeTier'}
+    ComputeAssignment:
+      description: One agent's compute tier assignment with its override and resolution state.
+      type: object
+      required: [agentId, tier]
+      properties:
+        agentId: {type: string}
+        agentName:
+          description: Display title of the agent when it can be resolved.
+          type: string
+        tier:
+          description: Tier resolution for this agent.
+          type: object
+          required: [override, effective, source]
+          properties:
+            override:
+              description: Runtime override stored in the control plane; null when no override is set.
+              type: [string, 'null']
+            effective:
+              description: Tier currently in effect — the runtime override when set, otherwise the deployment default tier.
+              type: string
+            source:
+              description: Origin of the effective tier.
+              type: string
+              enum: [override, default]
+        updatedAt:
+          description: When the override was last changed; absent when no override was ever stored.
+          type: string
+          format: date-time
+        updatedBy:
+          description: Operator user id that last changed the override.
+          type: string
+    ComputeAssignmentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ComputeAssignment'}
+    ComputeAssignmentUpdate:
+      description: Per-agent compute tier override update.
+      type: object
+      additionalProperties: false
+      required: [tier]
+      properties:
+        tier:
+          description: >-
+            Catalog tier name to store as the agent's override, validated
+            against the compute tier catalog at write time; unknown names are
+            rejected with 422. Null clears the override so the deployment
+            default tier applies.
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 200
     Problem:
       type: object
       required: [type, title, status, code]
