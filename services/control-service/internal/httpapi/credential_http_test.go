@@ -124,6 +124,36 @@ func TestAdminCredentialLifecycle(t *testing.T) {
 	}
 }
 
+func TestAdminCredentialRotateAuditOmitsSecret(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	handler := New(application).Handler()
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).
+		WithArgs("deployment-a", "credential-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "credentials" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "credential-a", 1).
+		WillReturnRows(credentialRows("credential-a", "Provider", "deepseek", "server_only", "rotated-ciphertext", "rotated-nonce", "key-b", "****alue", true))
+	capture := &auditPayloadCapture{}
+	expectAuditInsertCapturing(mock, capture)
+	mock.ExpectCommit()
+
+	response := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/credentials/credential-a/rotate", `{"value":"rotated-secret-value"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("rotate credential = %d %s", response.Code, response.Body.String())
+	}
+	payload := string(capture.raw)
+	if payload != `{"after":{"rotated":true}}` {
+		t.Fatalf("audit payload should be the rotation marker only = %s", payload)
+	}
+	for _, secret := range []string{"rotated-secret-value", "ciphertext", "rotated-nonce", "key-b"} {
+		if strings.Contains(payload, secret) {
+			t.Fatalf("audit payload leaked %q = %s", secret, payload)
+		}
+	}
+}
+
 func TestAdminCredentialDeleteErrors(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
 	handler := New(application).Handler()

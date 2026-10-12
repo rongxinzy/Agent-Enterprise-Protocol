@@ -128,6 +128,41 @@ func TestIdentityMappingAdminRoutes(t *testing.T) {
 	})
 }
 
+func TestUpdateAgentProfileAuditsTitle(t *testing.T) {
+	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	profileRows := func(title string) *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"deployment_id", "user_id", "display_title", "description", "avatar_object_key", "home_team_id", "prompt_skill_id", "ephemeral", "expires_at", "created_at", "updated_at"}).
+			AddRow("deployment-a", "agent-1", title, "帮忙的", nil, "rd", nil, false, nil, now, now)
+	}
+	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
+		WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows("旧标题"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
+		WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows("旧标题"))
+	mock.ExpectExec(`.*"agent_profiles".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+	capture := &auditPayloadCapture{}
+	expectAuditInsertCapturing(mock, capture)
+	mock.ExpectCommit()
+
+	response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/agents/agent-1/profile", `{"displayTitle":"新标题"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("patch = %d %s", response.Code, response.Body.String())
+	}
+	payload := string(capture.raw)
+	if !strings.Contains(payload, `"before":{"description":"帮忙的","displayTitle":"旧标题","homeTeamId":"rd"}`) {
+		t.Fatalf("audit payload before-values = %s", payload)
+	}
+	if !strings.Contains(payload, `"after":{"description":"帮忙的","displayTitle":"新标题","homeTeamId":"rd"}`) {
+		t.Fatalf("audit payload after-values = %s", payload)
+	}
+	if strings.Contains(payload, "[redacted]") {
+		t.Fatalf("audit payload redacted a declared field = %s", payload)
+	}
+}
+
 func TestDataScopeRuleAdminRoutes(t *testing.T) {
 	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
 	handler := New(application).Handler()

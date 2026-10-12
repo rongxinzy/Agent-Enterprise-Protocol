@@ -423,9 +423,9 @@ func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *ht
 	}
 	if err := recordAdminAuditTx(request.Context(), tx, claims.DeploymentID, repository.AdminAuditEntry{
 		ActorUserID: claims.Subject, Action: "delete", ResourceType: "skill_assignment", ResourceID: assignmentID, Result: "success",
-		Changes: map[string]any{"before": map[string]any{
+		Changes: auditRemoval(map[string]any{
 			"skillId": skillID, "subjectType": subjectType, "subjectId": subjectID,
-		}},
+		}),
 	}); err != nil {
 		databaseFailure(response, request, err)
 		return

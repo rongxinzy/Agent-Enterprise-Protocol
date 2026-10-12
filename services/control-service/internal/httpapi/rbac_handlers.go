@@ -172,7 +172,7 @@ func (s *Server) deleteRole(response http.ResponseWriter, request *http.Request)
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "role", ResourceID: roleID, Result: "success",
-			Changes: map[string]any{"before": auditRoleSnapshot(removed)},
+			Changes: auditRemoval(auditRoleSnapshot(removed)),
 		})
 	})
 	if errors.Is(err, repository.ErrNotFound) {
@@ -337,7 +337,7 @@ func (s *Server) deleteTeam(response http.ResponseWriter, request *http.Request)
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "team", ResourceID: teamID, Result: "success",
-			Changes: map[string]any{"before": auditTeamSnapshot(removed)},
+			Changes: auditRemoval(auditTeamSnapshot(removed)),
 		})
 	})
 	if errors.Is(err, repository.ErrNotFound) {
@@ -572,8 +572,7 @@ func validRBACID(value string) bool {
 // auditRoleChanges reports the role fields an update can touch, masked by the
 // same allowlist the request payload goes through.
 func auditRoleChanges(before, after repository.RoleRecord) map[string]any {
-	masked, _ := maskAuditValue(map[string]any{"before": auditRoleSnapshot(before), "after": auditRoleSnapshot(after)}).(map[string]any)
-	return masked
+	return auditChanges(auditRoleSnapshot(before), auditRoleSnapshot(after))
 }
 
 func auditRoleSnapshot(record repository.RoleRecord) map[string]any {
@@ -583,8 +582,7 @@ func auditRoleSnapshot(record repository.RoleRecord) map[string]any {
 // auditTeamChanges reports the team fields an update can touch, masked by the
 // same allowlist the request payload goes through.
 func auditTeamChanges(before, after repository.TeamRecord) map[string]any {
-	masked, _ := maskAuditValue(map[string]any{"before": auditTeamSnapshot(before), "after": auditTeamSnapshot(after)}).(map[string]any)
-	return masked
+	return auditChanges(auditTeamSnapshot(before), auditTeamSnapshot(after))
 }
 
 func auditTeamSnapshot(record repository.TeamRecord) map[string]any {

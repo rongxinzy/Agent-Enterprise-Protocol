@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql/driver"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,6 +37,28 @@ func teamDetailRow(id, name, description string, builtIn, enabled bool, now time
 
 func expectAuditInsert(mock sqlmock.Sqlmock) {
 	mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+// auditPayloadCapture records the payload argument of the next audit insert so
+// a test can assert exactly what was written to admin_audit_events.
+type auditPayloadCapture struct{ raw []byte }
+
+func (capture *auditPayloadCapture) Match(value driver.Value) bool {
+	switch typed := value.(type) {
+	case []byte:
+		capture.raw = typed
+	case string:
+		capture.raw = []byte(typed)
+	default:
+		return false
+	}
+	return true
+}
+
+func expectAuditInsertCapturing(mock sqlmock.Sqlmock, capture *auditPayloadCapture) {
+	mock.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), capture).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 func expectRoleRecord(mock sqlmock.Sqlmock, id, name, description string, enabled bool, permissions []string, now time.Time) {
@@ -123,6 +146,43 @@ func TestAdminRoleLifecycle(t *testing.T) {
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/roles/model-operator", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete role = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestAdminRoleUpdateAuditsPermissionChanges(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	mock.ExpectBegin()
+	expectRoleRecord(mock, "operator", "Operator", "Operates", true, []string{"models.write"}, now)
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "operator", 1).
+		WillReturnRows(roleRow("operator", "Operator", "Operates", false, true, now))
+	mock.ExpectExec(`UPDATE "roles" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "permissions" WHERE id IN \(\$1\)`).
+		WithArgs("models.read").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`DELETE FROM "role_permissions" WHERE deployment_id = \$1 AND role_id = \$2`).
+		WithArgs("deployment-a", "operator").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(`INSERT INTO "role_permissions"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	expectRoleRecord(mock, "operator", "Operator", "Operates", true, []string{"models.read"}, now)
+	capture := &auditPayloadCapture{}
+	expectAuditInsertCapturing(mock, capture)
+	mock.ExpectCommit()
+
+	response := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/roles/operator", `{"permissions":["models.read"]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("update role permissions = %d %s", response.Code, response.Body.String())
+	}
+	payload := string(capture.raw)
+	if !strings.Contains(payload, `"before":{"description":"Operates","enabled":true,"name":"Operator","permissions":["models.write"]}`) {
+		t.Fatalf("audit payload before-values = %s", payload)
+	}
+	if !strings.Contains(payload, `"after":{"description":"Operates","enabled":true,"name":"Operator","permissions":["models.read"]}`) {
+		t.Fatalf("audit payload after-values = %s", payload)
+	}
+	if strings.Contains(payload, "[redacted]") {
+		t.Fatalf("audit payload redacted a declared field = %s", payload)
 	}
 }
 

@@ -365,7 +365,7 @@ func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request)
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "user", ResourceID: userID, Result: "success",
-			Changes: map[string]any{"before": auditUserSnapshot(removed)},
+			Changes: auditRemoval(auditUserSnapshot(removed)),
 		})
 	})
 	if err != nil {
@@ -379,8 +379,7 @@ func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request)
 // auditUserChanges reports the profile fields an update can touch, masked by
 // the same allowlist the request payload goes through.
 func auditUserChanges(before, after repository.UserRecord) map[string]any {
-	masked, _ := maskAuditValue(map[string]any{"before": auditUserSnapshot(before), "after": auditUserSnapshot(after)}).(map[string]any)
-	return masked
+	return auditChanges(auditUserSnapshot(before), auditUserSnapshot(after))
 }
 
 func auditUserSnapshot(record repository.UserRecord) map[string]any {

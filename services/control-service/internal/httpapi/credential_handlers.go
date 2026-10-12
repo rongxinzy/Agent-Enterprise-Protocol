@@ -434,7 +434,7 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "credential", ResourceID: credentialID, Result: "success",
-			Changes: map[string]any{"before": auditCredentialSnapshot(removed)},
+			Changes: auditRemoval(auditCredentialSnapshot(removed)),
 		})
 	})
 	if isForeignKeyViolation(err) {
@@ -457,8 +457,7 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 // masked by the same allowlist the request payload goes through. The secret
 // value is never part of the snapshot.
 func auditCredentialChanges(before, after repository.Credential) map[string]any {
-	masked, _ := maskAuditValue(map[string]any{"before": auditCredentialSnapshot(before), "after": auditCredentialSnapshot(after)}).(map[string]any)
-	return masked
+	return auditChanges(auditCredentialSnapshot(before), auditCredentialSnapshot(after))
 }
 
 func auditCredentialSnapshot(record repository.Credential) map[string]any {
@@ -558,9 +557,9 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "credential_assignment", ResourceID: assignmentID, Result: "success",
-			Changes: map[string]any{"before": map[string]any{
+			Changes: auditRemoval(map[string]any{
 				"credentialId": removed.CredentialID, "subjectType": removed.SubjectType, "subjectId": removed.SubjectID,
-			}},
+			}),
 		})
 	})
 	if errors.Is(err, repository.ErrNotFound) {

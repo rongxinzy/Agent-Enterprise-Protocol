@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
 	"gorm.io/gorm"
 
@@ -189,6 +191,43 @@ func TestAdminModelLifecycle(t *testing.T) {
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/enterprise-chat", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete model = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestAuditModelSnapshotIncludesReasoningCompatibility(t *testing.T) {
+	before := modelRecord{
+		DisplayName: "Chat", Protocol: "openai-compatible", Enabled: true,
+		ReasoningCompatibility: json.RawMessage(`{"thinkingFormat":"deepseek"}`),
+	}
+	after := modelRecord{
+		DisplayName: "Chat", Protocol: "openai-compatible", Enabled: true,
+		ReasoningCompatibility: json.RawMessage(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true}`),
+	}
+	encoded, err := json.Marshal(auditModelChanges(before, after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := string(encoded)
+	if strings.Contains(payload, "[redacted]") {
+		t.Fatalf("snapshot redacted a declared field = %s", payload)
+	}
+	if !strings.Contains(payload, `"thinkingFormat":"deepseek"`) || !strings.Contains(payload, `"supportsReasoningEffort":true`) {
+		t.Fatalf("snapshot lost reasoning compatibility = %s", payload)
+	}
+}
+
+func TestAuditModelSnapshotStripsEndpointQuery(t *testing.T) {
+	record := modelRecord{DisplayName: "Chat", Endpoint: pgtype.Text{String: "https://gateway/v1?api_key=secret", Valid: true}}
+	encoded, err := json.Marshal(auditModelChanges(record, record))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := string(encoded)
+	if strings.Contains(payload, "secret") || strings.Contains(payload, "api_key") {
+		t.Fatalf("snapshot kept the endpoint query = %s", payload)
+	}
+	if !strings.Contains(payload, `"endpoint":"https://gateway/v1"`) {
+		t.Fatalf("snapshot lost the endpoint = %s", payload)
 	}
 }
 

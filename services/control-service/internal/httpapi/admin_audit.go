@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -27,60 +28,96 @@ const auditPayloadLimit = 64 << 10
 // sensitive field it did not name (a credential "value", for example), so the
 // default is to withhold. Comparison is case-insensitive.
 var auditSafeKeys = map[string]struct{}{
-	"name":           {},
-	"displayname":    {},
-	"description":    {},
-	"enabled":        {},
-	"status":         {},
-	"kind":           {},
-	"type":           {},
-	"protocol":       {},
-	"subjecttype":    {},
-	"subjectid":      {},
-	"roleids":        {},
-	"teamids":        {},
-	"userids":        {},
-	"modelid":        {},
-	"modelids":       {},
-	"resourcetype":   {},
-	"resourceid":     {},
-	"revision":       {},
-	"scopes":         {},
-	"tags":           {},
-	"parentid":       {},
-	"expiresat":      {},
-	"service":        {},
-	"deliverymode":   {},
-	"capabilities":   {},
-	"reason":         {},
-	"quota":          {},
-	"action":         {},
-	"sourcetype":     {},
-	"identifier":     {},
-	"version":        {},
-	"title":          {},
-	"path":           {},
-	"email":          {},
-	"before":         {},
-	"after":          {},
-	"rotated":        {},
-	"endpoint":       {},
-	"upstreammodel":  {},
-	"localmodelref":  {},
-	"contextwindow":  {},
-	"isdefault":      {},
-	"credentialid":   {},
-	"hometeamid":     {},
-	"promptskillid":  {},
-	"rulekind":       {},
-	"resourcekind":   {},
-	"startsat":       {},
-	"localsubjectid": {},
-	"externalid":     {},
-	"scopetype":      {},
-	"scopeid":        {},
-	"maximum":        {},
-	"interval":       {},
+	"name":                   {},
+	"displayname":            {},
+	"description":            {},
+	"enabled":                {},
+	"status":                 {},
+	"kind":                   {},
+	"type":                   {},
+	"protocol":               {},
+	"subjecttype":            {},
+	"subjectid":              {},
+	"roleids":                {},
+	"teamids":                {},
+	"userids":                {},
+	"modelid":                {},
+	"modelids":               {},
+	"resourcetype":           {},
+	"resourceid":             {},
+	"revision":               {},
+	"scopes":                 {},
+	"tags":                   {},
+	"parentid":               {},
+	"expiresat":              {},
+	"service":                {},
+	"deliverymode":           {},
+	"capabilities":           {},
+	"reason":                 {},
+	"quota":                  {},
+	"action":                 {},
+	"sourcetype":             {},
+	"identifier":             {},
+	"version":                {},
+	"title":                  {},
+	"path":                   {},
+	"email":                  {},
+	"before":                 {},
+	"after":                  {},
+	"rotated":                {},
+	"endpoint":               {},
+	"upstreammodel":          {},
+	"localmodelref":          {},
+	"contextwindow":          {},
+	"isdefault":              {},
+	"credentialid":           {},
+	"hometeamid":             {},
+	"promptskillid":          {},
+	"rulekind":               {},
+	"resourcekind":           {},
+	"startsat":               {},
+	"localsubjectid":         {},
+	"externalid":             {},
+	"scopetype":              {},
+	"scopeid":                {},
+	"maximum":                {},
+	"interval":               {},
+	"permissions":            {},
+	"displaytitle":           {},
+	"reasoningcompatibility": {},
+	"skillid":                {},
+}
+
+// auditChanges documents a mutation's before/after state, masked by the
+// fail-closed allowlist so an unlisted field can never reach the audit row.
+func auditChanges(before, after map[string]any) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": before, "after": after}).(map[string]any)
+	return masked
+}
+
+// auditRemoval documents the state a delete removed. It runs through the same
+// allowlist as every other snapshot, so a delete cannot leak a field that an
+// update would have redacted.
+func auditRemoval(before map[string]any) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": before}).(map[string]any)
+	return masked
+}
+
+// auditCreation documents the state a create established; there is no before.
+func auditCreation(after map[string]any) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"after": after}).(map[string]any)
+	return masked
+}
+
+// stripURLQuery drops a URL's query and fragment before it is audited: an
+// endpoint may carry an inline credential in its query string.
+func stripURLQuery(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.RawQuery == "" && parsed.Fragment == "") {
+		return raw
+	}
+	parsed.RawQuery, parsed.Fragment = "", ""
+	return parsed.String()
 }
 
 type auditStatusWriter struct {

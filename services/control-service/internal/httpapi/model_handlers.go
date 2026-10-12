@@ -478,7 +478,7 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "model", ResourceID: modelID, Result: "success",
-			Changes: map[string]any{"before": auditModelSnapshot(removed)},
+			Changes: auditRemoval(auditModelSnapshot(removed)),
 		})
 	})
 	if errors.Is(err, repository.ErrNotFound) {
@@ -496,8 +496,7 @@ func (s *Server) deleteModel(response http.ResponseWriter, request *http.Request
 // auditModelChanges reports the model fields an update can touch, masked by
 // the same allowlist the request payload goes through.
 func auditModelChanges(before, after modelRecord) map[string]any {
-	masked, _ := maskAuditValue(map[string]any{"before": auditModelSnapshot(before), "after": auditModelSnapshot(after)}).(map[string]any)
-	return masked
+	return auditChanges(auditModelSnapshot(before), auditModelSnapshot(after))
 }
 
 func auditModelSnapshot(model modelRecord) map[string]any {
@@ -507,7 +506,7 @@ func auditModelSnapshot(model modelRecord) map[string]any {
 		"capabilities": []string(model.Capabilities),
 	}
 	if model.Endpoint.Valid {
-		snapshot["endpoint"] = model.Endpoint.String
+		snapshot["endpoint"] = stripURLQuery(model.Endpoint.String)
 	}
 	if model.UpstreamModel.Valid {
 		snapshot["upstreamModel"] = model.UpstreamModel.String
@@ -520,6 +519,9 @@ func auditModelSnapshot(model modelRecord) map[string]any {
 	}
 	if model.ContextWindow.Valid {
 		snapshot["contextWindow"] = model.ContextWindow.Int32
+	}
+	if len(model.ReasoningCompatibility) > 0 {
+		snapshot["reasoningCompatibility"] = model.ReasoningCompatibility
 	}
 	return snapshot
 }
@@ -604,9 +606,9 @@ func (s *Server) deleteModelAssignment(response http.ResponseWriter, request *ht
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "model_assignment", ResourceID: assignmentID, Result: "success",
-			Changes: map[string]any{"before": map[string]any{
+			Changes: auditRemoval(map[string]any{
 				"modelId": removed.ModelID, "subjectType": removed.SubjectType, "subjectId": removed.SubjectID,
-			}},
+			}),
 		})
 	})
 	if errors.Is(err, repository.ErrNotFound) {

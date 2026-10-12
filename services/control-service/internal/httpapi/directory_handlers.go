@@ -374,8 +374,7 @@ func (s *Server) updateAgentProfile(response http.ResponseWriter, request *http.
 // auditAgentProfileChanges reports the agent profile fields an update can
 // touch, masked by the same allowlist the request payload goes through.
 func auditAgentProfileChanges(before, after repository.AgentProfile) map[string]any {
-	masked, _ := maskAuditValue(map[string]any{"before": auditAgentProfileSnapshot(before), "after": auditAgentProfileSnapshot(after)}).(map[string]any)
-	return masked
+	return auditChanges(auditAgentProfileSnapshot(before), auditAgentProfileSnapshot(after))
 }
 
 func auditAgentProfileSnapshot(profile repository.AgentProfile) map[string]any {
@@ -505,16 +504,21 @@ func (s *Server) upsertIdentityMapping(response http.ResponseWriter, request *ht
 	var before repository.IdentityMapping
 	if err := store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
 		current, err := tx.GetIdentityMapping(request.Context(), mapping.SourceID, mapping.ExternalSubjectType, mapping.ExternalID)
-		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		created := errors.Is(err, repository.ErrNotFound)
+		if err != nil && !created {
 			return err
 		}
 		before = current
 		if err := tx.UpsertIdentityMapping(request.Context(), mapping); err != nil {
 			return err
 		}
+		action, changes := "update", auditChanges(auditIdentityMappingSnapshot(before), auditIdentityMappingSnapshot(mapping))
+		if created {
+			action, changes = "create", auditCreation(auditIdentityMappingSnapshot(mapping))
+		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
-			ActorUserID: claimsFrom(request).Subject, Action: "update", ResourceType: "identity_source", ResourceID: mapping.SourceID, Result: "success",
-			Changes: map[string]any{"before": auditIdentityMappingSnapshot(before), "after": auditIdentityMappingSnapshot(mapping)},
+			ActorUserID: claimsFrom(request).Subject, Action: action, ResourceType: "identity_source", ResourceID: mapping.SourceID, Result: "success",
+			Changes: changes,
 		})
 	}); err != nil {
 		databaseFailure(response, request, err)
@@ -577,7 +581,7 @@ func (s *Server) deleteIdentityMapping(response http.ResponseWriter, request *ht
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "identity_source", ResourceID: sourceID, Result: "success",
-			Changes: map[string]any{"before": auditIdentityMappingSnapshot(removed)},
+			Changes: auditRemoval(auditIdentityMappingSnapshot(removed)),
 		})
 	})
 	if err != nil {
@@ -728,7 +732,7 @@ func (s *Server) deleteDataScopeRule(response http.ResponseWriter, request *http
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "data_scope_rule", ResourceID: ruleID, Result: "success",
-			Changes: map[string]any{"before": auditDataScopeRuleSnapshot(removed)},
+			Changes: auditRemoval(auditDataScopeRuleSnapshot(removed)),
 		})
 	})
 	if err != nil {
@@ -792,7 +796,7 @@ func (s *Server) deleteAgent(response http.ResponseWriter, request *http.Request
 		}
 		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
 			ActorUserID: claims.Subject, Action: "delete", ResourceType: "agent", ResourceID: userID, Result: "success",
-			Changes: map[string]any{"before": auditAgentProfileSnapshot(removed)},
+			Changes: auditRemoval(auditAgentProfileSnapshot(removed)),
 		})
 	})
 	if errors.Is(err, repository.ErrNotFound) {

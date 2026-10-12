@@ -102,13 +102,15 @@ func (s *Server) putGatewayLimit(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
-	var beforeConfig gatewaypolicy.Configuration
+	action, changes := "create", auditCreation(auditGatewayLimitSnapshot(cfg))
 	if len(beforeRaw) > 0 {
+		var beforeConfig gatewaypolicy.Configuration
 		_ = json.Unmarshal(beforeRaw, &beforeConfig)
+		action, changes = "update", auditChanges(auditGatewayLimitSnapshot(beforeConfig), auditGatewayLimitSnapshot(cfg))
 	}
 	if err = recordAdminAuditTx(request.Context(), tx, tenant, repository.AdminAuditEntry{
-		ActorUserID: claimsFrom(request).Subject, Action: "update", ResourceType: "gateway_limit", ResourceID: id, Result: "success",
-		Changes: map[string]any{"before": auditGatewayLimitSnapshot(beforeConfig), "after": auditGatewayLimitSnapshot(cfg)},
+		ActorUserID: claimsFrom(request).Subject, Action: action, ResourceType: "gateway_limit", ResourceID: id, Result: "success",
+		Changes: changes,
 	}); err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -123,8 +125,7 @@ func (s *Server) putGatewayLimit(response http.ResponseWriter, request *http.Req
 }
 
 // auditGatewayLimitSnapshot reports the native gateway rule fields a write can
-// touch, masked by the same allowlist the request payload goes through. The
-// expectedVersion concurrency token is never part of the snapshot.
+// touch. The expectedVersion concurrency token is never part of the snapshot.
 func auditGatewayLimitSnapshot(cfg gatewaypolicy.Configuration) map[string]any {
 	snapshot := map[string]any{
 		"kind": cfg.Kind, "scopeType": cfg.ScopeType, "maximum": cfg.Maximum,
@@ -136,8 +137,7 @@ func auditGatewayLimitSnapshot(cfg gatewaypolicy.Configuration) map[string]any {
 	if cfg.ModelID != nil {
 		snapshot["modelId"] = *cfg.ModelID
 	}
-	masked, _ := maskAuditValue(snapshot).(map[string]any)
-	return masked
+	return snapshot
 }
 
 func (s *Server) deleteGatewayLimit(response http.ResponseWriter, request *http.Request) {
@@ -177,7 +177,7 @@ func (s *Server) deleteGatewayLimit(response http.ResponseWriter, request *http.
 	}
 	if err = recordAdminAuditTx(request.Context(), tx, tenant, repository.AdminAuditEntry{
 		ActorUserID: claimsFrom(request).Subject, Action: "delete", ResourceType: "gateway_limit", ResourceID: ruleID, Result: "success",
-		Changes: map[string]any{"before": auditGatewayLimitSnapshot(beforeConfig)},
+		Changes: auditRemoval(auditGatewayLimitSnapshot(beforeConfig)),
 	}); err != nil {
 		databaseFailure(response, request, err)
 		return
