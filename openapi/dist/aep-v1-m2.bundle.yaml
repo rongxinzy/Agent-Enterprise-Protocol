@@ -2102,6 +2102,14 @@ paths:
         '503':
           $ref: '#/components/responses/Problem'
       parameters:
+        - name: source
+          in: query
+          required: false
+          description: Set loki to require native access-log aggregates, including failed requests in calls. Omit to keep automatic source selection. Unavailable Loki never falls back to Prometheus; organization permissions and configuration gates still apply.
+          schema:
+            type: string
+            enum:
+              - loki
         - name: expectedDefinition
           in: query
           required: false

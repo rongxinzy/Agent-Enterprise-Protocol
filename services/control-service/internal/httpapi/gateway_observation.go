@@ -42,9 +42,13 @@ func gatewayQueryFailure(response http.ResponseWriter, request *http.Request, er
 
 func (s *Server) gatewayMetrics(response http.ResponseWriter, request *http.Request) {
 	values := request.URL.Query()
+	if source := values.Get("source"); source != "" && source != "loki" {
+		gatewayQueryFailure(response, request, gatewaysource.ErrQuery)
+		return
+	}
 	// Catalog aliases can share an upstream model. The stock ai_model label
 	// cannot distinguish them; catalog filtering must use trusted access logs.
-	if values.Get("modelId") != "" && values.Get("teamId") == "" && values.Get("roleId") == "" && values.Get("groupBy") != "team" && values.Get("groupBy") != "role" {
+	if (values.Get("modelId") != "" || values.Get("source") == "loki") && values.Get("teamId") == "" && values.Get("roleId") == "" && values.Get("groupBy") != "team" && values.Get("groupBy") != "role" {
 		query, err := gatewaysource.LogMetricQuery(claimsFrom(request).DeploymentID, values)
 		if err != nil {
 			gatewayQueryFailure(response, request, err)

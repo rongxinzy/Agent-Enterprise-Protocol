@@ -27,6 +27,11 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 	h := New(application).Handler()
 	window := "&start=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + "&end=" + time.Now().UTC().Format(time.RFC3339) + "&step=300"
 	for _, tc := range []struct{ query, source, id string }{
+		{"metric=calls&source=loki", "loki", "gateway_access_requests"},
+		{"metric=calls&source=loki&groupBy=user", "loki", "gateway_access_requests"},
+		{"metric=calls&source=loki&groupBy=model", "loki", "gateway_access_requests"},
+		{"metric=calls&source=loki&groupBy=team", "loki", "gateway_access_requests"},
+		{"metric=calls&source=loki&roleId=role-a", "loki", "gateway_access_requests"},
 		{"metric=calls", "prometheus", "ai_usage_completed_calls"},
 		{"metric=failures", "prometheus", "ai_detected_failures"},
 		{"metric=calls&groupBy=team", "loki", "gateway_access_requests"},
@@ -45,6 +50,7 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 	}
 	before := sourceCalls.Load()
 	for _, query := range []string{
+		"metric=calls&source=loki&expectedDefinition=ai_usage_completed_calls",
 		"metric=calls&groupBy=team&expectedDefinition=ai_usage_completed_calls",
 		"metric=failures&roleId=role-a&expectedDefinition=ai_detected_failures",
 		"metric=calls&expectedDefinition=gateway_access_requests",
@@ -62,6 +68,60 @@ func TestGatewayMetricDefinitionGuard(t *testing.T) {
 	got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/requests?source=gateway"+window, "")
 	if got.Code != http.StatusOK || strings.Contains(got.Body.String(), `"definition"`) {
 		t.Fatalf("log result changed: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestExplicitLokiCallsPreserveTotalAndSourceGates(t *testing.T) {
+	application, token, _ := testHTTPApplication(t)
+	var sourceCalls atomic.Int32
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceCalls.Add(1)
+		query := r.URL.Query().Get("query")
+		if r.URL.Path != "/loki/api/v1/query_range" || !strings.Contains(query, "count_over_time(") ||
+			!strings.Contains(query, `aep_deployment_id="deployment-a"`) ||
+			!strings.Contains(query, `aep_source="gateway"`) || strings.Contains(query, "status") ||
+			strings.Contains(query, "llm_duration_count") || strings.Contains(query, "llm_failure_count") {
+			t.Errorf("total calls must use the tenant's unfiltered native gateway log count: %s %s", r.URL.Path, query)
+		}
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{},"values":[[1,"3"]]}]}}`)
+	}))
+	defer source.Close()
+	application.Config.GatewayPrometheusURL = source.URL
+	application.Config.GatewayLokiURL = source.URL
+	h := New(application).Handler()
+	window := "&start=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + "&end=" + time.Now().UTC().Format(time.RFC3339)
+	path := "/aep/v1/admin/model-gateway/metrics?metric=calls&source=loki&expectedDefinition=gateway_access_requests" + window
+	got := adminRequest(h, token, http.MethodGet, path, "")
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"source":"loki"`) ||
+		!strings.Contains(got.Body.String(), `[1,"3"]`) {
+		t.Fatalf("native total changed: %d %s", got.Code, got.Body.String())
+	}
+	before := sourceCalls.Load()
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		{"metric=calls&source=prometheus", http.StatusBadRequest},
+		{"metric=calls&source=https://untrusted.example", http.StatusBadRequest},
+		{"metric=downstream_qps&source=loki", http.StatusUnprocessableEntity},
+		{"metric=calls&source=loki&groupBy=team", http.StatusUnprocessableEntity},
+		{"metric=calls&source=loki&roleId=role-a", http.StatusUnprocessableEntity},
+	} {
+		got := adminRequest(h, token, http.MethodGet, "/aep/v1/admin/model-gateway/metrics?"+tc.query+window, "")
+		if got.Code != tc.status {
+			t.Fatalf("source/configuration guard: %d %s", got.Code, got.Body.String())
+		}
+	}
+	if sourceCalls.Load() != before {
+		t.Fatal("invalid or gated query contacted a source")
+	}
+	application.Config.GatewayLokiURL = ""
+	got = adminRequest(h, token, http.MethodGet, path, "")
+	if got.Code != http.StatusServiceUnavailable || sourceCalls.Load() != before {
+		t.Fatalf("missing Loki fell back to Prometheus: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(h, "", http.MethodGet, path, ""); got.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated source selection: %d", got.Code)
 	}
 }
 

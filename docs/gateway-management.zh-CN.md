@@ -1,5 +1,12 @@
 # 原生模型网关管理接口
 
+指标查询可指定 `source=loki`，在没有模型或组织筛选时也要求原生访问日志聚合。
+包含失败的总调用次数应同时指定 `expectedDefinition=gateway_access_requests`：
+统计已记录的网关请求，不按 HTTP 状态或是否有 usage 排除请求；只在鉴权层拒绝、
+未进入网关的请求不属于这个口径。Loki 缺失时返回不可用，不回退为另一种计数器。
+组织配置开关、租户隔离和查询边界仍生效。省略 `source` 保留原有自动选择；
+显式来源只接受 `loki`，部署运行指标仍只支持 Prometheus。
+
 健康接口的 Prometheus 目标遵循数据源归属：通过
 `AEP_GATEWAY_METRICS_DEPLOYMENT` 绑定当前登录部署的专用源，可返回仓库 discovery
 示例或 PodMonitor 产生的无部署标签目标。共享源只返回 `aep_deployment_id` 匹配的

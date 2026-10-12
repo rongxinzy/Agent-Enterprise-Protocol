@@ -24,6 +24,10 @@ describe('native gateway SDK contracts', () => {
     expect(requests[0]?.path).toContain('/aep/v1/admin/model-gateway/metrics?');
     expect(requests[0]?.path).toContain('userId=user+%26+one');
     expect(requests[0]?.path).toContain('expectedDefinition=ai_input_tokens');
+    await client.queryGatewayMetrics({metric: 'calls', source: 'loki',
+      expectedDefinition: 'gateway_access_requests', start: '2026-10-09T00:00:00Z', end: '2026-10-09T01:00:00Z'});
+    expect(requests.at(-1)?.path).toContain('source=loki');
+    expect(requests.at(-1)?.path).toContain('expectedDefinition=gateway_access_requests');
     await client.changeGatewayQuota('user/one', 100);
     expect(requests.at(-1)?.retry).toBe(false);
     expect(requests.at(-1)?.path).toContain('user%2Fone/delta');

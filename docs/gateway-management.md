@@ -2,6 +2,16 @@
 
 ## Metric definitions
 
+Set `source=loki` on metric queries to require native access-log aggregates,
+even without model or organization filters. For total calls including failed
+requests, also pin `expectedDefinition=gateway_access_requests`. This counts
+recorded gateway requests regardless of HTTP status or usage availability;
+authorizer-only rejections are outside this gateway-log definition. Missing
+Loki returns unavailable and never falls back to a different counter definition.
+Organization configuration gates, tenant isolation and query bounds still apply.
+Omitting `source` retains the existing automatic source selection. Only `loki`
+is an accepted explicit source; infrastructure metrics remain Prometheus-only.
+
 Every metric response includes `source` and a required `definition` with `id`,
 `unit`, `aggregation`, `windowSeconds`, `groupBy`, and `modelDimension`. These
 describe the native query; they do not calculate telemetry. The SDK preserves

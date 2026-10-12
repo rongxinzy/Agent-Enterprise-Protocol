@@ -5340,6 +5340,8 @@ export interface operations {
     queryGatewayMetrics: {
         parameters: {
             query: {
+                /** @description Set loki to require native access-log aggregates, including failed requests in calls. Omit to keep automatic source selection. Unavailable Loki never falls back to Prometheus; organization permissions and configuration gates still apply. */
+                source?: "loki";
                 /** @description Pin a previously returned definition.id. A different selected definition returns 422 GATEWAY_METRIC_DEFINITION_MISMATCH without querying the source. */
                 expectedDefinition?: components["schemas"]["GatewayMetricDefinitionId"];
                 start: string;
