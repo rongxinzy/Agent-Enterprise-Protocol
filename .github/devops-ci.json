@@ -17,5 +17,94 @@
       "name": "DevOps gate tests",
       "path": ".github/workflows/devops-gate-tests.yml"
     }
-  ]
+  ],
+  "e2e": {
+    "compose": [
+      "m0", "m1-control", "m1-gateway", "gateway-native", "m1-client",
+      "m2-control", "m2-agent", "runtime", "m3-data-plane", "upgrade"
+    ],
+    "documentationPaths": [
+      "docs/**/*.md", "README.md", "AGENTS.md", "DEVOPS.md", "SECURITY.md",
+      "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", ".github/pull_request_template.md"
+    ],
+    "fullPaths": [
+      ".github/**", "openapi/**", "packages/aep-sdk-node/**",
+      "go.mod", "go.sum", "go.work", "go.work.sum", "package.json", "package-lock.json",
+      ".dockerignore", "deploy/compose/compose.yaml", "services/control-service/Dockerfile*",
+      "services/control-service/cmd/**", "services/control-service/internal/auth/**",
+      "services/control-service/internal/config/**", "services/control-service/internal/db/**",
+      "services/control-service/internal/app/app*", "services/control-service/internal/httpapi/server*",
+      "services/control-service/internal/httpapi/auth*", "services/control-service/internal/httpapi/activation*",
+      "services/control-service/internal/httpapi/license*", "services/control-service/internal/license/**",
+      "services/internal/runtime/**"
+    ],
+    "scopes": [
+      {
+        "name": "gateway",
+        "paths": [
+          "services/gateway-authorizer/**", "services/internal/gatewaypolicy/**",
+          "deploy/compose/gateway.yaml", "deploy/compose/higress/**", "tests/e2e/mock-openai.mjs"
+        ],
+        "compose": ["m1-control", "m1-gateway", "gateway-native", "m1-client", "m3-data-plane"],
+        "kubernetes": true
+      },
+      {
+        "name": "reconciler",
+        "paths": [
+          "services/gateway-reconciler/**", "deploy/kubernetes/production/gateway-reconciler*",
+          "deploy/kubernetes/production/higress-values.yaml", "tests/e2e/fixtures/higress-*.yaml",
+          "tests/e2e/m3-data-plane.compose.yaml"
+        ],
+        "compose": ["gateway-native", "m3-data-plane"],
+        "kubernetes": true
+      },
+      {
+        "name": "model-control",
+        "paths": [
+          "services/control-service/internal/httpapi/model*", "services/control-service/internal/httpapi/gateway*",
+          "services/control-service/internal/httpapi/data_plane*", "services/control-service/internal/httpapi/deployment_settings*",
+          "services/control-service/internal/repository/models*", "services/control-service/internal/repository/model_pricing*",
+          "services/control-service/internal/repository/gateway*", "services/control-service/internal/app/model_health*",
+          "services/internal/gatewaysource/**", "services/internal/modelpricing/**", "cmd/aepctl/model*"
+        ],
+        "compose": ["m1-control", "m1-gateway", "gateway-native", "m1-client", "m2-control", "m3-data-plane"],
+        "kubernetes": true
+      },
+      {
+        "name": "credentials",
+        "paths": [
+          "services/control-service/internal/credential/**", "services/control-service/internal/httpapi/credential*",
+          "cmd/aepctl/credential*"
+        ],
+        "compose": ["m1-control", "m1-gateway", "gateway-native", "m1-client", "m2-control", "m2-agent", "m3-data-plane"],
+        "kubernetes": true
+      },
+      {
+        "name": "skills",
+        "paths": ["services/control-service/internal/blob/**", "services/control-service/internal/httpapi/skill*"],
+        "compose": ["m0", "m2-control", "m2-agent", "runtime", "upgrade"],
+        "backup": true
+      },
+      {
+        "name": "agent",
+        "paths": ["examples/node-agent/**"],
+        "compose": ["m0", "m1-client", "m2-agent"]
+      },
+      {
+        "name": "events-and-retention",
+        "paths": [
+          "services/control-service/internal/httpapi/event*", "services/control-service/internal/httpapi/telemetry*",
+          "services/control-service/internal/httpapi/audit*", "services/control-service/internal/httpapi/admin_audit*",
+          "services/control-service/internal/httpapi/session_client*", "services/control-service/internal/app/retention*"
+        ],
+        "compose": ["m0", "m1-client", "m2-control", "m2-agent", "runtime", "upgrade"]
+      },
+      {
+        "name": "backup",
+        "paths": ["scripts/backup-compose.mjs", "scripts/restore-compose.mjs", "scripts/backup-security.mjs", "tests/backup-security.mjs"],
+        "compose": [],
+        "backup": true
+      }
+    ]
+  }
 }
