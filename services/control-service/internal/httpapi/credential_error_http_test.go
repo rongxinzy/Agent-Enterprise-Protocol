@@ -247,8 +247,11 @@ func TestAdminCredentialMutationFailureBoundaries(t *testing.T) {
 	t.Run("update missing", func(t *testing.T) {
 		application, mock, token := newStoreBackedHTTPApplication(t)
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+			WithArgs("deployment-a", "credential-a", 1).
+			WillReturnRows(credentialRows("credential-a", "Provider", "deepseek", "server_only", "ciphertext", "nonce", "key-a", "****alue", true))
 		mock.ExpectExec(`UPDATE "credentials" SET`).WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectCommit()
+		mock.ExpectRollback()
 		response := adminRequest(New(application).Handler(), token, http.MethodPatch, "/aep/v1/admin/credentials/credential-a", `{"name":"Provider 2"}`)
 		requireCredentialProblem(t, response.Code, response.Body.String(), http.StatusNotFound, "RESOURCE_NOT_FOUND")
 	})
@@ -256,6 +259,9 @@ func TestAdminCredentialMutationFailureBoundaries(t *testing.T) {
 	t.Run("update database error", func(t *testing.T) {
 		application, mock, token := newStoreBackedHTTPApplication(t)
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+			WithArgs("deployment-a", "credential-a", 1).
+			WillReturnRows(credentialRows("credential-a", "Provider", "deepseek", "server_only", "ciphertext", "nonce", "key-a", "****alue", true))
 		mock.ExpectExec(`UPDATE "credentials" SET`).WillReturnError(errors.New("update unavailable"))
 		mock.ExpectRollback()
 		response := adminRequest(New(application).Handler(), token, http.MethodPatch, "/aep/v1/admin/credentials/credential-a", `{"service":"provider-2"}`)
@@ -301,6 +307,9 @@ func TestAdminCredentialMutationFailureBoundaries(t *testing.T) {
 	t.Run("delete database error", func(t *testing.T) {
 		application, mock, token := newStoreBackedHTTPApplication(t)
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+			WithArgs("deployment-a", "credential-a", 1).
+			WillReturnRows(credentialRows("credential-a", "Provider", "deepseek", "server_only", "ciphertext", "nonce", "key-a", "****alue", true))
 		mock.ExpectExec(`DELETE FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).WithArgs("deployment-a", "credential-a").
 			WillReturnError(errors.New("delete unavailable"))
 		mock.ExpectRollback()

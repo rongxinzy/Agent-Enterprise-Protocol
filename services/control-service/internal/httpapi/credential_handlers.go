@@ -330,11 +330,28 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 		value := strings.TrimSpace(*input.Service)
 		input.Service = &value
 	}
-	record, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateCredential(
-		request.Context(), chi.URLParam(request, "credentialId"), repository.UpdateCredentialParams{
-			Name: input.Name, Service: input.Service, DeliveryMode: input.DeliveryMode, Enabled: input.Enabled,
-		},
-	)
+	claims := claimsFrom(request)
+	credentialID := chi.URLParam(request, "credentialId")
+	var record repository.Credential
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetCredential(request.Context(), credentialID)
+		if err != nil {
+			return err
+		}
+		updated, err := tx.UpdateCredential(
+			request.Context(), credentialID, repository.UpdateCredentialParams{
+				Name: input.Name, Service: input.Service, DeliveryMode: input.DeliveryMode, Enabled: input.Enabled,
+			},
+		)
+		if err != nil {
+			return err
+		}
+		record = updated
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "credential", ResourceID: credentialID, Result: "success",
+			Changes: auditCredentialChanges(before, updated),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
@@ -343,6 +360,7 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, credentialJSON(record))
 }
 
@@ -375,13 +393,26 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusInternalServerError, "CREDENTIAL_ENCRYPT_FAILED", "The credential could not be encrypted.")
 		return
 	}
-	record, err := s.app.Store.Deployment(tenant).RotateCredential(
-		request.Context(), id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value),
-	)
+	var record repository.Credential
+	err = s.app.Store.Deployment(tenant).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		rotated, err := tx.RotateCredential(
+			request.Context(), id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value),
+		)
+		if err != nil {
+			return err
+		}
+		record = rotated
+		// The value itself is never audited; only the rotation event is.
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claimsFrom(request).Subject, Action: "rotate", ResourceType: "credential", ResourceID: id, Result: "success",
+			Changes: map[string]any{"after": map[string]any{"rotated": true}},
+		})
+	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, credentialJSON(record))
 }
 
@@ -389,8 +420,23 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		DeleteCredential(request.Context(), chi.URLParam(request, "credentialId"))
+	claims := claimsFrom(request)
+	credentialID := chi.URLParam(request, "credentialId")
+	var removed repository.Credential
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetCredential(request.Context(), credentialID)
+		if err != nil {
+			return err
+		}
+		removed = before
+		if err := tx.DeleteCredential(request.Context(), credentialID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "credential", ResourceID: credentialID, Result: "success",
+			Changes: map[string]any{"before": auditCredentialSnapshot(removed)},
+		})
+	})
 	if isForeignKeyViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "CREDENTIAL_IN_USE", "The credential is referenced by a model and cannot be deleted.")
 		return
@@ -403,7 +449,20 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// auditCredentialChanges reports the credential fields an update can touch,
+// masked by the same allowlist the request payload goes through. The secret
+// value is never part of the snapshot.
+func auditCredentialChanges(before, after repository.Credential) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": auditCredentialSnapshot(before), "after": auditCredentialSnapshot(after)}).(map[string]any)
+	return masked
+}
+
+func auditCredentialSnapshot(record repository.Credential) map[string]any {
+	return map[string]any{"name": record.Name, "service": record.Service, "deliveryMode": record.DeliveryMode, "enabled": record.Enabled}
 }
 
 func isForeignKeyViolation(err error) bool {

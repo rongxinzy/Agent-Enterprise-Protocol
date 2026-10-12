@@ -60,6 +60,7 @@ var auditSafeKeys = map[string]struct{}{
 	"email":        {},
 	"before":       {},
 	"after":        {},
+	"rotated":      {},
 }
 
 type auditStatusWriter struct {

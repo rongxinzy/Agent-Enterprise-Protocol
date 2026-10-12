@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"gorm.io/gorm"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 )
@@ -20,6 +21,12 @@ func credentialHTTPColumns() []string {
 		"deployment_id", "id", "name", "service", "type", "delivery_mode", "encrypted_value",
 		"nonce", "key_id", "masked_value", "enabled", "created_at", "updated_at", "rotated_at",
 	}
+}
+
+func credentialRows(id, name, service, deliveryMode, ciphertext, nonce, keyID, maskedValue string, enabled bool) *sqlmock.Rows {
+	now := time.Now().UTC()
+	return sqlmock.NewRows(credentialHTTPColumns()).
+		AddRow("deployment-a", id, name, service, "api_key", deliveryMode, []byte(ciphertext), []byte(nonce), keyID, maskedValue, enabled, now, now, now)
 }
 
 func credentialRuntimeColumns() []string {
@@ -51,11 +58,15 @@ func TestAdminCredentialLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE "credentials" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "credential-a", 1).
-		WillReturnRows(sqlmock.NewRows(credentialHTTPColumns()).AddRow("deployment-a", "credential-a", "Renamed Provider", "proxy", "api_key", "client", []byte("ciphertext"), []byte("nonce"), "key-a", "****alue", false, now, now, now))
+		WillReturnRows(credentialRows("credential-a", "Provider", "deepseek", "server_only", "ciphertext", "nonce", "key-a", "****alue", true))
+	mock.ExpectExec(`UPDATE "credentials" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "credential-a", 1).
+		WillReturnRows(credentialRows("credential-a", "Renamed Provider", "proxy", "client", "ciphertext", "nonce", "key-a", "****alue", false))
+	expectAuditInsert(mock)
+	mock.ExpectCommit()
 	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/credentials/credential-a", `{"name":" Renamed Provider ","service":" proxy ","deliveryMode":"client","enabled":false}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Renamed Provider"`) || !strings.Contains(updated.Body.String(), `"deliveryMode":"client"`) || !strings.Contains(updated.Body.String(), `"enabled":false`) {
 		t.Fatalf("update Credential = %d %s", updated.Code, updated.Body.String())
@@ -65,10 +76,11 @@ func TestAdminCredentialLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "credential-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "credentials" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "credential-a", 1).
-		WillReturnRows(sqlmock.NewRows(credentialHTTPColumns()).AddRow("deployment-a", "credential-a", "Renamed Provider", "proxy", "api_key", "client", []byte("rotated-ciphertext"), []byte("rotated-nonce"), "key-b", "****alue", false, now, now, now))
+		WillReturnRows(credentialRows("credential-a", "Renamed Provider", "proxy", "client", "rotated-ciphertext", "rotated-nonce", "key-b", "****alue", false))
+	expectAuditInsert(mock)
+	mock.ExpectCommit()
 	rotated := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/credentials/credential-a/rotate", `{"value":"rotated-secret-value"}`)
 	if rotated.Code != http.StatusOK || !strings.Contains(rotated.Body.String(), `"maskedValue":"****alue"`) || strings.Contains(rotated.Body.String(), "rotated-secret-value") || strings.Contains(rotated.Body.String(), "rotated-ciphertext") {
 		t.Fatalf("rotate Credential = %d %s", rotated.Code, rotated.Body.String())
@@ -108,6 +120,9 @@ func TestAdminCredentialDeleteErrors(t *testing.T) {
 	handler := New(application).Handler()
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "credential-in-use", 1).
+		WillReturnRows(credentialRows("credential-in-use", "Provider", "deepseek", "server_only", "ciphertext", "nonce", "key-a", "****alue", true))
 	mock.ExpectExec(`DELETE FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "credential-in-use").WillReturnError(&pgconn.PgError{Code: "23503"})
 	mock.ExpectRollback()
@@ -117,9 +132,9 @@ func TestAdminCredentialDeleteErrors(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "missing").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "missing", 1).WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectRollback()
 	missing := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/credentials/missing", "")
 	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), `"code":"RESOURCE_NOT_FOUND"`) {
 		t.Fatalf("delete missing Credential = %d %s", missing.Code, missing.Body.String())
