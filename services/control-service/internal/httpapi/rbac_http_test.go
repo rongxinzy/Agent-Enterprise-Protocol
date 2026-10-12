@@ -20,13 +20,29 @@ func teamHTTPColumns() []string {
 	return []string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at", "member_count"}
 }
 
+func roleRow(id, name, description string, builtIn, enabled bool, now time.Time) *sqlmock.Rows {
+	return sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", id, name, description, builtIn, enabled, now, now)
+}
+
+func teamRow(id, name, description string, builtIn, enabled bool, memberCount int64, now time.Time) *sqlmock.Rows {
+	return sqlmock.NewRows(teamHTTPColumns()).AddRow("deployment-a", id, name, description, builtIn, enabled, now, now, memberCount)
+}
+
+func expectAuditInsert(mock sqlmock.Sqlmock) {
+	mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
 func expectRoleRecord(mock sqlmock.Sqlmock, id, name, description string, enabled bool, permissions []string, now time.Time) {
 	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", id, 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", id, name, description, false, enabled, now, now))
+		WillReturnRows(roleRow(id, name, description, false, enabled, now))
 	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 ORDER BY id`).
 		WithArgs("deployment-a").
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", id, name, description, false, enabled, now, now))
+		WillReturnRows(roleRow(id, name, description, false, enabled, now))
+	expectRolePermissions(mock, id, permissions)
+}
+
+func expectRolePermissions(mock sqlmock.Sqlmock, id string, permissions []string) {
 	permissionRows := sqlmock.NewRows([]string{"deployment_id", "role_id", "permission_id"})
 	for _, permission := range permissions {
 		permissionRows.AddRow("deployment-a", id, permission)
@@ -69,28 +85,34 @@ func TestAdminRoleLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	// before-values
+	expectRoleRecord(mock, "model-operator", "Model Operator", "Manages models", true, []string{"models.read", "models.write"}, now)
 	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "model-operator", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "model-operator", "Model Operator", "Manages models", false, true, now, now))
+		WillReturnRows(roleRow("model-operator", "Model Operator", "Manages models", false, true, now))
 	mock.ExpectExec(`UPDATE "roles" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "permissions" WHERE id IN \(\$1\)`).
 		WithArgs("models.read").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec(`DELETE FROM "role_permissions" WHERE deployment_id = \$1 AND role_id = \$2`).
 		WithArgs("deployment-a", "model-operator").WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec(`INSERT INTO "role_permissions"`).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
+	// the updated record is read back inside the same transaction
 	expectRoleRecord(mock, "model-operator", "Model Reader", "Read-only access", false, []string{"models.read"}, now)
+	expectAuditInsert(mock)
+	mock.ExpectCommit()
 	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/roles/model-operator", `{"name":"Model Reader","description":"Read-only access","enabled":false,"permissions":["models.read"]}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Model Reader"`) || !strings.Contains(updated.Body.String(), `"enabled":false`) || !strings.Contains(updated.Body.String(), `"permissions":["models.read"]`) {
 		t.Fatalf("update role = %d %s", updated.Code, updated.Body.String())
 	}
 
+	mock.ExpectBegin()
+	expectRoleRecord(mock, "model-operator", "Model Reader", "Read-only access", false, []string{"models.read"}, now)
 	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "model-operator", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "model-operator", "Model Reader", "Read-only access", false, false, now, now))
-	mock.ExpectBegin()
+		WillReturnRows(roleRow("model-operator", "Model Reader", "Read-only access", false, false, now))
 	mock.ExpectExec(`DELETE FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "model-operator").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/roles/model-operator", "")
 	if deleted.Code != http.StatusNoContent {
@@ -122,20 +144,24 @@ func TestAdminTeamLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	expectTeamRecord(mock, "platform-team", "Platform Team", "Platform engineering", true, 3, now)
 	mock.ExpectExec(`UPDATE "teams" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	expectTeamRecord(mock, "platform-team", "Platform Core", "Core platform", false, 3, now)
+	expectAuditInsert(mock)
+	mock.ExpectCommit()
 	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/teams/platform-team", `{"name":"Platform Core","description":"Core platform","enabled":false}`)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"name":"Platform Core"`) || !strings.Contains(updated.Body.String(), `"enabled":false`) {
 		t.Fatalf("update team = %d %s", updated.Code, updated.Body.String())
 	}
 
+	mock.ExpectBegin()
+	expectTeamRecord(mock, "platform-team", "Platform Core", "Core platform", false, 3, now)
 	mock.ExpectQuery(`SELECT \* FROM "teams" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "platform-team", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "platform-team", "Platform Core", "Core platform", false, false, now, now))
-	mock.ExpectBegin()
+		WillReturnRows(roleRow("platform-team", "Platform Core", "Core platform", false, false, now))
 	mock.ExpectExec(`DELETE FROM "teams" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "platform-team").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/platform-team", "")
 	if deleted.Code != http.StatusNoContent {
@@ -182,18 +208,22 @@ func TestAdminRoleErrorMappings(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	expectRoleRecord(mock, "admin", "Administrator", "Built in", true, nil, now)
 	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "admin", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "admin", "Administrator", "Built in", true, true, now, now))
+		WillReturnRows(roleRow("admin", "Administrator", "Built in", true, true, now))
 	mock.ExpectRollback()
 	builtInUpdate := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/roles/admin", `{"enabled":false}`)
 	if builtInUpdate.Code != http.StatusConflict || !strings.Contains(builtInUpdate.Body.String(), `"code":"BUILT_IN_RESOURCE"`) {
 		t.Fatalf("update built-in role = %d %s", builtInUpdate.Code, builtInUpdate.Body.String())
 	}
 
+	mock.ExpectBegin()
+	expectRoleRecord(mock, "admin", "Administrator", "Built in", true, nil, now)
 	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "admin", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "admin", "Administrator", "Built in", true, true, now, now))
+		WillReturnRows(roleRow("admin", "Administrator", "Built in", true, true, now))
+	mock.ExpectRollback()
 	builtInDelete := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/roles/admin", "")
 	if builtInDelete.Code != http.StatusConflict || !strings.Contains(builtInDelete.Body.String(), `"code":"BUILT_IN_RESOURCE"`) {
 		t.Fatalf("delete built-in role = %d %s", builtInDelete.Code, builtInDelete.Body.String())
@@ -224,9 +254,12 @@ func TestAdminTeamErrorMappings(t *testing.T) {
 		t.Fatalf("missing team = %d %s", missing.Code, missing.Body.String())
 	}
 
+	mock.ExpectBegin()
+	expectTeamRecord(mock, "all-users", "All users", "Built in", true, 0, now)
 	mock.ExpectQuery(`SELECT \* FROM "teams" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 		WithArgs("deployment-a", "all-users", 1).
-		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "all-users", "All users", "Built in", true, true, now, now))
+		WillReturnRows(roleRow("all-users", "All users", "Built in", true, true, now))
+	mock.ExpectRollback()
 	builtInDelete := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/all-users", "")
 	if builtInDelete.Code != http.StatusConflict || !strings.Contains(builtInDelete.Body.String(), `"code":"BUILT_IN_RESOURCE"`) {
 		t.Fatalf("delete built-in team = %d %s", builtInDelete.Code, builtInDelete.Body.String())
