@@ -14,7 +14,7 @@ tests:
       - extract_from: gateway_metadata
         conditions:
           - type: vrl
-            source: '.input_token == "7" && .output_token == "9" && .aep_dimension == "base" && !exists(.question) && !exists(.answer) && !exists(.authorization) && !exists(.ai_log)'
+            source: '.request_id == "req-a" && .input_token == "7" && .output_token == "9" && .aep_dimension == "base" && !exists(.question) && !exists(.answer) && !exists(.authorization) && !exists(.ai_log)'
       - extract_from: gateway_teams
         conditions:
           - type: vrl

@@ -90,6 +90,14 @@ Loki 访问日志流需要 `aep_deployment_id` 和 `aep_source=gateway|authorize
 原生耗时字段；不返回提示词、回答、工具参数、凭据或自由文本的供应商错误。
 AEP 不另存监控历史。
 
+鉴权服务验证或生成对客户端可见的 `X-Request-ID`，清除客户端所有 `X-AEP-*`
+头后，以可信的 `X-AEP-Request-ID` 将同一 ID 传入网关。元数据访问日志的
+EnvoyFilter 读取该可信头，避免 Envoy 为追踪而改写自己的 `X-Request-ID`。
+上游响应头不能覆盖鉴权服务返回的 ID。先更新鉴权服务，再应用新版 EnvoyFilter；
+仅更新日志配置无法关联旧鉴权服务。Higress 仍必须仅允许可信鉴权服务访问。
+历史日志的 ID 不做回写。调用者可能重复使用 ID，展示详情须保留各来源的时间戳
+及可信身份，不能仅凭相同 ID 假定是唯一一次调用。
+
 ## 主动模型测试
 
 `POST models/{modelId}/test-access` 要求 `models.read` 权限、有效会话及当前模型
