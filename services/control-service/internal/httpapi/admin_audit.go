@@ -70,6 +70,8 @@ var auditSafeKeys = map[string]struct{}{
 	"contextwindow": {},
 	"isdefault":     {},
 	"credentialid":  {},
+	"hometeamid":    {},
+	"promptskillid": {},
 }
 
 type auditStatusWriter struct {

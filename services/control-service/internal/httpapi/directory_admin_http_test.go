@@ -216,7 +216,10 @@ func TestUpdateAgentProfileRoute(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
 			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows())
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
+			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows())
 		mock.ExpectExec(`.*"agent_profiles".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/agents/agent-1/profile", `{"displayTitle":"新标题"}`)
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "新标题") {

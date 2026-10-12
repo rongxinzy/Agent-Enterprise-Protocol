@@ -344,11 +344,48 @@ func (s *Server) updateAgentProfile(response http.ResponseWriter, request *http.
 			profile.PromptSkillID = input.PromptSkillID
 		}
 	}
-	if err := store.UpsertAgentProfile(request.Context(), profile); err != nil {
+	var before repository.AgentProfile
+	err = store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		current, err := tx.GetAgentProfile(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		before = current
+		if err := tx.UpsertAgentProfile(request.Context(), profile); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claimsFrom(request).Subject, Action: "update", ResourceType: "agent", ResourceID: userID, Result: "success",
+			Changes: auditAgentProfileChanges(before, profile),
+		})
+	})
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The agent profile was not found.")
+		return
+	}
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, map[string]any{"id": userID, "homeTeamId": profile.HomeTeamID, "displayTitle": profile.DisplayTitle})
+}
+
+// auditAgentProfileChanges reports the agent profile fields an update can
+// touch, masked by the same allowlist the request payload goes through.
+func auditAgentProfileChanges(before, after repository.AgentProfile) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": auditAgentProfileSnapshot(before), "after": auditAgentProfileSnapshot(after)}).(map[string]any)
+	return masked
+}
+
+func auditAgentProfileSnapshot(profile repository.AgentProfile) map[string]any {
+	snapshot := map[string]any{
+		"displayTitle": profile.DisplayTitle, "description": profile.Description, "homeTeamId": profile.HomeTeamID,
+	}
+	if profile.PromptSkillID != nil {
+		snapshot["promptSkillId"] = *profile.PromptSkillID
+	}
+	return snapshot
 }
 
 // ---- Identity sources and mappings ----
@@ -669,22 +706,36 @@ func (s *Server) dataScopeContext(response http.ResponseWriter, request *http.Re
 }
 
 func (s *Server) deleteAgent(response http.ResponseWriter, request *http.Request) {
+	claims := claimsFrom(request)
 	userID := chi.URLParam(request, "agentId")
-	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
-	if _, err := store.GetAgentProfile(request.Context(), userID); errors.Is(err, repository.ErrNotFound) {
+	store := s.app.Store.Deployment(claims.DeploymentID)
+	var removed repository.AgentProfile
+	err := store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		profile, err := tx.GetAgentProfile(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		removed = profile
+		if err := tx.DeleteAgent(request.Context(), userID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "agent", ResourceID: userID, Result: "success",
+			Changes: map[string]any{"before": auditAgentProfileSnapshot(removed)},
+		})
+	})
+	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The agent profile was not found.")
 		return
-	} else if err != nil {
+	}
+	if errors.Is(err, repository.ErrAgentHasSessions) {
+		writeProblem(response, request, http.StatusConflict, "AGENT_HAS_SESSIONS", "Revoke the agent sessions before deleting the account.")
+		return
+	}
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	if err := store.DeleteAgent(request.Context(), userID); err != nil {
-		if errors.Is(err, repository.ErrAgentHasSessions) {
-			writeProblem(response, request, http.StatusConflict, "AGENT_HAS_SESSIONS", "Revoke the agent sessions before deleting the account.")
-			return
-		}
-		databaseFailure(response, request, err)
-		return
-	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
