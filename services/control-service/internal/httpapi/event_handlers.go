@@ -501,7 +501,8 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED", "message": "A user session is required."})
 			continue
 		}
-		if code, message := telemetryEventProblem(event.EventID, event.Type, event.Result, event.OccurredAt, now); code != "" {
+		code, message, occurredAt := telemetryEventProblem(event.EventID, event.Type, event.Result, event.OccurredAt, now)
+		if code != "" {
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": code, "message": message})
 			continue
 		}
@@ -511,8 +512,22 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			resourceType = &event.Resource.Type
 			resourceID = &event.Resource.ID
 		}
-		rows = append(rows, []any{event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt})
+		rows = append(rows, []any{event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, occurredAt})
 		batchIDs = append(batchIDs, event.EventID)
+	}
+	// A batch may repeat an event_id; the lookup and the response must name
+	// each identifier once.
+	if len(batchIDs) > 0 {
+		seen := make(map[string]struct{}, len(batchIDs))
+		unique := batchIDs[:0]
+		for _, id := range batchIDs {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			unique = append(unique, id)
+		}
+		batchIDs = unique
 	}
 	if len(rows) > 0 {
 		values := make([]string, 0, len(rows))
@@ -568,31 +583,42 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 	writeJSON(response, http.StatusOK, map[string]any{"accepted": accepted, "rejected": rejected})
 }
 
-// telemetryEventProblem validates a client-reported event before it is stored.
-// The client controls occurredAt (which orders the audit list and drives the
-// cursor) and result (which the console renders), so implausible or unknown
-// values are rejected instead of trusted.
-func telemetryEventProblem(eventID, eventType string, result *string, occurredAt, now time.Time) (string, string) {
-	if strings.TrimSpace(eventID) == "" {
-		return "INVALID_EVENT_ID", "The event identifier is required."
+// telemetryMaxAge bounds how far in the past a client-reported occurrence time
+// may be. It mirrors the default telemetry retention: an older event would be
+// swept on the next cleanup anyway.
+const telemetryMaxAge = 90 * 24 * time.Hour
+
+// telemetryEventProblem validates a client-reported event and normalizes its
+// occurrence time. The client controls occurredAt, which orders the audit list
+// and drives the cursor: a future value is clamped to server time rather than
+// trusted (and rather than dropped, which would lose legitimate telemetry
+// whenever a client clock runs fast), and a value older than the retention
+// window is refused.
+func telemetryEventProblem(eventID, eventType string, result *string, occurredAt, now time.Time) (string, string, time.Time) {
+	normalized := occurredAt
+	if strings.TrimSpace(eventID) == "" || len(eventID) > 256 {
+		return "INVALID_EVENT_ID", "The event identifier must be between 1 and 256 characters.", normalized
 	}
 	if strings.TrimSpace(eventType) == "" || len(eventType) > 128 {
-		return "INVALID_TYPE", "The event type must be between 1 and 128 characters."
+		return "INVALID_TYPE", "The event type must be between 1 and 128 characters.", normalized
 	}
 	if result != nil {
 		switch *result {
 		case "success", "failure", "info":
 		default:
-			return "INVALID_RESULT", "The event result must be success, failure, or info."
+			return "INVALID_RESULT", "The event result must be success, failure, or info.", normalized
 		}
 	}
 	if occurredAt.IsZero() {
-		return "INVALID_OCCURRED_AT", "The event occurrence time is required."
+		return "INVALID_OCCURRED_AT", "The event occurrence time is required.", normalized
 	}
-	if occurredAt.After(now.Add(5 * time.Minute)) {
-		return "INVALID_OCCURRED_AT", "The event occurrence time must not be in the future."
+	if occurredAt.After(now) {
+		normalized = now
 	}
-	return "", ""
+	if normalized.Before(now.Add(-telemetryMaxAge)) {
+		return "INVALID_OCCURRED_AT", "The event occurrence time is older than the retention window.", normalized
+	}
+	return "", "", normalized
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {

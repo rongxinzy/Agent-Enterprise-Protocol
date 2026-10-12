@@ -494,7 +494,7 @@ func TestTelemetryUploadRejectsInvalidEvents(t *testing.T) {
 		{"eventId":"","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"},
 		{"eventId":"e2","type":"","occurredAt":"2026-10-01T00:00:00Z","result":"success"},
 		{"eventId":"e3","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"bogus"},
-		{"eventId":"e4","type":"t","occurredAt":"2999-01-01T00:00:00Z","result":"success"}
+		{"eventId":"e4","type":"t","occurredAt":"2000-01-01T00:00:00Z","result":"success"}
 	]}`
 	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":[]`) {
@@ -514,5 +514,31 @@ func TestTelemetryUploadReportsCrossDeploymentConflict(t *testing.T) {
 	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", `{"events":[{"eventId":"e1","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"EVENT_ID_CONFLICT"`) || !strings.Contains(response.Body.String(), `"accepted":[]`) {
 		t.Fatalf("conflicting telemetry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTelemetryUploadClampsFutureOccurrenceTime(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}).AddRow("e1"))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", `{"events":[{"eventId":"e1","type":"t","occurredAt":"2999-01-01T00:00:00Z","result":"success"}]}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":["e1"]`) || strings.Contains(response.Body.String(), "INVALID_OCCURRED_AT") {
+		t.Fatalf("clamped telemetry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTelemetryUploadDeduplicatesRepeatedEventID(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	// The insert still carries both rows (ON CONFLICT skips the second).
+	args := make([]any, 20)
+	for i := range args {
+		args[i] = pgxmock.AnyArg()
+	}
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(args...).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}).AddRow("dup"))
+	payload := `{"events":[{"eventId":"dup","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"},{"eventId":"dup","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":["dup"]`) || !strings.Contains(response.Body.String(), `"rejected":[]`) {
+		t.Fatalf("duplicate telemetry = %d %s", response.Code, response.Body.String())
 	}
 }
