@@ -28,6 +28,12 @@ func teamRow(id, name, description string, builtIn, enabled bool, memberCount in
 	return sqlmock.NewRows(teamHTTPColumns()).AddRow("deployment-a", id, name, description, builtIn, enabled, now, now, memberCount)
 }
 
+// teamDetailRow returns the bare team table shape written by Take(&Team{}).
+func teamDetailRow(id, name, description string, builtIn, enabled bool, now time.Time) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "parent_team_id", "path", "depth", "created_at", "updated_at"}).
+		AddRow("deployment-a", id, name, description, builtIn, enabled, nil, "/"+id, 0, now, now)
+}
+
 func expectAuditInsert(mock sqlmock.Sqlmock) {
 	mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
 }
