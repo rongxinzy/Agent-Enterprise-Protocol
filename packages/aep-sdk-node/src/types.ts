@@ -185,8 +185,14 @@ export type DataPlanePublishRequest = components['schemas']['DataPlanePublishReq
 export type DataPlaneCatalogComparison = components['schemas']['DataPlaneCatalogComparison'];
 export type DataPlaneStatus = components['schemas']['DataPlaneStatus'];
 export type DeploymentSettingValue = components['schemas']['DeploymentSettingValue'];
+export type DeploymentIntegerSettingValue = components['schemas']['DeploymentIntegerSettingValue'];
 export type DeploymentSettings = components['schemas']['DeploymentSettings'];
 export type DeploymentSettingsUpdate = components['schemas']['DeploymentSettingsUpdate'];
+export type ComputeTier = components['schemas']['ComputeTier'];
+export type ComputeTierCatalog = components['schemas']['ComputeTierCatalog'];
+export type ComputeAssignment = components['schemas']['ComputeAssignment'];
+export type ComputeAssignmentList = components['schemas']['ComputeAssignmentList'];
+export type ComputeAssignmentUpdate = components['schemas']['ComputeAssignmentUpdate'];
 export type ClientIdentity = components['schemas']['ClientIdentity'];
 
 export interface ModelConnection extends ModelGatewayMetadata {
