@@ -210,11 +210,26 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, "MEMBERSHIP_UPDATE_UNSUPPORTED", "teamIds and roleIds cannot be changed on user update; they are set at creation or import.")
 		return
 	}
-	user, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateUser(
-		request.Context(), chi.URLParam(request, "userId"), repository.UpdateUserParams{
+	claims := claimsFrom(request)
+	userID := chi.URLParam(request, "userId")
+	var user repository.UserRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetUserRecord(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		updated, err := tx.UpdateUser(request.Context(), userID, repository.UpdateUserParams{
 			DisplayName: input.DisplayName, Email: input.Email, Status: input.Status,
-		},
-	)
+		})
+		if err != nil {
+			return err
+		}
+		user = updated
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "user", ResourceID: userID, Result: "success",
+			Changes: auditUserChanges(before, updated),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
 		return
@@ -223,6 +238,7 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	if user.Status == "disabled" {
 		if err := s.app.RevokeUserSessionSet(request.Context(), user.ID); err != nil {
 			databaseFailure(response, request, err)
@@ -331,4 +347,18 @@ func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// auditUserChanges reports the profile fields an update can touch, masked by
+// the same allowlist the request payload goes through.
+func auditUserChanges(before, after repository.UserRecord) map[string]any {
+	snapshot := func(record repository.UserRecord) map[string]any {
+		email := any(nil)
+		if record.Email != nil {
+			email = *record.Email
+		}
+		return map[string]any{"displayName": record.DisplayName, "email": email, "status": record.Status}
+	}
+	masked, _ := maskAuditValue(map[string]any{"before": snapshot(before), "after": snapshot(after)}).(map[string]any)
+	return masked
 }

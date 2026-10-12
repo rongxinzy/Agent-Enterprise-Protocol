@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,6 +57,9 @@ var auditSafeKeys = map[string]struct{}{
 	"version":      {},
 	"title":        {},
 	"path":         {},
+	"email":        {},
+	"before":       {},
+	"after":        {},
 }
 
 type auditStatusWriter struct {
@@ -80,9 +84,23 @@ func (writer *auditStatusWriter) Write(body []byte) (int, error) {
 	return writer.ResponseWriter.Write(body)
 }
 
-// auditAdminWrites records every successful administrative write. It is
-// deliberately best-effort: an audit failure never turns a completed operation
-// into an error response, but it is logged so the gap is visible.
+// auditRecorded marks a request whose handler already wrote the audit row
+// inside its own transaction, so the fallback middleware must not duplicate it.
+type auditRecorded struct{ done bool }
+
+const auditRecordedKey contextKey = "aep-audit-recorded"
+
+func markAdminAuditRecorded(request *http.Request) {
+	if flag, ok := request.Context().Value(auditRecordedKey).(*auditRecorded); ok {
+		flag.done = true
+	}
+}
+
+// auditAdminWrites records every successful administrative write that its
+// handler did not record itself. It is deliberately best-effort: an audit
+// failure never turns a completed operation into an error response, but it is
+// logged so the gap is visible. Handlers that write the audit in their own
+// transaction take precedence.
 func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
@@ -102,7 +120,11 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 			}
 		}
 		recorder := &auditStatusWriter{ResponseWriter: response, status: http.StatusOK}
-		next.ServeHTTP(recorder, request)
+		recorded := &auditRecorded{}
+		next.ServeHTTP(recorder, request.WithContext(context.WithValue(request.Context(), auditRecordedKey, recorded)))
+		if recorded.done {
+			return
+		}
 		if recorder.status < 200 || recorder.status >= 300 {
 			return
 		}
