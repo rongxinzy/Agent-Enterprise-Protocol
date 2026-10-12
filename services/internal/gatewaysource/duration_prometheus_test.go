@@ -50,9 +50,10 @@ func TestSparseDurationWithNativePrometheus(t *testing.T) {
 						value = map[string]int{"llm_duration_count": 3, "llm_service_duration": 180, "llm_stream_duration_count": 3, "llm_first_token_duration": 18}[counter]
 					}
 					values := fmt.Sprintf("0 0 %d+0x149", value)
-					if scenario == "reset" {
+					switch scenario {
+					case "reset":
 						values = fmt.Sprintf("%d 0 %d+0x149", value*100, value)
-					} else if scenario == "idle" {
+					case "idle":
 						values = "0+0x151"
 					}
 					input = append(input, map[string]string{
@@ -78,7 +79,7 @@ func TestSparseDurationWithNativePrometheus(t *testing.T) {
 							t.Fatal(err)
 						}
 						var expected []map[string]any
-						if scenario != "absent" && !(scenario == "nonstream" && metric == "first_token_duration") {
+						if scenario != "absent" && (scenario != "nonstream" || metric != "first_token_duration") {
 							value := float64(55)
 							if metric == "first_token_duration" {
 								value = 5
