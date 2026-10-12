@@ -85,7 +85,11 @@ func TestIdentityMappingAdminRoutes(t *testing.T) {
 			WithArgs("deployment-a", "wecom", 1).
 			WillReturnRows(sqlmock.NewRows(identitySourceColumns()).AddRow("deployment-a", "wecom", "directory", "WeCom", nil, true, now, now))
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "identity_mappings"`).
+			WithArgs("deployment-a", "wecom", "user", "ext-1", 1).
+			WillReturnError(gorm.ErrRecordNotFound)
 		mock.ExpectExec(`.*"identity_mappings".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/identity-sources/wecom/mappings",
 			`{"externalSubjectType":"user","externalId":"ext-1","localSubjectId":"user-a"}`)
@@ -107,9 +111,14 @@ func TestIdentityMappingAdminRoutes(t *testing.T) {
 
 	t.Run("delete removes the mapping", func(t *testing.T) {
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "identity_mappings"`).
+			WithArgs("deployment-a", "wecom", "user", "ext-1", 1).
+			WillReturnRows(sqlmock.NewRows(identityMappingColumns()).
+				AddRow("deployment-a", "wecom", "user", "ext-1", "user-a", "active", now, nil))
 		mock.ExpectExec(`DELETE FROM "identity_mappings"`).
 			WithArgs("deployment-a", "wecom", "user", "ext-1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete,
 			"/aep/v1/admin/identity-sources/wecom/mappings/user/ext-1", "")
@@ -167,8 +176,13 @@ func TestDataScopeRuleAdminRoutes(t *testing.T) {
 
 	t.Run("delete removes the rule", func(t *testing.T) {
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "data_scope_rules"`).
+			WithArgs("deployment-a", "rule-1", 1).
+			WillReturnRows(sqlmock.NewRows(dataScopeColumns()).
+				AddRow("deployment-a", "rule-1", "exception_grant", "team", "rd", "skill", "reporting", nil, nil, "team needs reporting", "admin", time.Now().UTC(), time.Now().UTC()))
 		mock.ExpectExec(`DELETE FROM "data_scope_rules"`).
 			WithArgs("deployment-a", "rule-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/data-scope-rules/rule-1", "")
 		if response.Code != http.StatusNoContent {

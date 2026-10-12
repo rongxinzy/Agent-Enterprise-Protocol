@@ -502,11 +502,33 @@ func (s *Server) upsertIdentityMapping(response http.ResponseWriter, request *ht
 		ExternalID: strings.TrimSpace(input.ExternalID), LocalSubjectID: strings.TrimSpace(input.LocalSubjectID),
 		Status: "active",
 	}
-	if err := store.UpsertIdentityMapping(request.Context(), mapping); err != nil {
+	var before repository.IdentityMapping
+	if err := store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		current, err := tx.GetIdentityMapping(request.Context(), mapping.SourceID, mapping.ExternalSubjectType, mapping.ExternalID)
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+			return err
+		}
+		before = current
+		if err := tx.UpsertIdentityMapping(request.Context(), mapping); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claimsFrom(request).Subject, Action: "update", ResourceType: "identity_source", ResourceID: mapping.SourceID, Result: "success",
+			Changes: map[string]any{"before": auditIdentityMappingSnapshot(before), "after": auditIdentityMappingSnapshot(mapping)},
+		})
+	}); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusCreated, map[string]any{"sourceId": sourceID, "externalId": mapping.ExternalID, "localSubjectId": mapping.LocalSubjectID})
+}
+
+func auditIdentityMappingSnapshot(mapping repository.IdentityMapping) map[string]any {
+	return map[string]any{
+		"subjectType": mapping.ExternalSubjectType, "externalId": mapping.ExternalID,
+		"localSubjectId": mapping.LocalSubjectID, "status": mapping.Status,
+	}
 }
 
 func (s *Server) listIdentityMappings(response http.ResponseWriter, request *http.Request) {
@@ -539,12 +561,30 @@ func (s *Server) listIdentityMappings(response http.ResponseWriter, request *htt
 }
 
 func (s *Server) deleteIdentityMapping(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).DeleteIdentityMapping(
-		request.Context(), chi.URLParam(request, "sourceId"), chi.URLParam(request, "subjectType"), chi.URLParam(request, "externalId"))
+	claims := claimsFrom(request)
+	sourceID := chi.URLParam(request, "sourceId")
+	subjectType := chi.URLParam(request, "subjectType")
+	externalID := chi.URLParam(request, "externalId")
+	var removed repository.IdentityMapping
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		current, err := tx.GetIdentityMapping(request.Context(), sourceID, subjectType, externalID)
+		if err != nil {
+			return err
+		}
+		removed = current
+		if err := tx.DeleteIdentityMapping(request.Context(), sourceID, subjectType, externalID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "identity_source", ResourceID: sourceID, Result: "success",
+			Changes: map[string]any{"before": auditIdentityMappingSnapshot(removed)},
+		})
+	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
@@ -674,12 +714,43 @@ func (s *Server) getDataScopeRule(response http.ResponseWriter, request *http.Re
 }
 
 func (s *Server) deleteDataScopeRule(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).DeleteDataScopeRule(request.Context(), chi.URLParam(request, "ruleId"))
+	claims := claimsFrom(request)
+	ruleID := chi.URLParam(request, "ruleId")
+	var removed repository.DataScopeRule
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		current, err := tx.GetDataScopeRule(request.Context(), ruleID)
+		if err != nil {
+			return err
+		}
+		removed = current
+		if err := tx.DeleteDataScopeRule(request.Context(), ruleID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "data_scope_rule", ResourceID: ruleID, Result: "success",
+			Changes: map[string]any{"before": auditDataScopeRuleSnapshot(removed)},
+		})
+	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func auditDataScopeRuleSnapshot(rule repository.DataScopeRule) map[string]any {
+	snapshot := map[string]any{
+		"ruleKind": rule.RuleKind, "subjectType": rule.SubjectType, "subjectId": rule.SubjectID,
+		"resourceKind": rule.ResourceKind, "resourceId": rule.ResourceID, "reason": rule.Reason,
+	}
+	if rule.StartsAt != nil {
+		snapshot["startsAt"] = rule.StartsAt.UTC()
+	}
+	if rule.ExpiresAt != nil {
+		snapshot["expiresAt"] = rule.ExpiresAt.UTC()
+	}
+	return snapshot
 }
 
 // dataScopeContext is the PEP contract: the caller names a user; the server
