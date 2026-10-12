@@ -1,4 +1,5 @@
 {
+  "eventDrivenGate": true,
   "workflows": [
     {
       "name": "CodeQL",
@@ -11,6 +12,10 @@
     {
       "name": "AEP security baseline",
       "path": ".github/workflows/security.yml"
+    },
+    {
+      "name": "DevOps gate tests",
+      "path": ".github/workflows/devops-gate-tests.yml"
     }
   ]
 }
