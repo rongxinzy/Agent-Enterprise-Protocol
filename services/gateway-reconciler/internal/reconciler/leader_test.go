@@ -220,13 +220,8 @@ func TestLeaderElectionRunAcquiresAndReleases(t *testing.T) {
 func TestLeadershipLossEndsElectionRun(t *testing.T) {
 	elector, client := newFakeElector("instance-a")
 	workCtxCh := make(chan context.Context, 1)
-	var workCancelled atomic.Bool
 	elector.StartWork = func(ctx context.Context) {
 		workCtxCh <- ctx
-		go func() {
-			<-ctx.Done()
-			workCancelled.Store(true)
-		}()
 	}
 	var conflicting atomic.Bool
 	client.PrependReactor("update", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
@@ -271,7 +266,10 @@ func TestLeadershipLossEndsElectionRun(t *testing.T) {
 	if elector.IsLeader() {
 		t.Fatal("leadership flag still set after the election ended")
 	}
-	if !workCancelled.Load() {
+	// The cancellation is synchronous inside OnStoppedLeading, which client-go
+	// invokes before Run returns — by the time the run ended, the work context
+	// is already cancelled. No watcher goroutine, no propagation delay.
+	if workCtx.Err() == nil {
 		t.Fatal("lease-scoped work context was not cancelled when leadership stopped")
 	}
 }

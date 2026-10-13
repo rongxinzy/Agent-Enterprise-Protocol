@@ -37,9 +37,10 @@ type LeaderElector struct {
 	leaseDuration time.Duration
 	renewDeadline time.Duration
 	retryPeriod   time.Duration
-	// StartWork drives the reconcile workers with the lease-scoped context;
-	// client-go cancels it before leadership stops, so no in-flight reconcile
-	// survives a lost lease. Set before Run.
+	// StartWork drives the reconcile workers with a context that is cancelled
+	// synchronously inside OnStoppedLeading (client-go invokes that callback
+	// before Run returns), so no in-flight reconcile survives a lost lease and
+	// the cancellation is observable as soon as Run returns. Set before Run.
 	StartWork func(ctx context.Context)
 	isLeader  atomic.Bool
 }
@@ -68,6 +69,12 @@ func (l *LeaderElector) IsLeader() bool { return l.isLeader.Load() }
 // client-go never re-elects in-process, and idling would leave a permanently
 // passive replica that still reports ready.
 func (l *LeaderElector) Run(ctx context.Context) error {
+	// workCtx is ours, not client-go's internal lease context: we cancel it
+	// synchronously inside OnStoppedLeading, which client-go invokes before Run
+	// returns (vendored leaderelection.go:213/219), so when Run returns after a
+	// lost lease the workers' context is already cancelled.
+	workCtx, workCancel := context.WithCancel(ctx)
+	defer workCancel()
 	elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
 		Lock: &resourcelock.LeaseLock{
 			LeaseMeta:  metav1.ObjectMeta{Namespace: l.namespace, Name: l.leaseName},
@@ -83,7 +90,7 @@ func (l *LeaderElector) Run(ctx context.Context) error {
 		// Lease instead (reproduced in TestFormerLeaderReleaseSkipsSuccessor).
 		ReleaseOnCancel: false,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(workCtx context.Context) {
+			OnStartedLeading: func(_ context.Context) {
 				l.isLeader.Store(true)
 				slog.Info("leader election: acquired lease", "identity", l.identity)
 				if l.StartWork != nil {
@@ -91,8 +98,11 @@ func (l *LeaderElector) Run(ctx context.Context) error {
 				}
 			},
 			// client-go retries renewals until the renew deadline, so this
-			// fires only for a sustained loss, not one transient failure.
+			// fires only for a sustained loss, not one transient failure. The
+			// synchronous cancellation here is the ordering guarantee: no
+			// reconcile work survives leadership loss.
 			OnStoppedLeading: func() {
+				workCancel()
 				if l.isLeader.Swap(false) {
 					slog.Warn("leader election: lost lease", "identity", l.identity)
 				}
