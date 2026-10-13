@@ -317,3 +317,18 @@ func TestKubernetesApplierReadSecretThroughTypedClient(t *testing.T) {
 		t.Fatalf("ReadSecret(absent) = %v", err)
 	}
 }
+
+func TestKubernetesApplierPinsJSONWireFormat(t *testing.T) {
+	t.Parallel()
+	// client-go's generated typed clients prefer protobuf for built-in
+	// resources (the leader-election Lease included) unless the content type
+	// is pinned; JSON-only API doubles and every real API server both speak
+	// JSON, so the pin keeps the wire format explicit.
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: "http://localhost", Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applier.config.ContentType != "application/json" {
+		t.Fatalf("wire content type = %q", applier.config.ContentType)
+	}
+}

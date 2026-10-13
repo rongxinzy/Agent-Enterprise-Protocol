@@ -62,6 +62,12 @@ func newKubernetesApplier(config KubernetesConfig, client kubernetes.Interface) 
 		BearerToken:     config.Token,
 		BearerTokenFile: config.TokenFile,
 	}
+	// Pin the wire format to JSON. client-go's generated typed clients prefer
+	// protobuf for built-in resources (the coordination Lease included), and
+	// the request-level default only applies when no explicit content type is
+	// set — so the pin is the only switch. JSON is fully supported by every
+	// API server and stays parseable by JSON-only test doubles.
+	restConfig.ContentType = "application/json"
 	if config.CAFile != "" {
 		certificate, err := os.ReadFile(config.CAFile)
 		if err != nil {
