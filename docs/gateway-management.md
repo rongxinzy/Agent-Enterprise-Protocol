@@ -33,8 +33,16 @@ exposes that distinction. Pin a previously returned `expectedDefinition` to its
 `definition.id` when keeping the same semantics. A changed selected definition
 returns 422 `GATEWAY_METRIC_DEFINITION_MISMATCH` before any source request.
 
-`windowSeconds` is each point's native lookback: 120 seconds for rate queries,
-otherwise `step` (default 60). `step` controls output sampling and may differ
+`windowSeconds` is each point's native lookback: `max(step, 120)` seconds for AI
+mean durations, 120 seconds for infrastructure rates, otherwise `step` (default
+60). AI durations use Prometheus `sum(rate(duration[window])) /
+sum(rate(count[window]))` with matching label groups. This standard counter mean
+includes sparse completions across the window and handles counter resets, rather
+than depending on only the final two scrapes (`irate`). First Token duration uses
+the streaming-completion counter; non-streaming calls do not add first Token
+samples. Windows with no corresponding completions remain unknown; missing
+samples are never replaced with old values or zeros.
+`step` controls output sampling and may differ
 from the lookback. Counter series are not whole-period totals. Missing usage,
 empty series and unknown values are not zero-filled.
 
@@ -121,6 +129,18 @@ be ingested into these streams. The query renders only request/model/user,
 membership, status/flags, tokens and native duration fields; prompts,
 responses, tool arguments, credentials and free-form provider errors are not
 returned. AEP stores no copy of the monitoring history.
+
+The authorizer validates or generates the caller-visible `X-Request-ID`, strips
+all client `X-AEP-*` headers, then forwards the same ID as trusted
+`X-AEP-Request-ID`. The metadata access-log EnvoyFilter reads this trusted
+header, since Envoy may rewrite its own `X-Request-ID` for tracing. Upstream
+response headers cannot replace the authorizer's response ID. Update the
+authorizer before applying the updated EnvoyFilter; the filter alone cannot
+provide correlation with an older authorizer. Higress must remain reachable
+only through the trusted authorizer. Existing logs keep their original IDs;
+this change does not relabel history. Caller-supplied IDs may be reused, so
+consumers must preserve per-source timestamps and authenticated identity when
+displaying records rather than assuming an ID alone identifies a unique call.
 
 ## Active model tests
 

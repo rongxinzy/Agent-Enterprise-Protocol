@@ -28,7 +28,7 @@ spec:
                     json_format:
                       aep_source: gateway
                       deployment_id: '%REQ(X-AEP-DEPLOYMENT-ID)%'
-                      request_id: '%REQ(X-REQUEST-ID)%'
+                      request_id: '%REQ(X-AEP-REQUEST-ID)%'
                       user_id: '%REQ(X-AEP-USER-ID)%'
                       model_id: '%REQ(X-AEP-MODEL-ID)%'
                       team_ids: '%REQ(X-AEP-TEAM-IDS)%'
