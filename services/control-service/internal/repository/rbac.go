@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
@@ -177,7 +179,23 @@ func (s *DeploymentStore) DeleteRole(ctx context.Context, id string) error {
 	if role.BuiltIn {
 		return ErrBuiltInResource
 	}
-	return resultError(s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&Role{}))
+	return s.deleteSubject(ctx, "role", id, &Role{})
+}
+
+// deleteSubject removes a role or team together with every grant that names it,
+// in one transaction. Subjects are addressed by a name-derived id and the
+// polymorphic subject columns (subject_type, subject_id) carry no foreign key,
+// so a leftover grant would silently attach itself to a later subject that
+// reuses the same id.
+func (s *DeploymentStore) deleteSubject(ctx context.Context, subjectType, id string, subject any) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, grant := range []any{&SkillAssignment{}, &ModelAssignment{}, &CredentialAssignment{}, &DataScopeRule{}} {
+			if err := tx.Where("deployment_id = ? AND subject_type = ? AND subject_id = ?", s.deploymentID, subjectType, id).Delete(grant).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(subject).Error
+	})
 }
 
 func (s *DeploymentStore) ListTeams(ctx context.Context) ([]TeamRecord, error) {
@@ -260,7 +278,7 @@ func (s *DeploymentStore) DeleteTeam(ctx context.Context, id string) error {
 	if team.BuiltIn {
 		return ErrBuiltInResource
 	}
-	return resultError(s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&Team{}))
+	return s.deleteSubject(ctx, "team", id, &Team{})
 }
 
 func (s *DeploymentStore) ReplaceUserRBAC(ctx context.Context, userID string, roleIDs, teamIDs []string) error {

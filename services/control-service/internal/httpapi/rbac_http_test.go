@@ -41,6 +41,15 @@ func expectTeamRecord(mock sqlmock.Sqlmock, id, name, description string, enable
 		WillReturnRows(sqlmock.NewRows(teamHTTPColumns()).AddRow("deployment-a", id, name, description, false, enabled, now, now, memberCount))
 }
 
+// A role or team delete must take its polymorphic grants with it: those columns
+// carry no foreign key, so nothing else would remove them.
+func expectSubjectGrantCleanup(mock sqlmock.Sqlmock, subjectType, id string) {
+	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
+		mock.ExpectExec(`DELETE FROM "`+table+`" WHERE deployment_id = \$1 AND subject_type = \$2 AND subject_id = \$3`).
+			WithArgs("deployment-a", subjectType, id).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+}
+
 func TestAdminRoleLifecycle(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
 	handler := New(application).Handler()
@@ -89,6 +98,7 @@ func TestAdminRoleLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "model-operator", 1).
 		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "model-operator", "Model Reader", "Read-only access", false, false, now, now))
 	mock.ExpectBegin()
+	expectSubjectGrantCleanup(mock, "role", "model-operator")
 	mock.ExpectExec(`DELETE FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "model-operator").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -134,6 +144,7 @@ func TestAdminTeamLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "platform-team", 1).
 		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "platform-team", "Platform Core", "Core platform", false, false, now, now))
 	mock.ExpectBegin()
+	expectSubjectGrantCleanup(mock, "team", "platform-team")
 	mock.ExpectExec(`DELETE FROM "teams" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "platform-team").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
