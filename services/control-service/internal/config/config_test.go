@@ -24,6 +24,7 @@ var environmentKeys = []string{
 	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_SOURCE_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
 	"AEP_RETENTION_CLEANUP_INTERVAL", "AEP_OPERATIONAL_RETENTION", "AEP_TELEMETRY_RETENTION", "AEP_AUDIT_RETENTION", "AEP_RETENTION_CLEANUP_BATCH_SIZE",
 	"AEP_TRUSTED_PROXY_CIDRS",
+	"AEP_COMPUTE_TIERS_FILE", "AEP_COMPUTE_DEFAULT_TIER", "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "AEP_COMPUTE_CONCURRENCY_CAP",
 }
 
 func TestLoadDevelopmentDefaults(t *testing.T) {
@@ -65,6 +66,12 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 		{key: "AEP_RETENTION_CLEANUP_INTERVAL", value: "-1s"},
 		{key: "AEP_RETENTION_CLEANUP_BATCH_SIZE", value: "0"},
 		{key: "AEP_TRUSTED_PROXY_CIDRS", value: "not-a-cidr"},
+		{key: "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", value: "59"},
+		{key: "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", value: "86401"},
+		{key: "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", value: "5m"},
+		{key: "AEP_COMPUTE_CONCURRENCY_CAP", value: "0"},
+		{key: "AEP_COMPUTE_CONCURRENCY_CAP", value: "10001"},
+		{key: "AEP_COMPUTE_CONCURRENCY_CAP", value: "many"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			clearEnvironment(t)
@@ -102,6 +109,38 @@ func TestLoadParsesModelFallbackIDs(t *testing.T) {
 	t.Setenv("AEP_MODEL_FALLBACK_IDS", "a,b,c,d,e,f,g,h,i")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_MODEL_FALLBACK_IDS") {
 		t.Fatalf("nine entries must be rejected, got %v", err)
+	}
+}
+
+func TestLoadParsesComputeGovernanceEnvironment(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_COMPUTE_TIERS_FILE", " /etc/aep/tiers.json ")
+	t.Setenv("AEP_COMPUTE_DEFAULT_TIER", " standard ")
+	t.Setenv("AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "300")
+	t.Setenv("AEP_COMPUTE_CONCURRENCY_CAP", "25")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ComputeTiersFile != "/etc/aep/tiers.json" || cfg.ComputeDefaultTier != "standard" || cfg.ComputeIdleHibernateSeconds != 300 || cfg.ComputeConcurrencyCap != 25 {
+		t.Fatalf("unexpected compute governance config: %#v", cfg)
+	}
+
+	clearEnvironment(t)
+	defaults, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.ComputeTiersFile != "" || defaults.ComputeDefaultTier != "" || defaults.ComputeIdleHibernateSeconds != 0 || defaults.ComputeConcurrencyCap != 0 {
+		t.Fatalf("compute governance values must stay unset by default: %#v", defaults)
+	}
+}
+
+func TestLoadRejectsOversizedComputeDefaultTier(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_COMPUTE_DEFAULT_TIER", strings.Repeat("x", 201))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_COMPUTE_DEFAULT_TIER") {
+		t.Fatalf("Load() error = %v", err)
 	}
 }
 

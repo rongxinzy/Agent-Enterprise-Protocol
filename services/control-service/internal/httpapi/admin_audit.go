@@ -303,7 +303,9 @@ func adminAuditTarget(method, path string) (action, resourceType, resourceID str
 	case "test-access":
 		action = "test"
 	}
-	if len(segments) > 1 && !adminAuditVerbSegment(segments[1]) {
+	if collection == "compute" && len(segments) > 2 && segments[1] == "assignments" {
+		resourceID = segments[2]
+	} else if len(segments) > 1 && !adminAuditVerbSegment(segments[1]) {
 		resourceID = segments[1]
 	}
 	return action, resourceType, resourceID
@@ -359,6 +361,11 @@ func adminAuditResourceType(collection string, segments []string) string {
 		return "data_plane"
 	case "deployment":
 		return "deployment_settings"
+	case "compute":
+		if len(segments) > 1 && segments[1] == "assignments" {
+			return "compute_assignment"
+		}
+		return "compute_tier"
 	case "model-gateway":
 		if len(segments) > 1 {
 			switch segments[1] {
