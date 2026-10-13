@@ -48,9 +48,11 @@ gate = yaml.safe_load((root / "workflows/devops-gate.yml").read_text(encoding="u
 events = gate.get("on", gate.get(True, {}))
 assert "pull_request" not in events, "Privileged aggregation must not execute PR code"
 assert set(events) == {"pull_request_target", "workflow_run", "workflow_dispatch"}, "Unexpected gate events"
-assert set(events["workflow_run"]["workflows"]) == {item["name"] for item in config["workflows"]}, "Gate event watcher drift"
-assert len(events["workflow_run"]["workflows"]) == len(config["workflows"]), "Duplicate event watchers"
-assert set(events["workflow_run"]["types"]) == {"requested", "in_progress", "completed"}, "Missing lifecycle events"
+watched = {item["name"] for item in config.get("legacyWorkflows", config["workflows"])}
+watched.add(config["orchestrator"]["name"])
+assert set(events["workflow_run"]["workflows"]) == watched, "Gate event watcher drift"
+assert len(events["workflow_run"]["workflows"]) == len(watched), "Duplicate event watchers"
+assert events["workflow_run"]["types"] == ["completed"], "Refresh only completed workflows; early lifecycle events cause runner storms"
 assert "edited" in events["pull_request_target"]["types"], "Metadata edits must refresh the gate"
 assert gate["permissions"] == {"contents": "read"}, "Unexpected global gate permissions"
 assert set(gate["jobs"]) == {"refresh-gate"}, "Unexpected privileged gate job"
@@ -64,7 +66,8 @@ assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", checkout["uses"]), "Checko
 assert checkout["with"] == {"ref": "${{ github.event.repository.default_branch }}", "persist-credentials": False, "sparse-checkout": ".github"}, "Privileged checkout must use trusted default branch"
 assert re.fullmatch(r"actions/github-script@[0-9a-f]{40}", publisher["uses"]), "Publisher must be pinned"
 assert "gate.refresh({ github, context, core, config })" in publisher["with"]["script"], "One-shot publisher is required"
-assert "DevOps gate tests" in {item["name"] for item in config["workflows"]}, "Gate regression tests must remain mandatory"
+assert "gate-tests" in config["orchestrator"]["needs"], "Gate regression tests must remain mandatory"
+assert set(config["orchestrator"]["needs"]) == set(config["orchestrator"]["callers"]) | set(config["orchestrator"]["localNeeds"]), "Caller dependency inventory drift"
 assert config.get("eventDrivenGate") is True, "Gate mode must be declared"
 tests = yaml.safe_load((root / "workflows/devops-gate-tests.yml").read_text(encoding="utf-8"))
 assert tests["permissions"] == {"contents": "read"}, "PR regression tests must have read-only permissions"
