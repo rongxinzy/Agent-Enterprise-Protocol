@@ -8,6 +8,9 @@
     "needs": ["release-gate","codeql","security","gate-tests"]
   },
   "workflows": [
+    { "name": "CI validation", "path": ".github/workflows/m0.yml" }
+  ],
+  "legacyWorkflows": [
     {
       "name": "CodeQL",
       "path": ".github/workflows/codeql.yml"
