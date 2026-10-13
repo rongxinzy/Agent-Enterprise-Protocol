@@ -144,13 +144,11 @@ async function run({ github, context, core, config }) {
       pr.base.ref,
     ),
   );
-  core.info(
-    `Required existing workflows: ${expected.map((workflow) => workflow.name).join(', ') || 'none for this diff'}`,
-  );
   const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     ...context.repo, event: 'pull_request', head_sha: pr.head.sha, per_page: 100,
   });
   const selected = selectWorkflows(config, runs, pr, expected);
+  core.info(`Required existing workflows: ${selected.map((workflow) => workflow.name).join(', ') || 'none for this diff'}`);
   const { waiting, failed } = evaluateRuns(selected, runs, pr.head.sha, pr);
   if (failed.length) throw new Error(failed.join('\n'));
   if (waiting.length) {
@@ -173,7 +171,7 @@ async function eventPullNumbers({ github, context, config }) {
   if (context.eventName !== 'workflow_run') throw new Error('Unsupported gate event.');
   // Fetch authoritative run metadata; the event's conclusion and PR hints are not authority.
   const run = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.payload.workflow_run.id })).data;
-  if (run.event !== 'pull_request' || ![...config.workflows, ...(config.orchestrator ? [config.orchestrator] : [])].some(workflow => workflow.path === run.path?.split('@')[0])) return [];
+  if (run.event !== 'pull_request' || ![...(config.legacyWorkflows ?? config.workflows), ...(config.orchestrator ? [config.orchestrator] : [])].some(workflow => workflow.path === run.path?.split('@')[0])) return [];
   const numbers = [...new Set((run.pull_requests ?? []).map(pr => pr.number))];
   const prs = numbers.length
     ? await Promise.all(numbers.map(async number => (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data))
