@@ -504,6 +504,18 @@ CREATE TABLE IF NOT EXISTS deployment_settings (
   deployment_id text PRIMARY KEY REFERENCES deployments(id) ON DELETE CASCADE,
   model_gateway_base_url text,
   agent_control_base_url text,
+  compute_default_tier text,
+  compute_idle_hibernate_seconds integer,
+  compute_concurrency_cap integer,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_compute_assignments (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  agent_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tier text NOT NULL,
+  updated_by text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, agent_id)
 );
