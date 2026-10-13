@@ -1,6 +1,10 @@
 package httpapi
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +14,12 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 func writeTierCatalog(t *testing.T, content string) string {
@@ -224,4 +234,238 @@ func TestComputeAssignmentAuditTarget(t *testing.T) {
 	if action != "update" || resourceType != "compute_assignment" || resourceID != "agent-9" {
 		t.Fatalf("audit target = %s %s %s", action, resourceType, resourceID)
 	}
+}
+
+// newComputeHTTPApplication wires both mock databases: the pgx runtime pool
+// serving deployment-setting reads and the sqlmock GORM store serving the
+// directory and compute-assignment tables.
+func newComputeHTTPApplication(t *testing.T) (*app.App, pgxmock.PgxPoolIface, sqlmock.Sqlmock, string) {
+	t.Helper()
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	sqlDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application.Store = repository.New(ormDB)
+	t.Cleanup(func() {
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Error(err)
+		}
+		_ = sqlDB.Close()
+	})
+	return application, pool, mock, adminToken
+}
+
+func agentDirectoryRowsN(count int) *sqlmock.Rows {
+	rows := sqlmock.NewRows([]string{"id", "username", "display_name", "status", "kind", "display_title", "description", "avatar_object_key", "home_team_id", "prompt_skill_id", "ephemeral", "expires_at", "created_at", "updated_at", "last_seen_at"})
+	for index := 1; index <= count; index += 1 {
+		id := fmt.Sprintf("agent-%04d", index)
+		rows.AddRow(id, id, id, "active", "agent", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	}
+	return rows
+}
+
+func TestComputeTierCatalogMissingFileFailsClosed(t *testing.T) {
+	application, _, adminToken := newStoreBackedHTTPApplication(t)
+	application.Config.ComputeTiersFile = filepath.Join(t.TempDir(), "no-such-tiers.json")
+	handler := New(application).Handler()
+
+	response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/tiers", "")
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), `"code":"COMPUTE_TIERS_UNAVAILABLE"`) {
+		t.Fatalf("missing catalog file = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestComputeAssignmentUpdateRejectsNonObjectBody(t *testing.T) {
+	application, _, adminToken := newStoreBackedHTTPApplication(t)
+	handler := New(application).Handler()
+
+	response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/compute/assignments/agent-1", `["standard"]`)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("array body = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestComputeAssignmentListDefaultTierResolution(t *testing.T) {
+	application, pool, mock, adminToken := newComputeHTTPApplication(t)
+	application.Config.ComputeDefaultTier = "env-tier"
+	handler := New(application).Handler()
+
+	// A stored deployment override wins for agents without their own override.
+	mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+		WithArgs("deployment-a", "", "", false, 200).
+		WillReturnRows(agentDirectoryRows())
+	updatedAt := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`SELECT \* FROM "agent_compute_assignments" WHERE deployment_id = \$1 AND agent_id IN \(\$2,\$3\)`).
+		WithArgs("deployment-a", "agent-1", "agent-2").
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "agent_id", "tier", "updated_by", "updated_at"}).
+			AddRow("deployment-a", "agent-1", "performance", "admin-user", updatedAt))
+	pool.ExpectQuery(`SELECT compute_default_tier FROM deployment_settings`).
+		WithArgs("deployment-a").
+		WillReturnRows(pgxmock.NewRows([]string{"compute_default_tier"}).AddRow("platform-tier"))
+
+	first := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/assignments", "")
+	body := first.Body.String()
+	if first.Code != http.StatusOK ||
+		!strings.Contains(body, `"agentId":"agent-2","agentName":"Agent Two","tier":{"override":null,"effective":"platform-tier","source":"default"}`) {
+		t.Fatalf("deployment override resolution = %d %s", first.Code, body)
+	}
+
+	// Without an override row the environment value is the default.
+	mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+		WithArgs("deployment-a", "", "", false, 200).
+		WillReturnRows(agentDirectoryRows())
+	mock.ExpectQuery(`SELECT \* FROM "agent_compute_assignments" WHERE deployment_id = \$1 AND agent_id IN \(\$2,\$3\)`).
+		WithArgs("deployment-a", "agent-1", "agent-2").
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "agent_id", "tier", "updated_by", "updated_at"}))
+	pool.ExpectQuery(`SELECT compute_default_tier FROM deployment_settings`).
+		WithArgs("deployment-a").
+		WillReturnRows(pgxmock.NewRows([]string{"compute_default_tier"}).AddRow(nil))
+
+	second := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/assignments", "")
+	if second.Code != http.StatusOK ||
+		!strings.Contains(second.Body.String(), `"agentId":"agent-2","agentName":"Agent Two","tier":{"override":null,"effective":"env-tier","source":"default"}`) {
+		t.Fatalf("environment default resolution = %d %s", second.Code, second.Body.String())
+	}
+}
+
+func TestComputeAssignmentListPaginatesDirectory(t *testing.T) {
+	application, _, mock, adminToken := newComputeHTTPApplication(t)
+	handler := New(application).Handler()
+
+	mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+		WithArgs("deployment-a", "", "", false, 200).
+		WillReturnRows(agentDirectoryRowsN(200))
+	mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+		WithArgs("deployment-a", "agent-0200", "agent-0200", false, 200).
+		WillReturnRows(agentDirectoryRowsN(0))
+	overridesArgs := []driver.Value{"deployment-a"}
+	for index := 1; index <= 200; index += 1 {
+		overridesArgs = append(overridesArgs, fmt.Sprintf("agent-%04d", index))
+	}
+	mock.ExpectQuery(`SELECT \* FROM "agent_compute_assignments" WHERE deployment_id = \$1 AND agent_id IN`).
+		WithArgs(overridesArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "agent_id", "tier", "updated_by", "updated_at"}))
+
+	response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/assignments", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("paginated list = %d %s", response.Code, response.Body.String())
+	}
+	var page struct {
+		Items []struct {
+			AgentID string `json:"agentId"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 200 {
+		t.Fatalf("paginated list items = %d", len(page.Items))
+	}
+}
+
+func TestComputeAssignmentListEmptyDirectorySkipsOverrideLookup(t *testing.T) {
+	application, _, mock, adminToken := newComputeHTTPApplication(t)
+	handler := New(application).Handler()
+
+	mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+		WithArgs("deployment-a", "", "", false, 200).
+		WillReturnRows(agentDirectoryRowsN(0))
+	// No override query is expected: the store returns early for zero agents.
+
+	response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/assignments", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `{"items":[]}`) {
+		t.Fatalf("empty directory = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestComputeAssignmentListFailures(t *testing.T) {
+	t.Run("directory read", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+			WillReturnError(errors.New("directory unavailable"))
+		response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/assignments", "")
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("directory failure = %d %s", response.Code, response.Body.String())
+		}
+	})
+	t.Run("override read", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.status, u.kind,`).
+			WithArgs("deployment-a", "", "", false, 200).
+			WillReturnRows(agentDirectoryRows())
+		mock.ExpectQuery(`SELECT \* FROM "agent_compute_assignments"`).
+			WillReturnError(errors.New("overrides unavailable"))
+		response := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/compute/assignments", "")
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("override failure = %d %s", response.Code, response.Body.String())
+		}
+	})
+}
+
+func TestComputeAssignmentWriteFailures(t *testing.T) {
+	t.Run("agent lookup", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WillReturnError(errors.New("lookup unavailable"))
+		response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/compute/assignments/agent-1", `{"tier":"standard"}`)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("lookup failure = %d %s", response.Code, response.Body.String())
+		}
+	})
+	t.Run("broken catalog", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		application.Config.ComputeTiersFile = filepath.Join(t.TempDir(), "no-such-tiers.json")
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(userRow("agent"))
+		response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/compute/assignments/agent-1", `{"tier":"standard"}`)
+		if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), `"code":"COMPUTE_TIERS_UNAVAILABLE"`) {
+			t.Fatalf("broken catalog = %d %s", response.Code, response.Body.String())
+		}
+	})
+	t.Run("upsert", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(userRow("agent"))
+		mock.ExpectExec(`INSERT INTO agent_compute_assignments`).WillReturnError(errors.New("upsert unavailable"))
+		response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/compute/assignments/agent-1", `{"tier":"standard"}`)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("upsert failure = %d %s", response.Code, response.Body.String())
+		}
+	})
+	t.Run("clear", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(userRow("agent"))
+		mock.ExpectExec(`DELETE FROM agent_compute_assignments`).WillReturnError(errors.New("delete unavailable"))
+		response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/compute/assignments/agent-1", `{"tier":null}`)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("clear failure = %d %s", response.Code, response.Body.String())
+		}
+	})
+	t.Run("reload", func(t *testing.T) {
+		application, _, mock, adminToken := newComputeHTTPApplication(t)
+		handler := New(application).Handler()
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(userRow("agent"))
+		mock.ExpectExec(`INSERT INTO agent_compute_assignments`).WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectQuery(`SELECT \* FROM "agent_compute_assignments"`).WillReturnError(errors.New("reload unavailable"))
+		response := adminRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/compute/assignments/agent-1", `{"tier":"standard"}`)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("reload failure = %d %s", response.Code, response.Body.String())
+		}
+	})
 }
