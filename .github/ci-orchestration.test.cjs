@@ -78,3 +78,14 @@ test('renaming the existing entry does not make old heads skip the other checks'
   f.state.runs = [f.workflowRun(f.orchestrator)];
   assert.equal((await run(f)).conclusion, 'success');
 });
+
+test('after rollout, legacy head results and completion events remain valid', async () => {
+  const f = fixture();
+  f.config.legacyWorkflows = [f.legacy];
+  f.config.workflows = [f.orchestrator];
+  f.state.runs = [f.workflowRun(f.legacy)];
+  assert.equal((await run(f)).conclusion, 'success');
+  f.context.eventName = 'workflow_run';
+  f.context.payload = { workflow_run: { id: 1 } };
+  assert.deepEqual(await eventPullNumbers(f), [7]);
+});

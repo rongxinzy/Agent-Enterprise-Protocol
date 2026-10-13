@@ -54,6 +54,7 @@ assert set(events["workflow_run"]["workflows"]) == watched, "Gate event watcher 
 assert len(events["workflow_run"]["workflows"]) == len(watched), "Duplicate event watchers"
 assert events["workflow_run"]["types"] == ["completed"], "Refresh only completed workflows; early lifecycle events cause runner storms"
 assert "edited" in events["pull_request_target"]["types"], "Metadata edits must refresh the gate"
+assert events["pull_request_target"]["types"] == ["edited"], "New PR heads must publish only after the unified entry finishes"
 assert gate["permissions"] == {"contents": "read"}, "Unexpected global gate permissions"
 assert set(gate["jobs"]) == {"refresh-gate"}, "Unexpected privileged gate job"
 job = gate["jobs"]["refresh-gate"]
@@ -69,6 +70,32 @@ assert "gate.refresh({ github, context, core, config })" in publisher["with"]["s
 assert "gate-tests" in config["orchestrator"]["needs"], "Gate regression tests must remain mandatory"
 assert set(config["orchestrator"]["needs"]) == set(config["orchestrator"]["callers"]) | set(config["orchestrator"]["localNeeds"]), "Caller dependency inventory drift"
 assert config.get("eventDrivenGate") is True, "Gate mode must be declared"
+
+parent = yaml.safe_load((root.parent / config["orchestrator"]["path"]).read_text(encoding="utf-8"))
+assert parent["name"] == config["orchestrator"]["name"], "Unified entry name drift"
+assert parent["permissions"] == {"contents": "read"}, "Unexpected parent permissions"
+assert "pull_request" in parent.get("on", parent.get(True, {})), "Unified entry must run on every PR"
+summary = parent["jobs"]["ci-results"]
+assert summary["if"] == "${{ github.event_name == 'pull_request' && always() }}", "Final result must run even after upstream failures"
+assert set(summary["needs"]) == set(config["orchestrator"]["needs"]), "Missing final dependencies"
+assert len(summary["needs"]) == len(config["orchestrator"]["needs"]), "Duplicate final dependencies"
+assert summary["permissions"] == {"contents": "read"}, "Result summary cannot write checks or execute privileged PR code"
+assert summary["timeout-minutes"] == 5, "Result summary must not poll"
+assert summary["steps"][-1]["env"] == {"CI_NEEDS": "${{ toJSON(needs) }}"}, "Summary must use scheduler results"
+assert re.fullmatch(r"actions/checkout@[0-9a-f]{40}", summary["steps"][0]["uses"]), "Summary checkout must be pinned"
+assert summary["steps"][0]["with"]["persist-credentials"] is False, "Read-only summary must not persist credentials"
+assert "verifyNeeds(JSON.parse(process.env.CI_NEEDS), config.orchestrator.needs)" in summary["steps"][-1]["run"], "Final result validator is required"
+for name, path in config["orchestrator"]["callers"].items():
+    caller = parent["jobs"][name]
+    assert caller["uses"] == "./" + path, f"Required reusable workflow replaced: {name}"
+    assert caller["if"] == "github.event_name == 'pull_request'", f"Required PR caller skipped: {name}"
+    expected_permissions = {"contents": "read", "pull-requests": "read", "actions": "read"} if name == "gate-tests" else {"contents": "read", "security-events": "write"}
+    assert caller["permissions"] == expected_permissions, f"Unexpected reusable caller permissions: {name}"
+    child = yaml.safe_load((root.parent / path).read_text(encoding="utf-8"))
+    child_events = child.get("on", child.get(True, {}))
+    assert "workflow_call" in child_events and "pull_request" not in child_events, "Independent PR triggers duplicate the unified run"
+for name in config["orchestrator"]["localNeeds"]:
+    assert name in parent["jobs"], f"Missing original local check: {name}"
 tests = yaml.safe_load((root / "workflows/devops-gate-tests.yml").read_text(encoding="utf-8"))
 assert tests["permissions"] == {"contents": "read"}, "PR regression tests must have read-only permissions"
 assert "permissions" not in tests["jobs"]["gate-tests"], "PR tests must not elevate permissions"
