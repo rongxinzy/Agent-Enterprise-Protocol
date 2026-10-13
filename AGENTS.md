@@ -62,6 +62,30 @@ npm run release:check
 This includes OpenAPI drift checks, Node workspace tests, SDK package checks,
 Go tests/race/vet/build, release audit, and every Compose E2E scenario.
 
+## Image Builds
+
+Build the Go service images with [ko](https://ko.build) instead of hand-written
+Dockerfiles: `ko build` runs `go build` locally and does not need a Docker
+daemon.
+
+- Build only: `KO_DOCKER_REPO=<registry> ko build ./services/control-service`
+- Build and deploy: put `image: ko://<module-path>/services/control-service` in
+  the manifest, then `ko apply -f <dir>/`
+- Dependencies: `export GOPROXY=<internal proxy>,direct`
+- Keep the current runtime contract: `defaultBaseImage` should be a
+  distroless / chainguard static image (CA certificates included, non-root) so
+  the image stays non-root and can still verify TLS.
+
+Applies to the Go services: `services/control-service` (both Dockerfiles),
+`services/gateway-authorizer`, and `services/gateway-reconciler`.
+
+Verify the built image keeps the same entrypoint and `USER` as the Dockerfile
+build before pointing a manifest at it.
+
+> Build-time numbers (ko vs `docker build`) are not measured yet and are
+> deliberately omitted. The same convention is documented in
+> `aep-deerflow-governance`; keep the two in sync.
+
 ## Contract-First Development
 
 For a new protocol feature, follow this order:
