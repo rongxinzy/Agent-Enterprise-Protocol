@@ -1,4 +1,47 @@
-# Event-driven CI gate
+# CI gate rollout and queue control
+
+## Completion-only refresh and unified entry rollout
+
+Gate refreshes now watch completion events only. Requested and in-progress
+events do not allocate additional runners. Metadata edits and manual recovery
+remain supported; neither can waive a failed or missing check.
+
+Roll out in two PRs, in order:
+
+1. Deploy the completion-only trusted publisher and its compatibility rules.
+   Existing PR heads still require every applicable independent workflow.
+2. Convert those checks into reusable workflows called by `CI validation`.
+   Its final `ci-results` job uses `needs` and `always()` to reject failures,
+   cancellations, missing dependencies and unexpected skips. The trusted
+   publisher then takes one final snapshot on entry completion.
+
+The compatibility publisher accepts only an authoritative current-head run
+of the configured entry. Independently started legacy checks on that same
+head also remain required. An old PR does not need a mechanical main update:
+its independent workflows continue to be evaluated.
+
+This avoids an installation deadlock: a publisher on main that knows only old
+workflow paths cannot accept a migration PR after those triggers are removed.
+Do not merge stage 2 before stage 1 is deployed. Each repository rolls out
+independently. Existing queued runs are not removed by merging the change;
+runner availability can still delay the single final publisher.
+
+## Required check
+
+The unified entry retains the original top-level business jobs, including
+Admin Console's required `verify` name. CodeQL, gate regression tests and AEP
+security checks are called concurrently as reusable workflows. They retain
+their own scheduled/main/manual triggers, but no longer start independently
+on each PR. A new PR head triggers no initial privileged publisher; only
+the parent completion triggers publication. Title/body/base edits and manual
+recovery still revalidate current metadata.
+
+The final read-only `ci-results` job depends on all required caller results.
+AEP's existing `release-gate` continues to check its full business/E2E DAG,
+including precisely permitted scoped skips. The final publisher remains
+default-branch-only and never executes PR code or artifacts with write access.
+The last publication still needs one runner: this change removes redundant
+refresh launches, not GitHub-hosted runner capacity limits.
 
 `ci-gate` remains the required GitHub Actions check. Its status is now published
 through the Checks API, separately from the short `refresh-ci-gate` helper job:
@@ -11,8 +54,8 @@ through the Checks API, separately from the short `refresh-ci-gate` helper job:
 | Head, base branch, metadata or open state changes during aggregation | Cancelled snapshot; the new event evaluates the current state |
 
 The helper takes one API snapshot and exits. It never sleeps while another
-workflow waits for a runner. PR open/edit/synchronize/reopen events and required
-workflow lifecycle events refresh the check. Runner congestion may delay a
+workflow waits for a runner. PR metadata edits and required workflow completion
+events refresh the check. Runner congestion may delay a
 refresh, but upstream queue time is no longer a 30-minute gate failure.
 
 Repeated refreshes update the publisher-owned check for the same PR and head;
@@ -28,7 +71,8 @@ user-supplied shell commands. The helper's own success does not satisfy the
 required check: its name is `refresh-ci-gate`, not `ci-gate`.
 
 PR code for the gate is tested in `DevOps gate tests`, with read-only permissions.
-That workflow is part of the required inventory and event watcher list. The
+That reusable workflow is required through the unified entry; its former
+independent name remains watched for old PR heads. The
 inventory test checks triggers, default-branch checkout, permissions, pinned
 actions, watcher completeness and the bootstrap boundary.
 

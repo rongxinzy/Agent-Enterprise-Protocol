@@ -431,6 +431,7 @@ CREATE INDEX IF NOT EXISTS idx_license_audit_retention ON license_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_retention ON telemetry_events (received_at, event_id);
 CREATE INDEX IF NOT EXISTS idx_skill_sync_retention ON skill_sync_results (created_at, id);
+CREATE INDEX IF NOT EXISTS idx_skill_sync_latest_per_user ON skill_sync_results (deployment_id, user_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_session_deliveries_retention ON session_control_deliveries (updated_at, delivery_id) WHERE state IN ('succeeded', 'expired', 'superseded');
 CREATE INDEX IF NOT EXISTS idx_control_events_retention ON control_events (GREATEST(created_at, expires_at), event_id);
 CREATE INDEX IF NOT EXISTS idx_control_events_deployment_created ON control_events (deployment_id, created_at DESC);

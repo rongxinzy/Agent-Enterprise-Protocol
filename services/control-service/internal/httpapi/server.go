@@ -200,6 +200,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Post("/aep/v1/admin/skills/{skillId}/versions", s.uploadSkillVersion)
 			admin.Post("/aep/v1/admin/skills/{skillId}/versions/{version}/publish", s.publishSkillVersion)
 			admin.Delete("/aep/v1/admin/skills/{skillId}/versions/{version}", s.deleteSkillVersion)
+			admin.Get("/aep/v1/admin/skills/{skillId}/installations", s.skillInstallations)
 			admin.Get("/aep/v1/admin/skill-assignments", s.listSkillAssignments)
 			admin.Post("/aep/v1/admin/skill-assignments", s.createSkillAssignment)
 			admin.Delete("/aep/v1/admin/skill-assignments/{assignmentId}", s.deleteSkillAssignment)
