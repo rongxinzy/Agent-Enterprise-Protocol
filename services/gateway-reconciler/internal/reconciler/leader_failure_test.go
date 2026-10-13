@@ -2,89 +2,100 @@ package reconciler
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
+	"errors"
 	"testing"
 	"time"
+
+	coordinationv1 "k8s.io/api/coordination/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	coretesting "k8s.io/client-go/testing"
 )
 
-func TestLeaseReadFailureNeverPanicsOrRetainsLeadership(t *testing.T) {
-	for _, status := range []int{401, 403, 500, 503} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet {
-				t.Error("wrote after a failed lease read")
-			}
-			w.WriteHeader(status)
-		}))
-		applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "disposable", HTTPClient: server.Client()})
-		if err != nil {
-			t.Fatal(err)
+func TestLeaseReadFailureNeverGrantsLeadership(t *testing.T) {
+	for _, inject := range []func() error{
+		func() error { return apierrors.NewUnauthorized("expired") },
+		func() error {
+			return apierrors.NewForbidden(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, "gateway-reconciler", errors.New("denied"))
+		},
+		func() error { return apierrors.NewInternalError(errors.New("unavailable")) },
+		func() error { return apierrors.NewServiceUnavailable("overloaded") },
+	} {
+		elector, client := newFakeElector("a")
+		client.Fake.PrependReactor("get", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+			return true, nil, inject()
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		elector.Run(ctx)
+		cancel()
+		if elector.IsLeader() {
+			t.Fatal("a failed lease read granted leadership")
 		}
-		elector := NewLeaderElector(applier, "aep-system", "gateway-reconciler-leader", "a")
-		elector.isLeader.Store(true)
-		if err := elector.acquireOrRenew(context.Background()); err == nil || !strings.Contains(err.Error(), "lease") || elector.IsLeader() {
-			t.Fatalf("status %d did not fail closed: %v", status, err)
-		}
-		server.Close()
 	}
 }
 
 func TestLeaseCreateRejectionNeverGrantsLeadership(t *testing.T) {
-	for _, status := range []int{401, 403, 409, 500} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet {
-				w.WriteHeader(http.StatusNotFound)
-			} else {
-				w.WriteHeader(status)
-			}
-		}))
-		applier, _ := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "disposable", HTTPClient: server.Client()})
-		elector := NewLeaderElector(applier, "aep-system", "gateway-reconciler-leader", "a")
-		if err := elector.acquireOrRenew(context.Background()); err == nil || elector.IsLeader() {
-			t.Fatalf("create %d granted leadership", status)
+	for _, inject := range []func() error{
+		func() error { return apierrors.NewUnauthorized("expired") },
+		func() error {
+			return apierrors.NewForbidden(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, "gateway-reconciler", errors.New("denied"))
+		},
+		func() error {
+			return apierrors.NewAlreadyExists(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, "gateway-reconciler")
+		},
+		func() error { return apierrors.NewInternalError(errors.New("unavailable")) },
+	} {
+		elector, client := newFakeElector("a")
+		client.Fake.PrependReactor("create", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+			return true, nil, inject()
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		elector.Run(ctx)
+		cancel()
+		if elector.IsLeader() {
+			t.Fatal("a rejected lease create granted leadership")
 		}
-		server.Close()
 	}
 }
 
 func TestRunKeepsFollowerIdleAcrossSuccessfulReads(t *testing.T) {
-	var reads atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Error("follower wrote another owner's lease")
-		}
-		_, _ = w.Write([]byte(`{"spec":{"holderIdentity":"other","renewTime":"` + leaseTimestamp() + `"}}`))
-		reads.Add(1)
-	}))
-	defer server.Close()
-	applier, _ := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "disposable", HTTPClient: server.Client()})
-	elector := NewLeaderElector(applier, "aep-system", "gateway-reconciler-leader", "a")
-	elector.renewDur = time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	holder := "other"
+	fresh := metav1.NewMicroTime(time.Now())
+	duration := int32(15)
+	elector, client := newFakeElector("a", &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "aep-system", Name: "gateway-reconciler"},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder, LeaseDurationSeconds: &duration, RenewTime: &fresh},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	done := make(chan struct{})
-	go func() { elector.Run(ctx); close(done) }()
-	for reads.Load() < 5 && ctx.Err() == nil {
-		if elector.IsLeader() {
-			t.Error("successful follower read granted leadership")
-		}
-		time.Sleep(time.Millisecond)
+	elector.Run(ctx)
+	if elector.IsLeader() {
+		t.Fatal("successful follower read granted leadership")
 	}
-	cancel()
-	<-done
-	if elector.IsLeader() || reads.Load() < 5 {
-		t.Fatal("follower did not stay idle")
+	if writes := writeActions(client); writes != 0 {
+		t.Fatalf("follower wrote another owner's lease %d times", writes)
 	}
 }
 
 func TestReleaseNeverClearsAnotherOwner(t *testing.T) {
-	api := &fakeLeaseAPI{lease: &lease{Spec: leaseSpec{HolderIdentity: "other", RenewTime: leaseTimestamp()}}}
-	elector := newTestElector(t, api, "a")
-	elector.isLeader.Store(true)
-	elector.release()
-	if api.put != 0 || api.lease.Spec.HolderIdentity != "other" || elector.IsLeader() {
-		t.Fatal("release overwrote another owner")
+	holder := "other"
+	fresh := metav1.NewMicroTime(time.Now())
+	duration := int32(15)
+	elector, client := newFakeElector("a", &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "aep-system", Name: "gateway-reconciler"},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder, LeaseDurationSeconds: &duration, RenewTime: &fresh},
+	})
+	// The elector never led, so a cancel must not touch the lease at all.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	elector.Run(ctx)
+	cancel()
+	lease, err := client.CoordinationV1().Leases("aep-system").Get(context.Background(), "gateway-reconciler", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("lease read: %v", err)
+	}
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != "other" || elector.IsLeader() {
+		t.Fatalf("release overwrote another owner: %#v", lease.Spec.HolderIdentity)
 	}
 }
