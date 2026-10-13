@@ -62,6 +62,19 @@ npm run release:check
 This includes OpenAPI drift checks, Node workspace tests, SDK package checks,
 Go tests/race/vet/build, release audit, and every Compose E2E scenario.
 
+## 出镜像
+
+Go 服务（`services/control-service`、`services/gateway-authorizer`、`services/gateway-reconciler`）出镜像时，**优先用 ko（https://ko.build），不新增、不修改 Dockerfile**：
+
+- 只出镜像：`KO_DOCKER_REPO=<内网仓> ko build ./services/control-service`（不需要 Docker 守护进程）。
+- 出镜像并落到集群：清单里写 `image: ko://<module-path>/services/control-service`，再 `ko apply -f <清单目录>/`。
+- 依赖拉取：`export GOPROXY=<内网 goproxy>,direct`。
+- 保持非 root 与 CA 信任：`defaultBaseImage` 用 distroless / chainguard static（自带 CA，`USER 65532`）。
+
+验收：构建后确认 entrypoint 与 `USER` 与 Dockerfile 构建结果一致，再 apply 到集群验证。
+
+> 性能数字（ko vs docker build）待实测，暂不写入。同一段落亦见于 `aep-deerflow-governance`，改动请同步两处。
+
 ## Contract-First Development
 
 For a new protocol feature, follow this order:
