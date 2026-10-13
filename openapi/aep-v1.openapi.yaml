@@ -338,6 +338,7 @@ paths:
             schema:
               type: object
               required: [expiresAt]
+              additionalProperties: false
               properties:
                 expiresAt:
                   type: [string, 'null']

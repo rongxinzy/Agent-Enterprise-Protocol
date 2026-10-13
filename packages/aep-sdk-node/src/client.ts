@@ -690,6 +690,13 @@ export class AepClient {
     });
   }
 
+  updateSkillAssignment(assignmentId: string, input: JsonObject): Promise<JsonObject> {
+    return this.#send({
+      method: HttpMethod.Patch,
+      path: `/aep/v1/admin/skill-assignments/${segment(assignmentId)}`,
+      body: input,
+    });
+  }
   deleteSkillAssignment(assignmentId: string): Promise<void> {
     return this.#send({
       method: HttpMethod.Delete,

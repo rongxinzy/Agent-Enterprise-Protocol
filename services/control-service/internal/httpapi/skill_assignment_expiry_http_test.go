@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
@@ -19,8 +20,10 @@ func TestAdminSkillAssignmentExpiryUpdate(t *testing.T) {
 	application, _, pool, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
 	pool.ExpectBegin()
+	// The write itself is pinned: writing null instead of the requested expiry
+	// must fail this test, not just change the response.
 	pool.ExpectQuery(assignmentUpdateQuery).
-		WithArgs(pgxmock.AnyArg(), "assignment-a", "deployment-a").
+		WithArgs(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), "assignment-a", "deployment-a").
 		WillReturnRows(pgxmock.NewRows([]string{"skill_id", "subject_type", "subject_id"}).AddRow("writer", "user", "user-a"))
 	// Pinned rather than AnyArg: the event must carry the deployment, the
 	// subject scope, the Skill and the revision that names the new expiry.

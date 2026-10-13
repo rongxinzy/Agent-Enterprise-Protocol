@@ -1030,6 +1030,7 @@ paths:
               type: object
               required:
                 - expiresAt
+              additionalProperties: false
               properties:
                 expiresAt:
                   type:
