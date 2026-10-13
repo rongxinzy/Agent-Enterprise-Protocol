@@ -45,6 +45,14 @@ func NewHandler(config Config, verifier TokenVerifier) (*Handler, error) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	proxy.FlushInterval = -1
+	// Gateway/provider response IDs must not replace the ID used in our access
+	// log and trusted gateway metadata. This also applies to streaming responses.
+	proxy.ModifyResponse = func(response *http.Response) error {
+		// ReverseProxy appends upstream headers to the writer's existing headers;
+		// keep the single ID already set by withRequestID, including on errors.
+		response.Header.Del("X-Request-ID")
+		return nil
+	}
 	proxy.Transport = &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -166,6 +174,9 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	request.ContentLength = int64(len(body))
 	request.Header.Del("Authorization")
 	removeUntrustedAEPHeaders(request.Header)
+	// Envoy may regenerate or modify X-Request-ID for tracing. Carry our validated
+	// correlation ID independently, after removing every client AEP header.
+	setTrustedHeader(request.Header, "X-AEP-Request-ID", requestID(request))
 	request.Header.Del("Connection")
 	request.Header.Del("Proxy-Connection")
 	request.Header.Del("X-Mse-Consumer")
