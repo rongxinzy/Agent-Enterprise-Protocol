@@ -24,7 +24,7 @@ func TestLeaseReadFailureNeverGrantsLeadership(t *testing.T) {
 		func() error { return apierrors.NewServiceUnavailable("overloaded") },
 	} {
 		elector, client := newFakeElector("a")
-		client.Fake.PrependReactor("get", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+		client.PrependReactor("get", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
 			return true, nil, inject()
 		})
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
@@ -48,7 +48,7 @@ func TestLeaseCreateRejectionNeverGrantsLeadership(t *testing.T) {
 		func() error { return apierrors.NewInternalError(errors.New("unavailable")) },
 	} {
 		elector, client := newFakeElector("a")
-		client.Fake.PrependReactor("create", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+		client.PrependReactor("create", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
 			return true, nil, inject()
 		})
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)

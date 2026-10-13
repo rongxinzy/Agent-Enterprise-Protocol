@@ -137,7 +137,7 @@ func TestLeaderElectionRenewFailureDropsLeadership(t *testing.T) {
 	// release until it lands).
 	var conflicting atomic.Bool
 	var conflicts atomic.Int32
-	client.Fake.PrependReactor("update", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+	client.PrependReactor("update", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
 		if !conflicting.Load() || conflicts.Load() >= 6 {
 			return false, nil, nil
 		}
