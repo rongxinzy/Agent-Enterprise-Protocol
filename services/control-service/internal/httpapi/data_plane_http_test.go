@@ -77,6 +77,12 @@ func TestAdminDataPlaneDesiredStateRejectsCatalogMismatch(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			name:       "a credential on a catalog model that binds none is refused, not a crash",
+			route:      `{"modelId":"chat-b","enabled":true,"endpoint":"/v1","upstreamModel":"provider-b-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"provider-secret","key":"api-key","namespace":"higress-system"}}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "INVALID_DATA_PLANE_STATE",
+		},
+		{
 			name:       "a model that is not a publishable gateway model is refused",
 			route:      `{"modelId":"local-a","enabled":true,"endpoint":"http://provider-a/v1","upstreamModel":"provider-a-chat","protocol":"openai-compatible","providerType":"openai"}`,
 			wantStatus: http.StatusBadRequest,

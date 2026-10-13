@@ -155,7 +155,14 @@ func (s *Server) putDataPlaneDesiredState(response http.ResponseWriter, request 
 			return
 		}
 		if credentialRefNameKey(route.CredentialRef) != credentialRefNameKey(expected.CredentialRef) {
-			writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATE", fmt.Sprintf("The route for model %q must use the credential Secret bound in the catalog (%s).", route.ModelID, expected.CredentialRef.Name))
+			// The catalog may bind no credential at all, in which case the route
+			// must carry none either - naming it in the message dereferences
+			// nothing.
+			bound := "none"
+			if expected.CredentialRef != nil {
+				bound = expected.CredentialRef.Name
+			}
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATE", fmt.Sprintf("The route for model %q must use the credential Secret bound in the catalog (%s).", route.ModelID, bound))
 			return
 		}
 	}
