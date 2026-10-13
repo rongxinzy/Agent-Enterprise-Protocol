@@ -810,10 +810,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * @description The latest installation state Agents reported per user for one Skill.
-         *     Reports are per session and pruned by the telemetry retention window, so
-         *     this covers the retained window, not all history, and only users who
-         *     reported at least once.
+         * @description Reported installation state for the users one Skill is granted to: the
+         *     newest sync report per user decides, and only retained reports are
+         *     visible (telemetry retention window). A withdrawn Skill distributes to
+         *     nobody, so its grant set is empty, matching the manifest. Per-item
+         *     statuses are passed through as reported: the vocabularies differ across
+         *     contract, writer and Agent, and an Agent that fails to install writes no
+         *     report at all, so no failure verdict is derived here.
          */
         get: operations["listSkillInstallations"];
         put?: never;
@@ -2529,22 +2532,33 @@ export interface components {
         SkillInstallation: {
             userId: string;
             /** @enum {string} */
-            state: "failed" | "absent";
-            revision: string;
-            /** Format: date-time */
-            reportedAt: string;
+            state: "missing" | "unreported";
+            /** @description Present when the user has a retained report; the revision that report carried. */
+            revision?: string;
+            /**
+             * Format: date-time
+             * @description Present when the user has a retained report.
+             */
+            reportedAt?: string;
+            /** @description Raw per-item status for this Skill in that report, passed through as reported. */
+            itemStatus?: string;
         };
         SkillInstallationPage: {
             skillId: string;
             summary: {
+                /** @description Users the Skill is granted to, ignoring expired grants and a withdrawn Skill. */
+                granted: number;
+                /** @description Granted users with at least one retained report. */
                 reported: number;
                 installed: number;
-                failed: number;
-                absent: number;
+                /** @description Reported, but the report does not list the Skill as installed. */
+                missing: number;
+                /** @description Granted users with no retained report. */
+                unreported: number;
                 /** Format: date-time */
                 latestReportedAt: string | null;
             };
-            /** @description Users whose latest report does not show this Skill installed. */
+            /** @description Granted users whose report does not show the Skill installed; `missing` before `unreported`. */
             items: components["schemas"]["SkillInstallation"][];
             /** @description More users need attention than the limit returned. */
             truncated: boolean;
@@ -4845,7 +4859,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Latest reported installation state per user */
+            /** @description Reported installation state, grouped by user */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4855,6 +4869,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
         };
     };
     listSkillAssignments: {

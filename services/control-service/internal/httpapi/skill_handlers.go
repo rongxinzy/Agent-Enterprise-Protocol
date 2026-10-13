@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
@@ -331,35 +333,53 @@ func (s *Server) deleteSkillVersion(response http.ResponseWriter, request *http.
 	response.WriteHeader(http.StatusNoContent)
 }
 
-// skillInstallations reports what Agents last told the control plane about one
-// Skill. Reports are per session, so the view is "the latest report per user";
-// the rows behind it are pruned by the telemetry retention window, which makes
-// this the retained window rather than all history. It covers users who
-// reported at least once - "granted but never reported" would need the grant
-// expansion and is not answered here.
+// skillInstallations answers the question the sync reports exist for: of the
+// users this Skill is granted to, whose last report shows it installed?
+//
+// Reports arrive per session, so only the newest one per user counts, and they
+// are pruned by the telemetry retention window - this is the retained window,
+// not all history. A withdrawn Skill distributes to nobody, so its grant set is
+// empty here, matching the manifest's own rule.
+//
+// It reports what was reported, not a verdict: the per-item status vocabularies
+// disagree across layers (see skillSyncItemStatus), and an Agent that fails to
+// install writes no result row at all, so "failed" cannot be derived. The raw
+// item status is passed through instead.
 func (s *Server) skillInstallations(response http.ResponseWriter, request *http.Request) {
 	skillID := chi.URLParam(request, "skillId")
 	if !requireSkillIdentifier(response, request, skillID) {
 		return
 	}
+	claims := claimsFrom(request)
+	skill, err := s.app.Store.GetSkill(request.Context(), skillID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	rows, err := s.app.Database().Query(request.Context(), `
 WITH latest AS (
-  SELECT DISTINCT ON (user_id) user_id,revision,payload,installed_skill_ids,created_at
+  SELECT DISTINCT ON (user_id) user_id,revision,created_at,installed_skill_ids,payload
   FROM skill_sync_results
   WHERE deployment_id=$1
-  ORDER BY user_id,created_at DESC
+  ORDER BY user_id,created_at DESC,id DESC
 )
-SELECT user_id,revision,created_at,
-  CASE
-    WHEN installed_skill_ids @> ARRAY[$2]::text[] THEN 'installed'
-    WHEN EXISTS (
-      SELECT 1 FROM jsonb_array_elements(COALESCE(payload->'items','[]'::jsonb)) AS item
-      WHERE item->>'skillId'=$2 AND item->>'status'='failed'
-    ) THEN 'failed'
-    ELSE 'absent'
-  END AS state
-FROM latest
-ORDER BY state,user_id`, claimsFrom(request).DeploymentID, skillID)
+SELECT u.id,latest.revision,latest.created_at,latest.installed_skill_ids,latest.payload
+FROM users u
+LEFT JOIN latest ON latest.user_id=u.id
+WHERE u.deployment_id=$1 AND EXISTS (
+  SELECT 1 FROM skill_assignments sa
+  JOIN skills sk ON sk.id=sa.skill_id AND sk.enabled=true
+  WHERE sa.deployment_id=$1 AND sa.skill_id=$2 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND (
+    (sa.subject_type='user' AND sa.subject_id=u.id)
+    OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id))
+    OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))
+  )
+)
+ORDER BY u.id`, claims.DeploymentID, skillID)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -368,50 +388,121 @@ ORDER BY state,user_id`, claimsFrom(request).DeploymentID, skillID)
 	pageLimit := int(limit(request))
 	counts := map[string]int{}
 	items := make([]map[string]any, 0)
-	truncated := false
 	var latestReport time.Time
 	for rows.Next() {
-		var userID, revision, state string
-		var reportedAt time.Time
-		if err := rows.Scan(&userID, &revision, &reportedAt, &state); err != nil {
+		var userID string
+		var revision pgtype.Text
+		var reportedAt pgtype.Timestamptz
+		var installedSkillIDs []string
+		var payload []byte
+		if err := rows.Scan(&userID, &revision, &reportedAt, &installedSkillIDs, &payload); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}
+		reported := revision.Valid
+		state := skillInstallationState(reported, installedSkillIDs, skillID)
+		counts["granted"]++
 		counts[state]++
-		if reportedAt.After(latestReport) {
-			latestReport = reportedAt
+		if reported {
+			counts["reported"]++
+			if reportedAt.Valid && reportedAt.Time.After(latestReport) {
+				latestReport = reportedAt.Time
+			}
 		}
 		if state == "installed" {
 			continue
 		}
-		// Only the users whose report does not show the Skill installed are
-		// worth listing: an installed Skill needs no operator attention.
-		if len(items) >= pageLimit {
-			truncated = true
-			continue
+		item := map[string]any{"userId": userID, "state": state}
+		if reported {
+			item["revision"] = revision.String
+			if reportedAt.Valid {
+				item["reportedAt"] = reportedAt.Time
+			}
+			if status := skillSyncItemStatus(payload, skillID); status != "" {
+				item["itemStatus"] = status
+			}
 		}
-		items = append(items, map[string]any{"userId": userID, "state": state, "revision": revision, "reportedAt": reportedAt})
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		databaseFailure(response, request, err)
 		return
+	}
+	// A user whose report still shows the Skill missing needs attention before
+	// one that never reported, and the list stays deterministic past the limit.
+	sort.SliceStable(items, func(i, j int) bool {
+		return installationStateRank(items[i]["state"].(string)) < installationStateRank(items[j]["state"].(string))
+	})
+	truncated := false
+	if len(items) > pageLimit {
+		items = items[:pageLimit]
+		truncated = true
 	}
 	var latestReportValue any
 	if !latestReport.IsZero() {
 		latestReportValue = latestReport
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
-		"skillId": skillID,
+		"skillId": skill.ID,
 		"summary": map[string]any{
-			"reported":         counts["installed"] + counts["failed"] + counts["absent"],
+			"granted":          counts["granted"],
+			"reported":         counts["reported"],
 			"installed":        counts["installed"],
-			"failed":           counts["failed"],
-			"absent":           counts["absent"],
+			"missing":          counts["missing"],
+			"unreported":       counts["unreported"],
 			"latestReportedAt": latestReportValue,
 		},
 		"items":     items,
 		"truncated": truncated,
 	})
+}
+
+// skillInstallationState classifies one user from the last report they made.
+// "installed" is the writer's own rule (the Skill is in installed_skill_ids);
+// everything else is either reported without it or never reported at all.
+func skillInstallationState(reported bool, installedSkillIDs []string, skillID string) string {
+	if !reported {
+		return "unreported"
+	}
+	if slices.Contains(installedSkillIDs, skillID) {
+		return "installed"
+	}
+	return "missing"
+}
+
+func installationStateRank(state string) int {
+	if state == "missing" {
+		return 0
+	}
+	return 1
+}
+
+// skillSyncItemStatus returns the raw per-item status a report carried for one
+// Skill. The vocabularies disagree across layers - the contract declares
+// success|failed, the writer counts installed|updated|unchanged as installed,
+// and the shipping Agent reports installed|updated|unchanged|removed - so the
+// value is passed through as reported instead of being mapped to a verdict.
+// Decoding into typed fields also absorbs `"items": null`, which would otherwise
+// break a JSON-level query.
+func skillSyncItemStatus(payload []byte, skillID string) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var report struct {
+		Items []struct {
+			SkillID string `json:"skillId"`
+			Status  string `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(payload, &report) != nil {
+		return ""
+	}
+	for _, item := range report.Items {
+		if item.SkillID == skillID {
+			return item.Status
+		}
+	}
+	return ""
 }
 
 func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
