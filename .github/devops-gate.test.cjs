@@ -183,6 +183,43 @@ test('upstream completion event refreshes the current PR and releases the check'
   assert.equal(f.state.writes[0].external_id, `devops-gate:17:${f.state.pr.head.sha}`);
 });
 
+test('Actions Context prototype repository getter survives all publisher events and CI outcomes', async () => {
+  for (const eventName of ['pull_request_target', 'workflow_run', 'workflow_dispatch']) {
+    for (const outcome of ['queued', 'success', 'failure']) {
+      const f = fixture();
+      const { repo, ...properties } = f.context;
+      // @actions/github Context exposes repo as an inherited getter, not an own field.
+      f.context = Object.assign(Object.create({ get repo() { return repo; } }), properties);
+      assert.equal(Object.hasOwn(f.context, 'repo'), false);
+      f.context.eventName = eventName;
+      if (eventName === 'workflow_run') f.context.payload = { workflow_run: { id: 1 } };
+      if (eventName === 'workflow_dispatch')
+        f.context.payload = { inputs: { pull_request: '17' }, repository: { default_branch: 'main' } };
+      f.state.runs[0].status = outcome === 'queued' ? 'in_progress' : 'completed';
+      f.state.runs[0].conclusion = outcome === 'queued' ? null : outcome;
+      const get = f.github.rest.pulls.get;
+      f.github.rest.pulls.get = async request => {
+        assert.equal(request.owner, repo.owner);
+        assert.equal(request.repo, repo.repo);
+        return get(request);
+      };
+      const paginate = f.github.paginate;
+      f.github.paginate = async (endpoint, request) => {
+        assert.equal(request.owner, repo.owner);
+        assert.equal(request.repo, repo.repo);
+        return paginate(endpoint, request);
+      };
+      await refresh(f);
+      const result = f.state.writes.at(-1);
+      assert.equal(f.state.snapshots, 1);
+      assert.equal(result.status, outcome === 'queued' ? 'queued' : 'completed');
+      assert.equal(result.conclusion, outcome === 'queued' ? undefined : outcome);
+      assert.match(result.output.summary, outcome === 'queued' ? /Waiting for: CI/ :
+        outcome === 'failure' ? /CI: failure/ : /all applicable CI workflows passed/);
+    }
+  }
+});
+
 test('metadata errors, failed/cancelled/skipped CI and incomplete files block the required check', async () => {
   const changes = [
     f => { f.state.pr.body = 'missing template'; },
