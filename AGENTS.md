@@ -62,29 +62,18 @@ npm run release:check
 This includes OpenAPI drift checks, Node workspace tests, SDK package checks,
 Go tests/race/vet/build, release audit, and every Compose E2E scenario.
 
-## Image Builds
+## 出镜像
 
-Build the Go service images with [ko](https://ko.build) instead of hand-written
-Dockerfiles: `ko build` runs `go build` locally and does not need a Docker
-daemon.
+Go 服务（`services/control-service`、`services/gateway-authorizer`、`services/gateway-reconciler`）出镜像时，**优先用 ko（https://ko.build），不新增、不修改 Dockerfile**：
 
-- Build only: `KO_DOCKER_REPO=<registry> ko build ./services/control-service`
-- Build and deploy: put `image: ko://<module-path>/services/control-service` in
-  the manifest, then `ko apply -f <dir>/`
-- Dependencies: `export GOPROXY=<internal proxy>,direct`
-- Keep the current runtime contract: `defaultBaseImage` should be a
-  distroless / chainguard static image (CA certificates included, non-root) so
-  the image stays non-root and can still verify TLS.
+- 只出镜像：`KO_DOCKER_REPO=<内网仓> ko build ./services/control-service`（不需要 Docker 守护进程）。
+- 出镜像并落到集群：清单里写 `image: ko://<module-path>/services/control-service`，再 `ko apply -f <清单目录>/`。
+- 依赖拉取：`export GOPROXY=<内网 goproxy>,direct`。
+- 保持非 root 与 CA 信任：`defaultBaseImage` 用 distroless / chainguard static（自带 CA，`USER 65532`）。
 
-Applies to the Go services: `services/control-service` (both Dockerfiles),
-`services/gateway-authorizer`, and `services/gateway-reconciler`.
+验收：构建后确认 entrypoint 与 `USER` 与 Dockerfile 构建结果一致，再 apply 到集群验证。
 
-Verify the built image keeps the same entrypoint and `USER` as the Dockerfile
-build before pointing a manifest at it.
-
-> Build-time numbers (ko vs `docker build`) are not measured yet and are
-> deliberately omitted. The same convention is documented in
-> `aep-deerflow-governance`; keep the two in sync.
+> 性能数字（ko vs docker build）待实测，暂不写入。同一段落亦见于 `aep-deerflow-governance`，改动请同步两处。
 
 ## Contract-First Development
 
