@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -161,7 +162,7 @@ func Load() (Config, error) {
 	if cfg.LicenseTrustedKeys, err = loadTrustedKeys(cfg.LicenseTrustedKeysFile); err != nil {
 		return Config{}, err
 	}
-	if cfg.EnableMockFederatedAuth, err = boolean("AEP_ENABLE_MOCK_FEDERATED_AUTH", environment != "production"); err != nil {
+	if cfg.EnableMockFederatedAuth, err = boolean("AEP_ENABLE_MOCK_FEDERATED_AUTH", false); err != nil {
 		return Config{}, err
 	}
 	if cfg.MinioSecure, err = boolean("AEP_MINIO_SECURE", false); err != nil {
@@ -331,7 +332,28 @@ func (cfg Config) Validate() error {
 			return errors.New("AEP_GATEWAY_LICENSE_STATUS_TOKEN or AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE is required in production")
 		}
 	}
+	// Mock federated authentication hands out a bootstrap administrator session
+	// for a literal authorization code, so it is a local development fixture: it
+	// stays off unless asked for, and it may only listen on loopback.
+	if cfg.EnableMockFederatedAuth && !loopbackAddress(cfg.Address) {
+		return errors.New("AEP_ENABLE_MOCK_FEDERATED_AUTH requires AEP_ADDRESS to bind a loopback address")
+	}
 	return nil
+}
+
+// loopbackAddress reports whether a listen address accepts only local
+// connections: "localhost:8080", "127.0.0.1:8080", "[::1]:8080". A wildcard or
+// empty host (":8080", "0.0.0.0:8080") listens on every interface.
+func loopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 func loadTrustedKeys(file string) (map[string]string, error) {
