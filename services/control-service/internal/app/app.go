@@ -393,7 +393,7 @@ JOIN users u ON u.id=$2 AND u.deployment_id=$1
 WHERE m.deployment_id=$1 AND m.enabled=true AND (ma.expires_at IS NULL OR ma.expires_at>now()) AND (
   (ma.subject_type='user' AND ma.subject_id=$2)
   OR (ma.subject_type='role' AND EXISTS (
-    SELECT 1 FROM user_role_bindings urb
+    SELECT 1 FROM user_effective_roles urb
     JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
     WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ma.subject_id
   ))
@@ -420,7 +420,7 @@ ORDER BY m.id`, deploymentID, userID)
 }
 
 func (a *App) UserRoleIDs(ctx context.Context, deploymentID, userID string) ([]string, error) {
-	return a.Store.Deployment(deploymentID).UserRoleIDs(ctx, userID)
+    return a.Store.Deployment(deploymentID).EffectiveUserRoleIDs(ctx, userID)
 }
 
 // IssueUserSession creates a refreshable terminal session that is scoped to a
@@ -505,7 +505,7 @@ WHERE e.deployment_id=$2 AND e.state='active' AND e.expires_at>now()
     OR (e.scope_type='team' AND (
         (e.include_descendants AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN event_teams et ON et.event_id=e.event_id AND et.id=utb.team_id WHERE utb.deployment_id=$2 AND utb.user_id=$3))
         OR (NOT e.include_descendants AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=$3 AND utb.team_id=e.scope_id))))
-    OR (e.scope_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=$3 AND urb.role_id=e.scope_id)))
+    OR (e.scope_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=$3 AND urb.role_id=e.scope_id)))
 ON CONFLICT (event_id,session_id) DO NOTHING`, sessionID, a.DeploymentID(), user.ID); err != nil {
 		return TokenResponse{}, err
 	}

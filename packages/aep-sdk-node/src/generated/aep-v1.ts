@@ -2240,6 +2240,8 @@ export interface components {
             builtIn: boolean;
             enabled: boolean;
             memberCount: number;
+            /** @description Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Omitted for root teams. */
             parentId?: string | null;
             /** @description Materialized team path, for example /hq/engineering. */
@@ -2255,6 +2257,8 @@ export interface components {
         CreateTeamRequest: {
             name: string;
             description?: string;
+            /** @description Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible. */
             parentId?: string | null;
         };
@@ -2262,6 +2266,8 @@ export interface components {
             name?: string;
             description?: string;
             enabled?: boolean;
+            /** @description Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions. */
+            defaultRoleIds?: string[];
         };
         ReplaceUserRBACRequest: {
             roleIds: string[];

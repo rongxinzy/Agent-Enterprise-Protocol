@@ -59,7 +59,7 @@ func expectHTTPUserRoles(mock sqlmock.Sqlmock, deploymentID, userID string, role
 	for _, roleID := range roleIDs {
 		rows.AddRow(roleID)
 	}
-	mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).
+	mock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).
 		WithArgs(deploymentID, userID).WillReturnRows(rows)
 }
 

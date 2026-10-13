@@ -56,20 +56,29 @@ type RolePermission struct {
 func (RolePermission) TableName() string { return "role_permissions" }
 
 type Team struct {
-	DeploymentID string    `gorm:"column:deployment_id;primaryKey"`
-	ID           string    `gorm:"column:id;primaryKey"`
-	Name         string    `gorm:"column:name;not null"`
-	Description  string    `gorm:"column:description;not null"`
-	BuiltIn      bool      `gorm:"column:built_in;not null"`
-	Enabled      bool      `gorm:"column:enabled;not null"`
-	ParentTeamID *string   `gorm:"column:parent_team_id"`
-	Path         string    `gorm:"column:path;not null"`
-	Depth        int       `gorm:"column:depth;not null"`
-	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	DefaultRoleIDs []string  `gorm:"column:default_role_ids;->;serializer:json"`
+	DeploymentID   string    `gorm:"column:deployment_id;primaryKey"`
+	ID             string    `gorm:"column:id;primaryKey"`
+	Name           string    `gorm:"column:name;not null"`
+	Description    string    `gorm:"column:description;not null"`
+	BuiltIn        bool      `gorm:"column:built_in;not null"`
+	Enabled        bool      `gorm:"column:enabled;not null"`
+	ParentTeamID   *string   `gorm:"column:parent_team_id"`
+	Path           string    `gorm:"column:path;not null"`
+	Depth          int       `gorm:"column:depth;not null"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (Team) TableName() string { return "teams" }
+
+type TeamDefaultRole struct {
+	DeploymentID string `gorm:"column:deployment_id;primaryKey"`
+	TeamID       string `gorm:"column:team_id;primaryKey"`
+	RoleID       string `gorm:"column:role_id;primaryKey"`
+}
+
+func (TeamDefaultRole) TableName() string { return "team_default_roles" }
 
 type UserRoleBinding struct {
 	DeploymentID string    `gorm:"column:deployment_id;primaryKey"`
