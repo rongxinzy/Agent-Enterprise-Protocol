@@ -36,10 +36,22 @@ type deploymentListSettingState struct {
 	Source         string    `json:"source"`
 }
 
+// deploymentIntegerSettingState is the wire form of one integer
+// deployment-level runtime setting, mirroring deploymentSettingState with a
+// numeric value.
+type deploymentIntegerSettingState struct {
+	Override       *int   `json:"override"`
+	EffectiveValue *int   `json:"effectiveValue"`
+	Source         string `json:"source"`
+}
+
 type deploymentSettings struct {
-	ModelGatewayBaseURL deploymentSettingState     `json:"modelGatewayBaseUrl"`
-	AgentControlBaseURL deploymentSettingState     `json:"agentControlBaseUrl"`
-	ModelFallbackIDs    deploymentListSettingState `json:"modelFallbackIds"`
+	ModelGatewayBaseURL         deploymentSettingState        `json:"modelGatewayBaseUrl"`
+	AgentControlBaseURL         deploymentSettingState        `json:"agentControlBaseUrl"`
+	ModelFallbackIDs            deploymentListSettingState    `json:"modelFallbackIds"`
+	ComputeDefaultTier          deploymentSettingState        `json:"computeDefaultTier"`
+	ComputeIdleHibernateSeconds deploymentIntegerSettingState `json:"computeIdleHibernateSeconds"`
+	ComputeConcurrencyCap       deploymentIntegerSettingState `json:"computeConcurrencyCap"`
 }
 
 // deploymentSettingsUpdate tracks field presence so an omitted field stays
@@ -47,12 +59,18 @@ type deploymentSettings struct {
 // decoder cannot distinguish the two for pointer fields, hence the custom
 // unmarshaler; it also rejects unknown fields like decodeJSON would.
 type deploymentSettingsUpdate struct {
-	ModelGatewayBaseURL    *string
-	HasModelGatewayBaseURL bool
-	AgentControlBaseURL    *string
-	HasAgentControlBaseURL bool
-	ModelFallbackIDs       *[]string
-	HasModelFallbackIDs    bool
+	ModelGatewayBaseURL            *string
+	HasModelGatewayBaseURL         bool
+	AgentControlBaseURL            *string
+	HasAgentControlBaseURL         bool
+	ModelFallbackIDs               *[]string
+	HasModelFallbackIDs            bool
+	ComputeDefaultTier             *string
+	HasComputeDefaultTier          bool
+	ComputeIdleHibernateSeconds    *int
+	HasComputeIdleHibernateSeconds bool
+	ComputeConcurrencyCap          *int
+	HasComputeConcurrencyCap       bool
 }
 
 func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
@@ -61,7 +79,9 @@ func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	for key := range fields {
-		if key != "modelGatewayBaseUrl" && key != "agentControlBaseUrl" && key != "modelFallbackIds" {
+		switch key {
+		case "modelGatewayBaseUrl", "agentControlBaseUrl", "modelFallbackIds", "computeDefaultTier", "computeIdleHibernateSeconds", "computeConcurrencyCap":
+		default:
 			return fmt.Errorf("unknown field %q", key)
 		}
 	}
@@ -116,6 +136,40 @@ func (update *deploymentSettingsUpdate) UnmarshalJSON(data []byte) error {
 			update.AgentControlBaseURL = &trimmed
 		}
 	}
+	if raw, present := fields["computeDefaultTier"]; present {
+		update.HasComputeDefaultTier = true
+		if string(raw) != "null" {
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("computeDefaultTier must be a string or null")
+			}
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" || len(trimmed) > 200 {
+				return fmt.Errorf("computeDefaultTier must be a catalog tier name of at most 200 characters")
+			}
+			update.ComputeDefaultTier = &trimmed
+		}
+	}
+	if raw, present := fields["computeIdleHibernateSeconds"]; present {
+		update.HasComputeIdleHibernateSeconds = true
+		if string(raw) != "null" {
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("computeIdleHibernateSeconds must be an integer or null")
+			}
+			update.ComputeIdleHibernateSeconds = &value
+		}
+	}
+	if raw, present := fields["computeConcurrencyCap"]; present {
+		update.HasComputeConcurrencyCap = true
+		if string(raw) != "null" {
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("computeConcurrencyCap must be an integer or null")
+			}
+			update.ComputeConcurrencyCap = &value
+		}
+	}
 	return nil
 }
 
@@ -127,6 +181,16 @@ func resolveDeploymentSetting(override *string, environmentValue string) deploym
 		return deploymentSettingState{EffectiveValue: &environmentValue, Source: "env"}
 	}
 	return deploymentSettingState{Source: "unset"}
+}
+
+func resolveDeploymentIntegerSetting(override *int, environmentValue int) deploymentIntegerSettingState {
+	if override != nil {
+		return deploymentIntegerSettingState{Override: override, EffectiveValue: override, Source: "override"}
+	}
+	if environmentValue > 0 {
+		return deploymentIntegerSettingState{EffectiveValue: &environmentValue, Source: "env"}
+	}
+	return deploymentIntegerSettingState{Source: "unset"}
 }
 
 func resolveDeploymentListSetting(override *[]string, environmentValue []string) deploymentListSettingState {
@@ -187,6 +251,26 @@ func (s *Server) deploymentSettingOverride(request *http.Request, column string)
 	return &value.String, nil
 }
 
+func (s *Server) deploymentIntegerSettingOverride(request *http.Request, column string) (*int, error) {
+	database := s.app.Database()
+	if database == nil {
+		return nil, errors.New("database unavailable")
+	}
+	var value sql.NullInt64
+	err := database.QueryRow(request.Context(), `SELECT `+column+` FROM deployment_settings WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !value.Valid {
+		return nil, nil
+	}
+	parsed := int(value.Int64)
+	return &parsed, nil
+}
+
 func (s *Server) getDeploymentSettings(response http.ResponseWriter, request *http.Request) {
 	override, err := s.deploymentSettingOverride(request, "model_gateway_base_url")
 	if err != nil {
@@ -203,10 +287,28 @@ func (s *Server) getDeploymentSettings(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	tierOverride, err := s.deploymentSettingOverride(request, "compute_default_tier")
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	hibernateOverride, err := s.deploymentIntegerSettingOverride(request, "compute_idle_hibernate_seconds")
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	capOverride, err := s.deploymentIntegerSettingOverride(request, "compute_concurrency_cap")
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	writeJSON(response, http.StatusOK, deploymentSettings{
-		ModelGatewayBaseURL: resolveDeploymentSetting(override, s.app.Config.ModelGatewayBaseURL),
-		AgentControlBaseURL: resolveDeploymentSetting(agentOverride, s.app.Config.AgentControlBaseURL),
-		ModelFallbackIDs:    resolveDeploymentListSetting(fallbackOverride, s.app.Config.ModelFallbackIDs),
+		ModelGatewayBaseURL:         resolveDeploymentSetting(override, s.app.Config.ModelGatewayBaseURL),
+		AgentControlBaseURL:         resolveDeploymentSetting(agentOverride, s.app.Config.AgentControlBaseURL),
+		ModelFallbackIDs:            resolveDeploymentListSetting(fallbackOverride, s.app.Config.ModelFallbackIDs),
+		ComputeDefaultTier:          resolveDeploymentSetting(tierOverride, s.app.Config.ComputeDefaultTier),
+		ComputeIdleHibernateSeconds: resolveDeploymentIntegerSetting(hibernateOverride, s.app.Config.ComputeIdleHibernateSeconds),
+		ComputeConcurrencyCap:       resolveDeploymentIntegerSetting(capOverride, s.app.Config.ComputeConcurrencyCap),
 	})
 }
 
@@ -263,6 +365,42 @@ func (s *Server) updateDeploymentSettings(response http.ResponseWriter, request 
 		}
 		fallbackStored = ids
 	}
+	var tierStored any
+	if input.HasComputeDefaultTier && input.ComputeDefaultTier != nil {
+		// Tier names are validated against the deployment-owned catalog when
+		// one is configured; without a catalog file there is nothing to
+		// validate against and the value stays inert.
+		items, err := loadComputeTierCatalog(s.app.Config.ComputeTiersFile)
+		if err != nil {
+			computeTiersUnavailable(response, request, err)
+			return
+		}
+		if len(items) > 0 {
+			if _, ok := computeTierNames(items)[*input.ComputeDefaultTier]; !ok {
+				writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", "The computeDefaultTier is not in the compute tier catalog.")
+				return
+			}
+		}
+		tierStored = *input.ComputeDefaultTier
+	}
+	var hibernateStored any
+	if input.HasComputeIdleHibernateSeconds && input.ComputeIdleHibernateSeconds != nil {
+		value := *input.ComputeIdleHibernateSeconds
+		if value < 60 || value > 86400 {
+			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", "The computeIdleHibernateSeconds must be an integer between 60 and 86400.")
+			return
+		}
+		hibernateStored = value
+	}
+	var capStored any
+	if input.HasComputeConcurrencyCap && input.ComputeConcurrencyCap != nil {
+		value := *input.ComputeConcurrencyCap
+		if value < 1 || value > 10000 {
+			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DEPLOYMENT_SETTINGS", "The computeConcurrencyCap must be an integer between 1 and 10000.")
+			return
+		}
+		capStored = value
+	}
 	if input.HasModelGatewayBaseURL {
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,model_gateway_base_url) VALUES ($1,$2)
 ON CONFLICT (deployment_id) DO UPDATE SET model_gateway_base_url=EXCLUDED.model_gateway_base_url,updated_at=now()`, claimsFrom(request).DeploymentID, gatewayStored); err != nil {
@@ -280,6 +418,27 @@ ON CONFLICT (deployment_id) DO UPDATE SET agent_control_base_url=EXCLUDED.agent_
 	if input.HasModelFallbackIDs {
 		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,model_fallback_ids) VALUES ($1,$2)
 ON CONFLICT (deployment_id) DO UPDATE SET model_fallback_ids=EXCLUDED.model_fallback_ids,updated_at=now()`, claimsFrom(request).DeploymentID, fallbackStored); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	if input.HasComputeDefaultTier {
+		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,compute_default_tier) VALUES ($1,$2)
+ON CONFLICT (deployment_id) DO UPDATE SET compute_default_tier=EXCLUDED.compute_default_tier,updated_at=now()`, claimsFrom(request).DeploymentID, tierStored); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	if input.HasComputeIdleHibernateSeconds {
+		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,compute_idle_hibernate_seconds) VALUES ($1,$2)
+ON CONFLICT (deployment_id) DO UPDATE SET compute_idle_hibernate_seconds=EXCLUDED.compute_idle_hibernate_seconds,updated_at=now()`, claimsFrom(request).DeploymentID, hibernateStored); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+	}
+	if input.HasComputeConcurrencyCap {
+		if _, err := database.Exec(request.Context(), `INSERT INTO deployment_settings (deployment_id,compute_concurrency_cap) VALUES ($1,$2)
+ON CONFLICT (deployment_id) DO UPDATE SET compute_concurrency_cap=EXCLUDED.compute_concurrency_cap,updated_at=now()`, claimsFrom(request).DeploymentID, capStored); err != nil {
 			databaseFailure(response, request, err)
 			return
 		}

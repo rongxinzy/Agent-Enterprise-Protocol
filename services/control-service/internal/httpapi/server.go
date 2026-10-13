@@ -234,6 +234,9 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Get("/aep/v1/admin/data-plane/status", s.getDataPlaneStatus)
 			admin.Get("/aep/v1/admin/deployment/settings", s.getDeploymentSettings)
 			admin.Put("/aep/v1/admin/deployment/settings", s.updateDeploymentSettings)
+			admin.Get("/aep/v1/admin/compute/tiers", s.listComputeTiers)
+			admin.Get("/aep/v1/admin/compute/assignments", s.listComputeAssignments)
+			admin.Put("/aep/v1/admin/compute/assignments/{agentId}", s.updateComputeAssignment)
 			admin.Get("/aep/v1/admin/credentials", s.listCredentials)
 			admin.Post("/aep/v1/admin/credentials", s.createCredential)
 			admin.Get("/aep/v1/admin/credentials/{credentialId}", s.getCredential)
@@ -475,6 +478,13 @@ func requiredAdminPermission(method, path string) []string {
 			return []string{"deployment.read"}
 		}
 		return []string{"deployment.write"}
+	case strings.HasPrefix(path, "/aep/v1/admin/compute"):
+		if method == http.MethodGet {
+			return []string{"deployment.read"}
+		}
+		// agents.compute.write is the delegable digital-employee compute grant;
+		// it cannot touch human accounts.
+		return []string{"agents.compute.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/agents"):
 		if method == http.MethodGet {
 			return []string{"users.read"}

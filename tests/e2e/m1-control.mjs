@@ -41,6 +41,7 @@ async function runScenario() {
   assert(connection.baseUrl === gatewayBaseUrl, 'SDK received the wrong model gateway URL');
   assert(connection.protocol === 'openai-compatible', 'SDK received the wrong model gateway protocol');
   await assertDeploymentSettings(admin);
+  await assertComputeGovernance(admin, adminStore);
 
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
@@ -152,6 +153,10 @@ async function assertDeploymentSettings(admin) {
   assert(initial.modelGatewayBaseUrl.override === null
     && initial.modelGatewayBaseUrl.effectiveValue === gatewayBaseUrl
     && initial.modelGatewayBaseUrl.source === 'env', 'Deployment settings did not resolve the environment gateway URL');
+  assert(initial.computeDefaultTier.override === null
+    && initial.computeDefaultTier.source === 'unset'
+    && initial.computeIdleHibernateSeconds.source === 'unset'
+    && initial.computeConcurrencyCap.source === 'unset', 'Compute settings were not unset without environment values');
 
   const overrideUrl = 'https://runtime-gateway.example.com/v1';
   const updated = await admin.updateDeploymentSettings({modelGatewayBaseUrl: overrideUrl});
@@ -166,11 +171,76 @@ async function assertDeploymentSettings(admin) {
     'INVALID_DEPLOYMENT_SETTINGS',
   );
 
+  const computeUpdated = await admin.updateDeploymentSettings({computeIdleHibernateSeconds: 300, computeConcurrencyCap: 10});
+  assert(computeUpdated.computeIdleHibernateSeconds.override === 300
+    && computeUpdated.computeIdleHibernateSeconds.effectiveValue === 300
+    && computeUpdated.computeIdleHibernateSeconds.source === 'override'
+    && computeUpdated.computeConcurrencyCap.override === 10
+    && computeUpdated.computeConcurrencyCap.source === 'override', 'Compute integer settings did not store numeric overrides');
+
+  const computeCleared = await admin.updateDeploymentSettings({computeIdleHibernateSeconds: null, computeConcurrencyCap: null});
+  assert(computeCleared.computeIdleHibernateSeconds.override === null
+    && computeCleared.computeIdleHibernateSeconds.source === 'unset'
+    && computeCleared.computeConcurrencyCap.source === 'unset', 'Clearing compute overrides did not restore the unset state');
+
   const cleared = await admin.updateDeploymentSettings({modelGatewayBaseUrl: null});
   assert(cleared.modelGatewayBaseUrl.override === null
     && cleared.modelGatewayBaseUrl.effectiveValue === gatewayBaseUrl
     && cleared.modelGatewayBaseUrl.source === 'env', 'Clearing the runtime override did not restore the environment value');
   assert((await admin.getMetadata()).modelGateway?.baseUrl === gatewayBaseUrl, 'Metadata did not fall back to the environment gateway URL');
+}
+
+async function assertComputeGovernance(admin, store) {
+  // The compose deployment ships no tier catalog: the API reports an empty
+  // catalog and tier names stay unvalidated here.
+  const tiers = await adminFetch(store, 'GET', '/aep/v1/admin/compute/tiers');
+  assert(tiers.status === 200 && Array.isArray(tiers.body.items) && tiers.body.items.length === 0, 'Compute tier catalog was not empty without AEP_COMPUTE_TIERS_FILE');
+
+  const role = await admin.createRole({name: `Compute Role ${runId}`, description: 'Compute governance E2E role', permissions: []});
+  const team = await admin.createTeam({name: `Compute Team ${runId}`, description: 'Compute governance E2E team'});
+  const agent = await admin.createAgent({
+    username: `compute-agent-${runId}`, displayName: `Compute Agent ${runId}`,
+    password: 'agent-password-123', roleIds: [role.id], teamIds: [team.id], homeTeamId: team.id,
+    displayTitle: 'Compute Agent',
+  });
+
+  const before = await adminFetch(store, 'GET', '/aep/v1/admin/compute/assignments');
+  const inherited = before.body.items.find(item => item.agentId === agent.id);
+  assert(before.status === 200 && inherited && inherited.tier.override === null && inherited.tier.source === 'default', 'New agent did not inherit the deployment default tier');
+
+  const assigned = await adminFetch(store, 'PUT', `/aep/v1/admin/compute/assignments/${agent.id}`, {tier: 'standard'});
+  assert(assigned.status === 200 && assigned.body.tier.override === 'standard' && assigned.body.tier.source === 'override'
+    && typeof assigned.body.updatedBy === 'string' && assigned.body.updatedBy.length > 0
+    && typeof assigned.body.updatedAt === 'string', 'Compute assignment did not store the tier override');
+
+  const listed = await adminFetch(store, 'GET', '/aep/v1/admin/compute/assignments');
+  const overridden = listed.body.items.find(item => item.agentId === agent.id);
+  assert(overridden && overridden.tier.override === 'standard' && overridden.tier.effective === 'standard' && overridden.tier.source === 'override', 'Assignment list did not echo the stored override');
+
+  const cleared = await adminFetch(store, 'PUT', `/aep/v1/admin/compute/assignments/${agent.id}`, {tier: null});
+  assert(cleared.status === 200 && cleared.body.tier.override === null && cleared.body.tier.source === 'default', 'Clearing the assignment did not restore the deployment default');
+
+  const missing = await adminFetch(store, 'PUT', '/aep/v1/admin/compute/assignments/missing-agent', {tier: 'standard'});
+  assert(missing.status === 404 && missing.body.code === 'RESOURCE_NOT_FOUND', 'Unknown agent did not return 404');
+
+  await admin.deleteAgent(agent.id);
+  await admin.deleteTeam(team.id);
+  await admin.deleteRole(role.id);
+}
+
+async function adminFetch(store, method, path, body) {
+  const tokens = await store.get();
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${tokens.accessToken}`,
+      'content-type': 'application/json',
+      'x-aep-protocol-version': '1.0',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  return {status: response.status, body: text ? JSON.parse(text) : null};
 }
 
 async function assertModelToken(store, expectedScopes) {
