@@ -2,9 +2,10 @@
   "eventDrivenGate": true,
   "orchestrator": {
     "name": "CI validation",
-    "path": ".github/workflows/ci-validation.yml",
-    "callers": {"aep":".github/workflows/m0.yml","codeql":".github/workflows/codeql.yml","security":".github/workflows/security.yml","gate-tests":".github/workflows/devops-gate-tests.yml"},
-    "needs": ["aep","codeql","security","gate-tests"]
+    "path": ".github/workflows/m0.yml",
+    "callers": {"codeql":".github/workflows/codeql.yml","security":".github/workflows/security.yml","gate-tests":".github/workflows/devops-gate-tests.yml"},
+    "localNeeds": ["release-gate"],
+    "needs": ["release-gate","codeql","security","gate-tests"]
   },
   "workflows": [
     {

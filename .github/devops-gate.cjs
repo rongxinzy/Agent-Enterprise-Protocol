@@ -113,10 +113,10 @@ function samePr(left, right) {
 // current-head PR run can select the unified entry; any legacy runs on that
 // same head remain required, so parallel failures cannot be hidden.
 function selectWorkflows(config, runs, pr, expected) {
-  const belongs = (workflow) => runs.some((item) =>
+  const belongs = (workflow, matchName = false) => runs.some((item) =>
     item.event === 'pull_request' && item.head_sha === pr.head.sha &&
-    item.path?.split('@')[0] === workflow.path && linkedRun(item, pr));
-  if (!config.orchestrator || !belongs(config.orchestrator)) return expected;
+    item.path?.split('@')[0] === workflow.path && (!matchName || item.name === workflow.name) && linkedRun(item, pr));
+  if (!config.orchestrator || !belongs(config.orchestrator, true)) return expected;
   return [config.orchestrator, ...expected.filter((workflow) =>
     workflow.path !== config.orchestrator.path && belongs(workflow))];
 }

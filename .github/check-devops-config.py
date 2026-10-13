@@ -67,7 +67,7 @@ assert checkout["with"] == {"ref": "${{ github.event.repository.default_branch }
 assert re.fullmatch(r"actions/github-script@[0-9a-f]{40}", publisher["uses"]), "Publisher must be pinned"
 assert "gate.refresh({ github, context, core, config })" in publisher["with"]["script"], "One-shot publisher is required"
 assert "gate-tests" in config["orchestrator"]["needs"], "Gate regression tests must remain mandatory"
-assert set(config["orchestrator"]["needs"]) == set(config["orchestrator"]["callers"]), "Caller dependency inventory drift"
+assert set(config["orchestrator"]["needs"]) == set(config["orchestrator"]["callers"]) | set(config["orchestrator"]["localNeeds"]), "Caller dependency inventory drift"
 assert config.get("eventDrivenGate") is True, "Gate mode must be declared"
 tests = yaml.safe_load((root / "workflows/devops-gate-tests.yml").read_text(encoding="utf-8"))
 assert tests["permissions"] == {"contents": "read"}, "PR regression tests must have read-only permissions"
