@@ -1502,6 +1502,28 @@ paths:
           description: Version withdrawn
         '400':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/skills/{skillId}/installations:
+    get:
+      tags:
+        - Admin Skills
+      operationId: listSkillInstallations
+      description: |
+        The latest installation state Agents reported per user for one Skill.
+        Reports are per session and pruned by the telemetry retention window, so
+        this covers the retained window, not all history, and only users who
+        reported at least once.
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Latest reported installation state per user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillInstallationPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skill-assignments:
     get:
       tags:
@@ -5590,6 +5612,70 @@ components:
           enum:
             - active
             - withdrawn
+    SkillInstallation:
+      type: object
+      required:
+        - userId
+        - state
+        - revision
+        - reportedAt
+      properties:
+        userId:
+          type: string
+        state:
+          type: string
+          enum:
+            - failed
+            - absent
+        revision:
+          type: string
+        reportedAt:
+          type: string
+          format: date-time
+    SkillInstallationPage:
+      type: object
+      required:
+        - skillId
+        - summary
+        - items
+        - truncated
+      properties:
+        skillId:
+          type: string
+        summary:
+          type: object
+          required:
+            - reported
+            - installed
+            - failed
+            - absent
+            - latestReportedAt
+          properties:
+            reported:
+              type: integer
+              minimum: 0
+            installed:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+            absent:
+              type: integer
+              minimum: 0
+            latestReportedAt:
+              type:
+                - string
+                - 'null'
+              format: date-time
+        items:
+          type: array
+          description: Users whose latest report does not show this Skill installed.
+          items:
+            $ref: '#/components/schemas/SkillInstallation'
+        truncated:
+          type: boolean
+          description: More users need attention than the limit returned.
     Subject:
       type: object
       required:

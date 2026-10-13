@@ -331,6 +331,89 @@ func (s *Server) deleteSkillVersion(response http.ResponseWriter, request *http.
 	response.WriteHeader(http.StatusNoContent)
 }
 
+// skillInstallations reports what Agents last told the control plane about one
+// Skill. Reports are per session, so the view is "the latest report per user";
+// the rows behind it are pruned by the telemetry retention window, which makes
+// this the retained window rather than all history. It covers users who
+// reported at least once - "granted but never reported" would need the grant
+// expansion and is not answered here.
+func (s *Server) skillInstallations(response http.ResponseWriter, request *http.Request) {
+	skillID := chi.URLParam(request, "skillId")
+	if !requireSkillIdentifier(response, request, skillID) {
+		return
+	}
+	rows, err := s.app.Database().Query(request.Context(), `
+WITH latest AS (
+  SELECT DISTINCT ON (user_id) user_id,revision,payload,installed_skill_ids,created_at
+  FROM skill_sync_results
+  WHERE deployment_id=$1
+  ORDER BY user_id,created_at DESC
+)
+SELECT user_id,revision,created_at,
+  CASE
+    WHEN installed_skill_ids @> ARRAY[$2]::text[] THEN 'installed'
+    WHEN EXISTS (
+      SELECT 1 FROM jsonb_array_elements(COALESCE(payload->'items','[]'::jsonb)) AS item
+      WHERE item->>'skillId'=$2 AND item->>'status'='failed'
+    ) THEN 'failed'
+    ELSE 'absent'
+  END AS state
+FROM latest
+ORDER BY state,user_id`, claimsFrom(request).DeploymentID, skillID)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	defer rows.Close()
+	pageLimit := int(limit(request))
+	counts := map[string]int{}
+	items := make([]map[string]any, 0)
+	truncated := false
+	var latestReport time.Time
+	for rows.Next() {
+		var userID, revision, state string
+		var reportedAt time.Time
+		if err := rows.Scan(&userID, &revision, &reportedAt, &state); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		counts[state]++
+		if reportedAt.After(latestReport) {
+			latestReport = reportedAt
+		}
+		if state == "installed" {
+			continue
+		}
+		// Only the users whose report does not show the Skill installed are
+		// worth listing: an installed Skill needs no operator attention.
+		if len(items) >= pageLimit {
+			truncated = true
+			continue
+		}
+		items = append(items, map[string]any{"userId": userID, "state": state, "revision": revision, "reportedAt": reportedAt})
+	}
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	var latestReportValue any
+	if !latestReport.IsZero() {
+		latestReportValue = latestReport
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"skillId": skillID,
+		"summary": map[string]any{
+			"reported":         counts["installed"] + counts["failed"] + counts["absent"],
+			"installed":        counts["installed"],
+			"failed":           counts["failed"],
+			"absent":           counts["absent"],
+			"latestReportedAt": latestReportValue,
+		},
+		"items":     items,
+		"truncated": truncated,
+	})
+}
+
 func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
 	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListSkillAssignments(request.Context())
 	if err != nil {

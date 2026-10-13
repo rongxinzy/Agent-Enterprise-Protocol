@@ -802,6 +802,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/skills/{skillId}/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description The latest installation state Agents reported per user for one Skill.
+         *     Reports are per session and pruned by the telemetry retention window, so
+         *     this covers the retained window, not all history, and only users who
+         *     reported at least once.
+         */
+        get: operations["listSkillInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skill-assignments": {
         parameters: {
             query?: never;
@@ -2503,6 +2525,29 @@ export interface components {
             description?: string;
             /** @enum {string} */
             state?: "active" | "withdrawn";
+        };
+        SkillInstallation: {
+            userId: string;
+            /** @enum {string} */
+            state: "failed" | "absent";
+            revision: string;
+            /** Format: date-time */
+            reportedAt: string;
+        };
+        SkillInstallationPage: {
+            skillId: string;
+            summary: {
+                reported: number;
+                installed: number;
+                failed: number;
+                absent: number;
+                /** Format: date-time */
+                latestReportedAt: string | null;
+            };
+            /** @description Users whose latest report does not show this Skill installed. */
+            items: components["schemas"]["SkillInstallation"][];
+            /** @description More users need attention than the limit returned. */
+            truncated: boolean;
         };
         Subject: {
             /** @enum {string} */
@@ -4783,6 +4828,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["Problem-2"];
+        };
+    };
+    listSkillInstallations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path: {
+                skillId: components["parameters"]["SkillId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest reported installation state per user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInstallationPage"];
+                };
             };
             400: components["responses"]["Problem-2"];
         };
