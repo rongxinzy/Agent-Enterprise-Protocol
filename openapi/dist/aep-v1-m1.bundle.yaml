@@ -1023,6 +1023,73 @@ paths:
       responses:
         '204':
           description: Assignment removed
+    patch:
+      tags:
+        - Admin Skills
+      operationId: updateSkillAssignment
+      description: |
+        Changes when an existing grant ends. Deleting and recreating the grant
+        would drop the Skill from the employee's desired manifest in between -
+        which can uninstall and reinstall it - so the expiry is edited in place.
+        `null` makes the grant perpetual again. The change emits the same control
+        event a grant change does, so agents reconcile promptly.
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expiresAt
+              properties:
+                expiresAt:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                  description: RFC3339 expiry, or null for a perpetual grant.
+      responses:
+        '200':
+          description: Grant updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - skillId
+                  - subject
+                  - expiresAt
+                properties:
+                  id:
+                    type: string
+                  skillId:
+                    type: string
+                  subject:
+                    type: object
+                    required:
+                      - type
+                      - id
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - user
+                          - role
+                          - team
+                      id:
+                        type: string
+                  expiresAt:
+                    type:
+                      - string
+                      - 'null'
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/control-events:
     get:
       tags:
