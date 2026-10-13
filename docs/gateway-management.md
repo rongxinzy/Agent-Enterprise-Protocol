@@ -130,6 +130,18 @@ membership, status/flags, tokens and native duration fields; prompts,
 responses, tool arguments, credentials and free-form provider errors are not
 returned. AEP stores no copy of the monitoring history.
 
+The authorizer validates or generates the caller-visible `X-Request-ID`, strips
+all client `X-AEP-*` headers, then forwards the same ID as trusted
+`X-AEP-Request-ID`. The metadata access-log EnvoyFilter reads this trusted
+header, since Envoy may rewrite its own `X-Request-ID` for tracing. Upstream
+response headers cannot replace the authorizer's response ID. Update the
+authorizer before applying the updated EnvoyFilter; the filter alone cannot
+provide correlation with an older authorizer. Higress must remain reachable
+only through the trusted authorizer. Existing logs keep their original IDs;
+this change does not relabel history. Caller-supplied IDs may be reused, so
+consumers must preserve per-source timestamps and authenticated identity when
+displaying records rather than assuming an ID alone identifies a unique call.
+
 ## Active model tests
 
 `POST models/{modelId}/test-access` requires `models.read`, an active session,
