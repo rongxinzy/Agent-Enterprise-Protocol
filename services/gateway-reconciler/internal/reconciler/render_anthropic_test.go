@@ -198,7 +198,7 @@ func TestKubernetesApplierDeletesAnthropicPairWhenRouteDisabled(t *testing.T) {
 		response.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", HTTPClient: server.Client()})
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token"})
 	if err != nil {
 		t.Fatal(err)
 	}
