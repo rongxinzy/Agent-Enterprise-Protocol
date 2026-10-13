@@ -216,10 +216,14 @@ try {
   await admin.putDataPlaneDesiredState({revision: 'rev-drift', routes: [route('ghost', '/v1/ghost', 'provider-ghost', 'api-key-a')]});
   comparison = (await admin.getDataPlaneStatus()).catalogComparison;
   assert(comparison.extra.includes('ghost') && comparison.missing.includes('catalog-chat'), `manual drift was not reported: ${JSON.stringify(comparison)}`);
+  // Republish restores the previous catalog revision. A status that is already
+  // ready for that revision can still be the observation from before this
+  // drift, so wait until the ghost route is applied before publishing it away.
+  await waitFor(() => assert(snapshot().includes('/v1/ghost'), 'manual drift was not applied'));
   const corrected = await admin.publishDataPlaneRoutes();
   assert(corrected.revision === published.revision, 'republishing the catalog did not restore the derived state');
   await waitForReady(admin, published.revision);
-  assert(!snapshot().includes('ghost'), 'ghost route survived catalog publication');
+  await waitFor(() => assert(!snapshot().includes('/v1/ghost'), 'ghost route survived catalog publication'));
 
   // Anthropic catalog models publish into a self-contained EnvoyFilter
   // passthrough under a per-model path prefix — no ai-proxy involvement.
