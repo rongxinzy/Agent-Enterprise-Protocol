@@ -117,12 +117,19 @@ func MetricQuery(tenant string, values url.Values) (url.Values, error) {
 		if metric == "first_token_duration" {
 			duration, count = "llm_first_token_duration", "llm_stream_duration_count"
 		}
-		query = aggregate("irate("+prefix+duration+selector+"[2m])") + " / " + aggregate("irate("+prefix+count+selector+"[2m])")
+		lookback := strconv.Itoa(durationWindow(step)) + "s"
+		query = aggregate("rate("+prefix+duration+selector+"["+lookback+"])") + " / " + aggregate("rate("+prefix+count+selector+"["+lookback+"])")
 	}
 	if query == "" {
 		return nil, ErrDimension
 	}
 	return url.Values{"query": {query}, "start": {start.Format(time.RFC3339Nano)}, "end": {end.Format(time.RFC3339Nano)}, "step": {strconv.Itoa(step)}}, nil
+}
+
+// Use the full lookback for sparse completions, rather than only the last two
+// scrapes. Keep the established two-minute minimum for short sampling steps.
+func durationWindow(step int) int {
+	return max(step, 120)
 }
 
 func LogQuery(tenant, requestID string, values url.Values) (url.Values, error) {

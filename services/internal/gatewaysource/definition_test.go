@@ -14,7 +14,7 @@ func TestMetricDefinitionsFollowNativeQuerySemantics(t *testing.T) {
 		{"loki", "calls", "gateway_access_requests", "count_over_time", "requests", 300},
 		{"prometheus", "failures", "ai_detected_failures", "llm_failure_count", "requests", 300},
 		{"loki", "failures", "gateway_http_errors", "status >= 400", "requests", 300},
-		{"prometheus", "service_duration", "ai_usage_mean_service_duration", "[2m]", "milliseconds", 120},
+		{"prometheus", "service_duration", "ai_usage_mean_service_duration", "rate(", "milliseconds", 300},
 		{"loki", "service_duration", "gateway_log_mean_service_duration", "[300s]", "milliseconds", 300},
 		{"prometheus", "downstream_success_rate", "envoy_downstream_non_5xx_ratio", `response_code_class="5xx"`, "ratio", 120},
 		{"prometheus", "auth_requests", "authorizer_http_requests", "sum by (status)", "requests", 300},
