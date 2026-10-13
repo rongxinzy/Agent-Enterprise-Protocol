@@ -37,6 +37,48 @@ class WorkflowBoundaryTests(unittest.TestCase):
                     data[True]["workflow_run"].update(types=["requested", "in_progress", "completed"]))
         self.assertNotEqual(self.check().returncode, 0)
 
+    def parent_path(self):
+        config = json.loads((self.root / "devops-ci.json").read_text(encoding="utf-8"))
+        return config["orchestrator"]["path"].removeprefix(".github/")
+
+    def test_missing_final_dependency_is_rejected(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["ci-results"]["needs"].remove("codeql"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_failure_skipping_final_gate_is_rejected(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["ci-results"].update({"if": "success()"}))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_reusable_security_check_cannot_be_disabled(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["codeql"].update({"if": "false"}))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_direct_pr_trigger_cannot_duplicate_reusable_checks(self):
+        self.mutate("workflows/codeql.yml", lambda data:
+                    data[True].update(pull_request=None))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_final_pr_summary_cannot_gain_write_permissions(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["ci-results"]["permissions"].update(checks="write"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_extra_initial_gate_runner_is_rejected(self):
+        self.mutate("workflows/devops-gate.yml", lambda data:
+                    data[True]["pull_request_target"].update(types=["opened", "edited", "synchronize"]))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_single_entry_preserves_original_local_checks(self):
+        config = json.loads((self.root / "devops-ci.json").read_text(encoding="utf-8"))
+        parent = yaml.safe_load((self.root.parent / config["orchestrator"]["path"]).read_text(encoding="utf-8"))
+        self.assertEqual(len(config["workflows"]), 1)
+        self.assertEqual(parent["concurrency"]["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}")
+        for name in config["orchestrator"]["localNeeds"]:
+            self.assertIn(name, parent["jobs"])
+
     def test_privileged_pr_checkout_is_rejected(self):
         self.mutate("workflows/devops-gate.yml", lambda data:
                     data["jobs"]["refresh-gate"]["steps"][0]["with"].update(ref="${{ github.event.pull_request.head.sha }}"))
@@ -90,7 +132,7 @@ class WorkflowBoundaryTests(unittest.TestCase):
     def test_duplicate_names_are_rejected(self):
         path = self.root / "devops-ci.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        data["workflows"][1]["name"] = data["workflows"][0]["name"]
+        data["workflows"].append({**data["workflows"][0], "path": ".github/workflows/duplicate.yml"})
         path.write_text(json.dumps(data), encoding="utf-8")
         self.assertNotEqual(self.check().returncode, 0)
 
