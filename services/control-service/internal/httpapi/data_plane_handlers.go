@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -124,10 +125,43 @@ func (s *Server) putDataPlaneDesiredState(response http.ResponseWriter, request 
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATE", "The desired data-plane state is invalid.")
 		return
 	}
-	hash := dataPlaneHash(normalized)
 	tenant := claimsFrom(request).DeploymentID
+	// The desired state is a projection of the model catalog, and the raw write
+	// must not be a way around that: with a free-form route an operator could
+	// name any Secret in the gateway namespace and point its value at an
+	// arbitrary upstream. Every route is checked against the catalog-derived
+	// route for the same model, so endpoint and credential always come from the
+	// catalog and its credential binding.
+	models, err := s.app.Store.Deployment(tenant).ListModels(request.Context())
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	derived := make(map[string]dataPlaneRoute)
+	for _, route := range deriveDataPlaneRoutes(models) {
+		derived[route.ModelID] = route
+	}
+	for _, route := range normalized.Routes {
+		expected, known := derived[route.ModelID]
+		if !known {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATE", fmt.Sprintf("The route for model %q is not a publishable gateway model in this catalog.", route.ModelID))
+			return
+		}
+		// The deprecated manual escape hatch may decide how a route renders
+		// (provider type, upstream model, protocol, enabled), but never where a
+		// credential is read from or where its value is sent.
+		if route.Endpoint != expected.Endpoint {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATE", fmt.Sprintf("The route for model %q must use the catalog endpoint %q.", route.ModelID, expected.Endpoint))
+			return
+		}
+		if credentialRefNameKey(route.CredentialRef) != credentialRefNameKey(expected.CredentialRef) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_PLANE_STATE", fmt.Sprintf("The route for model %q must use the credential Secret bound in the catalog (%s).", route.ModelID, expected.CredentialRef.Name))
+			return
+		}
+	}
+	hash := dataPlaneHash(normalized)
 	var publishedAt time.Time
-	err := s.app.Database().QueryRow(request.Context(), `INSERT INTO data_plane_desired_states (deployment_id,revision,routes,content_hash)
+	err = s.app.Database().QueryRow(request.Context(), `INSERT INTO data_plane_desired_states (deployment_id,revision,routes,content_hash)
 VALUES ($1,$2,$3::jsonb,$4)
 ON CONFLICT (deployment_id) DO UPDATE SET revision=EXCLUDED.revision,routes=EXCLUDED.routes,content_hash=EXCLUDED.content_hash,published_at=now(),updated_at=now()
 RETURNING published_at`, tenant, normalized.Revision, normalized.Routes, hash).Scan(&publishedAt)

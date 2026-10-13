@@ -13,11 +13,21 @@ import (
 )
 
 func TestAdminDataPlaneDesiredStateLifecycle(t *testing.T) {
-	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	application, storeMock, adminToken := newStoreBackedHTTPApplication(t)
+	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
 	publishedAt := time.Date(2026, 9, 11, 8, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 
-	payload := `{"revision":"rev-2","routes":[{"modelId":"z-model","enabled":true,"endpoint":"http://gateway/v1","upstreamModel":"z-upstream","protocol":"openai-compatible","providerType":"deepseek","credentialRef":{"name":"provider-secret","key":"api-key"}},{"modelId":"a-model","enabled":false,"endpoint":"http://gateway/v1","upstreamModel":"a-upstream","protocol":"openai-compatible"}]}`
+	// The desired state is a projection of the catalog: the payload below is the
+	// catalog-derived shape (endpoint, provider type and the conventional
+	// credential Secret name), because anything else is refused.
+	catalogModelsQuery(storeMock, sqlmock.NewRows(modelHTTPColumns()).
+		AddRow("deployment-a", "z-model", "Z", "gateway", "openai-compatible", "http://gateway/v1", "z-upstream", nil, "credential-z", `{text}`, nil, nil, false, true, "unknown", nil, nil, nil, now, now).
+		AddRow("deployment-a", "a-model", "A", "gateway", "openai-compatible", "http://gateway/v1", "a-upstream", nil, nil, `{text}`, nil, nil, false, false, "unknown", nil, nil, nil, now, now))
+	payload := `{"revision":"rev-2","routes":[` +
+		`{"modelId":"z-model","enabled":true,"endpoint":"http://gateway/v1","upstreamModel":"z-upstream","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-credential-z","key":"api-key","namespace":"higress-system"}},` +
+		`{"modelId":"a-model","enabled":false,"endpoint":"http://gateway/v1","upstreamModel":"a-upstream","protocol":"openai-compatible","providerType":"openai"}]}`
 	pool.ExpectQuery(`INSERT INTO data_plane_desired_states`).
 		WithArgs("deployment-a", "rev-2", pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows([]string{"published_at"}).AddRow(publishedAt))
@@ -34,6 +44,66 @@ func TestAdminDataPlaneDesiredStateLifecycle(t *testing.T) {
 	failedRead := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/data-plane/desired-state", "")
 	if failedRead.Code != http.StatusInternalServerError || !strings.Contains(failedRead.Body.String(), `"code":"INTERNAL_ERROR"`) {
 		t.Fatalf("desired state database error = %d %s", failedRead.Code, failedRead.Body.String())
+	}
+}
+
+// A raw desired-state write must not become a way around the catalog: with a
+// free-form route an operator could name any Secret in the gateway namespace and
+// point its value at an arbitrary upstream.
+func TestAdminDataPlaneDesiredStateRejectsCatalogMismatch(t *testing.T) {
+	derivedRoute := `{"modelId":"chat-a","enabled":true,"endpoint":"http://provider-a/v1","upstreamModel":"provider-a-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-credential-a","key":"api-key","namespace":"higress-system"}}`
+	for _, test := range []struct {
+		name       string
+		route      string
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "catalog-derived route is accepted", route: derivedRoute, wantStatus: http.StatusOK},
+		{
+			name:       "endpoint pointing away from the catalog is refused",
+			route:      strings.Replace(derivedRoute, "http://provider-a/v1", "http://attacker.example/v1", 1),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "INVALID_DATA_PLANE_STATE",
+		},
+		{
+			name:       "an arbitrary Secret name is refused",
+			route:      strings.Replace(derivedRoute, "aep-credential-credential-a", "provider-secret", 1),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "INVALID_DATA_PLANE_STATE",
+		},
+		{
+			name:       "rendering fields may still be overridden by the escape hatch",
+			route:      strings.Replace(derivedRoute, `"providerType":"openai"`, `"providerType":"deepseek"`, 1),
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "a model that is not a publishable gateway model is refused",
+			route:      `{"modelId":"local-a","enabled":true,"endpoint":"http://provider-a/v1","upstreamModel":"provider-a-chat","protocol":"openai-compatible","providerType":"openai"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "INVALID_DATA_PLANE_STATE",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			application, storeMock, adminToken := newStoreBackedHTTPApplication(t)
+			pool := attachRuntimeDatabase(t, application)
+			now := time.Now().UTC()
+			catalogModelsQuery(storeMock, catalogModelRows(now))
+			if test.wantStatus == http.StatusOK {
+				pool.ExpectQuery(`INSERT INTO data_plane_desired_states`).
+					WithArgs("deployment-a", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+					WillReturnRows(pgxmock.NewRows([]string{"published_at"}).AddRow(now))
+				pool.ExpectExec(`INSERT INTO data_plane_statuses`).
+					WithArgs("deployment-a", 1).
+					WillReturnResult(pgxmock.NewResult("INSERT", 1))
+			}
+			response := adminRequest(New(application).Handler(), adminToken, http.MethodPut, "/aep/v1/admin/data-plane/desired-state", `{"revision":"rev-3","routes":[`+test.route+`]}`)
+			if response.Code != test.wantStatus {
+				t.Fatalf("raw desired-state write = %d %s", response.Code, response.Body.String())
+			}
+			if test.wantCode != "" && !strings.Contains(response.Body.String(), `"code":"`+test.wantCode+`"`) {
+				t.Fatalf("raw desired-state write = %s", response.Body.String())
+			}
+		})
 	}
 }
 
