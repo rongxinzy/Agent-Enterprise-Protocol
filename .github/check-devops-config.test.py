@@ -32,6 +32,11 @@ class WorkflowBoundaryTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_early_lifecycle_refresh_storm_is_rejected(self):
+        self.mutate("workflows/devops-gate.yml", lambda data:
+                    data[True]["workflow_run"].update(types=["requested", "in_progress", "completed"]))
+        self.assertNotEqual(self.check().returncode, 0)
+
     def test_privileged_pr_checkout_is_rejected(self):
         self.mutate("workflows/devops-gate.yml", lambda data:
                     data["jobs"]["refresh-gate"]["steps"][0]["with"].update(ref="${{ github.event.pull_request.head.sha }}"))
