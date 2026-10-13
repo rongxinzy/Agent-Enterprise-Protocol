@@ -4,8 +4,8 @@ on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, ready_for_review]
   workflow_run:
-    workflows: [CodeQL, AEP, AEP security baseline, DevOps gate tests]
-    types: [requested, in_progress, completed]
+    workflows: [CodeQL, AEP, AEP security baseline, DevOps gate tests, CI validation]
+    types: [completed]
   workflow_dispatch:
     inputs:
       pull_request:
