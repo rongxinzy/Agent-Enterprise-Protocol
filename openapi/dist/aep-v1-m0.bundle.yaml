@@ -977,6 +977,33 @@ paths:
                 $ref: '#/components/schemas/SkillVersion'
         '400':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/skills/{skillId}/installations:
+    get:
+      tags:
+        - Admin Skills
+      operationId: listSkillInstallations
+      description: |
+        Reported installation state for the users one Skill is granted to: the
+        newest sync report per user decides, and only retained reports are
+        visible (telemetry retention window). A withdrawn Skill distributes to
+        nobody, so its grant set is empty, matching the manifest. Per-item
+        statuses are passed through as reported: the vocabularies differ across
+        contract, writer and Agent, and an Agent that fails to install writes no
+        report at all, so no failure verdict is derived here.
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Reported installation state, grouped by user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillInstallationPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skill-assignments:
     get:
       tags:
@@ -2755,6 +2782,81 @@ components:
           enum:
             - active
             - withdrawn
+    SkillInstallation:
+      type: object
+      required:
+        - userId
+        - state
+      properties:
+        userId:
+          type: string
+        state:
+          type: string
+          enum:
+            - missing
+            - unreported
+        revision:
+          type: string
+          description: Present when the user has a retained report; the revision that report carried.
+        reportedAt:
+          type: string
+          format: date-time
+          description: Present when the user has a retained report.
+        itemStatus:
+          type: string
+          description: Raw per-item status for this Skill in that report, passed through as reported.
+    SkillInstallationPage:
+      type: object
+      required:
+        - skillId
+        - summary
+        - items
+        - truncated
+      properties:
+        skillId:
+          type: string
+        summary:
+          type: object
+          required:
+            - granted
+            - reported
+            - installed
+            - missing
+            - unreported
+            - latestReportedAt
+          properties:
+            granted:
+              type: integer
+              minimum: 0
+              description: Users the Skill is granted to, ignoring expired grants and a withdrawn Skill.
+            reported:
+              type: integer
+              minimum: 0
+              description: Granted users with at least one retained report.
+            installed:
+              type: integer
+              minimum: 0
+            missing:
+              type: integer
+              minimum: 0
+              description: Reported, but the report does not list the Skill as installed.
+            unreported:
+              type: integer
+              minimum: 0
+              description: Granted users with no retained report.
+            latestReportedAt:
+              type:
+                - string
+                - 'null'
+              format: date-time
+        items:
+          type: array
+          description: Granted users whose report does not show the Skill installed; `missing` before `unreported`.
+          items:
+            $ref: '#/components/schemas/SkillInstallation'
+        truncated:
+          type: boolean
+          description: More users need attention than the limit returned.
     Subject:
       type: object
       required:

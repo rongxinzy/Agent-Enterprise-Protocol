@@ -802,6 +802,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/skills/{skillId}/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description Reported installation state for the users one Skill is granted to: the
+         *     newest sync report per user decides, and only retained reports are
+         *     visible (telemetry retention window). A withdrawn Skill distributes to
+         *     nobody, so its grant set is empty, matching the manifest. Per-item
+         *     statuses are passed through as reported: the vocabularies differ across
+         *     contract, writer and Agent, and an Agent that fails to install writes no
+         *     report at all, so no failure verdict is derived here.
+         */
+        get: operations["listSkillInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skill-assignments": {
         parameters: {
             query?: never;
@@ -2503,6 +2528,40 @@ export interface components {
             description?: string;
             /** @enum {string} */
             state?: "active" | "withdrawn";
+        };
+        SkillInstallation: {
+            userId: string;
+            /** @enum {string} */
+            state: "missing" | "unreported";
+            /** @description Present when the user has a retained report; the revision that report carried. */
+            revision?: string;
+            /**
+             * Format: date-time
+             * @description Present when the user has a retained report.
+             */
+            reportedAt?: string;
+            /** @description Raw per-item status for this Skill in that report, passed through as reported. */
+            itemStatus?: string;
+        };
+        SkillInstallationPage: {
+            skillId: string;
+            summary: {
+                /** @description Users the Skill is granted to, ignoring expired grants and a withdrawn Skill. */
+                granted: number;
+                /** @description Granted users with at least one retained report. */
+                reported: number;
+                installed: number;
+                /** @description Reported, but the report does not list the Skill as installed. */
+                missing: number;
+                /** @description Granted users with no retained report. */
+                unreported: number;
+                /** Format: date-time */
+                latestReportedAt: string | null;
+            };
+            /** @description Granted users whose report does not show the Skill installed; `missing` before `unreported`. */
+            items: components["schemas"]["SkillInstallation"][];
+            /** @description More users need attention than the limit returned. */
+            truncated: boolean;
         };
         Subject: {
             /** @enum {string} */
@@ -4785,6 +4844,32 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Problem-2"];
+        };
+    };
+    listSkillInstallations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path: {
+                skillId: components["parameters"]["SkillId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reported installation state, grouped by user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInstallationPage"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
         };
     };
     listSkillAssignments: {
