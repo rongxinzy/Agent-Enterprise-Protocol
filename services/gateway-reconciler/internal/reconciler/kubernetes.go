@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,13 +34,21 @@ type KubernetesConfig struct {
 	TokenFile  string
 	CAFile     string
 	HTTPClient *http.Client
+	// StateDir remembers resources this applier kept, so a later desired
+	// state can delete routes that disappeared instead of only routes it
+	// still lists as disabled. Empty keeps that memory in process only.
+	StateDir string
 }
 
 type KubernetesApplier struct {
 	baseURL   string
 	token     string
 	tokenFile string
+	stateDir  string
 	client    *http.Client
+
+	mu      sync.Mutex
+	applied map[string][]string
 }
 
 // bearerToken returns the current credential, re-reading the token file when
@@ -83,7 +93,7 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 		}
 		client = &http.Client{Timeout: 10 * time.Second, Transport: transport}
 	}
-	return &KubernetesApplier{baseURL: baseURL, token: config.Token, tokenFile: config.TokenFile, client: client}, nil
+	return &KubernetesApplier{baseURL: baseURL, token: config.Token, tokenFile: config.TokenFile, stateDir: config.StateDir, client: client, applied: map[string][]string{}}, nil
 }
 
 // Apply server-side-applies every rendered resource and first deletes what
@@ -100,6 +110,10 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 		if strings.TrimSpace(resource.APIPath) == "" || strings.TrimSpace(resource.Body) == "" {
 			return fmt.Errorf("rendered %s resource has an empty API path or body", resource.Kind)
 		}
+	}
+	kept := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		kept[resource.APIPath] = struct{}{}
 	}
 	deletions := make([]string, 0, 4)
 	for _, route := range desired.Routes {
@@ -120,6 +134,9 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 			deletions = append(deletions, envoyFilterAPIPath(name))
 		}
 	}
+	for _, path := range deletions {
+		delete(kept, path)
+	}
 	sort.Strings(deletions)
 	for _, path := range deletions {
 		if err := a.delete(ctx, path); err != nil {
@@ -131,7 +148,81 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	}
 	// Remove the legacy shared ingress only after replacement routes/plugins
 	// have been applied. It otherwise remains an unscoped fallback route.
-	return a.delete(ctx, openAIIngressAPIPath(resourceSuffix(desired.TenantID())))
+	if err := a.delete(ctx, openAIIngressAPIPath(resourceSuffix(desired.TenantID()))); err != nil {
+		return err
+	}
+	// Routes that left the desired state are not in the deletion list above.
+	// A manual route replaced by a catalog republish would otherwise stay on
+	// the gateway after the control plane reports the old revision ready.
+	return a.pruneAbsent(ctx, desired.TenantID(), kept)
+}
+
+func (a *KubernetesApplier) pruneAbsent(ctx context.Context, tenant string, kept map[string]struct{}) error {
+	for _, path := range a.loadApplied(tenant) {
+		if _, ok := kept[path]; ok {
+			continue
+		}
+		if err := a.delete(ctx, path); err != nil {
+			return err
+		}
+	}
+	paths := make([]string, 0, len(kept))
+	for path := range kept {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return a.storeApplied(tenant, paths)
+}
+
+func (a *KubernetesApplier) loadApplied(tenant string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if paths, ok := a.applied[tenant]; ok {
+		return append([]string(nil), paths...)
+	}
+	if a.stateDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(a.pathsFile(tenant))
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	if json.Unmarshal(data, &paths) != nil {
+		return nil
+	}
+	a.applied[tenant] = append([]string(nil), paths...)
+	return append([]string(nil), paths...)
+}
+
+func (a *KubernetesApplier) storeApplied(tenant string, paths []string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applied[tenant] = append([]string(nil), paths...)
+	if a.stateDir == "" {
+		return nil
+	}
+	data, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(a.pathsFile(tenant), data)
+}
+
+func (a *KubernetesApplier) pathsFile(tenant string) string {
+	var name strings.Builder
+	for _, r := range tenant {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			name.WriteRune(r)
+		default:
+			name.WriteByte('_')
+		}
+	}
+	if name.Len() == 0 {
+		name.WriteString("tenant")
+	}
+	return filepath.Join(a.stateDir, name.String()+".applied-paths.json")
 }
 
 func hasResourcePath(resources []RenderedResource, path string) bool {
