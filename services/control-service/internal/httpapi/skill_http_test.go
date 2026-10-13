@@ -341,6 +341,8 @@ func TestAdminSkillAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("list Skill assignments = %d %s", listed.Code, listed.Body.String())
 	}
 
+	// The existence probe runs before the create transaction opens.
+	expectSubjectExists(pool, "engineering")
 	pool.ExpectBegin()
 	pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "team", "engineering", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	expectSkillAssignmentEvent(pool)
@@ -362,6 +364,8 @@ func TestAdminSkillAssignmentLifecycle(t *testing.T) {
 		t.Fatalf("delete Skill assignment = %d %s", deleted.Code, deleted.Body.String())
 	}
 
+	// A subject that exists but is already granted still probes first.
+	expectSubjectExists(pool, "engineering")
 	pool.ExpectBegin()
 	pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(
 		pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),

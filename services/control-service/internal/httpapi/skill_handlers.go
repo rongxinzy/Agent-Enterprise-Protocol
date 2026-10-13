@@ -540,8 +540,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !requireSkillIdentifier(response, request, input.SkillID) {
 		return
 	}
-	if input.Subject.Type != "user" && input.Subject.Type != "role" && input.Subject.Type != "team" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
 		return
 	}
 	id := uuid.NewString()

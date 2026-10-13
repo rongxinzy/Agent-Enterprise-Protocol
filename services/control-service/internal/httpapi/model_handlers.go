@@ -497,6 +497,9 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The model and a valid assignment subject are required.")
 		return
 	}
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
+		return
+	}
 	tenant := claimsFrom(request).DeploymentID
 	exists, err := s.app.Store.Deployment(tenant).HasModel(request.Context(), input.ModelID)
 	if err != nil {

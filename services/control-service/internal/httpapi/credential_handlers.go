@@ -452,6 +452,9 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The credential and a valid assignment subject are required.")
 		return
 	}
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
+		return
+	}
 	tenant := claimsFrom(request).DeploymentID
 	exists, err := s.app.Store.Deployment(tenant).HasCredential(request.Context(), input.CredentialID)
 	if err != nil {

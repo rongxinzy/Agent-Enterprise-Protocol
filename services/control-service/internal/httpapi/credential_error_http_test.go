@@ -320,6 +320,8 @@ func TestAdminCredentialAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("lookup", func(t *testing.T) {
 		application, mock, token := newStoreBackedHTTPApplication(t)
+		pool := attachRuntimeDatabase(t, application)
+		expectSubjectExists(pool, "user-a")
 		mock.ExpectQuery(`SELECT count\(\*\) FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).WithArgs("deployment-a", "credential-a").
 			WillReturnError(errors.New("lookup unavailable"))
 		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/credential-assignments", `{"credentialId":"credential-a","subject":{"type":"user","id":"user-a"}}`)
@@ -328,6 +330,8 @@ func TestAdminCredentialAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("missing credential", func(t *testing.T) {
 		application, mock, token := newStoreBackedHTTPApplication(t)
+		pool := attachRuntimeDatabase(t, application)
+		expectSubjectExists(pool, "user-a")
 		mock.ExpectQuery(`SELECT count\(\*\) FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).WithArgs("deployment-a", "credential-a").
 			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/credential-assignments", `{"credentialId":"credential-a","subject":{"type":"user","id":"user-a"}}`)
@@ -345,6 +349,8 @@ func TestAdminCredentialAssignmentFailureBoundaries(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			application, mock, token := newStoreBackedHTTPApplication(t)
+			pool := attachRuntimeDatabase(t, application)
+			expectSubjectExists(pool, "user-a")
 			mock.ExpectQuery(`SELECT count\(\*\) FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).WithArgs("deployment-a", "credential-a").
 				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 			mock.ExpectBegin()
