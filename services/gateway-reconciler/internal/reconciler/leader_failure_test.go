@@ -28,7 +28,9 @@ func TestLeaseReadFailureNeverGrantsLeadership(t *testing.T) {
 			return true, nil, inject()
 		})
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		elector.Run(ctx)
+		if err := elector.Run(ctx); err != nil {
+			t.Fatalf("Run() = %v", err)
+		}
 		cancel()
 		if elector.IsLeader() {
 			t.Fatal("a failed lease read granted leadership")
@@ -52,7 +54,9 @@ func TestLeaseCreateRejectionNeverGrantsLeadership(t *testing.T) {
 			return true, nil, inject()
 		})
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		elector.Run(ctx)
+		if err := elector.Run(ctx); err != nil {
+			t.Fatalf("Run() = %v", err)
+		}
 		cancel()
 		if elector.IsLeader() {
 			t.Fatal("a rejected lease create granted leadership")
@@ -70,7 +74,9 @@ func TestRunKeepsFollowerIdleAcrossSuccessfulReads(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	elector.Run(ctx)
+	if err := elector.Run(ctx); err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
 	if elector.IsLeader() {
 		t.Fatal("successful follower read granted leadership")
 	}
@@ -89,7 +95,9 @@ func TestReleaseNeverClearsAnotherOwner(t *testing.T) {
 	})
 	// The elector never led, so a cancel must not touch the lease at all.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	elector.Run(ctx)
+	if err := elector.Run(ctx); err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
 	cancel()
 	lease, err := client.CoordinationV1().Leases("aep-system").Get(context.Background(), "gateway-reconciler", metav1.GetOptions{})
 	if err != nil {

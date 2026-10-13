@@ -55,8 +55,8 @@ func TestLeaderElectionAcquire(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { elector.Run(ctx); close(done) }()
+	done := make(chan error, 1)
+	go func() { done <- elector.Run(ctx) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for !elector.IsLeader() {
 		if time.Now().After(deadline) {
@@ -73,7 +73,9 @@ func TestLeaderElectionAcquire(t *testing.T) {
 		t.Fatal("acquired lease carries no acquireTime")
 	}
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
 }
 
 func TestLeaderElectionFollowerRespectsValidLease(t *testing.T) {
@@ -87,7 +89,9 @@ func TestLeaderElectionFollowerRespectsValidLease(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
-	elector.Run(ctx)
+	if err := elector.Run(ctx); err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
 	if elector.IsLeader() {
 		t.Fatal("another instance's fresh lease must not be taken over")
 	}
@@ -110,8 +114,8 @@ func TestLeaderElectionTakesOverExpiredLease(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { elector.Run(ctx); close(done) }()
+	done := make(chan error, 1)
+	go func() { done <- elector.Run(ctx) }()
 	deadline := time.Now().Add(4 * time.Second)
 	for !elector.IsLeader() {
 		if time.Now().After(deadline) {
@@ -125,29 +129,28 @@ func TestLeaderElectionTakesOverExpiredLease(t *testing.T) {
 		t.Fatalf("after takeover holder = %v", lease.Spec.HolderIdentity)
 	}
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
 }
 
 func TestLeaderElectionRenewFailureDropsLeadership(t *testing.T) {
 	elector, client := newFakeElector("instance-a")
 	// Reactors must be registered before Run starts — mutating the chain
 	// mid-flight races with in-flight calls. The conflict gate opens only once
-	// this instance leads, and the budget lets the release update land after
-	// the renew deadline drops leadership (client-go retries a conflicting
-	// release until it lands).
+	// this instance leads. Sustained conflicts are safe here: the lost-lease
+	// path never releases, so there is no release retry to deadlock.
 	var conflicting atomic.Bool
-	var conflicts atomic.Int32
 	client.PrependReactor("update", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
-		if !conflicting.Load() || conflicts.Load() >= 6 {
+		if !conflicting.Load() {
 			return false, nil, nil
 		}
-		conflicts.Add(1)
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, "gateway-reconciler", errors.New("conflict"))
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	done := make(chan struct{})
-	go func() { elector.Run(ctx); close(done) }()
+	done := make(chan error, 1)
+	go func() { done <- elector.Run(ctx) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for !elector.IsLeader() {
 		if time.Now().After(deadline) {
@@ -157,22 +160,24 @@ func TestLeaderElectionRenewFailureDropsLeadership(t *testing.T) {
 	}
 
 	conflicting.Store(true)
-	lost := time.Now().Add(2 * time.Second)
-	for elector.IsLeader() {
-		if time.Now().After(lost) {
-			t.Fatal("a sustained renew conflict must drop leadership")
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("losing the lease must end the election with an error")
 		}
-		time.Sleep(5 * time.Millisecond)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a sustained renew conflict must end the election")
 	}
-	<-done
-	cancel()
+	if elector.IsLeader() {
+		t.Fatal("a sustained renew conflict must drop leadership")
+	}
 }
 
 func TestLeaderElectionRunAcquiresAndReleases(t *testing.T) {
 	elector, client := newFakeElector("instance-run")
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { elector.Run(ctx); close(done) }()
+	done := make(chan error, 1)
+	go func() { done <- elector.Run(ctx) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -190,7 +195,10 @@ func TestLeaderElectionRunAcquiresAndReleases(t *testing.T) {
 
 	cancel()
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() = %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not stop after cancel")
 	}
@@ -200,5 +208,120 @@ func TestLeaderElectionRunAcquiresAndReleases(t *testing.T) {
 	lease := currentLease(t, client)
 	if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != "" {
 		t.Fatalf("release must clear the holder, got %q", *lease.Spec.HolderIdentity)
+	}
+}
+
+// TestLeadershipLossEndsElectionRun pins the P1 regression from the
+// adversarial cloud-native review of the client-go migration: client-go's
+// elector never re-enters an election after a lost lease, so the election run
+// must end with an error and the lease-scoped work context must be cancelled —
+// the process then exits for Kubernetes to restart it instead of idling as a
+// ready-but-passive replica forever.
+func TestLeadershipLossEndsElectionRun(t *testing.T) {
+	elector, client := newFakeElector("instance-a")
+	workCtxCh := make(chan context.Context, 1)
+	var workCancelled atomic.Bool
+	elector.StartWork = func(ctx context.Context) {
+		workCtxCh <- ctx
+		go func() {
+			<-ctx.Done()
+			workCancelled.Store(true)
+		}()
+	}
+	var conflicting atomic.Bool
+	client.PrependReactor("update", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+		if !conflicting.Load() {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, "gateway-reconciler", errors.New("conflict"))
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- elector.Run(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for !elector.IsLeader() {
+		if time.Now().After(deadline) {
+			t.Fatal("Run never acquired leadership")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	var workCtx context.Context
+	select {
+	case workCtx = <-workCtxCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartWork did not receive the lease-scoped context")
+	}
+	if workCtx == nil {
+		t.Fatal("StartWork did not receive the lease-scoped context")
+	}
+
+	conflicting.Store(true)
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("losing the lease must end the election with an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the election run did not end after sustained renew conflicts")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("the election ended the caller's context; the process context must stay live")
+	}
+	if elector.IsLeader() {
+		t.Fatal("leadership flag still set after the election ended")
+	}
+	if !workCancelled.Load() {
+		t.Fatal("lease-scoped work context was not cancelled when leadership stopped")
+	}
+}
+
+// TestFormerLeaderReleaseSkipsSuccessor pins the second P1 from the
+// adversarial review (adapted from pr271-cloudnative-review-test.go): an
+// instance that WAS leader gets taken over during its pause, and its release
+// on shutdown must not clear the successor's holderIdentity.
+func TestFormerLeaderReleaseSkipsSuccessor(t *testing.T) {
+	elector, client := newFakeElector("review-a")
+	ctx, cancel := context.WithCancel(context.Background())
+	// Mutate the remote lease to a successor after cancellation, so the
+	// release path reads a lease that changed hands during our pause.
+	client.PrependReactor("get", "leases", func(action coretesting.Action) (bool, runtime.Object, error) {
+		if ctx.Err() == nil {
+			return false, nil, nil
+		}
+		resource := action.GetResource()
+		obj, err := client.Tracker().Get(resource, "aep-system", "gateway-reconciler")
+		if err != nil {
+			return true, nil, errors.New("review lease missing")
+		}
+		lease := obj.(*coordinationv1.Lease).DeepCopy()
+		holder := "review-b"
+		lease.Spec.HolderIdentity = &holder
+		if err := client.Tracker().Update(resource, lease, "aep-system"); err != nil {
+			return true, nil, err
+		}
+		return true, lease, nil
+	})
+	done := make(chan error, 1)
+	go func() { done <- elector.Run(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for !elector.IsLeader() {
+		if time.Now().After(deadline) {
+			t.Fatal("Run never acquired leadership")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("clean shutdown Run = %v", err)
+	}
+	// Read the tracker directly to avoid the injection masking an overwrite.
+	obj, err := client.Tracker().Get(coordinationv1.SchemeGroupVersion.WithResource("leases"), "aep-system", "gateway-reconciler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := obj.(*coordinationv1.Lease)
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != "review-b" {
+		t.Fatalf("former leader cleared the successor's lease: %#v", lease.Spec.HolderIdentity)
 	}
 }

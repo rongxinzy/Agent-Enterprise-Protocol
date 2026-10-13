@@ -332,3 +332,50 @@ func TestKubernetesApplierPinsJSONWireFormat(t *testing.T) {
 		t.Fatalf("wire content type = %q", applier.config.ContentType)
 	}
 }
+
+func TestBearerTokenRunningInstanceSurvivesFileRotation(t *testing.T) {
+	t.Parallel()
+	// The review asked for a RUNNING instance crossing an in-place projected
+	// token rotation. client-go's cached file source re-reads at a one-minute
+	// cadence (kubelet-tuned), so the immediate successor request still carries
+	// the previous token — Kubernetes bound tokens stay valid across the
+	// overlap window, which is exactly why the cadence is safe. What must never
+	// happen is an empty credential or a wedged client after the swap.
+	var tokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		auth := request.Header.Get("Authorization")
+		if auth == "" || auth == "Bearer " {
+			t.Errorf("request carried an empty credential")
+		}
+		tokens = append(tokens, auth)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"provider","namespace":"higress-system"},"data":{"api-key":"eA=="}}`))
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("first-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, TokenFile: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+		t.Fatal(err)
+	}
+	// Rotate the projected token in place mid-flight; the running instance
+	// keeps serving with the cached token until the one-minute source refresh.
+	if err := os.WriteFile(path, []byte("rotated-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 3 || tokens[0] != "Bearer first-token" || tokens[1] != "Bearer first-token" || tokens[2] != "Bearer first-token" {
+		t.Fatalf("authorization headers across rotation = %v", tokens)
+	}
+}
