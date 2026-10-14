@@ -1,11 +1,7 @@
-package reconciler
+package gatewayrender
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -16,7 +12,7 @@ func anthropicRoute(modelID, endpoint string) Route {
 func TestRenderAnthropicPassthrough(t *testing.T) {
 	t.Parallel()
 	route := anthropicRoute("bench-anthropic", "https://open.bigmodel.cn/api/anthropic")
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{route}}
+	desired := Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{route}}
 	document, resources, digest, err := Render(desired, map[string]string{"aep-credential-bigmodel/api-key": "bigmodel-secret"})
 	if err != nil {
 		t.Fatal(err)
@@ -27,12 +23,12 @@ func TestRenderAnthropicPassthrough(t *testing.T) {
 	if resources[0].Kind != ResourceAnthropicIngress || resources[1].Kind != ResourceEnvoyFilter || resources[2].Kind != ResourceWasmPlugin || resources[3].Kind != ResourceAIStatistics {
 		t.Fatalf("resource order = %#v", resources)
 	}
-	if resources[0].APIPath != ingressAPIPath(anthropicResourceName("bench-anthropic")) || resources[1].APIPath != envoyFilterAPIPath(anthropicResourceName("bench-anthropic")) {
+	if resources[0].APIPath != IngressAPIPath(AnthropicResourceName("bench-anthropic")) || resources[1].APIPath != EnvoyFilterAPIPath(AnthropicResourceName("bench-anthropic")) {
 		t.Fatalf("anthropic API paths = %q %q", resources[0].APIPath, resources[1].APIPath)
 	}
 
 	ingress := resources[0].Body
-	if !strings.Contains(ingress, "name: 'aep-anthropic-"+resourceSuffix("bench-anthropic")+"'") || !strings.Contains(ingress, "path: '/bench-anthropic'") {
+	if !strings.Contains(ingress, "name: 'aep-anthropic-"+ResourceSuffix("bench-anthropic")+"'") || !strings.Contains(ingress, "path: '/bench-anthropic'") {
 		t.Fatalf("anthropic ingress = %s", ingress)
 	}
 
@@ -45,8 +41,8 @@ func TestRenderAnthropicPassthrough(t *testing.T) {
 		"address: 'open.bigmodel.cn'",
 		"port_value: 443",
 		"sni: 'open.bigmodel.cn'",
-		"route:\n              name: 'aep-anthropic-" + resourceSuffix("bench-anthropic") + "'",
-		"cluster: 'aep-anthropic-" + resourceSuffix("bench-anthropic") + "'",
+		"route:\n              name: 'aep-anthropic-" + ResourceSuffix("bench-anthropic") + "'",
+		"cluster: 'aep-anthropic-" + ResourceSuffix("bench-anthropic") + "'",
 		"host_rewrite_literal: 'open.bigmodel.cn'",
 		"regex: '^/bench-anthropic/(.*)$'",
 		"substitution: '/api/anthropic/\\1'",
@@ -79,7 +75,7 @@ func TestRenderAnthropicEndpointVariations(t *testing.T) {
 	t.Parallel()
 	// No endpoint path: strip the slug only. http scheme: no TLS block, port 80.
 	route := anthropicRoute("bench-anthropic", "http://internal-gateway.svc:8000")
-	_, resources, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{route}}, nil)
+	_, resources, _, err := Render(Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{route}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +94,7 @@ func TestRenderAnthropicEndpointVariations(t *testing.T) {
 
 	// Trailing slashes on the endpoint path normalize away.
 	route = anthropicRoute("bench-anthropic", "https://open.bigmodel.cn/api/anthropic/")
-	_, resources, _, err = Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{route}}, nil)
+	_, resources, _, err = Render(Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{route}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +107,7 @@ func TestRenderAnthropicMultipleModelsAndErrors(t *testing.T) {
 	t.Parallel()
 	first := anthropicRoute("alpha-anthropic", "https://open.bigmodel.cn/api/anthropic")
 	second := anthropicRoute("beta-anthropic", "https://api.anthropic.com")
-	_, resources, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{second, first}}, nil)
+	_, resources, _, err := Render(Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{second, first}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +124,7 @@ func TestRenderAnthropicMultipleModelsAndErrors(t *testing.T) {
 		"missing scheme": func() Route { r := first; r.Endpoint = "open.bigmodel.cn"; return r }(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{invalid}}, nil); err == nil {
+			if _, _, _, err := Render(Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{invalid}}, nil); err == nil {
 				t.Fatal("invalid anthropic route was accepted")
 			}
 		})
@@ -137,7 +133,7 @@ func TestRenderAnthropicMultipleModelsAndErrors(t *testing.T) {
 	// Two models whose sanitized slugs collide cannot share path prefixes.
 	collideA := anthropicRoute("Bench GLM", "https://open.bigmodel.cn/api/anthropic")
 	collideB := anthropicRoute("bench-glm", "https://api.anthropic.com")
-	if _, _, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{collideA, collideB}}, nil); err == nil {
+	if _, _, _, err := Render(Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{collideA, collideB}}, nil); err == nil {
 		t.Fatal("slug collision was accepted")
 	}
 }
@@ -145,7 +141,7 @@ func TestRenderAnthropicMultipleModelsAndErrors(t *testing.T) {
 func TestRenderMixedProtocolsKeepOpenAIShape(t *testing.T) {
 	t.Parallel()
 	openai := Route{ModelID: "chat", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible"}
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{openai, anthropicRoute("bench-anthropic", "https://open.bigmodel.cn/api/anthropic")}}
+	desired := Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{openai, anthropicRoute("bench-anthropic", "https://open.bigmodel.cn/api/anthropic")}}
 	document, resources, _, err := Render(desired, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -180,60 +176,8 @@ func TestAnthropicSlugAndRewriteHelpers(t *testing.T) {
 	if got := anthropicRewrite("/api/anthropic/"); got != "/api/anthropic/\\1" {
 		t.Fatalf("path rewrite = %q", got)
 	}
-	name := anthropicResourceName("bench-anthropic")
+	name := AnthropicResourceName("bench-anthropic")
 	if !strings.HasPrefix(name, "aep-anthropic-") || len(name) > 63 {
 		t.Fatalf("resource name = %q", name)
-	}
-}
-
-func TestKubernetesApplierDeletesAnthropicPairWhenRouteDisabled(t *testing.T) {
-	t.Parallel()
-	operations := make([]string, 0, 8)
-	var mutex sync.Mutex
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		mutex.Lock()
-		operations = append(operations, request.Method+" "+request.URL.Path)
-		mutex.Unlock()
-		response.Header().Set("Content-Type", "application/json")
-		response.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	disabled := anthropicRoute("bench-anthropic", "https://open.bigmodel.cn/api/anthropic")
-	disabled.Enabled = false
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-2", Routes: []Route{disabled}}
-	_, resources, _, err := Render(desired, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := applier.Apply(context.Background(), desired, resources); err != nil {
-		t.Fatal(err)
-	}
-	mutex.Lock()
-	defer mutex.Unlock()
-	name := anthropicResourceName("bench-anthropic")
-	seen := make(map[string]bool, len(operations))
-	for _, operation := range operations {
-		seen[operation] = true
-	}
-	// Disabled anthropic route: its Ingress+EnvoyFilter pair is deleted (plus
-	// the idle openai ingress per the no-enabled-openai rule); the WasmPlugin
-	// is still applied.
-	for _, path := range []string{
-		"DELETE " + ingressAPIPath(name),
-		"DELETE " + envoyFilterAPIPath(name),
-		"DELETE " + openAIIngressAPIPath(resourceSuffix("demo")),
-		"PATCH " + wasmPluginAPIPath(resourceSuffix("demo")),
-		"PATCH " + aiStatisticsAPIPath(resourceSuffix("demo")),
-	} {
-		if !seen[path] {
-			t.Fatalf("missing %q in %#v", path, operations)
-		}
-	}
-	if len(operations) != 5 {
-		t.Fatalf("operations = %#v", operations)
 	}
 }

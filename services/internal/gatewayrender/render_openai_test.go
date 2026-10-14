@@ -1,4 +1,4 @@
-package reconciler
+package gatewayrender
 
 import (
 	"reflect"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestOpenAIModelsSharingPathHaveIsolatedProviderConfigurations(t *testing.T) {
-	d := DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{
+	d := Input{Deployment: "demo", Revision: "rev", Routes: []Route{
 		{ModelID: "alpha", Enabled: true, Endpoint: "http://alpha.example/v1", UpstreamModel: "same-upstream", CredentialRef: &SecretReference{Name: "fixture", Key: "alpha"}},
 		{ModelID: "beta", Enabled: true, Endpoint: "http://beta.example/v1", UpstreamModel: "same-upstream", CredentialRef: &SecretReference{Name: "fixture", Key: "beta"}},
 	}}
@@ -50,7 +50,7 @@ func TestOpenAIModelsSharingPathHaveIsolatedProviderConfigurations(t *testing.T)
 		if err := yaml.Unmarshal([]byte(resources[2*i].Body), &ingress); err != nil {
 			t.Fatal(err)
 		}
-		name := openAIResourceName(d.TenantID(), route.ModelID)
+		name := OpenAIResourceName(d.Deployment, route.ModelID)
 		rule := plugin.Spec.MatchRules[i]
 		if ingress.Metadata.Name != name || ingress.Metadata.Annotations["higress.io/exact-match-header-x-aep-model-id"] != route.ModelID || !reflect.DeepEqual(rule.Ingress, []string{name}) {
 			t.Fatalf("model %s has an ambiguous route/plugin binding", route.ModelID)
@@ -59,7 +59,7 @@ func TestOpenAIModelsSharingPathHaveIsolatedProviderConfigurations(t *testing.T)
 		if p.OpenAICustomURL != route.Endpoint || !reflect.DeepEqual(p.ModelMapping, map[string]string{route.ModelID: route.UpstreamModel}) || !reflect.DeepEqual(p.APITokens, []string{"disposable-" + route.ModelID}) {
 			t.Fatalf("model %s lost its provider configuration", route.ModelID)
 		}
-		if len(name) > 63 || name == openAIResourceName("other", route.ModelID) {
+		if len(name) > 63 || name == OpenAIResourceName("other", route.ModelID) {
 			t.Fatal("unsafe resource ownership")
 		}
 		if !strings.Contains(resources[5].Body, name) {
@@ -77,7 +77,7 @@ func TestOpenAIModelsSharingPathHaveIsolatedProviderConfigurations(t *testing.T)
 	}
 	d.Routes[0].Enabled = false
 	_, active, _, err := Render(d, nil)
-	if err != nil || len(active) != 4 || strings.Contains(active[2].Body, openAIResourceName("demo", "alpha")) {
+	if err != nil || len(active) != 4 || strings.Contains(active[2].Body, OpenAIResourceName("demo", "alpha")) {
 		t.Fatal("disabled model still matches ai-proxy")
 	}
 }
@@ -93,7 +93,7 @@ func TestOpenAIUpstreamTransportAndClientPaths(t *testing.T) {
 		{"http://internal.example", "internal.example", "internal.example", "80", false},
 	} {
 		t.Run(test.endpoint, func(t *testing.T) {
-			d := DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: test.endpoint, UpstreamModel: "upstream"}}}
+			d := Input{Deployment: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: test.endpoint, UpstreamModel: "upstream"}}}
 			_, resources, _, err := Render(d, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -122,7 +122,7 @@ func TestOpenAIUpstreamTransportAndClientPaths(t *testing.T) {
 			}
 		})
 	}
-	_, relative, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "/v1"}}}, nil)
+	_, relative, _, err := Render(Input{Deployment: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "/v1"}}}, nil)
 	if err != nil || len(relative) != 3 || relative[1].Kind != ResourceWasmPlugin {
 		t.Fatal("relative backend compatibility lost")
 	}
@@ -130,18 +130,18 @@ func TestOpenAIUpstreamTransportAndClientPaths(t *testing.T) {
 
 func TestOpenAIRejectsUnsafeAbsoluteEndpoints(t *testing.T) {
 	for _, endpoint := range []string{"//api.example/v1", "ftp://api.example/v1", "api.example/v1", "https://user:password@api.example/v1", "https://api.example/v1?key=value", "https://api.example/v1#fragment", "https://api.example:0/v1", "https://api.example:65536/v1", "https://api.example:invalid/v1"} {
-		if _, _, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: endpoint}}}, nil); err == nil {
+		if _, _, _, err := Render(Input{Deployment: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: endpoint}}}, nil); err == nil {
 			t.Fatalf("accepted unsafe endpoint %s", endpoint)
 		}
 	}
-	_, _, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "ftp://user:disposable-password@api.example/v1"}}}, nil)
+	_, _, _, err := Render(Input{Deployment: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "ftp://user:disposable-password@api.example/v1"}}}, nil)
 	if err == nil || strings.Contains(err.Error(), "disposable-password") {
 		t.Fatal("endpoint validation leaked credentials")
 	}
 }
 
 func TestOpenAIHTTPSIPAddressValidatesIPSAN(t *testing.T) {
-	_, resources, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "https://192.0.2.1:8443/v1"}}}, nil)
+	_, resources, _, err := Render(Input{Deployment: "demo", Revision: "rev", Routes: []Route{{ModelID: "chat", Enabled: true, Endpoint: "https://192.0.2.1:8443/v1"}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,11 +163,11 @@ func TestNativePluginsFollowEveryOpenAIModelIngress(t *testing.T) {
 	}
 	for _, resource := range append(limits, quota[1]) {
 		for _, id := range []string{"a", "second"} {
-			if !strings.Contains(resource.Body, openAIResourceName(d.TenantID(), id)) {
+			if !strings.Contains(resource.Body, OpenAIResourceName(d.Deployment, id)) {
 				t.Fatal("native plugin lost a model ingress")
 			}
 		}
-		if strings.Contains(resource.Body, openAIResourceName(d.TenantID(), "disabled")) {
+		if strings.Contains(resource.Body, OpenAIResourceName(d.Deployment, "disabled")) {
 			t.Fatal("disabled route matched")
 		}
 	}

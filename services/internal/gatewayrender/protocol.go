@@ -1,4 +1,4 @@
-package reconciler
+package gatewayrender
 
 import (
 	"fmt"
@@ -6,22 +6,25 @@ import (
 	"strings"
 )
 
-// protocolStrategy encapsulates the protocol-specific knowledge about a
-// route: which data-plane bucket it renders into, how its endpoints
-// validate, and how its per-model resources are named. Render's
-// classification loop, the applier's deletion pass, and the quota/native
-// ingress collectors all consume this one abstraction, so protocol knowledge
-// lives in exactly one place per protocol instead of being re-derived at
-// each call site.
+// Strategy encapsulates the protocol-specific knowledge about a route: which
+// data-plane bucket it renders into, how its endpoints validate, and how its
+// per-model resources are named. Render's classification loop, the
+// reconciler applier's deletion pass, and the quota/native ingress collectors
+// all consume this one abstraction, so protocol knowledge lives in exactly
+// one place per protocol instead of being re-derived at each call site.
 //
 // One wire format, one strategy. OpenAI has shipped two generations of wire
 // API (Chat Completions and the newer Responses API): when the platform
 // models the newer one, it lands here as its own strategy — a new case in
-// strategyFor with its own type — never as format sniffing or a
+// StrategyFor with its own type — never as format sniffing or a
 // compatibility branch inside an existing strategy.
-type protocolStrategy interface {
-	// bucket reports which render bucket the route occupies.
-	bucket() renderBucket
+//
+// The interface is sealed: validateEndpoint is unexported, so only this
+// package implements Strategy. External consumers (the reconciler's applier)
+// dispatch on Bucket only.
+type Strategy interface {
+	// Bucket reports which render bucket the route occupies.
+	Bucket() Bucket
 	// validateEndpoint checks the route's endpoint for this protocol. It
 	// returns the parsed absolute endpoint when the route should own an
 	// EnvoyFilter cluster, or nil when the protocol's shape does not need
@@ -30,27 +33,27 @@ type protocolStrategy interface {
 	validateEndpoint(route Route) (*url.URL, error)
 }
 
-// renderBucket is the render pass's classification of a route.
-type renderBucket int
+// Bucket is the render pass's classification of a route.
+type Bucket int
 
 const (
-	// bucketAnthropic: per-model Ingress + EnvoyFilter pair with server-side
+	// BucketAnthropic: per-model Ingress + EnvoyFilter pair with server-side
 	// credential injection (x-api-key + authorization Bearer) and the
 	// slug-strip path rewrite.
-	bucketAnthropic renderBucket = iota
-	// bucketOpenAI: per-model Ingress plus a per-model ai-proxy matchRule
+	BucketAnthropic Bucket = iota
+	// BucketOpenAI: per-model Ingress plus a per-model ai-proxy matchRule
 	// bound to that ingress (isolated provider configuration and apiTokens —
 	// a shared matchRule list would resolve only the first entry). Routes
 	// with an absolute endpoint additionally own an EnvoyFilter routing
 	// their ingress to a dedicated upstream cluster.
-	bucketOpenAI
+	BucketOpenAI
 )
 
 // anthropicStrategy: the per-model passthrough under the aep-anthropic-
 // prefix. Deployed objects keep their identity across upgrades.
 type anthropicStrategy struct{}
 
-func (anthropicStrategy) bucket() renderBucket { return bucketAnthropic }
+func (anthropicStrategy) Bucket() Bucket { return BucketAnthropic }
 
 func (anthropicStrategy) validateEndpoint(route Route) (*url.URL, error) {
 	endpoint, err := parseAbsoluteEndpoint(route.Endpoint)
@@ -65,7 +68,7 @@ func (anthropicStrategy) validateEndpoint(route Route) (*url.URL, error) {
 // provider block).
 type openaiStrategy struct{}
 
-func (openaiStrategy) bucket() renderBucket { return bucketOpenAI }
+func (openaiStrategy) Bucket() Bucket { return BucketOpenAI }
 
 // validateEndpoint keeps #237's semantics: a relative endpoint retains the
 // deployment's preconfigured backend (no EnvoyFilter cluster — ai-proxy only
@@ -88,10 +91,10 @@ func (openaiStrategy) validateEndpoint(route Route) (*url.URL, error) {
 	return endpoint, nil
 }
 
-// strategyFor resolves a route's protocol strategy. openai-compatible routes
+// StrategyFor resolves a route's protocol strategy. openai-compatible routes
 // default to the openai provider when none is set; an anthropic route with a
 // provider type, or an unknown protocol, is rejected.
-func strategyFor(route Route) (protocolStrategy, error) {
+func StrategyFor(route Route) (Strategy, error) {
 	switch route.Protocol {
 	case "anthropic":
 		if route.ProviderType != "" {
