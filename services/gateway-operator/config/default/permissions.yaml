@@ -1,0 +1,96 @@
+# The generated ClusterRole is an inventory, not a cluster-wide grant.
+# Bind only namespace-scoped permissions. No grants to the control service.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-gateway-operator-config
+  namespace: aep-system
+rules:
+  - apiGroups: [gateway.aep.zhiyuan.io]
+    resources: [modelroutes, modelpolicies, deploymentconfigs]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [gateway.aep.zhiyuan.io]
+    resources: [modelroutes/status, modelpolicies/status, deploymentconfigs/status]
+    verbs: [get, patch, update]
+  - apiGroups: [gateway.aep.zhiyuan.io]
+    resources: [modelroutes/finalizers, deploymentconfigs/finalizers]
+    verbs: [update]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [gateway-operator.gateway.aep.zhiyuan.io]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-gateway-operator-config
+  namespace: aep-system
+subjects:
+  - kind: ServiceAccount
+    name: aep-gateway-operator
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-gateway-operator-config
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-gateway-operator-data
+  namespace: higress-system
+rules:
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [networking.istio.io]
+    resources: [envoyfilters]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [extensions.higress.io]
+    resources: [wasmplugins]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [aep-native-gateway]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-gateway-operator-data
+  namespace: higress-system
+subjects:
+  - kind: ServiceAccount
+    name: aep-gateway-operator
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-gateway-operator-data
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-gateway-operator-credentials
+  namespace: aep-credentials
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-gateway-operator-credentials
+  namespace: aep-credentials
+subjects:
+  - kind: ServiceAccount
+    name: aep-gateway-operator
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-gateway-operator-credentials
