@@ -22,7 +22,7 @@ func TestInternalGatewayIdentity(t *testing.T) {
 	r.Header.Set("X-AEP-Session-ID", "session-a")
 	r.Header.Set("X-AEP-Model-ID", "model-a")
 	pool.ExpectQuery(`SELECT DISTINCT m.id`).WithArgs("deployment-a", "user-a").WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("model-a"))
-	mock.ExpectQuery(`SELECT "b"."role_id" FROM user_role_bindings AS b JOIN roles AS r`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("role-a").AddRow("role-b"))
+	mock.ExpectQuery(`SELECT "b"."role_id" FROM user_effective_roles AS b JOIN roles AS r`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("role-a").AddRow("role-b"))
 	mock.ExpectQuery(`SELECT "b"."team_id" FROM user_team_bindings AS b JOIN teams AS t`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("team-a"))
 	w := httptest.NewRecorder()
 	New(a).Handler().ServeHTTP(w, r)

@@ -198,7 +198,7 @@ func TestDataScopeContextRoute(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "users"`).
 			WithArgs("deployment-a", "user-a", 1).
 			WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", nil, "hash", "active", false, false, "human", now, now))
-		mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+		mock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles"`).
 			WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
 		pool.ExpectQuery(`JOIN user_team_bindings`).
 			WithArgs("deployment-a", "user-a").WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))

@@ -860,3 +860,6 @@ Common codes are `INVALID_REQUEST`, `TOKEN_INVALID`, `ACCESS_DENIED`,
 Retry safe reads with exponential backoff. Event batches are idempotent by
 `eventId`. Do not blindly retry authorization-code exchange or credential
 resolution. Honor `Retry-After` on `429` and `503`.
+
+Team `defaultRoleIds` and effective role inheritance are documented in
+[Team default roles](team-default-roles.md).

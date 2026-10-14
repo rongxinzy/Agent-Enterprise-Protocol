@@ -788,3 +788,5 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 
 安全的读取请求采用指数退避重试。事件批次依据 `eventId` 幂等。授权码交换和凭证获取不得
 盲目重试。收到 `429` 或 `503` 时遵守 `Retry-After`。
+
+团队 `defaultRoleIds` 配置与有效角色继承规则见[团队默认角色](team-default-roles.zh-CN.md)。
