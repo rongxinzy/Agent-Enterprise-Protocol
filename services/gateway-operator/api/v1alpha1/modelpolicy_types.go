@@ -5,7 +5,7 @@ import (
 )
 
 // PolicyTargetReference selects the ModelRoute a ModelPolicy applies to. Only
-// ModelRoute targets exist at the pilot stage.
+// ModelRoute targets are currently supported.
 type PolicyTargetReference struct {
 	// Kind is the target resource kind; only ModelRoute is supported.
 	// +kubebuilder:validation:Enum=ModelRoute
@@ -74,8 +74,8 @@ type ModelPolicyStatus struct {
 	// reconciled.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Conditions report the reconciliation state; the pilot stage writes only
-	// the Accepted condition.
+	// Conditions report semantic acceptance, aggregate application and
+	// independent data-plane readiness.
 	// +optional
 	// +listType=map
 	// +listMapKey=type

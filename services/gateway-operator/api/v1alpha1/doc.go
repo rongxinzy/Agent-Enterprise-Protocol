@@ -1,6 +1,5 @@
-// Package v1alpha1 groups the pilot gateway CRDs: ModelRoute and ModelPolicy.
-// ComputeAssignment and DeploymentConfig are deliberately not part of this
-// stage; they land with the compute-governance and aggregate-reconciler work.
+// Package v1alpha1 groups the gateway CRDs: ModelRoute, ModelPolicy and
+// DeploymentConfig. ComputeAssignment belongs to later compute governance.
 //
 // +kubebuilder:object:generate=true
 // +groupName=gateway.aep.zhiyuan.io

@@ -1,7 +1,6 @@
-// Package controller holds the gateway operator's watch-only pilot
-// controllers. They validate shallowly and write the Accepted condition on
-// their own CRs; they write nothing else — no Higress resources, no external
-// calls, no credential reads (pilot stage of the hybrid architecture).
+// Package controller reconciles gateway CRs into owned Higress resources.
+// The production Manager always supplies Runtime; the nil Runtime seam
+// preserves the isolated validation/status tests.
 package controller
 
 import (
@@ -23,8 +22,8 @@ import (
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
 )
 
-// ModelRouteReconciler watches ModelRoute objects and records shallow
-// validation in the Accepted condition. It never touches Higress resources.
+// ModelRouteReconciler validates ModelRoutes and applies route-owned resources
+// after the matching deployment aggregate is installed.
 type ModelRouteReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme

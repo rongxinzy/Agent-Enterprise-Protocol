@@ -15,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/util/csaupgrade"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/yaml"
@@ -211,6 +213,9 @@ func object(resource gatewayrender.RenderedResource) (*unstructured.Unstructured
 // Apply all replacements before deleting obsolete objects. Inventory comes
 // from live ownership labels, so a crash after SSA but before status is safe.
 func (r *Runtime) apply(ctx context.Context, owner client.Object, resources []gatewayrender.RenderedResource, hash string) ([]gateway.AppliedResource, error) {
+	if owner.GetUID() == "" {
+		return nil, errors.New("owner identity unavailable")
+	}
 	inventory := make([]gateway.AppliedResource, 0, len(resources))
 	keep := map[string]bool{}
 	for _, resource := range resources {
@@ -221,6 +226,7 @@ func (r *Runtime) apply(ctx context.Context, owner client.Object, resources []ga
 		live := &unstructured.Unstructured{}
 		live.SetGroupVersionKind(obj.GroupVersionKind())
 		err = r.Reader.Get(ctx, client.ObjectKeyFromObject(obj), live)
+		missing := apierrors.IsNotFound(err)
 		if err == nil {
 			if live.GetLabels()[ownerLabel] != string(owner.GetUID()) {
 				return nil, errors.New("resource ownership conflict")
@@ -244,9 +250,31 @@ func (r *Runtime) apply(ctx context.Context, owner client.Object, resources []ga
 			annotations["gateway.aep.zhiyuan.io/audit-event-id"] = event
 		}
 		obj.SetAnnotations(annotations)
-		// No ForceOwnership: a conflict is visible and is never silently stolen.
+		// A not-found read is not an atomic creation guard. Create cannot
+		// overwrite an object that appeared since that read; subsequent writes
+		// use SSA with the verified resourceVersion and no ForceOwnership.
+		if missing {
+			live = obj.DeepCopy()
+			if err := r.Create(ctx, live, client.FieldOwner(fieldManager)); err != nil {
+				return nil, errors.New("resource creation failed: " + string(apierrors.ReasonForError(err)))
+			}
+		}
+		// Create records an Update manager. Use client-go's native migration
+		// to promote only our own fields to Apply, retaining other managers.
+		// The generated patch includes an optimistic resourceVersion guard.
+		// Repeating it for owned objects also repairs a crash after creation.
+		upgrade, err := csaupgrade.UpgradeManagedFieldsPatch(live, sets.New(fieldManager), fieldManager)
+		if err != nil {
+			return nil, errors.New("field ownership migration failed")
+		}
+		if len(upgrade) > 0 {
+			if err := r.Patch(ctx, live, client.RawPatch(types.JSONPatchType, upgrade), client.FieldOwner(fieldManager)); err != nil {
+				return nil, errors.New("field ownership migration failed: " + string(apierrors.ReasonForError(err)))
+			}
+		}
+		obj.SetResourceVersion(live.GetResourceVersion())
 		if err := r.Apply(ctx, client.ApplyConfigurationFromUnstructured(obj), client.FieldOwner(fieldManager)); err != nil {
-			return nil, errors.New("server-side apply failed")
+			return nil, errors.New("server-side apply failed: " + string(apierrors.ReasonForError(err)))
 		}
 		ref := gateway.AppliedResource{APIVersion: obj.GetAPIVersion(), Kind: obj.GetKind(), Namespace: obj.GetNamespace(), Name: obj.GetName()}
 		inventory = append(inventory, ref)

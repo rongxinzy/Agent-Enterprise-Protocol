@@ -27,6 +27,22 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
+type creationRaceReader struct {
+	client.Reader
+	writer  client.Client
+	foreign *unstructured.Unstructured
+}
+
+func (r *creationRaceReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	err := r.Reader.Get(ctx, key, obj, opts...)
+	if apierrors.IsNotFound(err) && key == client.ObjectKeyFromObject(r.foreign) {
+		if createErr := r.writer.Create(ctx, r.foreign); createErr != nil {
+			return createErr
+		}
+	}
+	return err
+}
+
 // Real API server tests exercise watch delivery, SSA, status isolation and
 // finalizers. Higress CRDs here are schema fixtures, not a running data plane.
 func TestAppliedControllersWithEnvtest(t *testing.T) {
@@ -106,6 +122,14 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 		t.Fatal("reconciliation did not converge")
 	}
 	deployment := &gateway.DeploymentConfig{ObjectMeta: metav1.ObjectMeta{Name: "deployment", Namespace: "aep-system"}, Spec: gateway.DeploymentConfigSpec{DeploymentID: "test"}}
+	defer func() {
+		if t.Failed() {
+			var latest gateway.DeploymentConfig
+			if c.Get(ctx, client.ObjectKeyFromObject(deployment), &latest) == nil {
+				t.Logf("aggregate convergence status: %+v", latest.Status)
+			}
+		}
+	}()
 	if err := c.Create(ctx, deployment); err != nil {
 		t.Fatal(err)
 	}
@@ -129,11 +153,17 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 	}
 	waitRoute := func(applied bool) {
 		t.Helper()
+		lastStatus := ""
 		wait(func() bool {
 			if c.Get(ctx, client.ObjectKeyFromObject(route), route) != nil {
 				return false
 			}
 			condition := meta.FindStatusCondition(route.Status.Conditions, gateway.ConditionApplied)
+			status, _ := json.Marshal(route.Status)
+			if string(status) != lastStatus {
+				lastStatus = string(status)
+				t.Logf("route convergence status: %s", lastStatus)
+			}
 			return condition != nil && condition.ObservedGeneration == route.Generation && (condition.Status == metav1.ConditionTrue) == applied
 		})
 	}
@@ -260,6 +290,25 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 	if _, err := rt.apply(ctx, route, []gatewayrender.RenderedResource{{Kind: gatewayrender.ResourceOpenAIIngress, Body: string(body)}}, "collision"); err == nil || !strings.Contains(err.Error(), "ownership conflict") {
 		t.Fatalf("foreign resource takeover: %v", err)
 	}
+	// A foreign writer creates an unlabelled object between our not-found
+	// read and write. SSA alone could claim its previously unowned fields.
+	raceObject := foreign.DeepCopy()
+	raceObject.SetName("foreign-race")
+	raceObject.SetUID("")
+	raceObject.SetResourceVersion("")
+	raceObject.SetManagedFields(nil)
+	raceObject.SetLabels(nil)
+	raceBody, err := json.Marshal(raceObject.Object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raceRuntime := &Runtime{Client: c, Reader: &creationRaceReader{Reader: c, writer: c, foreign: raceObject}}
+	if _, err := raceRuntime.apply(ctx, route, []gatewayrender.RenderedResource{{Kind: gatewayrender.ResourceOpenAIIngress, Body: string(raceBody)}}, "race"); err == nil {
+		t.Fatal("not-found race adopted a foreign resource")
+	}
+	if raced := get("Ingress", "foreign-race"); raced.GetUID() != raceObject.GetUID() || raced.GetLabels()[ownerLabel] != "" || raced.GetAnnotations()[snapshotAnnotation] != "" {
+		t.Fatal("foreign resource was modified during creation race")
+	}
 	if err := c.Delete(ctx, route); err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +325,7 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 		return len(rules) == 0
 	})
 	get("Ingress", "foreign")
+	get("Ingress", "foreign-race")
 	if err := c.Delete(ctx, deployment); err != nil {
 		t.Fatal(err)
 	}

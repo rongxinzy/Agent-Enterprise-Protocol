@@ -5,6 +5,7 @@ import (
 	"errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"reflect"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,8 +71,10 @@ func (r *ModelRouteReconciler) reconcileApplied(ctx context.Context, route *gate
 		}
 		return r.appliedStatus(ctx, route, false, false, "InvalidSpec", "Route spec is invalid", nil)
 	}
-	if changed, err := r.Runtime.ensureFinalizer(ctx, route); err != nil || changed {
-		return ctrl.Result{Requeue: changed}, err
+	if changed, err := r.Runtime.ensureFinalizer(ctx, route); err != nil {
+		return ctrl.Result{}, err
+	} else if changed {
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 	in, err := r.Runtime.snapshot(ctx, client.ObjectKey{Namespace: route.Namespace, Name: "deployment"})
 	if err != nil {
