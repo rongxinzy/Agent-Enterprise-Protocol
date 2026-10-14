@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" || cfg.RetentionCleanupInterval != 15*time.Minute || cfg.OperationalRetention != 30*24*time.Hour || cfg.TelemetryRetention != 90*24*time.Hour || cfg.AuditRetention != 365*24*time.Hour || cfg.RetentionCleanupBatchSize != 1000 {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" || cfg.RetentionCleanupInterval != 15*time.Minute || cfg.OperationalRetention != 30*24*time.Hour || cfg.TelemetryRetention != 90*24*time.Hour || cfg.AuditRetention != 365*24*time.Hour || cfg.RetentionCleanupBatchSize != 1000 {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
 	}
 }
@@ -416,5 +417,34 @@ func TestNonNegativeInteger(t *testing.T) {
 	t.Setenv("TEST_NNI_GARBAGE", "abc")
 	if _, err = nonNegativeInteger("TEST_NNI_GARBAGE", 42); err == nil {
 		t.Fatal("garbage must be rejected")
+	}
+}
+
+func TestMockFederatedAuthRequiresLoopbackAddress(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		address string
+		enabled bool
+		wantErr bool
+	}{
+		{name: "default wildcard address is refused", address: ":8080", enabled: true, wantErr: true},
+		{name: "wildcard IPv4 is refused", address: "0.0.0.0:8080", enabled: true, wantErr: true},
+		{name: "loopback IPv4 is accepted", address: "127.0.0.1:8080", enabled: true},
+		{name: "loopback IPv6 is accepted", address: "[::1]:8080", enabled: true},
+		{name: "localhost is accepted", address: "localhost:8080", enabled: true},
+		{name: "wildcard with the fixture disabled is accepted", address: ":8080", enabled: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearEnvironment(t)
+			t.Setenv("AEP_ENABLE_MOCK_FEDERATED_AUTH", strconv.FormatBool(test.enabled))
+			t.Setenv("AEP_ADDRESS", test.address)
+			_, err := Load()
+			if test.wantErr && err == nil {
+				t.Fatal("Load() accepted mock federated authentication on a non-loopback address")
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("Load() = %v", err)
+			}
+		})
 	}
 }
