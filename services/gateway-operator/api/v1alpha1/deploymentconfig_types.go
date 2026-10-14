@@ -47,6 +47,10 @@ type DeploymentConfigSpec struct {
 }
 
 type DeploymentConfigStatus struct {
+	// AppliedSnapshot changes when any render input or referenced credential changes.
+	// It is an opaque digest, never a data-plane readiness proof.
+	// +optional
+	AppliedSnapshot string `json:"appliedSnapshot,omitempty"`
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// +optional

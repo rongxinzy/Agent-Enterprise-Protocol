@@ -20,7 +20,8 @@ import (
 // never touches Higress resources.
 type ModelPolicyReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Runtime *Runtime
 }
 
 // +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelpolicies,verbs=get;list;watch
@@ -35,6 +36,9 @@ func (r *ModelPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+	if r.Runtime != nil {
+		return r.reconcileApplied(ctx, &policy)
 	}
 	var route gatewayv1alpha1.ModelRoute
 	err := r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: policy.Spec.TargetRef.Name}, &route)
@@ -102,6 +106,17 @@ func (r *ModelPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gatewayv1alpha1.ModelPolicy{}).
 		Watches(&gatewayv1alpha1.ModelRoute{}, handler.EnqueueRequestsFromMapFunc(r.policiesForRoute)).
+		Watches(&gatewayv1alpha1.DeploymentConfig{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+			var policies gatewayv1alpha1.ModelPolicyList
+			if r.List(ctx, &policies, client.InNamespace(obj.GetNamespace())) != nil {
+				return nil
+			}
+			out := make([]ctrl.Request, 0, len(policies.Items))
+			for i := range policies.Items {
+				out = append(out, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&policies.Items[i])})
+			}
+			return out
+		})).
 		Named("modelpolicy").
 		Complete(r)
 }
