@@ -2596,6 +2596,7 @@ export interface components {
         };
         AssignmentList: {
             items: components["schemas"]["Assignment"][];
+            nextCursor: string | null;
         };
         SkillAssignmentWrite: {
             skillId: components["schemas"]["SkillIdentifier"];
@@ -2796,6 +2797,7 @@ export interface components {
         };
         CredentialAssignmentList: {
             assignments: components["schemas"]["CredentialAssignment"][];
+            nextCursor: string | null;
         };
         CredentialAssignmentWrite: {
             credentialId: string;
@@ -2901,6 +2903,7 @@ export interface components {
         };
         ModelAssignmentList: {
             assignments: components["schemas"]["ModelAssignment"][];
+            nextCursor: string | null;
         };
         ModelAssignmentWrite: {
             modelId: string;
@@ -4887,7 +4890,10 @@ export interface operations {
     };
     listSkillAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5298,7 +5304,10 @@ export interface operations {
     };
     listCredentialAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5495,7 +5504,10 @@ export interface operations {
     };
     listModelAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;

@@ -506,11 +506,20 @@ func skillSyncItemStatus(payload []byte, skillID string) string {
 }
 
 func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
-	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListSkillAssignments(request.Context())
+	pageSize := limit(request)
+	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListSkillAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	assignments, nextCursor := page(assignments, pageSize, func(item repository.SkillAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	items := make([]map[string]any, 0, len(assignments))
 	for _, assignment := range assignments {
 		items = append(items, map[string]any{
@@ -522,7 +531,7 @@ func (s *Server) listSkillAssignments(response http.ResponseWriter, request *htt
 			"expiresAt": assignment.ExpiresAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createSkillAssignment(response http.ResponseWriter, request *http.Request) {
