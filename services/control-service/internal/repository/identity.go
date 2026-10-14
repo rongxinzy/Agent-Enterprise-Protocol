@@ -177,10 +177,22 @@ func (s *DeploymentStore) UpdatePassword(ctx context.Context, id, passwordHash s
 	return nil
 }
 
-// DeleteUser removes a user and their role/team bindings in a transaction.
-// Returns ErrNotFound when the user does not exist in this deployment.
+// DeleteUser revokes the user's sessions and removes the user and their
+// role/team bindings, all in one transaction. Revoking inside the same
+// transaction as the deletion is what makes the whole operation atomic: a
+// failure after the revocation used to leave the account alive but signed out
+// everywhere. Returns ErrNotFound when the user does not exist in this
+// deployment.
+//
+// Only rows that exist for the user are touched. The history that references
+// the user (telemetry_events, credential_resolution_audit, skill_sync_results,
+// control_events, data_scope_rules) is kept and anonymized by the database
+// through ON DELETE SET NULL.
 func (s *DeploymentStore) DeleteUser(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := revokeUserSessions(tx, id); err != nil {
+			return err
+		}
 		result := tx.Where("deployment_id = ? AND id = ?", s.deploymentID, id).
 			Delete(&User{})
 		if result.Error != nil {
@@ -199,6 +211,18 @@ func (s *DeploymentStore) DeleteUser(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+}
+
+// revokeUserSessions signs a user out everywhere inside the caller's
+// transaction. It mirrors App.RevokeUserSessionSet, which stays in use on the
+// paths that revoke without deleting (disable, password reset, logout); the
+// delete path runs it here so that the revocation and the removal of the user
+// commit or roll back together.
+func revokeUserSessions(tx *gorm.DB, userID string) error {
+	if err := tx.Exec(`UPDATE user_session_tokens SET revoked_at=now() WHERE session_id IN (SELECT session_id FROM user_sessions WHERE user_id = ?) AND revoked_at IS NULL`, userID).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`UPDATE user_sessions SET revoked_at=now() WHERE user_id = ? AND revoked_at IS NULL`, userID).Error
 }
 
 func (s *DeploymentStore) UserRoleIDs(ctx context.Context, userID string) ([]string, error) {

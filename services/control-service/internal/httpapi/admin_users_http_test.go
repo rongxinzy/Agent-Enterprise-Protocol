@@ -263,7 +263,7 @@ func TestGetUserByIDRoutes(t *testing.T) {
 }
 
 func TestDeleteUserRoutes(t *testing.T) {
-	application, mock, pool, adminToken := newUserHTTPApplication(t)
+	application, mock, _, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
@@ -290,14 +290,17 @@ func TestDeleteUserRoutes(t *testing.T) {
 		}
 	})
 
-	t.Run("deletion revokes sessions then removes the user", func(t *testing.T) {
+	t.Run("deletion revokes the sessions in the same transaction and leaves history to the foreign keys", func(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "users"`).
 			WithArgs("deployment-a", "u1", 1).WillReturnRows(userRows("bob"))
-		pool.ExpectExec(`UPDATE user_session_tokens`).
-			WithArgs("u1").WillReturnResult(pgconn.NewCommandTag("UPDATE 0"))
-		pool.ExpectExec(`UPDATE user_sessions`).
-			WithArgs("u1").WillReturnResult(pgconn.NewCommandTag("UPDATE 0"))
+		// The revocation runs inside the deletion transaction, so a user whose
+		// telemetry or credential audit rows used to abort the delete can no
+		// longer end up alive but signed out everywhere.
 		mock.ExpectBegin()
+		mock.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).
+			WithArgs("u1").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).
+			WithArgs("u1").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(`DELETE FROM "users"`).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(`DELETE FROM "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(`DELETE FROM "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -320,6 +323,16 @@ func TestTelemetryEventSearchRoute(t *testing.T) {
 		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/events", "")
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"items"`) {
 			t.Fatalf("search = %d %s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("a row whose user was deleted still renders", func(t *testing.T) {
+		pool.ExpectQuery(`FROM telemetry_events`).WithArgs("deployment-a", 51).
+			WillReturnRows(pgxmock.NewRows([]string{"event_id", "user_id", "session_id", "type", "resource_type", "resource_id", "result", "payload", "occurred_at", "received_at"}).
+				AddRow("evt-2", nil, nil, "model.call", nil, nil, "success", nil, time.Now(), time.Now()))
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/events", "")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"userId":""`) || !strings.Contains(response.Body.String(), `"eventId":"evt-2"`) {
+			t.Fatalf("deleted user telemetry = %d %s", response.Code, response.Body.String())
 		}
 	})
 
