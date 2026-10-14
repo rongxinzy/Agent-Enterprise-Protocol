@@ -38,8 +38,10 @@ func (r *DeploymentConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 		return ctrl.Result{}, r.finalize(ctx, &deployment)
 	}
-	if changed, err := r.ensureFinalizer(ctx, &deployment); err != nil || changed {
-		return ctrl.Result{Requeue: changed}, err
+	if changed, err := r.ensureFinalizer(ctx, &deployment); err != nil {
+		return ctrl.Result{}, err
+	} else if changed {
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 	in, err := r.snapshot(ctx, req.NamespacedName)
 	if err != nil {

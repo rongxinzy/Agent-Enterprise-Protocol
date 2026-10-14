@@ -15,9 +15,8 @@ import (
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
 )
 
-// ModelPolicyReconciler watches ModelPolicy objects, checks the target
-// ModelRoute exists, and records the verdict in the Accepted condition. It
-// never touches Higress resources.
+// ModelPolicyReconciler validates the target and reports aggregate application
+// status. DeploymentConfig remains the sole writer of shared policy plugins.
 type ModelPolicyReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
