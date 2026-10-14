@@ -75,6 +75,24 @@ Go 服务（`services/control-service`、`services/gateway-authorizer`、`servic
 
 > 性能数字（ko vs docker build）待实测，暂不写入。同一段落亦见于 `aep-deerflow-governance`，改动请同步两处。
 
+## Operator Development
+
+- Kubernetes operators live in `services/gateway-operator/` and use the standard
+  kubebuilder/controller-runtime layout (`api/` types, `internal/controller/`
+  reconcilers, `cmd/main.go`, `config/crd|rbac` generated output).
+- CRD changes go through `services/gateway-operator/generate.sh`
+  (controller-gen pinned to the controller-tools release matching the root
+  module's client-go line); CI fails on drift. Never hand-edit generated files
+  (`zz_generated.deepcopy.go`, `config/crd/bases/*`, `config/rbac/*`).
+- Every controller needs an envtest suite covering CRD install, reconcile on
+  create/update, and status-condition writes; the status subresource write must
+  never clobber the spec. CI installs the pinned envtest binaries; locally set
+  `KUBEBUILDER_ASSETS` or drop the pinned tarball under
+  `services/gateway-operator/bin/` (git-ignored).
+- Exclusive-write discipline: an operator never writes resources it does not
+  own; ownership is enforced by RBAC (no other service account gets write verbs
+  on those resources), not by fieldManager alone.
+
 ## Contract-First Development
 
 For a new protocol feature, follow this order:
