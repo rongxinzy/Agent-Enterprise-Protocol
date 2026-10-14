@@ -41,6 +41,8 @@ async function runScenario() {
   assert(connection.baseUrl === gatewayBaseUrl, 'SDK received the wrong model gateway URL');
   assert(connection.protocol === 'openai-compatible', 'SDK received the wrong model gateway protocol');
   await assertDeploymentSettings(admin);
+  await assertComputeGovernance(admin, adminStore);
+  await assertTeamDefaultRoles(admin, modelCredential.id);
 
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
@@ -147,11 +149,79 @@ async function runScenario() {
   assert(JSON.parse(cliModels).models.length === 2, 'aepctl model list did not return the administrator catalog');
 }
 
+async function assertTeamDefaultRoles(admin, credentialId) {
+  const direct = await admin.createRole({name: `Direct Role ${runId}`, permissions: ['licenses.read']});
+  const inherited = await admin.createRole({name: `Inherited Role ${runId}`, permissions: ['users.read', 'models.read']});
+  const observer = await admin.createRole({name: `Observer Role ${runId}`, permissions: ['events.read']});
+  const model = await admin.createModel({displayName: `Default Role Model ${runId}`, sourceType: 'gateway', protocol: 'openai-compatible',
+    upstreamModel: 'mock-default-role-model', credentialId, capabilities: ['text'], contextWindow: 32768, isDefault: false, enabled: true});
+  const modelGrant = await admin.createModelAssignment({modelId: model.id, subject: {type: 'role', id: inherited.id}});
+  const team = await admin.createTeam({name: `Defaults Team ${runId}`, defaultRoleIds: [inherited.id, observer.id]});
+  const other = await admin.createTeam({name: `Other Defaults Team ${runId}`});
+  const username = `defaults-user-${runId}`;
+  const password = 'temporary-default-role-password-123';
+  const created = await admin.createUser({deploymentId: 'demo', username, displayName: 'Default roles member', temporaryPassword: password,
+    requirePasswordChange: false, roleIds: [direct.id], teamIds: [team.id]});
+  const memberStore = new MemoryTokenStore();
+  const member = new AepClient({baseUrl, tokenStore: memberStore});
+  await member.loginWithPassword({deploymentId: 'demo', username, password});
+  await assertModelToken(memberStore, [model.id]);
+  const roles = async () => (await member.getCurrentIdentity()).roles;
+  const assertRoles = async expected => assert(JSON.stringify((await roles()).sort()) === JSON.stringify([...expected].sort()), 'Effective roles do not match current direct/team bindings');
+  await assertRoles([direct.id, inherited.id, observer.id]);
+  await member.listUsers();
+  await member.listAdminModels();
+  assert((await member.listModels()).models.some(item => item.id === model.id), 'Role-assigned model did not inherit through team defaults');
+  const stored = (await admin.listUsers()).items.find(user => user.id === created.id);
+  assert(JSON.stringify(stored.roleIds) === JSON.stringify([direct.id]), 'Inherited defaults leaked into explicit user role bindings');
+  await admin.updateTeam(team.id, {description: 'Preserve defaults when omitted'});
+  assert((await admin.getTeam(team.id)).defaultRoleIds.length === 2, 'PATCH without defaultRoleIds lost configured defaults');
+  await admin.updateTeam(team.id, {defaultRoleIds: []});
+  await assertRoles([direct.id]);
+  await expectProblem(member.listUsers(), 403, 'ACCESS_DENIED');
+  await expectProblem(member.listAdminModels(), 403, 'ACCESS_DENIED');
+  assert((await member.listModels()).models.length === 0, 'Cleared team defaults retained model access');
+  await member.refreshSession();
+  const refreshedScopes = decodeJwtPart((await memberStore.get()).modelAccessToken, 1).model_scopes;
+  assert(refreshedScopes === undefined || (Array.isArray(refreshedScopes) && refreshedScopes.length === 0), 'Refreshed model JWT retained revoked default-role scopes');
+  await admin.updateTeam(team.id, {defaultRoleIds: [inherited.id, observer.id]});
+  await admin.updateRole(inherited.id, {enabled: false});
+  await assertRoles([direct.id, observer.id]);
+  await admin.updateRole(inherited.id, {enabled: true});
+  await assertRoles([direct.id, inherited.id, observer.id]);
+  await admin.updateTeam(team.id, {enabled: false});
+  await assertRoles([direct.id]);
+  await admin.updateTeam(team.id, {enabled: true});
+  await assertRoles([direct.id, inherited.id, observer.id]);
+  await admin.replaceUserRBAC(created.id, {roleIds: [direct.id, inherited.id], teamIds: [team.id]});
+  await admin.updateTeam(team.id, {defaultRoleIds: []});
+  await assertRoles([direct.id, inherited.id]);
+  await admin.updateTeam(team.id, {defaultRoleIds: [observer.id]});
+  await admin.replaceUserRBAC(created.id, {roleIds: [direct.id], teamIds: [other.id]});
+  await assertRoles([direct.id]);
+  await expectProblem(admin.updateTeam(team.id, {defaultRoleIds: ['unknown-default-role']}), 400, 'INVALID_ROLE');
+  assert(JSON.stringify((await admin.getTeam(team.id)).defaultRoleIds) === JSON.stringify([observer.id]), 'Invalid default role update changed stored defaults');
+  await expectProblem(admin.deleteRole(observer.id), 409, 'ROLE_IN_USE');
+  await member.logout();
+  await admin.updateUser(created.id, {status: 'disabled'});
+  await admin.deleteTeam(team.id);
+  await admin.deleteTeam(other.id);
+  await admin.deleteModelAssignment(modelGrant.id);
+  await admin.deleteModel(model.id);
+  await admin.deleteRole(direct.id);
+  await admin.deleteRole(inherited.id);
+  await admin.deleteRole(observer.id);
+}
+
 async function assertDeploymentSettings(admin) {
   const initial = await admin.getDeploymentSettings();
   assert(initial.modelGatewayBaseUrl.override === null
     && initial.modelGatewayBaseUrl.effectiveValue === gatewayBaseUrl
     && initial.modelGatewayBaseUrl.source === 'env', 'Deployment settings did not resolve the environment gateway URL');
+  assert(initial.computeDefaultTier.override === null
+    && initial.computeDefaultTier.source === 'unset'
+    && initial.computeIdleHibernateSeconds.source === 'unset'
+    && initial.computeConcurrencyCap.source === 'unset', 'Compute settings were not unset without environment values');
 
   const overrideUrl = 'https://runtime-gateway.example.com/v1';
   const updated = await admin.updateDeploymentSettings({modelGatewayBaseUrl: overrideUrl});
@@ -166,11 +236,76 @@ async function assertDeploymentSettings(admin) {
     'INVALID_DEPLOYMENT_SETTINGS',
   );
 
+  const computeUpdated = await admin.updateDeploymentSettings({computeIdleHibernateSeconds: 300, computeConcurrencyCap: 10});
+  assert(computeUpdated.computeIdleHibernateSeconds.override === 300
+    && computeUpdated.computeIdleHibernateSeconds.effectiveValue === 300
+    && computeUpdated.computeIdleHibernateSeconds.source === 'override'
+    && computeUpdated.computeConcurrencyCap.override === 10
+    && computeUpdated.computeConcurrencyCap.source === 'override', 'Compute integer settings did not store numeric overrides');
+
+  const computeCleared = await admin.updateDeploymentSettings({computeIdleHibernateSeconds: null, computeConcurrencyCap: null});
+  assert(computeCleared.computeIdleHibernateSeconds.override === null
+    && computeCleared.computeIdleHibernateSeconds.source === 'unset'
+    && computeCleared.computeConcurrencyCap.source === 'unset', 'Clearing compute overrides did not restore the unset state');
+
   const cleared = await admin.updateDeploymentSettings({modelGatewayBaseUrl: null});
   assert(cleared.modelGatewayBaseUrl.override === null
     && cleared.modelGatewayBaseUrl.effectiveValue === gatewayBaseUrl
     && cleared.modelGatewayBaseUrl.source === 'env', 'Clearing the runtime override did not restore the environment value');
   assert((await admin.getMetadata()).modelGateway?.baseUrl === gatewayBaseUrl, 'Metadata did not fall back to the environment gateway URL');
+}
+
+async function assertComputeGovernance(admin, store) {
+  // The compose deployment ships no tier catalog: the API reports an empty
+  // catalog and tier names stay unvalidated here.
+  const tiers = await adminFetch(store, 'GET', '/aep/v1/admin/compute/tiers');
+  assert(tiers.status === 200 && Array.isArray(tiers.body.items) && tiers.body.items.length === 0, 'Compute tier catalog was not empty without AEP_COMPUTE_TIERS_FILE');
+
+  const role = await admin.createRole({name: `Compute Role ${runId}`, description: 'Compute governance E2E role', permissions: []});
+  const team = await admin.createTeam({name: `Compute Team ${runId}`, description: 'Compute governance E2E team'});
+  const agent = await admin.createAgent({
+    username: `compute-agent-${runId}`, displayName: `Compute Agent ${runId}`,
+    password: 'agent-password-123', roleIds: [role.id], teamIds: [team.id], homeTeamId: team.id,
+    displayTitle: 'Compute Agent',
+  });
+
+  const before = await adminFetch(store, 'GET', '/aep/v1/admin/compute/assignments');
+  const inherited = before.body.items.find(item => item.agentId === agent.id);
+  assert(before.status === 200 && inherited && inherited.tier.override === null && inherited.tier.source === 'default', 'New agent did not inherit the deployment default tier');
+
+  const assigned = await adminFetch(store, 'PUT', `/aep/v1/admin/compute/assignments/${agent.id}`, {tier: 'standard'});
+  assert(assigned.status === 200 && assigned.body.tier.override === 'standard' && assigned.body.tier.source === 'override'
+    && typeof assigned.body.updatedBy === 'string' && assigned.body.updatedBy.length > 0
+    && typeof assigned.body.updatedAt === 'string', 'Compute assignment did not store the tier override');
+
+  const listed = await adminFetch(store, 'GET', '/aep/v1/admin/compute/assignments');
+  const overridden = listed.body.items.find(item => item.agentId === agent.id);
+  assert(overridden && overridden.tier.override === 'standard' && overridden.tier.effective === 'standard' && overridden.tier.source === 'override', 'Assignment list did not echo the stored override');
+
+  const cleared = await adminFetch(store, 'PUT', `/aep/v1/admin/compute/assignments/${agent.id}`, {tier: null});
+  assert(cleared.status === 200 && cleared.body.tier.override === null && cleared.body.tier.source === 'default', 'Clearing the assignment did not restore the deployment default');
+
+  const missing = await adminFetch(store, 'PUT', '/aep/v1/admin/compute/assignments/missing-agent', {tier: 'standard'});
+  assert(missing.status === 404 && missing.body.code === 'RESOURCE_NOT_FOUND', 'Unknown agent did not return 404');
+
+  await admin.deleteAgent(agent.id);
+  await admin.deleteTeam(team.id);
+  await admin.deleteRole(role.id);
+}
+
+async function adminFetch(store, method, path, body) {
+  const tokens = await store.get();
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${tokens.accessToken}`,
+      'content-type': 'application/json',
+      'x-aep-protocol-version': '1.0',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  return {status: response.status, body: text ? JSON.parse(text) : null};
 }
 
 async function assertModelToken(store, expectedScopes) {

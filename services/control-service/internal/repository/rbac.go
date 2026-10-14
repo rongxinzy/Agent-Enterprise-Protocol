@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
@@ -107,7 +109,7 @@ func (s *DeploymentStore) UserPermissionIDs(ctx context.Context, userID string) 
 	permissions := make([]string, 0)
 	err := s.db.WithContext(ctx).Table("role_permissions AS rp").
 		Select("DISTINCT rp.permission_id").
-		Joins("JOIN user_role_bindings AS urb ON urb.deployment_id = rp.deployment_id AND urb.role_id = rp.role_id").
+		Joins("JOIN user_effective_roles AS urb ON urb.deployment_id = rp.deployment_id AND urb.role_id = rp.role_id").
 		Joins("JOIN roles AS r ON r.deployment_id = urb.deployment_id AND r.id = urb.role_id AND r.enabled = true").
 		Where("urb.deployment_id = ? AND urb.user_id = ?", s.deploymentID, userID).
 		Order("rp.permission_id").
@@ -177,7 +179,23 @@ func (s *DeploymentStore) DeleteRole(ctx context.Context, id string) error {
 	if role.BuiltIn {
 		return ErrBuiltInResource
 	}
-	return resultError(s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&Role{}))
+	return s.deleteSubject(ctx, "role", id, &Role{})
+}
+
+// deleteSubject removes a role or team together with every grant that names it,
+// in one transaction. Subjects are addressed by a name-derived id and the
+// polymorphic subject columns (subject_type, subject_id) carry no foreign key,
+// so a leftover grant would silently attach itself to a later subject that
+// reuses the same id.
+func (s *DeploymentStore) deleteSubject(ctx context.Context, subjectType, id string, subject any) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, grant := range []any{&SkillAssignment{}, &ModelAssignment{}, &CredentialAssignment{}, &DataScopeRule{}} {
+			if err := tx.Where("deployment_id = ? AND subject_type = ? AND subject_id = ?", s.deploymentID, subjectType, id).Delete(grant).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(subject).Error
+	})
 }
 
 func (s *DeploymentStore) ListTeams(ctx context.Context) ([]TeamRecord, error) {
@@ -191,7 +209,7 @@ func (s *DeploymentStore) ListTeamsPage(ctx context.Context, cursor string, fetc
 	}
 	rows := make([]row, 0)
 	query := s.db.WithContext(ctx).Model(&Team{}).
-		Select("teams.*, COUNT(user_team_bindings.user_id) AS member_count").
+		Select("teams.*, COUNT(user_team_bindings.user_id) AS member_count, COALESCE((SELECT json_agg(d.role_id ORDER BY d.role_id) FROM team_default_roles d WHERE d.deployment_id=teams.deployment_id AND d.team_id=teams.id), '[]'::json) AS default_role_ids").
 		Joins("LEFT JOIN user_team_bindings ON user_team_bindings.deployment_id = teams.deployment_id AND user_team_bindings.team_id = teams.id").
 		Where("teams.deployment_id = ?", s.deploymentID)
 	if cursor != "" {
@@ -212,7 +230,15 @@ func (s *DeploymentStore) ListTeamsPage(ctx context.Context, cursor string, fetc
 	return items, nil
 }
 
-func (s *DeploymentStore) CreateTeam(ctx context.Context, team Team) error {
+func (s *DeploymentStore) CreateTeam(ctx context.Context, team Team, defaults ...[]string) error {
+	if len(defaults) > 0 {
+		return s.transaction(ctx, func(tx *DeploymentStore) error {
+			if err := tx.CreateTeam(ctx, team); err != nil {
+				return err
+			}
+			return tx.replaceTeamDefaultRoles(ctx, team.ID, defaults[0])
+		})
+	}
 	team.DeploymentID = s.deploymentID
 	team.Enabled = true
 	return s.db.WithContext(ctx).Create(&team).Error
@@ -231,7 +257,22 @@ func (s *DeploymentStore) GetTeamRecord(ctx context.Context, id string) (TeamRec
 	return TeamRecord{}, ErrNotFound
 }
 
-func (s *DeploymentStore) UpdateTeam(ctx context.Context, id string, name, description *string, enabled *bool) (TeamRecord, error) {
+func (s *DeploymentStore) UpdateTeam(ctx context.Context, id string, name, description *string, enabled *bool, defaults ...[]string) (TeamRecord, error) {
+	if len(defaults) > 0 {
+		var team TeamRecord
+		err := s.transaction(ctx, func(tx *DeploymentStore) error {
+			if _, err := tx.UpdateTeam(ctx, id, name, description, enabled); err != nil {
+				return err
+			}
+			if err := tx.replaceTeamDefaultRoles(ctx, id, defaults[0]); err != nil {
+				return err
+			}
+			var err error
+			team, err = tx.GetTeamRecord(ctx, id)
+			return err
+		})
+		return team, err
+	}
 	updates := map[string]any{"updated_at": time.Now().UTC()}
 	if name != nil {
 		updates["name"] = *name
@@ -260,7 +301,37 @@ func (s *DeploymentStore) DeleteTeam(ctx context.Context, id string) error {
 	if team.BuiltIn {
 		return ErrBuiltInResource
 	}
-	return resultError(s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&Team{}))
+	return s.deleteSubject(ctx, "team", id, &Team{})
+}
+
+func (s *DeploymentStore) replaceTeamDefaultRoles(ctx context.Context, teamID string, roleIDs []string) error {
+	roleIDs = uniqueStrings(roleIDs)
+	if len(roleIDs) > 0 {
+		var count int64
+		if err := s.db.WithContext(ctx).Model(&Role{}).Where("deployment_id = ? AND id IN ?", s.deploymentID, roleIDs).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != int64(len(roleIDs)) {
+			return ErrUnknownRole
+		}
+	}
+	if err := s.db.WithContext(ctx).Where("deployment_id = ? AND team_id = ?", s.deploymentID, teamID).Delete(&TeamDefaultRole{}).Error; err != nil {
+		return err
+	}
+	bindings := make([]TeamDefaultRole, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		bindings = append(bindings, TeamDefaultRole{DeploymentID: s.deploymentID, TeamID: teamID, RoleID: roleID})
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Create(&bindings).Error
+}
+
+func (s *DeploymentStore) EffectiveUserRoleIDs(ctx context.Context, userID string) ([]string, error) {
+	ids := make([]string, 0)
+	err := s.db.WithContext(ctx).Table("user_effective_roles").Where("deployment_id = ? AND user_id = ?", s.deploymentID, userID).Order("role_id").Pluck("role_id", &ids).Error
+	return ids, err
 }
 
 func (s *DeploymentStore) ReplaceUserRBAC(ctx context.Context, userID string, roleIDs, teamIDs []string) error {

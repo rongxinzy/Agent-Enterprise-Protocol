@@ -32,24 +32,42 @@ func main() {
 		_ = response.Body.Close()
 		return
 	}
+	if err := run(); err != nil {
+		slog.Error("gateway reconciler stopped", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	config, err := loadConfig()
 	if err != nil {
-		slog.Error("gateway reconciler configuration failed", "error", err)
-		os.Exit(1)
+		return err
 	}
 	worker, err := reconciler.New(config.worker)
 	if err != nil {
-		slog.Error("gateway reconciler initialization failed", "error", err)
-		os.Exit(1)
+		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	readiness := newReadinessState(config.worker.Tenants)
 	go serveHealth(ctx, config.address, readiness)
 
+	var workers sync.WaitGroup
+	startWorkers := func(workCtx context.Context) {
+		for _, tenant := range config.worker.Tenants {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				runTenant(workCtx, worker, tenant, config.interval, readiness)
+			}()
+		}
+	}
+
 	// Leader election: when multiple replicas run, only the lease holder
 	// executes the reconcile loop; followers idle (but stay ready) for
 	// fast failover. Disabled (nil) when no KubernetesApplier is configured.
+	// client-go never re-elects after a lost lease, so an ended election exits
+	// the process non-zero and Kubernetes restarts the pod.
 	var elector *reconciler.LeaderElector
 	if applier, ok := config.worker.Applier.(*reconciler.KubernetesApplier); ok {
 		identity := os.Getenv("POD_NAME")
@@ -57,16 +75,45 @@ func main() {
 			identity = fmt.Sprintf("reconciler-%d", os.Getpid())
 		}
 		elector = reconciler.NewLeaderElector(applier, "aep-system", "gateway-reconciler-leader", identity)
-		go elector.Run(ctx)
+		elector.StartWork = startWorkers
+		// Followers never start workers; they stay ready exactly like the old
+		// idle loop did, until they lead or the process exits after a lost lease.
+		readiness.markReady()
 		slog.Info("leader election enabled", "identity", identity)
 	} else {
 		slog.Info("leader election disabled (no Kubernetes applier)")
+		startWorkers(ctx)
+		<-ctx.Done()
+		return nil
 	}
 
-	for _, tenant := range config.worker.Tenants {
-		go runTenant(ctx, worker, tenant, config.interval, readiness, elector)
+	electionDone := make(chan error, 1)
+	go func() { electionDone <- elector.Run(ctx) }()
+	select {
+	case <-ctx.Done():
+		// SIGTERM/SIGINT: orderly shutdown; wait for the guarded lease release.
+		<-electionDone
+		return nil
+	case err := <-electionDone:
+		if ctx.Err() != nil {
+			// The signal path won the race with the elector returning.
+			return nil
+		}
+		stop()
+		// The lease-scoped work context is already cancelled; drain the
+		// unwind before exiting so no reconcile survives the leadership loss.
+		drained := make(chan struct{})
+		go func() {
+			workers.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+		case <-time.After(10 * time.Second):
+			slog.Warn("reconcile workers did not drain before exit")
+		}
+		return fmt.Errorf("leader election ended: %w", err)
 	}
-	<-ctx.Done()
 }
 
 type serverConfig struct {
@@ -113,21 +160,9 @@ func loadConfig() (serverConfig, error) {
 	return serverConfig{worker: workerConfig, address: value("AEP_RECONCILER_ADDRESS", ":8091"), interval: interval}, nil
 }
 
-func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration, readiness *readinessState, elector *reconciler.LeaderElector) {
+func runTenant(ctx context.Context, worker *reconciler.Reconciler, tenant string, interval time.Duration, readiness *readinessState) {
 	backoff := time.Second
 	for {
-		// Only the lease holder reconciles; followers skip and mark ready.
-		if elector != nil && !elector.IsLeader() {
-			readiness.record(tenant, nil)
-			timer := time.NewTimer(time.Second)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-			continue
-		}
 		err := worker.Sync(ctx, tenant)
 		readiness.record(tenant, err)
 		if err != nil {
@@ -169,6 +204,17 @@ func (s *readinessState) record(tenant string, err error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.tenants[tenant] = err == nil
+}
+
+// markReady reports every tenant as ready without reconciling: followers never
+// run workers, and this keeps their readiness semantics identical to the old
+// idle loop until they either lead (workers take over reporting) or exit.
+func (s *readinessState) markReady() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	for tenant := range s.tenants {
+		s.tenants[tenant] = true
+	}
 }
 
 func (s *readinessState) ready() bool {
