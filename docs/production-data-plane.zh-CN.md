@@ -78,7 +78,7 @@ npm run test:e2e:m1-gateway
 
 优先使用 `POST /aep/v1/admin/data-plane/publish`，而不是手工编写期望状态。模型目录是单一事实源：管控服务为每个 `sourceType` 为 `gateway`、协议为 OpenAI 兼容或 Anthropic 且 endpoint 与上游模型完整的模型派生一条路由，并原子替换期望状态；禁用模型以 `enabled: false` 路由随行，reconciler 借此删除该路由曾拥有的资源。这从结构上消除了"目录里有模型、网关 WasmPlugin 没有对应 `modelMapping`"的漂移。目录未变化时重复发布是幂等空操作；目录一旦变化就会产生新的按内容寻址的 revision。
 
-凭据映射按约定进行。发布的模型绑定 Credential 时，其路由引用 `higress-system` 下名为 `aep-credential-<credentialId>`、键为 `api-key` 的 Secret。通过部署侧 Secret 系统（例如 External Secret）为每个被引用的 Credential 供给一个这样的 Secret，值为供应商密钥。管控服务不写 Kubernetes，也绝不输出 Credential 明文；reconciler 在每次同步时读取 Secret 并把值内联到渲染出的 WasmPlugin。轮换时先在管控面轮换 Credential，再更新对应 Secret，下一次调和即生效。Secret 缺失的路由渲染时没有 `apiToken`，ai-proxy 会以失败关闭的方式拒绝其请求；anthropic 透传路由的 Secret 缺失时渲染不出凭证头，由上游自己回答 401——失败暴露在上游侧，而不是网关侧失败关闭。
+凭据映射按约定进行。发布的模型绑定 Credential 时，其路由引用 `higress-system` 下名为 `aep-credential-<credentialId>`、键为 `api-key` 的 Secret。通过部署侧 Secret 系统（例如 External Secret）为每个被引用的 Credential 供给一个这样的 Secret，值为供应商密钥。管控服务不写 Kubernetes，也绝不输出 Credential 明文；reconciler 在每次同步时读取 Secret 并把值内联到渲染出的 WasmPlugin。轮换时先在管控面轮换 Credential，再更新对应 Secret，下一次调和即生效。配置了凭据 fetcher（Kubernetes 部署）时，路由引用的 Secret 缺失或不可读会让本次同步以 `CREDENTIAL_UNAVAILABLE` 失败关闭——状态报 `error`，不渲染也不 apply 任何资源。只有未配置 fetcher 时，路由才会渲染出没有 `apiToken`（anthropic 透传路由则是没有凭证头）的配置，由 ai-proxy 或上游拒绝该请求。
 
 `GET /aep/v1/admin/data-plane/status` 包含 `catalogComparison`：目录可发布但期望路由缺失的模型（`missing`）、目录不会再发布的期望路由（`extra`）、逐字段不一致项（`mismatched`）。比对非空即视为需要评审的漂移；发布可消除漂移，手工 `PUT` 逃生口则用于有意维持的差异（例如下文的原生 `deepseek` provider 类型）。
 
