@@ -111,7 +111,11 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	}
 	deletions := make([]string, 0, 4)
 	for _, route := range desired.Routes {
-		if route.Protocol == "anthropic" {
+		strategy, err := gatewayrender.StrategyFor(route)
+		if err != nil {
+			return err
+		}
+		if strategy.Bucket() == gatewayrender.BucketAnthropic {
 			if !route.Enabled {
 				name := gatewayrender.AnthropicResourceName(route.ModelID)
 				deletions = append(deletions, gatewayrender.IngressAPIPath(name), gatewayrender.EnvoyFilterAPIPath(name))

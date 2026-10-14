@@ -29,7 +29,7 @@ func TestRouteFromCR(t *testing.T) {
 	route := routeCR("route-a")
 	route.Spec.TenantScope = &gatewayv1alpha1.TenantScope{Teams: []string{"qa"}}
 	projected := RouteFromCR(route)
-	want := gatewayrender.Route{ModelID: "deepseek-chat", Enabled: true, Endpoint: "https://provider.example/v1", UpstreamModel: "deepseek-chat", Protocol: "openai"}
+	want := gatewayrender.Route{ModelID: "deepseek-chat", Enabled: true, Endpoint: "https://provider.example/v1", UpstreamModel: "deepseek-chat", Protocol: "openai-compatible"}
 	if projected != want {
 		t.Fatalf("RouteFromCR = %#v, want %#v", projected, want)
 	}

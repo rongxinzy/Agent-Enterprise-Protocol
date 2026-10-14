@@ -21,16 +21,22 @@ import (
 
 // RouteFromCR projects one ModelRoute CR onto the shared render Route.
 // TenantScope is authorization-plane data and never enters the render. The
-// CRD carries no providerType, so ai-proxy renders the default ("openai");
-// a providerType field on the CRD is a deliberate follow-up (see the
-// documented exclusion in shadow_test.go).
+// CRD-facing protocol enum name "openai" maps onto the data-plane wire
+// protocol "openai-compatible" the control plane publishes and the shared
+// strategy dispatch expects. The CRD carries no providerType, so ai-proxy
+// renders the default ("openai"); a providerType field on the CRD is a
+// deliberate follow-up (see the documented exclusion in shadow_test.go).
 func RouteFromCR(route *gatewayv1alpha1.ModelRoute) gatewayrender.Route {
+	protocol := route.Spec.Protocol
+	if protocol == "openai" {
+		protocol = "openai-compatible"
+	}
 	out := gatewayrender.Route{
 		ModelID:       route.Spec.ModelID,
 		Enabled:       route.Spec.Enabled,
 		Endpoint:      route.Spec.Upstream.Endpoint,
 		UpstreamModel: route.Spec.Upstream.Model,
-		Protocol:      route.Spec.Protocol,
+		Protocol:      protocol,
 	}
 	if ref := route.Spec.CredentialRef; ref != nil {
 		out.CredentialRef = &gatewayrender.SecretReference{Name: ref.Name, Key: ref.Key}

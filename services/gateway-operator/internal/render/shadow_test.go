@@ -23,7 +23,10 @@ import (
 // syncGatewayLimits) and once through the operator path (ModelRoute/
 // ModelPolicy CRs in, render.RenderDeployment out) — and byte-compares the
 // two resource lists in their pinned order. Identical fake credentials feed
-// both sides through the CredentialFetcher seam.
+// both sides through the CredentialFetcher seam. The fixtures also carry the
+// vocabulary gap between the two planes: the DB wire protocol is
+// "openai-compatible" while the CRD enum is "openai" — RouteFromCR maps it,
+// so the harness proves the enum translation too.
 //
 // desiredStateWire mirrors the reconciler's DB-shaped DesiredState wire JSON;
 // the reconciler type itself lives behind its internal package boundary, so
@@ -104,7 +107,7 @@ func shadowFixtures() []shadowFixture {
 		{
 			name: "openai enabled with absolute https endpoint and credentialRef",
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat", "openai", "https://api.example/v1", "upstream-chat", true, &gatewayrender.SecretReference{Name: "provider-secrets", Key: "chat"}),
+				routeJSON("chat", "openai-compatible", "https://api.example/v1", "upstream-chat", true, &gatewayrender.SecretReference{Name: "provider-secrets", Key: "chat"}),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-chat", "chat", "openai", "https://api.example/v1", "upstream-chat", true, &gatewayv1alpha1.CredentialReference{Name: "provider-secrets", Key: "chat"}),
@@ -113,7 +116,7 @@ func shadowFixtures() []shadowFixture {
 		{
 			name: "openai enabled with absolute http endpoint on a custom port, no credentialRef",
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat", "openai", "http://internal.example:8000/api/v1", "upstream-chat", true, nil),
+				routeJSON("chat", "openai-compatible", "http://internal.example:8000/api/v1", "upstream-chat", true, nil),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-chat", "chat", "openai", "http://internal.example:8000/api/v1", "upstream-chat", true, nil),
@@ -122,7 +125,7 @@ func shadowFixtures() []shadowFixture {
 		{
 			name: "openai disabled renders no route resources and idle plugins",
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat", "openai", "https://api.example/v1", "upstream-chat", false, nil),
+				routeJSON("chat", "openai-compatible", "https://api.example/v1", "upstream-chat", false, nil),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-chat", "chat", "openai", "https://api.example/v1", "upstream-chat", false, nil),
@@ -135,7 +138,7 @@ func shadowFixtures() []shadowFixture {
 			// the CR in memory, bypassing admission.
 			name: "openai enabled with a relative endpoint keeps the preconfigured backend",
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat", "openai", "/v1", "upstream-chat", true, nil),
+				routeJSON("chat", "openai-compatible", "/v1", "upstream-chat", true, nil),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-chat", "chat", "openai", "/v1", "upstream-chat", true, nil),
@@ -164,10 +167,10 @@ func shadowFixtures() []shadowFixture {
 			// pinned render order must still make the outputs byte-identical.
 			name: "multi-route mixed set with disabled member renders in pinned order",
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("z-last", "openai", "https://z.example/v1", "upstream-z", true, nil),
+				routeJSON("z-last", "openai-compatible", "https://z.example/v1", "upstream-z", true, nil),
 				routeJSON("bench-anthropic", "anthropic", "https://open.bigmodel.cn/api/anthropic", "upstream", true, &gatewayrender.SecretReference{Name: "aep-credential-bigmodel", Key: "api-key"}),
-				routeJSON("a-first", "openai", "/v1", "upstream-a", true, nil),
-				routeJSON("off", "openai", "https://off.example/v1", "upstream-off", false, nil),
+				routeJSON("a-first", "openai-compatible", "/v1", "upstream-a", true, nil),
+				routeJSON("off", "openai-compatible", "https://off.example/v1", "upstream-off", false, nil),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-a-first", "a-first", "openai", "/v1", "upstream-a", true, nil),
@@ -179,7 +182,7 @@ func shadowFixtures() []shadowFixture {
 		{
 			name: "credentialRef whose value fails to resolve renders without tokens on both paths",
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat", "openai", "https://api.example/v1", "upstream-chat", true, &gatewayrender.SecretReference{Name: "provider-secrets", Key: "broken"}),
+				routeJSON("chat", "openai-compatible", "https://api.example/v1", "upstream-chat", true, &gatewayrender.SecretReference{Name: "provider-secrets", Key: "broken"}),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-chat", "chat", "openai", "https://api.example/v1", "upstream-chat", true, &gatewayv1alpha1.CredentialReference{Name: "provider-secrets", Key: "broken"}),
@@ -188,8 +191,8 @@ func shadowFixtures() []shadowFixture {
 		{
 			name: "native limits and quota from ModelPolicies",
 			desired: desiredStateWire{DeploymentID: "tenant-a", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat-a", "openai", "/v1", "upstream-a", true, nil),
-				routeJSON("chat-b", "openai", "https://api.example/v1", "upstream-b", true, nil),
+				routeJSON("chat-a", "openai-compatible", "/v1", "upstream-a", true, nil),
+				routeJSON("chat-b", "openai-compatible", "https://api.example/v1", "upstream-b", true, nil),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-a", "chat-a", "openai", "/v1", "upstream-a", true, nil),
@@ -215,7 +218,7 @@ func shadowFixtures() []shadowFixture {
 			// (revision present, items empty).
 			name: "native gateway with no policies renders only the quota admin route",
 			desired: desiredStateWire{DeploymentID: "tenant-a", Revision: "rev-1", Routes: []gatewayrender.Route{
-				routeJSON("chat-a", "openai", "/v1", "upstream-a", true, nil),
+				routeJSON("chat-a", "openai-compatible", "/v1", "upstream-a", true, nil),
 			}},
 			routes: []gatewayv1alpha1.ModelRoute{
 				routeCR("route-a", "chat-a", "openai", "/v1", "upstream-a", true, nil),
@@ -388,7 +391,7 @@ func TestShadowDocumentedExclusions(t *testing.T) {
 	fixture := shadowFixture{
 		name: "deepseek provider type",
 		desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{{
-			ModelID: "reasoner", Protocol: "openai", Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Enabled: true, ProviderType: "deepseek",
+			ModelID: "reasoner", Protocol: "openai-compatible", Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Enabled: true, ProviderType: "deepseek",
 		}}},
 		routes: []gatewayv1alpha1.ModelRoute{
 			routeCR("route-reasoner", "reasoner", "openai", "/v1/chat", "deepseek-reasoner", true, nil),

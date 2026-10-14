@@ -47,7 +47,11 @@ func RenderGatewayLimits(input Input, publication gatewaypolicy.Publication, cfg
 		if !route.Enabled {
 			continue
 		}
-		if route.Protocol == "anthropic" {
+		strategy, err := StrategyFor(route)
+		if err != nil {
+			return nil, err
+		}
+		if strategy.Bucket() == BucketAnthropic {
 			ingresses = append(ingresses, AnthropicResourceName(route.ModelID))
 		} else {
 			ingresses = append(ingresses, OpenAIResourceName(input.Deployment, route.ModelID))
