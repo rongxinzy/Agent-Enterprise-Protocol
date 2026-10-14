@@ -67,11 +67,11 @@ type Input struct {
 }
 
 // FetchCredentials resolves every route's credentialRef to its value via the
-// injected fetcher. Unresolvable refs are skipped — the route renders without
-// an apiToken and ai-proxy rejects its requests.
-func FetchCredentials(ctx context.Context, routes []Route, fetch CredentialFetcher) map[string]string {
+// injected fetcher. With a configured fetcher,
+// unresolved references abort the whole resolution; no partial set is returned.
+func FetchCredentials(ctx context.Context, routes []Route, fetch CredentialFetcher) (map[string]string, error) {
 	if fetch == nil {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]string)
 	for _, route := range routes {
@@ -84,11 +84,11 @@ func FetchCredentials(ctx context.Context, routes []Route, fetch CredentialFetch
 		}
 		value, err := fetch(ctx, *route.CredentialRef)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("credentialRef %s: %w", key, err)
 		}
 		out[key] = value
 	}
-	return out
+	return out, nil
 }
 
 // ResourceKind tags each rendered Kubernetes resource so the applier can
@@ -316,7 +316,12 @@ func renderEnvoyFilter(name string, route Route, credentialValues map[string]str
 		return document.String()
 	}
 	substitution := anthropicRewrite(endpoint.Path)
-	document.WriteString("            regex_rewrite:\n              pattern:\n                google_re2: {}\n                regex: " + yamlScalar("^/"+anthropicSlug(route.ModelID)+"/(.*)$") + "\n              substitution: " + yamlScalar(substitution) + "\n")
+	pattern := "^/" + anthropicSlug(route.ModelID) + "/(.*)$"
+	endpointPath := strings.Trim(endpoint.Path, "/")
+	if endpointPath == "v1" || strings.HasSuffix(endpointPath, "/v1") {
+		pattern = "^/" + anthropicSlug(route.ModelID) + "/(?:v1/)?(.*)$"
+	}
+	document.WriteString("            regex_rewrite:\n              pattern:\n                google_re2: {}\n                regex: " + yamlScalar(pattern) + "\n              substitution: " + yamlScalar(substitution) + "\n")
 	return document.String()
 }
 
