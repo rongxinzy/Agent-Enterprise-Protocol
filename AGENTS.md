@@ -92,6 +92,15 @@ Go 服务（`services/control-service`、`services/gateway-authorizer`、`servic
 - Exclusive-write discipline: an operator never writes resources it does not
   own; ownership is enforced by RBAC (no other service account gets write verbs
   on those resources), not by fieldManager alone.
+- The Higress render layer is shared in `services/internal/gatewayrender/`;
+  the reconciler and the operator must both consume it — never fork render
+  logic into a service-internal package. The operator's
+  `internal/render/` translates ModelRoute/ModelPolicy CRs into the shared
+  inputs and renders the deployment scope in memory (migration phase 1
+  shadow: render only, never apply; enabled by `AEP_OPERATOR_SHADOW_DEPLOYMENT`).
+  `internal/render/shadow_test.go` is the promotion gate: it byte-compares
+  the CR-driven render against the DB-driven reconciler path across the
+  fixture matrix and pins documented expressiveness gaps explicitly.
 
 ## Contract-First Development
 

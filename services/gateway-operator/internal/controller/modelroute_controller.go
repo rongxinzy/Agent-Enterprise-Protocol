@@ -2,6 +2,9 @@
 // controllers. They validate shallowly and write the Accepted condition on
 // their own CRs; they write nothing else — no Higress resources, no external
 // calls, no credential reads (pilot stage of the hybrid architecture).
+// With ShadowDeployment set, the ModelRoute controller additionally
+// re-renders the deployment scope from CRs in memory and logs the result at
+// debug level (migration phase 1 shadow: render only, never apply).
 package controller
 
 import (
@@ -19,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
+	operatorrender "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/internal/render"
 )
 
 // ModelRouteReconciler watches ModelRoute objects and records shallow
@@ -26,10 +30,16 @@ import (
 type ModelRouteReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// ShadowDeployment enables the migration phase 1 shadow render: every
+	// accepted reconcile re-renders the deployment scope from CRs and logs
+	// the rendered kinds/paths at debug level. Nothing is applied; the
+	// DB-driven reconciler remains the only writer. Empty disables it.
+	ShadowDeployment string
 }
 
 // +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelroutes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelroutes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelpolicies,verbs=get;list;watch
 
 func (r *ModelRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -44,7 +54,47 @@ func (r *ModelRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		logger.Info("ModelRoute rejected", "reason", err.Error())
 		return ctrl.Result{}, r.writeAccepted(ctx, &route, metav1.ConditionFalse, gatewayv1alpha1.ReasonInvalidSpec, err.Error())
 	}
-	return ctrl.Result{}, r.writeAccepted(ctx, &route, metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, "Spec accepted")
+	if err := r.writeAccepted(ctx, &route, metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, "Spec accepted"); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.shadowRender(ctx, route.Namespace)
+	return ctrl.Result{}, nil
+}
+
+// shadowRender re-renders the whole deployment scope from CRs and logs the
+// rendered kinds/paths at debug level (migration phase 1: render only, never
+// apply). Failures are logged, never propagated — the shadow must not perturb
+// the Accepted-condition path.
+func (r *ModelRouteReconciler) shadowRender(ctx context.Context, namespace string) {
+	if r.ShadowDeployment == "" {
+		return
+	}
+	logger := log.FromContext(ctx)
+	var routes gatewayv1alpha1.ModelRouteList
+	if err := r.List(ctx, &routes, client.InNamespace(namespace)); err != nil {
+		logger.Error(err, "shadow render: list ModelRoutes failed")
+		return
+	}
+	var policies gatewayv1alpha1.ModelPolicyList
+	if err := r.List(ctx, &policies, client.InNamespace(namespace)); err != nil {
+		logger.Error(err, "shadow render: list ModelPolicies failed")
+		return
+	}
+	resources, err := operatorrender.RenderDeployment(ctx, operatorrender.DeploymentInput{
+		Deployment: r.ShadowDeployment,
+		Revision:   "cr-shadow",
+		Routes:     routes.Items,
+		Policies:   policies.Items,
+	}, nil)
+	if err != nil {
+		logger.Error(err, "shadow render failed")
+		return
+	}
+	rendered := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		rendered = append(rendered, string(resource.Kind)+" "+resource.APIPath)
+	}
+	logger.V(1).Info("shadow render completed", "deployment", r.ShadowDeployment, "resources", rendered)
 }
 
 func (r *ModelRouteReconciler) writeAccepted(ctx context.Context, route *gatewayv1alpha1.ModelRoute, status metav1.ConditionStatus, reason, message string) error {

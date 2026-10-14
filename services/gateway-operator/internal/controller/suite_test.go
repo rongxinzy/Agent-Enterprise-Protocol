@@ -78,7 +78,9 @@ func TestControllersWithEnvtest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	if err := (&ModelRouteReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+	// The shadow render rides every accepted ModelRoute reconcile against the
+	// real cache, exercising the deployment-scope list + render wiring.
+	if err := (&ModelRouteReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), ShadowDeployment: "envtest-shadow"}).SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
 	if err := (&ModelPolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {

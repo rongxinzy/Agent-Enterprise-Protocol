@@ -45,9 +45,16 @@ func main() {
 }
 
 // wireManager registers the controllers and health checks; split out so the
-// wiring is testable without a live cluster.
+// wiring is testable without a live cluster. AEP_OPERATOR_SHADOW_DEPLOYMENT
+// turns on the phase 1 shadow render for that deployment scope (render only,
+// logged at debug; nothing is applied).
 func wireManager(mgr ctrl.Manager) error {
-	if err := (&controller.ModelRouteReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+	routeReconciler := &controller.ModelRouteReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		ShadowDeployment: os.Getenv("AEP_OPERATOR_SHADOW_DEPLOYMENT"),
+	}
+	if err := routeReconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&controller.ModelPolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
