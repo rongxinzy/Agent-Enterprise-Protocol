@@ -156,3 +156,21 @@ func TestCompareCatalogRoutesReportsMissingExtraAndMismatched(t *testing.T) {
 		t.Fatalf("protocol drift = %#v", comparison.Mismatched)
 	}
 }
+
+// A desired state stored before the namespace left the desired state still
+// carries one. The reconciler resolves the namespace server-side, so the
+// catalog comparison must ignore it: otherwise every existing deployment would
+// report drift for every credential-bound route after the upgrade.
+func TestCompareCatalogRoutesIgnoresTheStoredCredentialNamespace(t *testing.T) {
+	stored := "higress-system"
+	legacy := []dataPlaneRoute{
+		{ModelID: "chat-a", Enabled: true, Endpoint: "http://provider-a/v1", UpstreamModel: "provider-a-chat", Protocol: "openai-compatible", ProviderType: "openai", CredentialRef: &dataPlaneSecretReference{Name: "aep-credential-credential-a", Key: "api-key", Namespace: &stored}},
+	}
+	derived := []dataPlaneRoute{
+		{ModelID: "chat-a", Enabled: true, Endpoint: "http://provider-a/v1", UpstreamModel: "provider-a-chat", Protocol: "openai-compatible", ProviderType: "openai", CredentialRef: &dataPlaneSecretReference{Name: "aep-credential-credential-a", Key: "api-key"}},
+	}
+	comparison := compareCatalogRoutes(legacy, derived)
+	if len(comparison.Missing) != 0 || len(comparison.Extra) != 0 || len(comparison.Mismatched) != 0 {
+		t.Fatalf("a stored credential namespace read as drift: %#v", comparison)
+	}
+}
