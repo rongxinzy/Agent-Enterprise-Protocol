@@ -466,11 +466,14 @@ func validModelSubject(subjectType string) bool {
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {
-	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListModelAssignments(request.Context())
+	pageSize := limit(request)
+	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListModelAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	items, nextCursor := page(items, pageSize, func(item repository.ModelAssignment) string { return item.ID })
 	assignments := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		assignments = append(assignments, map[string]any{
@@ -478,7 +481,7 @@ func (s *Server) listModelAssignments(response http.ResponseWriter, request *htt
 			"subject": map[string]string{"type": item.SubjectType, "id": item.SubjectID}, "createdAt": item.CreatedAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments})
+	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments, "nextCursor": nextCursor})
 }
 
 func (s *Server) createModelAssignment(response http.ResponseWriter, request *http.Request) {

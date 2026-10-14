@@ -300,9 +300,17 @@ func (s *Store) DeleteSkillVersion(ctx context.Context, skillID, version string)
 	return item.ObjectKey, nil
 }
 
-func (s *DeploymentStore) ListSkillAssignments(ctx context.Context) ([]SkillAssignment, error) {
+func (s *DeploymentStore) ListSkillAssignmentsPage(ctx context.Context, cursor string, fetchLimit int32) ([]SkillAssignment, error) {
 	items := make([]SkillAssignment, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("id").Find(&items).Error
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Find(&items).Error
 	return items, err
 }
 
@@ -390,9 +398,17 @@ func (s *DeploymentStore) DeleteCredential(ctx context.Context, id string) error
 	return resultError(result)
 }
 
-func (s *DeploymentStore) ListCredentialAssignments(ctx context.Context) ([]CredentialAssignment, error) {
+func (s *DeploymentStore) ListCredentialAssignmentsPage(ctx context.Context, cursor string, fetchLimit int32) ([]CredentialAssignment, error) {
 	items := make([]CredentialAssignment, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("created_at, id").Find(&items).Error
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Find(&items).Error
 	return items, err
 }
 
@@ -454,9 +470,17 @@ func (s *DeploymentStore) DeleteModel(ctx context.Context, id string) error {
 	return resultError(result)
 }
 
-func (s *DeploymentStore) ListModelAssignments(ctx context.Context) ([]ModelAssignment, error) {
+func (s *DeploymentStore) ListModelAssignmentsPage(ctx context.Context, cursor string, fetchLimit int32) ([]ModelAssignment, error) {
 	items := make([]ModelAssignment, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("created_at, id").Find(&items).Error
+	query := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID)
+	if cursor != "" {
+		query = query.Where("id > ?", cursor)
+	}
+	query = query.Order("id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err := query.Find(&items).Error
 	return items, err
 }
 

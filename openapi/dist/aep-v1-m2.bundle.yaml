@@ -1534,6 +1534,9 @@ paths:
       tags:
         - Admin Skills
       operationId: listSkillAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/AssignmentList'
@@ -1905,6 +1908,9 @@ paths:
       tags:
         - Admin Credentials
       operationId: listCredentialAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/CredentialAssignmentList'
@@ -2047,6 +2053,9 @@ paths:
       tags:
         - Admin Models
       operationId: listModelAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/ModelAssignmentList'
@@ -5754,11 +5763,16 @@ components:
       type: object
       required:
         - items
+        - nextCursor
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/Assignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillAssignmentWrite:
       type: object
       required:
@@ -6304,11 +6318,16 @@ components:
       type: object
       required:
         - assignments
+        - nextCursor
       properties:
         assignments:
           type: array
           items:
             $ref: '#/components/schemas/CredentialAssignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CredentialAssignmentWrite:
       type: object
       required:
@@ -6565,11 +6584,16 @@ components:
       type: object
       required:
         - assignments
+        - nextCursor
       properties:
         assignments:
           type: array
           items:
             $ref: '#/components/schemas/ModelAssignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     ModelAssignmentWrite:
       type: object
       required:

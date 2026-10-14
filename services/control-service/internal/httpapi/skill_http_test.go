@@ -326,7 +326,7 @@ func TestAdminSkillAssignmentLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 
 	expires := now.Truncate(time.Second).Add(24 * time.Hour)
-	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY id`).WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY id LIMIT \$2`).WithArgs("deployment-a", 51).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "skill_id", "subject_type", "subject_id", "created_at", "expires_at"}).
 			AddRow("assignment-a", "deployment-a", "writer", "team", "engineering", now, expires).
 			AddRow("assignment-b", "deployment-a", "writer", "user", "user-a", now, nil))

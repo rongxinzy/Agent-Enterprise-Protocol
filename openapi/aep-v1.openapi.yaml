@@ -322,6 +322,9 @@ paths:
     get:
       tags: [Admin Skills]
       operationId: listSkillAssignments
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {$ref: '#/components/responses/AssignmentList'}
     post:
@@ -407,6 +410,9 @@ paths:
     get:
       tags: [Admin Credentials]
       operationId: listCredentialAssignments
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {$ref: '#/components/responses/CredentialAssignmentList'}
     post:
@@ -481,6 +487,9 @@ paths:
     get:
       tags: [Admin Models]
       operationId: listModelAssignments
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {$ref: '#/components/responses/ModelAssignmentList'}
     post:
@@ -1106,9 +1115,10 @@ components:
           description: Temporary grant that stops authorizing at this time; null for a perpetual grant. Only an administrator can set it.
     AssignmentList:
       type: object
-      required: [items]
+      required: [items, nextCursor]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Assignment'}}
+        nextCursor: {type: [string, 'null']}
     ModelSubject:
       type: object
       required: [type, id]
@@ -1126,9 +1136,10 @@ components:
         createdAt: {type: string, format: date-time}
     ModelAssignmentList:
       type: object
-      required: [assignments]
+      required: [assignments, nextCursor]
       properties:
         assignments: {type: array, items: {$ref: '#/components/schemas/ModelAssignment'}}
+        nextCursor: {type: [string, 'null']}
     CredentialSubject:
       type: object
       required: [type, id]
@@ -1146,9 +1157,10 @@ components:
         createdAt: {type: string, format: date-time}
     CredentialAssignmentList:
       type: object
-      required: [assignments]
+      required: [assignments, nextCursor]
       properties:
         assignments: {type: array, items: {$ref: '#/components/schemas/CredentialAssignment'}}
+        nextCursor: {type: [string, 'null']}
     SkillAssignmentWrite:
       type: object
       required: [skillId, subject]
