@@ -153,7 +153,12 @@ func RenderDeployment(ctx context.Context, in DeploymentInput, fetch gatewayrend
 		routesByName[in.Routes[index].Name] = in.Routes[index]
 	}
 	input := gatewayrender.Input{Deployment: in.Deployment, Revision: in.Revision, Routes: routes}
-	credentials := gatewayrender.FetchCredentials(ctx, routes, fetch)
+	credentials, err := gatewayrender.FetchCredentials(ctx, routes, fetch)
+	if err != nil {
+		// Same fail-closed semantics as the reconciler's CREDENTIAL_UNAVAILABLE:
+		// a route is never rendered with a missing credential.
+		return nil, err
+	}
 	_, resources, _, err := gatewayrender.Render(input, credentials)
 	if err != nil {
 		return nil, err

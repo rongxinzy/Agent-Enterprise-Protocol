@@ -45,6 +45,9 @@ type shadowFixture struct {
 	desired  desiredStateWire
 	routes   []gatewayv1alpha1.ModelRoute
 	policies []gatewayv1alpha1.ModelPolicy
+	// expectFetchFailure marks fixtures whose credential resolution must abort
+	// both paths with the identical error (#283 fail-closed semantics).
+	expectFetchFailure bool
 	// native carries the deployment-level native gateway fixture; nil means
 	// the native gateway is disabled on both sides.
 	native *nativeFixture
@@ -180,7 +183,12 @@ func shadowFixtures() []shadowFixture {
 			},
 		},
 		{
-			name: "credentialRef whose value fails to resolve renders without tokens on both paths",
+			// Post-#283 semantics: a configured fetcher that fails aborts the
+			// whole resolution (CREDENTIAL_UNAVAILABLE on the reconciler); a
+			// route is never rendered without its credential. Both paths must
+			// fail with the identical error.
+			name:               "credential resolution failure aborts both paths identically",
+			expectFetchFailure: true,
 			desired: desiredStateWire{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{
 				routeJSON("chat", "openai-compatible", "https://api.example/v1", "upstream-chat", true, &gatewayrender.SecretReference{Name: "provider-secrets", Key: "broken"}),
 			}},
@@ -248,9 +256,10 @@ func fakeCredentials(_ context.Context, ref gatewayrender.SecretReference) (stri
 }
 
 // reconcilerRender mirrors Reconciler.Sync plus syncGatewayLimits: decode the
-// desired-state wire JSON, resolve credentials, Render, then the native
-// gateway resources (limits, then quota) when the native gateway is enabled.
-func reconcilerRender(ctx context.Context, t *testing.T, fixture shadowFixture, fetch gatewayrender.CredentialFetcher) []gatewayrender.RenderedResource {
+// desired-state wire JSON, resolve credentials (fail-closed, #283), Render,
+// then the native gateway resources (limits, then quota) when the native
+// gateway is enabled. A credential failure is returned, not rendered around.
+func reconcilerRender(ctx context.Context, t *testing.T, fixture shadowFixture, fetch gatewayrender.CredentialFetcher) ([]gatewayrender.RenderedResource, error) {
 	t.Helper()
 	raw, err := json.Marshal(fixture.desired)
 	if err != nil {
@@ -261,12 +270,16 @@ func reconcilerRender(ctx context.Context, t *testing.T, fixture shadowFixture, 
 		t.Fatal(err)
 	}
 	input := gatewayrender.Input{Deployment: desired.DeploymentID, Revision: desired.Revision, Routes: desired.Routes}
-	_, resources, _, err := gatewayrender.Render(input, gatewayrender.FetchCredentials(ctx, desired.Routes, fetch))
+	credentials, err := gatewayrender.FetchCredentials(ctx, desired.Routes, fetch)
+	if err != nil {
+		return nil, err
+	}
+	_, resources, _, err := gatewayrender.Render(input, credentials)
 	if err != nil {
 		t.Fatalf("reconciler path render: %v", err)
 	}
 	if fixture.native == nil {
-		return resources
+		return resources, nil
 	}
 	cfg := fixture.native.config
 	password := ""
@@ -292,11 +305,11 @@ func reconcilerRender(ctx context.Context, t *testing.T, fixture shadowFixture, 
 		}
 		resources = append(resources, quota...)
 	}
-	return resources
+	return resources, nil
 }
 
 // operatorRender renders the same intent from the CR snapshot.
-func operatorRender(ctx context.Context, t *testing.T, fixture shadowFixture, fetch gatewayrender.CredentialFetcher) []gatewayrender.RenderedResource {
+func operatorRender(ctx context.Context, t *testing.T, fixture shadowFixture, fetch gatewayrender.CredentialFetcher) ([]gatewayrender.RenderedResource, error) {
 	t.Helper()
 	input := operatorrender.DeploymentInput{
 		Deployment: fixture.desired.DeploymentID,
@@ -307,19 +320,31 @@ func operatorRender(ctx context.Context, t *testing.T, fixture shadowFixture, fe
 	if fixture.native != nil {
 		input.Native = fixture.native.config
 	}
-	resources, err := operatorrender.RenderDeployment(ctx, input, fetch)
-	if err != nil {
-		t.Fatalf("operator path render: %v", err)
-	}
-	return resources
+	return operatorrender.RenderDeployment(ctx, input, fetch)
 }
 
 func TestShadowRenderByteParity(t *testing.T) {
 	ctx := context.Background()
 	for _, fixture := range shadowFixtures() {
 		t.Run(fixture.name, func(t *testing.T) {
-			dbSide := reconcilerRender(ctx, t, fixture, fakeCredentials)
-			crSide := operatorRender(ctx, t, fixture, fakeCredentials)
+			dbSide, dbErr := reconcilerRender(ctx, t, fixture, fakeCredentials)
+			crSide, crErr := operatorRender(ctx, t, fixture, fakeCredentials)
+
+			if fixture.expectFetchFailure {
+				if dbErr == nil || crErr == nil {
+					t.Fatalf("both paths must fail closed: db=%v cr=%v", dbErr, crErr)
+				}
+				if dbErr.Error() != crErr.Error() {
+					t.Fatalf("error drift: db=%q cr=%q", dbErr, crErr)
+				}
+				if dbSide != nil || crSide != nil {
+					t.Fatal("a failed credential resolution must not render anything")
+				}
+				return
+			}
+			if dbErr != nil || crErr != nil {
+				t.Fatalf("unexpected render error: db=%v cr=%v", dbErr, crErr)
+			}
 
 			// The CR snapshot must also reproduce the published contentHash:
 			// canonical-hash parity proves the JSON-canonical route sets match.
@@ -332,7 +357,10 @@ func TestShadowRenderByteParity(t *testing.T) {
 			}
 
 			// The operator render is deterministic across repeated runs.
-			again := operatorRender(ctx, t, fixture, fakeCredentials)
+			again, err := operatorRender(ctx, t, fixture, fakeCredentials)
+			if err != nil {
+				t.Fatal(err)
+			}
 			assertResourcesEqual(t, "operator render is not deterministic", crSide, again)
 
 			assertResourcesEqual(t, "shadow byte parity", dbSide, crSide)
@@ -397,8 +425,14 @@ func TestShadowDocumentedExclusions(t *testing.T) {
 			routeCR("route-reasoner", "reasoner", "openai", "/v1/chat", "deepseek-reasoner", true, nil),
 		},
 	}
-	dbSide := reconcilerRender(ctx, t, fixture, fakeCredentials)
-	crSide := operatorRender(ctx, t, fixture, fakeCredentials)
+	dbSide, err := reconcilerRender(ctx, t, fixture, fakeCredentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crSide, err := operatorRender(ctx, t, fixture, fakeCredentials)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(dbSide) != len(crSide) {
 		t.Fatalf("resource count %d != %d", len(dbSide), len(crSide))
 	}

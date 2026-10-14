@@ -31,9 +31,13 @@ type Config struct {
 	HTTPClient    *http.Client
 	Applier       Applier
 	// CredentialFetcher resolves credentialRef values for the rendered
-	// WasmPlugin (ai-proxy requires inline apiTokens). When nil, routes with
-	// credentialRefs render without tokens — ai-proxy then rejects requests
-	// to those providers.
+	// WasmPlugin (ai-proxy requires inline apiTokens). A nil fetcher means
+	// secret-backed credentials are not configured for this reconciler: refs
+	// resolve to nothing and routes render without tokens (ai-proxy then
+	// rejects requests to those providers) — this remains intentional for
+	// deployments that do not use secret-backed providers. When a fetcher is
+	// configured and it fails to resolve a ref, Sync reports
+	// CREDENTIAL_UNAVAILABLE instead of rendering the route without its token.
 	CredentialFetcher gatewayrender.CredentialFetcher
 }
 
@@ -89,7 +93,10 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 	if err := r.writeStatus(ctx, tenant, Status{State: "applying", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, ResourceCount: len(desired.Routes)}); err != nil {
 		return err
 	}
-	credentials := gatewayrender.FetchCredentials(ctx, desired.Routes, r.config.CredentialFetcher)
+	credentials, err := gatewayrender.FetchCredentials(ctx, desired.Routes, r.config.CredentialFetcher)
+	if err != nil {
+		return r.writeFailure(ctx, tenant, "CREDENTIAL_UNAVAILABLE", err)
+	}
 	document, resources, _, err := gatewayrender.Render(gatewayrender.Input{Deployment: desired.TenantID(), Revision: desired.Revision, Routes: desired.Routes}, credentials)
 	if err != nil {
 		return r.writeFailure(ctx, tenant, "RENDER_FAILED", err)

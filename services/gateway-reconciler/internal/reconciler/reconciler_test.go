@@ -79,6 +79,52 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 	}
 }
 
+func TestSyncReportsCredentialUnavailableWithoutApplying(t *testing.T) {
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{{ModelID: "model-1", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible", CredentialRef: &gatewayrender.SecretReference{Name: "provider-secrets", Key: "model-1"}}}}
+	desired.ContentHash = gatewayrender.CanonicalHash(desired.Revision, desired.Routes)
+	statuses := make([]Status, 0)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			_ = json.NewEncoder(response).Encode(desired)
+			return
+		}
+		var status Status
+		if err := json.NewDecoder(request.Body).Decode(&status); err != nil {
+			response.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		statuses = append(statuses, status)
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	output := t.TempDir()
+	applier := &recordingApplier{}
+	worker, err := New(Config{ControlURL: server.URL, Token: "token", OutputDir: output, Tenants: []string{"demo"}, HTTPClient: server.Client(), Applier: applier,
+		CredentialFetcher: func(context.Context, gatewayrender.SecretReference) (string, error) {
+			return "", errors.New("secret read denied")
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = worker.Sync(context.Background(), "demo")
+	if err == nil || !strings.Contains(err.Error(), "CREDENTIAL_UNAVAILABLE") || !strings.Contains(err.Error(), "provider-secrets/model-1") {
+		t.Fatalf("Sync() error = %v, want CREDENTIAL_UNAVAILABLE naming the credentialRef", err)
+	}
+	if len(statuses) != 2 || statuses[0].State != "applying" || statuses[1].State != "error" {
+		t.Fatalf("unexpected status transitions: %#v", statuses)
+	}
+	if statuses[1].ErrorCode == nil || *statuses[1].ErrorCode != "CREDENTIAL_UNAVAILABLE" {
+		t.Fatalf("failure status = %#v", statuses[1])
+	}
+	if applier.calls != 0 {
+		t.Fatalf("apply calls = %d, want 0", applier.calls)
+	}
+	if _, statErr := os.Stat(filepath.Join(output, "demo.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("a document was written despite the credential failure: %v", statErr)
+	}
+}
+
 func TestSyncReportsKubernetesApplyFailure(t *testing.T) {
 	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{}}
 	desired.ContentHash = gatewayrender.CanonicalHash(desired.Revision, desired.Routes)

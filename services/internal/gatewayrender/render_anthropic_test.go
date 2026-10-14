@@ -1,6 +1,7 @@
 package gatewayrender
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -100,6 +101,54 @@ func TestRenderAnthropicEndpointVariations(t *testing.T) {
 	}
 	if !strings.Contains(resources[1].Body, "substitution: '/api/anthropic/\\1'") {
 		t.Fatalf("trailing-slash substitution = %s", resources[1].Body)
+	}
+}
+
+func TestRenderAnthropicVersionedEndpointPaths(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		endpoint     string
+		pattern      string
+		substitution string
+		paths        map[string]string
+	}{
+		{
+			endpoint: "http://provider.example/v1", pattern: "^/bench-anthropic/(?:v1/)?(.*)$", substitution: "/v1/\\1",
+			paths: map[string]string{
+				"/bench-anthropic/messages":                 "/v1/messages",
+				"/bench-anthropic/v1/messages":              "/v1/messages",
+				"/bench-anthropic/v1/messages/count_tokens": "/v1/messages/count_tokens",
+			},
+		},
+		{
+			endpoint: "https://provider.example/api/anthropic/v1/", pattern: "^/bench-anthropic/(?:v1/)?(.*)$", substitution: "/api/anthropic/v1/\\1",
+			paths: map[string]string{"/bench-anthropic/v1/messages": "/api/anthropic/v1/messages"},
+		},
+		{
+			endpoint: "https://provider.example/api/anthropic", pattern: "^/bench-anthropic/(.*)$", substitution: "/api/anthropic/\\1",
+			paths: map[string]string{"/bench-anthropic/v1/messages": "/api/anthropic/v1/messages"},
+		},
+	} {
+		t.Run(test.endpoint, func(t *testing.T) {
+			_, resources, _, err := Render(Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{anthropicRoute("bench-anthropic", test.endpoint)}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filter := resources[1].Body
+			if !strings.Contains(filter, "regex: "+yamlScalar(test.pattern)) || !strings.Contains(filter, "substitution: "+yamlScalar(test.substitution)) {
+				t.Fatalf("unexpected path rewrite for %q", test.endpoint)
+			}
+			pattern := regexp.MustCompile(test.pattern)
+			for input, want := range test.paths {
+				matches := pattern.FindStringSubmatch(input)
+				if len(matches) != 2 {
+					t.Fatalf("rewrite pattern did not match %q", input)
+				}
+				if got := strings.Replace(test.substitution, `\1`, matches[1], 1); got != want {
+					t.Errorf("rewrite %q = %q, want %q", input, got, want)
+				}
+			}
+		})
 	}
 }
 
