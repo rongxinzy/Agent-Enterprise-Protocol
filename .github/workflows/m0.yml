@@ -41,6 +41,21 @@ jobs:
       pull-requests: read
       actions: read
 
+  # Compatibility shim: the branch protection rule still requires the
+  # pre-reorganisation check name `dependency-audit`, but a reusable workflow's
+  # jobs now report as `<caller job> / <job>` ("security / dependency-audit").
+  # Re-expose the required context from the real result so the rule stays
+  # satisfiable; delete this job once the required-check list is updated.
+  dependency-audit:
+    if: github.event_name == 'pull_request'
+    needs: [security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: echo "The dependency audit passed in the reusable security workflow."
+
   ci-results:
     if: ${{ github.event_name == 'pull_request' && always() }}
     needs: [release-gate, codeql, security, gate-tests]
