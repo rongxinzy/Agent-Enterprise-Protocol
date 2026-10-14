@@ -678,8 +678,8 @@ export class AepClient {
     });
   }
 
-  listSkillAssignments(): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/skill-assignments'});
+  listSkillAssignments(filters: Query = {}): Promise<JsonObject> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/skill-assignments?${query(filters)}`});
   }
 
   createSkillAssignment(input: JsonObject): Promise<JsonObject> {
@@ -735,8 +735,8 @@ export class AepClient {
     });
   }
 
-  listCredentialAssignments(): Promise<CredentialAssignmentList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/credential-assignments'});
+  listCredentialAssignments(filters: Query = {}): Promise<CredentialAssignmentList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/credential-assignments?${query(filters)}`});
   }
 
   createCredentialAssignment(input: CredentialAssignmentWrite): Promise<CredentialAssignment> {
@@ -783,8 +783,8 @@ export class AepClient {
     });
   }
 
-  listModelAssignments(): Promise<ModelAssignmentList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-assignments'});
+  listModelAssignments(filters: Query = {}): Promise<ModelAssignmentList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-assignments?${query(filters)}`});
   }
 
   createModelAssignment(input: ModelAssignmentWrite): Promise<ModelAssignment> {

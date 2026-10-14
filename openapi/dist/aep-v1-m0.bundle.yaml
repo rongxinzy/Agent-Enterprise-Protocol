@@ -1009,6 +1009,9 @@ paths:
       tags:
         - Admin Skills
       operationId: listSkillAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/AssignmentList'
@@ -2908,11 +2911,16 @@ components:
       type: object
       required:
         - items
+        - nextCursor
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/Assignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillAssignmentWrite:
       type: object
       required:
