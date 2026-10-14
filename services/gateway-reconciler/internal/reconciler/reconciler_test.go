@@ -10,72 +10,29 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
+
+// renderInput projects the DB-shaped desired state onto the shared render
+// input, mirroring Reconciler.Sync.
+func renderInput(desired DesiredState) gatewayrender.Input {
+	return gatewayrender.Input{Deployment: desired.TenantID(), Revision: desired.Revision, Routes: desired.Routes}
+}
 
 type recordingApplier struct {
 	calls int
 	err   error
 }
 
-func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ []RenderedResource) error {
+func (a *recordingApplier) Apply(_ context.Context, _ DesiredState, _ []gatewayrender.RenderedResource) error {
 	a.calls++
 	return a.err
 }
 
-func TestRenderIsDeterministicAndDoesNotIncludeSecretValues(t *testing.T) {
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", ContentHash: "ignored", Routes: []Route{{ModelID: "model-b", Enabled: true, Endpoint: "/b", UpstreamModel: "up-b", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-b"}}, {ModelID: "model-a", Enabled: true, Endpoint: "/a", UpstreamModel: "up-a", Protocol: "openai-compatible"}}}
-	first, _, firstHash, err := Render(desired, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, _, secondHash, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{desired.Routes[1], desired.Routes[0]}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first != second || firstHash != secondHash {
-		t.Fatal("render output is not deterministic")
-	}
-	// With nil credential values the render omits apiTokens entirely; the
-	// credentialRef name stays a lookup key and never reaches the document.
-	if strings.Contains(first, "provider-secret-value") {
-		t.Fatal("secret value leaked into render without credential fetcher")
-	}
-	// With the value resolved, it inlines as an apiToken for ai-proxy.
-	withCredentials, _, _, err := Render(desired, map[string]string{"provider-secrets/model-b": "provider-secret-value"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(withCredentials, "provider-secret-value") {
-		t.Fatal("resolved credential was not inlined as an apiToken")
-	}
-}
-
-func TestRenderRejectsMissingRevision(t *testing.T) {
-	if _, _, _, err := Render(DesiredState{DeploymentID: "demo"}, nil); err == nil {
-		t.Fatal("missing revision was accepted")
-	}
-}
-
-func TestRenderSelectsDeepSeekProviderAndRejectsUnknownProviders(t *testing.T) {
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-deepseek", Routes: []Route{{
-		ModelID: "reasoner", Enabled: true, Endpoint: "/v1/chat", UpstreamModel: "deepseek-reasoner", Protocol: "openai-compatible", ProviderType: "deepseek",
-	}}}
-	document, _, _, err := Render(desired, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(document, "type: 'deepseek'") {
-		t.Fatalf("DeepSeek provider was not rendered: %s", document)
-	}
-	desired.Routes[0].ProviderType = "unknown"
-	if _, _, _, err := Render(desired, nil); err == nil {
-		t.Fatal("unsupported provider type was accepted")
-	}
-}
-
 func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{{ModelID: "model-1", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible", CredentialRef: &SecretReference{Name: "provider-secrets", Key: "model-1"}}}}
-	desired.ContentHash = canonicalHash(desired)
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{{ModelID: "model-1", Enabled: true, Endpoint: "/v1", UpstreamModel: "upstream", Protocol: "openai-compatible", CredentialRef: &gatewayrender.SecretReference{Name: "provider-secrets", Key: "model-1"}}}}
+	desired.ContentHash = gatewayrender.CanonicalHash(desired.Revision, desired.Routes)
 	statuses := make([]Status, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("X-AEP-Data-Plane-Token") != "token" || request.Header.Get("X-AEP-Deployment-ID") != "demo" {
@@ -123,8 +80,8 @@ func TestSyncReadsDesiredStateWritesResourcesAndReportsReady(t *testing.T) {
 }
 
 func TestSyncReportsKubernetesApplyFailure(t *testing.T) {
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{}}
-	desired.ContentHash = canonicalHash(desired)
+	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{}}
+	desired.ContentHash = gatewayrender.CanonicalHash(desired.Revision, desired.Routes)
 	statuses := make([]Status, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodGet {
@@ -164,8 +121,8 @@ func TestSyncReportsControlAndDesiredStateFailures(t *testing.T) {
 		{name: "status update rejected", rejectStatus: true, failureCode: "status update returned 503", wantStates: []string{"applying"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{}}
-			desired.ContentHash = canonicalHash(desired)
+			desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []gatewayrender.Route{}}
+			desired.ContentHash = gatewayrender.CanonicalHash(desired.Revision, desired.Routes)
 			if test.noRevision {
 				desired.Revision = ""
 			}

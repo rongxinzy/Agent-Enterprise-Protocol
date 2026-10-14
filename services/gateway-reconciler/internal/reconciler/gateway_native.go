@@ -5,100 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"sort"
-	"strings"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
-const (
-	requestLimitURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/cluster-key-rate-limit@sha256:8f704ae666222d1cc8e67ea72a7342ba5f08db1dd1cb8f5344e3700924f87ce5"
-	// Higress plugin snapshot 2.2.5, plugin version 2.0.3, source
-	// 2b837c0ada8dbfb3e4bd92fc3f18ea532d269cb1. Older 2025 artifacts lack
-	// global_threshold and Anthropic quota path/usage support.
-	tokenLimitURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-token-ratelimit@sha256:9276a7d4cbd7afef668fd1aaf41212e663fd7fa98661c619398a7f2fb2736679"
-	quotaURL      = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-quota@sha256:2684810410de2803200f21d4971fe30161a7c0060c39ccab3906f6bcd4b8a509"
-	quotaAuthURL  = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/key-auth@sha256:18587fac5be178a2260c37ed74eb7abb9ed9b24915d3e2f037b69983772a4700"
-)
-
-type NativeGatewayConfig struct {
-	Enabled                 bool
-	RedisService            string
-	RedisPort               int
-	RedisUsername           string
-	RedisDatabase           int
-	RedisPasswordRef        *SecretReference
-	QuotaAdminCredentialRef *SecretReference
-}
-
-func RenderGatewayLimits(desired DesiredState, publication gatewaypolicy.Publication, cfg NativeGatewayConfig, password string) ([]RenderedResource, error) {
-	if cfg.RedisService == "" || cfg.RedisPort < 1 || cfg.RedisPort > 65535 || cfg.RedisDatabase < 0 {
-		return nil, errors.New("native gateway Redis is not configured")
-	}
-	if publication.Revision != gatewaypolicy.Revision(publication.Items) {
-		return nil, errors.New("native gateway publication hash mismatch")
-	}
-	items := append([]gatewaypolicy.Limit(nil), publication.Items...)
-	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-	resources := make([]RenderedResource, 0, len(items))
-	ingresses := make([]string, 0)
-	for _, route := range desired.Routes {
-		if !route.Enabled {
-			continue
-		}
-		strategy, err := strategyFor(route)
-		if err != nil {
-			return nil, err
-		}
-		if strategy.bucket() == bucketAnthropic {
-			ingresses = append(ingresses, anthropicResourceName(route.ModelID))
-		} else {
-			ingresses = append(ingresses, openAIResourceName(desired.TenantID(), route.ModelID))
-		}
-	}
-	sort.Strings(ingresses)
-	for _, item := range items {
-		if !gatewaypolicy.ValidID(item.ID) || !item.Configuration.Valid() {
-			return nil, errors.New("invalid native gateway rule")
-		}
-		name := "aep-limit-" + resourceSuffix(desired.TenantID()+"/"+item.ID)
-		plugin, priority, field := requestLimitURL, 20, "query_per_"
-		if item.Configuration.Kind == "tokens" {
-			plugin, priority, field = tokenLimitURL, 600, "token_per_"
-		}
-		var out strings.Builder
-		out.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar(name) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar(plugin) + "\n  failStrategy: FAIL_CLOSE\n  phase: UNSPECIFIED_PHASE\n  priority: " + fmt.Sprint(priority) + "\n  defaultConfigDisable: true\n")
-		if !item.Configuration.Enabled || len(ingresses) == 0 {
-			out.WriteString("  matchRules: []\n")
-		} else {
-			redis := map[string]any{"service_name": cfg.RedisService, "service_port": cfg.RedisPort, "timeout": 1000, "database": cfg.RedisDatabase}
-			if cfg.RedisUsername != "" {
-				redis["username"] = cfg.RedisUsername
-			}
-			if password != "" {
-				redis["password"] = password
-			}
-			config := map[string]any{"rule_name": name, "redis": redis, "rejected_code": 429}
-			threshold := map[string]any{field + item.Configuration.Interval: item.Configuration.Maximum}
-			if item.Configuration.ScopeType == "global" && item.Configuration.ModelID == nil {
-				config["global_threshold"] = threshold
-			} else {
-				threshold["key"] = "1"
-				config["rule_items"] = []any{map[string]any{"limit_by_header": gatewaypolicy.Header(item.Configuration), "limit_keys": []any{threshold}}}
-			}
-			encoded, _ := json.Marshal(config)
-			out.WriteString("  matchRules:\n    - config: " + string(encoded) + "\n      configDisable: false\n      ingress:\n")
-			for _, ingress := range ingresses {
-				out.WriteString("        - " + yamlScalar(ingress) + "\n")
-			}
-		}
-		resources = append(resources, RenderedResource{Kind: ResourceGatewayNative, APIPath: "/apis/extensions.higress.io/v1alpha1/namespaces/higress-system/wasmplugins/" + name, Body: out.String()})
-	}
-	return resources, nil
-}
+// The native-gateway render functions (RenderGatewayLimits/RenderGatewayQuota)
+// live in the shared gatewayrender package; this file keeps the reconciler's
+// control-plane sync: fetch the publication, resolve secrets, render, apply,
+// acknowledge.
 
 func (r *Reconciler) syncGatewayLimits(ctx context.Context, desired DesiredState) (syncErr error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, r.config.ControlURL+"/internal/data-plane/gateway-limits", nil)
@@ -152,9 +69,10 @@ func (r *Reconciler) syncGatewayLimits(ctx context.Context, desired DesiredState
 			return errors.New("native Redis secret unavailable")
 		}
 	}
-	resources := make([]RenderedResource, 0)
+	resources := make([]gatewayrender.RenderedResource, 0)
+	input := gatewayrender.Input{Deployment: desired.TenantID(), Revision: desired.Revision, Routes: desired.Routes}
 	if publication.Revision != "" {
-		resources, err = RenderGatewayLimits(desired, publication, r.config.NativeGateway, password)
+		resources, err = gatewayrender.RenderGatewayLimits(input, publication, r.config.NativeGateway, password)
 	}
 	if err != nil {
 		return err
@@ -167,14 +85,14 @@ func (r *Reconciler) syncGatewayLimits(ctx context.Context, desired DesiredState
 		if fetchErr != nil {
 			return errors.New("native quota secret unavailable")
 		}
-		quota, renderErr := RenderGatewayQuota(desired, r.config.NativeGateway, password, credential)
+		quota, renderErr := gatewayrender.RenderGatewayQuota(input, r.config.NativeGateway, password, credential)
 		if renderErr != nil {
 			return renderErr
 		}
 		resources = append(resources, quota...)
 	}
 	applier, ok := r.config.Applier.(interface {
-		ApplyGatewayNative(context.Context, []RenderedResource) error
+		ApplyGatewayNative(context.Context, []gatewayrender.RenderedResource) error
 	})
 	if !ok {
 		return errors.New("native gateway requires a Kubernetes applier")
