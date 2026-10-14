@@ -704,13 +704,21 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *http.Request) {
 	var input struct {
 		Revision string `json:"revision"`
-		Status   string `json:"status"`
-		Items    []struct {
+		// The guide used to name this field `manifestRevision` while the server
+		// has always read `revision`; naming it here turns a silent drop into a
+		// clear refusal for anything still built against the old guide.
+		ManifestRevision *string `json:"manifestRevision"`
+		Status           string  `json:"status"`
+		Items            []struct {
 			SkillID string `json:"skillId"`
 			Status  string `json:"status"`
 		} `json:"items"`
 	}
 	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Revision == "" && input.ManifestRevision != nil {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The sync result must carry `revision`; the server does not read `manifestRevision`.")
 		return
 	}
 	installed := make([]string, 0)
