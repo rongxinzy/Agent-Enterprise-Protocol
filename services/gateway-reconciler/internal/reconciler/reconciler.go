@@ -449,7 +449,12 @@ func renderEnvoyFilter(name string, route Route, credentialValues map[string]str
 		return document.String()
 	}
 	substitution := anthropicRewrite(endpoint.Path)
-	document.WriteString("            regex_rewrite:\n              pattern:\n                google_re2: {}\n                regex: " + yamlScalar("^/"+anthropicSlug(route.ModelID)+"/(.*)$") + "\n              substitution: " + yamlScalar(substitution) + "\n")
+	pattern := "^/" + anthropicSlug(route.ModelID) + "/(.*)$"
+	endpointPath := strings.Trim(endpoint.Path, "/")
+	if endpointPath == "v1" || strings.HasSuffix(endpointPath, "/v1") {
+		pattern = "^/" + anthropicSlug(route.ModelID) + "/(?:v1/)?(.*)$"
+	}
+	document.WriteString("            regex_rewrite:\n              pattern:\n                google_re2: {}\n                regex: " + yamlScalar(pattern) + "\n              substitution: " + yamlScalar(substitution) + "\n")
 	return document.String()
 }
 
