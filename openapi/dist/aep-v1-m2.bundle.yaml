@@ -2787,7 +2787,7 @@ paths:
         - Admin Data Plane
       operationId: putDataPlaneDesiredState
       deprecated: true
-      description: 'Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.'
+      description: 'Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.'
       requestBody:
         required: true
         content:
@@ -4906,6 +4906,13 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams.
         parentId:
           type:
             - string
@@ -4946,6 +4953,13 @@ components:
         description:
           type: string
           maxLength: 1024
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold.
         parentId:
           type:
             - string
@@ -4966,6 +4980,13 @@ components:
           maxLength: 1024
         enabled:
           type: boolean
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions.
     ReplaceUserRBACRequest:
       type: object
       required:

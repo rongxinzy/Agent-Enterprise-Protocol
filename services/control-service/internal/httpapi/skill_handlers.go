@@ -540,8 +540,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !requireSkillIdentifier(response, request, input.SkillID) {
 		return
 	}
-	if input.Subject.Type != "user" && input.Subject.Type != "role" && input.Subject.Type != "team" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
 		return
 	}
 	id := uuid.NewString()
@@ -618,7 +617,7 @@ func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, cr
 SELECT gen_random_uuid()::text,$1,s.session_id
 FROM user_sessions s JOIN users u ON u.id=s.user_id
 WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
-  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)) OR ($3='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4)))
+  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)) OR ($3='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4)))
 ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
 	if err != nil {
 		return err
@@ -641,7 +640,7 @@ SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes,sv.published_at
 FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
 JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
 JOIN users u ON u.id=$2
-WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
+WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
 ), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,published_at DESC NULLS LAST,version DESC)
 SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.DeploymentID, claims.Subject)
 	if err != nil {
@@ -678,7 +677,7 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 		return
 	}
 	var objectKey string
-	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusForbidden, "SKILL_NOT_ASSIGNED", "The Skill version is not assigned.")
 		return

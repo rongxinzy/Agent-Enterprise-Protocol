@@ -89,6 +89,7 @@ assert(/^go\s+1\.26\.9$/m.test(goModule), "patched Go 1.26.9 baseline is not pin
 
 const controlConfig = await readText("services/control-service/internal/config/config.go");
 assert(controlConfig.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH must be false in production"), "production mock federated-auth guard is missing");
+assert(controlConfig.includes("AEP_ENABLE_MOCK_FEDERATED_AUTH requires AEP_ADDRESS to bind a loopback address"), "mock federated-auth loopback guard is missing");
 const controlServer = await readText("services/control-service/internal/httpapi/server.go");
 assert(controlServer.includes("http.StatusUpgradeRequired"), "protocol-version 426 gate is missing");
 assert(controlServer.includes("mockFederatedAuthEnabled(s.app.Config)"), "metadata does not conditionally advertise mock federated auth");

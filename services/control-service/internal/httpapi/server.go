@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -350,6 +351,37 @@ func passwordChangeRouteAllowed(request *http.Request) bool {
 	return request.Method == http.MethodGet && request.URL.Path == "/aep/v1/user/me"
 }
 
+// requireSubject checks that a polymorphic assignment subject exists in this
+// deployment. Subject ids carry no foreign key, so without this check an
+// assignment could name a role or team that was just deleted - and because those
+// ids are derived from the name, a later subject reusing the identifier would
+// inherit the grant.
+func (s *Server) requireSubject(response http.ResponseWriter, request *http.Request, subjectType, subjectID string) bool {
+	var table string
+	switch subjectType {
+	case "user":
+		table = "users"
+	case "role":
+		table = "roles"
+	case "team":
+		table = "teams"
+	default:
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
+		return false
+	}
+	var exists bool
+	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE deployment_id=$1 AND id=$2)`, claimsFrom(request).DeploymentID, subjectID).Scan(&exists)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return false
+	}
+	if !exists {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", fmt.Sprintf("The assignment subject %s %q does not exist in this deployment.", subjectType, subjectID))
+		return false
+	}
+	return true
+}
+
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		claims := claimsFrom(request)
@@ -389,7 +421,7 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 	}
 	var allowed bool
 	err := database.QueryRow(request.Context(), `SELECT EXISTS (
-  SELECT 1 FROM user_role_bindings urb
+  SELECT 1 FROM user_effective_roles urb
   JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
   JOIN role_permissions rp ON rp.deployment_id=urb.deployment_id AND rp.role_id=urb.role_id AND rp.permission_id=$3
   WHERE urb.deployment_id=$1 AND urb.user_id=$2

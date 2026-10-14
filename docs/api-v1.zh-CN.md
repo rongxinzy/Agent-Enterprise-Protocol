@@ -502,7 +502,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 团队构成一个森林。`POST /admin/teams` 接受可选的 `parentId`，每个团队都带有创建时即固定的
 `path` 和 `depth`；父团队创建后不可变更，因此不可能出现环形层级。删除仍被引用的团队时，
 存在子团队返回 `TEAM_HAS_CHILDREN`（409），是数字员工主团队返回 `TEAM_HAS_AGENTS`（409），
-其他引用返回 `TEAM_IN_USE`（409）。
+其他**外键**引用返回 `TEAM_IN_USE`（409）。通过多态 subject 列指向主体的授权（技能/模型/凭据授权与数据范围规则）**不带外键**：删除角色或团队会在同一事务内把它们一并删除，而不是拦下删除 —— 因此之后复用同一标识符的主体不会继承它们。
 
 ### 数字员工
 
@@ -788,3 +788,5 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 
 安全的读取请求采用指数退避重试。事件批次依据 `eventId` 幂等。授权码交换和凭证获取不得
 盲目重试。收到 `429` 或 `503` 时遵守 `Retry-After`。
+
+团队 `defaultRoleIds` 配置与有效角色继承规则见[团队默认角色](team-default-roles.zh-CN.md)。
