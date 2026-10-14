@@ -73,7 +73,7 @@ func TestTeamReadUpdateAndNotFound(t *testing.T) {
 		return sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at", "member_count"}).
 			AddRow("deployment-a", "engineering", name, "Builders", false, enabled, now, now, int64(3))
 	}
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a").WillReturnRows(teamRows("Engineering", true))
 	team, err := store.Deployment("deployment-a").GetTeamRecord(context.Background(), "engineering")
 	if err != nil || team.ID != "engineering" || team.MemberCount != 3 {
@@ -86,7 +86,7 @@ func TestTeamReadUpdateAndNotFound(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "teams" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a").WillReturnRows(teamRows(name, enabled))
 	updated, err := store.Deployment("deployment-a").UpdateTeam(context.Background(), "engineering", &name, &description, &enabled)
 	if err != nil || updated.Name != name || updated.Enabled || updated.MemberCount != 3 {

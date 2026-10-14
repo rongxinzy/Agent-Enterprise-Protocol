@@ -306,7 +306,7 @@ WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
     SELECT 1 FROM user_team_bindings utb
     WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id IN (SELECT id FROM scope_teams)
   )) OR ($3='role' AND EXISTS (
-    SELECT 1 FROM user_role_bindings urb
+    SELECT 1 FROM user_effective_roles urb
     JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
     WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4
   )))
