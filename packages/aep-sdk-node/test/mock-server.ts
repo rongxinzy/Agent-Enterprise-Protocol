@@ -15,6 +15,7 @@ export class MockAepServer {
   #modelGatewayOverride: string | null = null;
   readonly requests: Array<{method: string; path: string; search: string; headers: IncomingMessage['headers']}> = [];
   readonly loginBodies: Record<string, unknown>[] = [];
+  readonly teamBodies: Record<string, unknown>[] = [];
   readonly passwordChangeBodies: Record<string, unknown>[] = [];
   refreshCount = 0;
   baseUrl = '';
@@ -184,10 +185,19 @@ export class MockAepServer {
       return json(response, 200, role('operator'));
     }
     if (path === '/aep/v1/admin/teams') {
-      if (request.method === 'POST') return json(response, 201, team('support'));
+      if (request.method === 'POST') {
+        const input = await readJson(request);
+        this.teamBodies.push(input);
+        return json(response, 201, {...team('support'), defaultRoleIds: input.defaultRoleIds ?? []});
+      }
       return json(response, 200, {teams: [team('support')]});
     }
     if (path === '/aep/v1/admin/teams/support') {
+      if (request.method === 'PATCH') {
+        const input = await readJson(request);
+        this.teamBodies.push(input);
+        return json(response, 200, {...team('support'), defaultRoleIds: input.defaultRoleIds ?? []});
+      }
       if (request.method === 'DELETE') return empty(response, 204);
       return json(response, 200, team('support'));
     }

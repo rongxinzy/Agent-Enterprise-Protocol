@@ -52,7 +52,7 @@ func TestDataScopeContext(t *testing.T) {
 	t.Run("own team plus managed subtree plus grant", func(t *testing.T) {
 		application, sqlMock, pool := newDataScopeApp(t)
 
-		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles"`).
 			WithArgs("deployment-a", "user-a").
 			WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("manager"))
 
@@ -121,7 +121,7 @@ func TestDataScopeRuleWindow(t *testing.T) {
 	// The rule read filters by time window at the SQL level; the Go side just
 	// scans. Guard the scan shapes with a full row including timestamps.
 	application, sqlMock, pool := newDataScopeApp(t)
-	sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+	sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles"`).
 		WithArgs("deployment-a", "user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
 	pool.ExpectQuery(`JOIN user_team_bindings`).

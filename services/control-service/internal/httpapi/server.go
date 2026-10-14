@@ -389,7 +389,7 @@ func (s *Server) userHasPermission(request *http.Request, permission string) (bo
 	}
 	var allowed bool
 	err := database.QueryRow(request.Context(), `SELECT EXISTS (
-  SELECT 1 FROM user_role_bindings urb
+  SELECT 1 FROM user_effective_roles urb
   JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
   JOIN role_permissions rp ON rp.deployment_id=urb.deployment_id AND rp.role_id=urb.role_id AND rp.permission_id=$3
   WHERE urb.deployment_id=$1 AND urb.user_id=$2
