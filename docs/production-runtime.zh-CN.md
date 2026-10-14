@@ -8,7 +8,7 @@
 
 模型网关地址 `AEP_MODEL_GATEWAY_BASE_URL` 会原样通过 `GET /aep/v1/metadata` 下发给全部客户端，必须是集群外客户端可解析、可直达的地址，否则客户端只会在运行期收到莫名失败。启动时即校验：主机为集群内部名称（`*.svc.cluster.local`，或不含 `.` 的单段裸主机名，如 `aep-gateway-authorizer`）在任何环境都拒绝启动；`AEP_ENVIRONMENT=production` 时主机为 localhost 或回环地址（127.0.0.1、::1 等）同样拒绝启动，development/test 放行以便本机联调。未配置该变量不阻止启动，但 metadata 不再公布 `model_gateway` capability、也不输出 `modelGateway` 字段，客户端按能力关闭处理。启动日志会打印生效的模型网关地址，未配置时输出一条 warn。
 
-Mock 联合认证只属于开发和测试夹具。生产环境默认关闭，并拒绝 AEP_ENABLE_MOCK_FEDERATED_AUTH=true。在真实企业身份适配器接入前，不得公布或暴露 federated_auth。
+Mock 联合认证只属于本地开发夹具：它用一个字面量授权码换取 bootstrap 管理员会话。默认关闭；开启时要求 AEP_ADDRESS 绑定 loopback 地址；生产环境带着它启动会被拒绝。在真实企业身份适配器接入前，不得公布或暴露 federated_auth。
 
 部署输入参考 [control-service.env.example](../deploy/production/control-service.env.example) 与 [gateway-authorizer.env.example](../deploy/production/gateway-authorizer.env.example)。敏感变量支持 `VARIABLE_FILE` 文件路径，直接值与 `_FILE` 形式不能同时设置。Credential keyring 继续使用 `AEP_CREDENTIAL_MASTER_KEY_FILE`，以便受控轮换期间保留旧解密密钥。数据面 reconciler token 与网关 License 状态令牌也支持文件形式。Kubernetes 基线通过 External Secret 挂载 License 可信公钥集、签名 License 和两个服务共享的状态令牌；清单中的客户 ID 与部署 ID 必须由交付 overlay 替换为 License 对应值。
 

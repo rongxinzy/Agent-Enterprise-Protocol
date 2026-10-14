@@ -117,6 +117,7 @@ metadata:
   namespace: aep-system
 data:
   AEP_ENVIRONMENT: development
+  AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"
   AEP_LOG_FORMAT: text
   AEP_LOG_LEVEL: info
   AEP_ADDRESS: ":8080"
@@ -184,6 +185,7 @@ metadata:
   namespace: aep-system
 data:
   AEP_ENVIRONMENT: development
+  AEP_ENABLE_MOCK_FEDERATED_AUTH: "false"
   AEP_LOG_FORMAT: text
   AEP_LOG_LEVEL: info
   AEP_GATEWAY_ADDRESS: ":8090"
