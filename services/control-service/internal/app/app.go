@@ -420,7 +420,7 @@ ORDER BY m.id`, deploymentID, userID)
 }
 
 func (a *App) UserRoleIDs(ctx context.Context, deploymentID, userID string) ([]string, error) {
-    return a.Store.Deployment(deploymentID).EffectiveUserRoleIDs(ctx, userID)
+	return a.Store.Deployment(deploymentID).EffectiveUserRoleIDs(ctx, userID)
 }
 
 // IssueUserSession creates a refreshable terminal session that is scoped to a
