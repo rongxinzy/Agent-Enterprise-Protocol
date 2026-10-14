@@ -2031,22 +2031,27 @@ export interface components {
         };
         SkillSyncItem: {
             skillId: components["schemas"]["SkillIdentifier"];
-            version: components["schemas"]["SkillVersionIdentifier"];
-            /** @enum {string} */
-            action: "install" | "update" | "remove" | "unchanged";
-            /** @enum {string} */
-            status: "success" | "failed";
+            version?: components["schemas"]["SkillVersionIdentifier"];
+            /** @description Advisory when the Agent reports it; the server does not act on it. */
+            action?: string;
+            /**
+             * @description Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+             *     `removed` and every other value count as not installed. Agents use different
+             *     vocabularies, so the server reads the value as reported instead of enforcing an enum.
+             */
+            status: string;
             errorCode?: string;
             message?: string;
         };
         SkillSyncResult: {
-            manifestRevision: string;
+            /** @description The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync. */
+            revision?: string;
             /** Format: date-time */
-            startedAt: string;
+            startedAt?: string;
             /** Format: date-time */
-            completedAt: string;
-            /** @enum {string} */
-            status: "success" | "partial" | "failed";
+            completedAt?: string;
+            /** @description Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum. */
+            status?: string;
             items: components["schemas"]["SkillSyncItem"][];
         };
         EventResource: {
