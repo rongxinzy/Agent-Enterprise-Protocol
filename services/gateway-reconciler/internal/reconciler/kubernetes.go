@@ -16,12 +16,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
 const fieldManager = "aep-gateway-reconciler"
 
 type Applier interface {
-	Apply(context.Context, DesiredState, []RenderedResource) error
+	Apply(context.Context, DesiredState, []gatewayrender.RenderedResource) error
 }
 
 type KubernetesConfig struct {
@@ -98,8 +100,8 @@ func newKubernetesApplier(config KubernetesConfig, client kubernetes.Interface) 
 // Ingress+EnvoyFilter pair for every disabled anthropic route. Both WasmPlugins
 // are always present in the render (with empty matchRules when idle) and are
 // therefore always applied, never deleted.
-func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, resources []RenderedResource) error {
-	if !hasResourceKind(resources, ResourceWasmPlugin) {
+func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, resources []gatewayrender.RenderedResource) error {
+	if !hasResourceKind(resources, gatewayrender.ResourceWasmPlugin) {
 		return errors.New("rendered data plane must include the ai-proxy WasmPlugin")
 	}
 	for _, resource := range resources {
@@ -111,19 +113,19 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	for _, route := range desired.Routes {
 		if route.Protocol == "anthropic" {
 			if !route.Enabled {
-				name := anthropicResourceName(route.ModelID)
-				deletions = append(deletions, ingressAPIPath(name), envoyFilterAPIPath(name))
+				name := gatewayrender.AnthropicResourceName(route.ModelID)
+				deletions = append(deletions, gatewayrender.IngressAPIPath(name), gatewayrender.EnvoyFilterAPIPath(name))
 			}
 			continue
 		}
-		name := openAIResourceName(desired.TenantID(), route.ModelID)
+		name := gatewayrender.OpenAIResourceName(desired.TenantID(), route.ModelID)
 		if !route.Enabled {
-			deletions = append(deletions, ingressAPIPath(name))
+			deletions = append(deletions, gatewayrender.IngressAPIPath(name))
 		}
 		// Also remove the old absolute upstream when an enabled model switches
 		// back to a relative/preconfigured endpoint.
-		if !route.Enabled || !hasResourcePath(resources, envoyFilterAPIPath(name)) {
-			deletions = append(deletions, envoyFilterAPIPath(name))
+		if !route.Enabled || !hasResourcePath(resources, gatewayrender.EnvoyFilterAPIPath(name)) {
+			deletions = append(deletions, gatewayrender.EnvoyFilterAPIPath(name))
 		}
 	}
 	sort.Strings(deletions)
@@ -137,10 +139,10 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	}
 	// Remove the legacy shared ingress only after replacement routes/plugins
 	// have been applied. It otherwise remains an unscoped fallback route.
-	return a.delete(ctx, openAIIngressAPIPath(resourceSuffix(desired.TenantID())))
+	return a.delete(ctx, gatewayrender.OpenAIIngressAPIPath(gatewayrender.ResourceSuffix(desired.TenantID())))
 }
 
-func hasResourcePath(resources []RenderedResource, path string) bool {
+func hasResourcePath(resources []gatewayrender.RenderedResource, path string) bool {
 	for _, resource := range resources {
 		if resource.APIPath == path {
 			return true
@@ -151,7 +153,7 @@ func hasResourcePath(resources []RenderedResource, path string) bool {
 
 // ApplyGatewayNative applies only supplied resources. Disabled/tombstone rules
 // render disabled plugins instead of deleting unrelated routes or resources.
-func (a *KubernetesApplier) ApplyGatewayNative(ctx context.Context, resources []RenderedResource) error {
+func (a *KubernetesApplier) ApplyGatewayNative(ctx context.Context, resources []gatewayrender.RenderedResource) error {
 	for _, resource := range resources {
 		err := a.client.CoreV1().RESTClient().Patch(types.ApplyPatchType).
 			AbsPath(resource.APIPath).
@@ -169,7 +171,7 @@ func (a *KubernetesApplier) ApplyGatewayNative(ctx context.Context, resources []
 	return nil
 }
 
-func hasResourceKind(resources []RenderedResource, kind ResourceKind) bool {
+func hasResourceKind(resources []gatewayrender.RenderedResource, kind gatewayrender.ResourceKind) bool {
 	for _, resource := range resources {
 		if resource.Kind == kind {
 			return true
