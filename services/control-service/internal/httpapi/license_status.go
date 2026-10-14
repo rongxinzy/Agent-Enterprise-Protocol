@@ -46,7 +46,7 @@ WHERE s.deployment_id=$1 AND s.session_id=$2 AND s.user_id=$3 AND s.revoked_at I
       AND (ma.expires_at IS NULL OR ma.expires_at>now()) AND (
       (ma.subject_type='user' AND ma.subject_id=s.user_id)
       OR (ma.subject_type='role' AND EXISTS (
-        SELECT 1 FROM user_role_bindings urb
+        SELECT 1 FROM user_effective_roles urb
         JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
         WHERE urb.deployment_id=s.deployment_id AND urb.user_id=s.user_id AND urb.role_id=ma.subject_id
       ))

@@ -109,6 +109,18 @@ function samePr(left, right) {
   return snapshot(left) === snapshot(right);
 }
 
+// Old heads retain independent checks during migration. Only an authoritative
+// current-head PR run can select the unified entry; any legacy runs on that
+// same head remain required, so parallel failures cannot be hidden.
+function selectWorkflows(config, runs, pr, expected) {
+  const belongs = (workflow, matchName = false) => runs.some((item) =>
+    item.event === 'pull_request' && item.head_sha === pr.head.sha &&
+    item.path?.split('@')[0] === workflow.path && (!matchName || item.name === workflow.name) && linkedRun(item, pr));
+  if (!config.orchestrator || !belongs(config.orchestrator, true)) return expected;
+  return [config.orchestrator, ...expected.filter((workflow) =>
+    workflow.path !== config.orchestrator.path && belongs(workflow))];
+}
+
 async function run({ github, context, core, config }) {
   const pr = context.payload.pull_request;
   if (!pr) throw new Error('This gate only runs for pull requests.');
@@ -125,20 +137,19 @@ async function run({ github, context, core, config }) {
   // GitHub returns at most 3000 changed files; fail closed rather than miss a filtered workflow.
   if (files.length !== pr.changed_files)
     throw new Error('Incomplete PR file list; split the PR or inspect the API limit.');
-  const expected = config.workflows.filter((workflow) =>
+  const expected = (config.legacyWorkflows ?? config.workflows).filter((workflow) =>
     workflowApplies(
       workflow,
       files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]),
       pr.base.ref,
     ),
   );
-  core.info(
-    `Required existing workflows: ${expected.map((workflow) => workflow.name).join(', ') || 'none for this diff'}`,
-  );
   const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     ...context.repo, event: 'pull_request', head_sha: pr.head.sha, per_page: 100,
   });
-  const { waiting, failed } = evaluateRuns(expected, runs, pr.head.sha, pr);
+  const selected = selectWorkflows(config, runs, pr, expected);
+  core.info(`Required existing workflows: ${selected.map((workflow) => workflow.name).join(', ') || 'none for this diff'}`);
+  const { waiting, failed } = evaluateRuns(selected, runs, pr.head.sha, pr);
   if (failed.length) throw new Error(failed.join('\n'));
   if (waiting.length) {
     core.info(`Waiting for: ${waiting.join(', ')}; a workflow event will refresh this check.`);
@@ -160,7 +171,7 @@ async function eventPullNumbers({ github, context, config }) {
   if (context.eventName !== 'workflow_run') throw new Error('Unsupported gate event.');
   // Fetch authoritative run metadata; the event's conclusion and PR hints are not authority.
   const run = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.payload.workflow_run.id })).data;
-  if (run.event !== 'pull_request' || !config.workflows.some(workflow => workflow.path === run.path?.split('@')[0])) return [];
+  if (run.event !== 'pull_request' || ![...(config.legacyWorkflows ?? config.workflows), ...(config.orchestrator ? [config.orchestrator] : [])].some(workflow => workflow.path === run.path?.split('@')[0])) return [];
   const numbers = [...new Set((run.pull_requests ?? []).map(pr => pr.number))];
   const prs = numbers.length
     ? await Promise.all(numbers.map(async number => (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data))

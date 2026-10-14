@@ -466,11 +466,20 @@ func validModelSubject(subjectType string) bool {
 }
 
 func (s *Server) listModelAssignments(response http.ResponseWriter, request *http.Request) {
-	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListModelAssignments(request.Context())
+	pageSize := limit(request)
+	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListModelAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	items, nextCursor := page(items, pageSize, func(item repository.ModelAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	assignments := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		assignments = append(assignments, map[string]any{
@@ -478,7 +487,7 @@ func (s *Server) listModelAssignments(response http.ResponseWriter, request *htt
 			"subject": map[string]string{"type": item.SubjectType, "id": item.SubjectID}, "createdAt": item.CreatedAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments})
+	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments, "nextCursor": nextCursor})
 }
 
 func (s *Server) createModelAssignment(response http.ResponseWriter, request *http.Request) {
@@ -495,6 +504,9 @@ func (s *Server) createModelAssignment(response http.ResponseWriter, request *ht
 	}
 	if input.ModelID == "" || input.Subject.ID == "" || !validModelSubject(input.Subject.Type) {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The model and a valid assignment subject are required.")
+		return
+	}
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
 		return
 	}
 	tenant := claimsFrom(request).DeploymentID

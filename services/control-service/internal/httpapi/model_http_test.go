@@ -116,8 +116,8 @@ func TestAdminModelLifecycle(t *testing.T) {
 		t.Fatalf("update model = %d %s", updated.Code, updated.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id`).
-		WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+		WithArgs("deployment-a", 51).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-a", "deployment-a", "enterprise-chat", "team", "engineering", now))
 	listedAssignments := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/model-assignments", "")
@@ -125,6 +125,8 @@ func TestAdminModelLifecycle(t *testing.T) {
 		t.Fatalf("list model assignments = %d %s", listedAssignments.Code, listedAssignments.Body.String())
 	}
 
+	// The existence probe runs on the runtime pool, before the assignment write.
+	expectSubjectExists(pool, "developer")
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "enterprise-chat").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectBegin()
@@ -271,6 +273,8 @@ func TestAdminModelErrorMappings(t *testing.T) {
 		t.Fatalf("update missing model = %d %s", missingModel.Code, missingModel.Body.String())
 	}
 
+	// The probe precedes the model lookup, so a missing model never hides it.
+	expectSubjectExists(pool, "user-a")
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "missing").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	missingAssignmentModel := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/model-assignments", `{"modelId":"missing","subject":{"type":"user","id":"user-a"}}`)
@@ -278,6 +282,7 @@ func TestAdminModelErrorMappings(t *testing.T) {
 		t.Fatalf("assign missing model = %d %s", missingAssignmentModel.Code, missingAssignmentModel.Body.String())
 	}
 
+	expectSubjectExists(pool, "user-a")
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "chat-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectBegin()

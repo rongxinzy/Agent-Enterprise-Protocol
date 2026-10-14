@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -107,6 +108,54 @@ func TestRenderAnthropicEndpointVariations(t *testing.T) {
 	}
 }
 
+func TestRenderAnthropicVersionedEndpointPaths(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		endpoint     string
+		pattern      string
+		substitution string
+		paths        map[string]string
+	}{
+		{
+			endpoint: "http://provider.example/v1", pattern: "^/bench-anthropic/(?:v1/)?(.*)$", substitution: "/v1/\\1",
+			paths: map[string]string{
+				"/bench-anthropic/messages":                 "/v1/messages",
+				"/bench-anthropic/v1/messages":              "/v1/messages",
+				"/bench-anthropic/v1/messages/count_tokens": "/v1/messages/count_tokens",
+			},
+		},
+		{
+			endpoint: "https://provider.example/api/anthropic/v1/", pattern: "^/bench-anthropic/(?:v1/)?(.*)$", substitution: "/api/anthropic/v1/\\1",
+			paths: map[string]string{"/bench-anthropic/v1/messages": "/api/anthropic/v1/messages"},
+		},
+		{
+			endpoint: "https://provider.example/api/anthropic", pattern: "^/bench-anthropic/(.*)$", substitution: "/api/anthropic/\\1",
+			paths: map[string]string{"/bench-anthropic/v1/messages": "/api/anthropic/v1/messages"},
+		},
+	} {
+		t.Run(test.endpoint, func(t *testing.T) {
+			_, resources, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{anthropicRoute("bench-anthropic", test.endpoint)}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			filter := resources[1].Body
+			if !strings.Contains(filter, "regex: "+yamlScalar(test.pattern)) || !strings.Contains(filter, "substitution: "+yamlScalar(test.substitution)) {
+				t.Fatalf("unexpected path rewrite for %q", test.endpoint)
+			}
+			pattern := regexp.MustCompile(test.pattern)
+			for input, want := range test.paths {
+				matches := pattern.FindStringSubmatch(input)
+				if len(matches) != 2 {
+					t.Fatalf("rewrite pattern did not match %q", input)
+				}
+				if got := strings.Replace(test.substitution, `\1`, matches[1], 1); got != want {
+					t.Errorf("rewrite %q = %q, want %q", input, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderAnthropicMultipleModelsAndErrors(t *testing.T) {
 	t.Parallel()
 	first := anthropicRoute("alpha-anthropic", "https://open.bigmodel.cn/api/anthropic")
@@ -198,7 +247,7 @@ func TestKubernetesApplierDeletesAnthropicPairWhenRouteDisabled(t *testing.T) {
 		response.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", HTTPClient: server.Client()})
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -145,7 +145,7 @@ func TestRunTenantStopsAfterPendingStatus(t *testing.T) {
 	readiness := newReadinessState([]string{"demo"})
 	done := make(chan struct{})
 	go func() {
-		runTenant(ctx, worker, "demo", time.Hour, readiness, nil)
+		runTenant(ctx, worker, "demo", time.Hour, readiness)
 		close(done)
 	}()
 	select {
@@ -187,7 +187,7 @@ func TestRunTenantReportsControlPlaneFailureAndStops(t *testing.T) {
 	readiness.record("demo", nil)
 	done := make(chan struct{})
 	go func() {
-		runTenant(ctx, worker, "demo", time.Hour, readiness, nil)
+		runTenant(ctx, worker, "demo", time.Hour, readiness)
 		close(done)
 	}()
 	select {

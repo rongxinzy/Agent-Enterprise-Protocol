@@ -36,9 +36,18 @@ func expectRoleRecord(mock sqlmock.Sqlmock, id, name, description string, enable
 }
 
 func expectTeamRecord(mock sqlmock.Sqlmock, id, name, description string, enabled bool, memberCount int64, now time.Time) {
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a").
 		WillReturnRows(sqlmock.NewRows(teamHTTPColumns()).AddRow("deployment-a", id, name, description, false, enabled, now, now, memberCount))
+}
+
+// A role or team delete must take its polymorphic grants with it: those columns
+// carry no foreign key, so nothing else would remove them.
+func expectSubjectGrantCleanup(mock sqlmock.Sqlmock, subjectType, id string) {
+	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
+		mock.ExpectExec(`DELETE FROM "`+table+`" WHERE deployment_id = \$1 AND subject_type = \$2 AND subject_id = \$3`).
+			WithArgs("deployment-a", subjectType, id).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
 }
 
 func TestAdminRoleLifecycle(t *testing.T) {
@@ -89,6 +98,7 @@ func TestAdminRoleLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "model-operator", 1).
 		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "model-operator", "Model Reader", "Read-only access", false, false, now, now))
 	mock.ExpectBegin()
+	expectSubjectGrantCleanup(mock, "role", "model-operator")
 	mock.ExpectExec(`DELETE FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "model-operator").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -105,7 +115,7 @@ func TestAdminTeamLifecycle(t *testing.T) {
 
 	// The identifier is generated from the team name: the existence probe
 	// lists the deployment's teams before the insert transaction.
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "teams"`).WillReturnResult(sqlmock.NewResult(1, 1))
@@ -134,6 +144,7 @@ func TestAdminTeamLifecycle(t *testing.T) {
 		WithArgs("deployment-a", "platform-team", 1).
 		WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "platform-team", "Platform Core", "Core platform", false, false, now, now))
 	mock.ExpectBegin()
+	expectSubjectGrantCleanup(mock, "team", "platform-team")
 	mock.ExpectExec(`DELETE FROM "teams" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "platform-team").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -207,7 +218,7 @@ func TestAdminTeamErrorMappings(t *testing.T) {
 
 	// Uniqueness-violation fallback for the concurrent-create race on a
 	// generated team id.
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "teams"`).WillReturnError(&pgconn.PgError{Code: "23505"})
@@ -217,7 +228,7 @@ func TestAdminTeamErrorMappings(t *testing.T) {
 		t.Fatalf("duplicate team = %d %s", duplicate.Code, duplicate.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
 	missing := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/teams/missing", "")
 	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), `"code":"RESOURCE_NOT_FOUND"`) {
@@ -247,7 +258,7 @@ func TestDelegatedRolePermissionsRejectEscalation(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/aep/v1/admin/roles", nil)
 	request = request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims))
 
-	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_role_bindings AS urb`).
+	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_effective_roles AS urb`).
 		WithArgs("deployment-a", "delegated-admin").
 		WillReturnRows(sqlmock.NewRows([]string{"permission_id"}).AddRow("models.read").AddRow("skills.read"))
 	allowedResponse := httptest.NewRecorder()
@@ -255,7 +266,7 @@ func TestDelegatedRolePermissionsRejectEscalation(t *testing.T) {
 		t.Fatalf("permission subset rejected = %d %s", allowedResponse.Code, allowedResponse.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_role_bindings AS urb`).
+	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_effective_roles AS urb`).
 		WithArgs("deployment-a", "delegated-admin").
 		WillReturnRows(sqlmock.NewRows([]string{"permission_id"}).AddRow("models.read").AddRow("skills.read"))
 	deniedResponse := httptest.NewRecorder()
@@ -281,6 +292,8 @@ func TestDelegatedTeamMembershipRejectsEscalation(t *testing.T) {
 	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).
 		WithArgs("deployment-a", "delegated-admin").
 		WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("engineering"))
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams"`).
+		WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamJoinColumns()).AddRow("deployment-a", "engineering", "Engineering", "", false, true, nil, "/engineering", 0, time.Now(), time.Now(), 1))
 	allowedResponse := httptest.NewRecorder()
 	if !server.authorizeTeamGrant(allowedResponse, request, []string{"engineering"}) || allowedResponse.Code != http.StatusOK {
 		t.Fatalf("Team subset rejected = %d %s", allowedResponse.Code, allowedResponse.Body.String())

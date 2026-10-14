@@ -560,6 +560,9 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_SCOPE_RULE", "The rule kind, subject, and resource are invalid.")
 		return
 	}
+	if !s.requireSubject(response, request, input.SubjectType, strings.TrimSpace(input.SubjectID)) {
+		return
+	}
 	tenant := claimsFrom(request).DeploymentID
 	name := strings.TrimSpace(input.Reason)
 	if name == "" {

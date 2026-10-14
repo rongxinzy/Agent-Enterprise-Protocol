@@ -802,6 +802,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/skills/{skillId}/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description Reported installation state for the users one Skill is granted to: the
+         *     newest sync report per user decides, and only retained reports are
+         *     visible (telemetry retention window). A withdrawn Skill distributes to
+         *     nobody, so its grant set is empty, matching the manifest. Per-item
+         *     statuses are passed through as reported: the vocabularies differ across
+         *     contract, writer and Agent, and an Agent that fails to install writes no
+         *     report at all, so no failure verdict is derived here.
+         */
+        get: operations["listSkillInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skill-assignments": {
         parameters: {
             query?: never;
@@ -1411,7 +1436,7 @@ export interface paths {
         get: operations["getDataPlaneDesiredState"];
         /**
          * @deprecated
-         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.
+         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.
          */
         put: operations["putDataPlaneDesiredState"];
         post?: never;
@@ -2013,22 +2038,27 @@ export interface components {
         };
         SkillSyncItem: {
             skillId: components["schemas"]["SkillIdentifier"];
-            version: components["schemas"]["SkillVersionIdentifier"];
-            /** @enum {string} */
-            action: "install" | "update" | "remove" | "unchanged";
-            /** @enum {string} */
-            status: "success" | "failed";
+            version?: components["schemas"]["SkillVersionIdentifier"];
+            /** @description Advisory when the Agent reports it; the server does not act on it. */
+            action?: string;
+            /**
+             * @description Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+             *     `removed` and every other value count as not installed. Agents use different
+             *     vocabularies, so the server reads the value as reported instead of enforcing an enum.
+             */
+            status: string;
             errorCode?: string;
             message?: string;
         };
         SkillSyncResult: {
-            manifestRevision: string;
+            /** @description The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync. */
+            revision?: string;
             /** Format: date-time */
-            startedAt: string;
+            startedAt?: string;
             /** Format: date-time */
-            completedAt: string;
-            /** @enum {string} */
-            status: "success" | "partial" | "failed";
+            completedAt?: string;
+            /** @description Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum. */
+            status?: string;
             items: components["schemas"]["SkillSyncItem"][];
         };
         EventResource: {
@@ -2247,6 +2277,8 @@ export interface components {
             builtIn: boolean;
             enabled: boolean;
             memberCount: number;
+            /** @description Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Omitted for root teams. */
             parentId?: string | null;
             /** @description Materialized team path, for example /hq/engineering. */
@@ -2262,6 +2294,8 @@ export interface components {
         CreateTeamRequest: {
             name: string;
             description?: string;
+            /** @description Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible. */
             parentId?: string | null;
         };
@@ -2269,6 +2303,8 @@ export interface components {
             name?: string;
             description?: string;
             enabled?: boolean;
+            /** @description Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions. */
+            defaultRoleIds?: string[];
         };
         ReplaceUserRBACRequest: {
             roleIds: string[];
@@ -2511,6 +2547,40 @@ export interface components {
             /** @enum {string} */
             state?: "active" | "withdrawn";
         };
+        SkillInstallation: {
+            userId: string;
+            /** @enum {string} */
+            state: "missing" | "unreported";
+            /** @description Present when the user has a retained report; the revision that report carried. */
+            revision?: string;
+            /**
+             * Format: date-time
+             * @description Present when the user has a retained report.
+             */
+            reportedAt?: string;
+            /** @description Raw per-item status for this Skill in that report, passed through as reported. */
+            itemStatus?: string;
+        };
+        SkillInstallationPage: {
+            skillId: string;
+            summary: {
+                /** @description Users the Skill is granted to, ignoring expired grants and a withdrawn Skill. */
+                granted: number;
+                /** @description Granted users with at least one retained report. */
+                reported: number;
+                installed: number;
+                /** @description Reported, but the report does not list the Skill as installed. */
+                missing: number;
+                /** @description Granted users with no retained report. */
+                unreported: number;
+                /** Format: date-time */
+                latestReportedAt: string | null;
+            };
+            /** @description Granted users whose report does not show the Skill installed; `missing` before `unreported`. */
+            items: components["schemas"]["SkillInstallation"][];
+            /** @description More users need attention than the limit returned. */
+            truncated: boolean;
+        };
         Subject: {
             /** @enum {string} */
             type: "user" | "role" | "team";
@@ -2531,6 +2601,7 @@ export interface components {
         };
         AssignmentList: {
             items: components["schemas"]["Assignment"][];
+            nextCursor: string | null;
         };
         SkillAssignmentWrite: {
             skillId: components["schemas"]["SkillIdentifier"];
@@ -2731,6 +2802,7 @@ export interface components {
         };
         CredentialAssignmentList: {
             assignments: components["schemas"]["CredentialAssignment"][];
+            nextCursor: string | null;
         };
         CredentialAssignmentWrite: {
             credentialId: string;
@@ -2836,6 +2908,7 @@ export interface components {
         };
         ModelAssignmentList: {
             assignments: components["schemas"]["ModelAssignment"][];
+            nextCursor: string | null;
         };
         ModelAssignmentWrite: {
             modelId: string;
@@ -4794,9 +4867,38 @@ export interface operations {
             400: components["responses"]["Problem-2"];
         };
     };
+    listSkillInstallations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path: {
+                skillId: components["parameters"]["SkillId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reported installation state, grouped by user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInstallationPage"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
     listSkillAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5251,7 +5353,10 @@ export interface operations {
     };
     listCredentialAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5448,7 +5553,10 @@ export interface operations {
     };
     listModelAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;

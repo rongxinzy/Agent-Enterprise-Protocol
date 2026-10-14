@@ -1,3 +1,17 @@
+// Live data-plane E2E: a real Compose stack plus the reconciler binary drive the
+// desired-state API against a mock Kubernetes API.
+//
+// PUT /aep/v1/admin/data-plane/desired-state is an escape hatch on top of the
+// model catalog, not a way to invent providers: every accepted route must carry
+// the endpoint the catalog holds for the model and the credential Secret the
+// catalog derives from its binding (aep-credential-<credentialId>, key api-key),
+// so a route can neither read an arbitrary Secret nor send a credential to an
+// arbitrary upstream. Only rendering fields stay overridable (providerType,
+// upstreamModel, protocol, enabled) - that is what lets a route ask for Higress'
+// native deepseek provider type. Repointing a route at another endpoint or
+// credential means updating the catalog first (createModel / updateModel), so
+// every fixture below prepares the catalog and then mirrors it into routes.
+
 import {spawn} from 'node:child_process';
 import * as nodeCrypto from 'node:crypto';
 import {mkdtemp, rm} from 'node:fs/promises';
@@ -22,11 +36,10 @@ const outputDir = await mkdtemp(path.join(tmpdir(), 'aep-m3-reconciler-'));
 const reconcilerBinary = path.join(outputDir, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
 const resources = new Map();
 // Fixture Secret store the mock Kubernetes API serves to the reconciler's
-// credentialRef reads (KubernetesApplier.ReadSecret GETs these).
-const kubeSecrets = new Map([
-  ['provider-secrets', {'api-key-a': 'provider-secret-value-a', 'api-key-c': 'provider-secret-value-c', 'api-key-d': 'provider-secret-value-d'}],
-  ['provider-secrets-v2', {'api-key-b': 'provider-secret-value-b'}],
-]);
+// credentialRef reads (KubernetesApplier.ReadSecret GETs these). Entries are
+// keyed by the conventional Secret name the catalog derives for a Credential
+// (aep-credential-<credentialId>) and are seeded by useCredential.
+const kubeSecrets = new Map();
 let kubeAvailable = true;
 let failWasm = false;
 let applyCount = 0;
@@ -95,7 +108,12 @@ try {
   startReconciler();
   await waitForHealth('/livez', 200);
 
-  const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
+  // The escape hatch renders catalog routes, so the model and its credential
+  // binding come first: routes below are that catalog entry plus overrides.
+  const credentialA = await useCredential(admin, 'Provider A key', 'provider-a', 'provider-secret-value-a');
+  const chatModel = await useModel(admin, {displayName: 'Chat', endpoint: '/v1/chat', upstreamModel: 'provider-a', credentialId: credentialA.id});
+
+  const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [routeFor(chatModel, {providerType: 'deepseek'})]});
   await waitForReady(admin, 'rev-1');
   await waitForHealth('/readyz', 200);
   assert(resources.size === 3, 'Ingress, ai-proxy and ai-statistics were not all applied');
@@ -107,23 +125,29 @@ try {
   assert(!JSON.stringify(first).includes('provider-secret-value-a'), 'Secret value leaked into the desired-state response');
   assert(!JSON.stringify(await admin.getDataPlaneStatus()).includes('provider-secret-value-a'), 'Secret value leaked into the data-plane status');
 
-  const repeated = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [route('chat', '/v1/chat', 'provider-a', 'api-key-a', 'provider-secrets', 'deepseek')]});
+  const repeated = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [routeFor(chatModel, {providerType: 'deepseek'})]});
   assert(repeated.contentHash === first.contentHash, 'same revision was not idempotent');
   await waitFor(() => assert(applyCount >= firstCount + 2, 'periodic convergence did not reapply desired state'));
   assert(snapshot() === firstResources, 'idempotent reconciliation changed resources');
 
-  await admin.putDataPlaneDesiredState({revision: 'rev-2', routes: [route('chat', '/v1/responses', 'provider-b', 'api-key-b', 'provider-secrets-v2')]});
+  // Rotating a credential is a catalog change: the route may only name the
+  // Secret the model is bound to now, so the model moves first.
+  const credentialB = await useCredential(admin, 'Provider B key', 'provider-b', 'provider-secret-value-b');
+  const providerBModel = await admin.updateModel(chatModel.id, {endpoint: '/v1/responses', upstreamModel: 'provider-b', credentialId: credentialB.id});
+  await admin.putDataPlaneDesiredState({revision: 'rev-2', routes: [routeFor(providerBModel)]});
   await waitForReady(admin, 'rev-2');
   assert(snapshot().includes('/v1/responses'), 'route update was not applied');
   assert(snapshot().includes("apiTokens:\n            - 'provider-secret-value-b'"), 'rotated Secret value was not inlined as an ai-proxy apiToken');
   assert(!snapshot().includes('provider-secret-value-a'), 'previous Secret value remained after Secret rotation');
-  assert(!snapshot().includes('credentialRef') && !snapshot().includes('provider-secrets-v2'), 'Secret reference leaked into the rendered Higress resources');
+  assert(!snapshot().includes('credentialRef') && !snapshot().includes(`aep-credential-${credentialB.id}`), 'Secret reference leaked into the rendered Higress resources');
 
   for (const key of resources.keys()) resources.set(key, 'drifted-by-operator');
   await waitFor(() => assert(!snapshot().includes('drifted-by-operator'), 'drift was not corrected'));
 
+  const credentialC = await useCredential(admin, 'Provider C key', 'provider-c', 'provider-secret-value-c');
+  const providerCModel = await admin.updateModel(chatModel.id, {endpoint: '/v1/chat', upstreamModel: 'provider-c', credentialId: credentialC.id});
   failWasm = true;
-  await admin.putDataPlaneDesiredState({revision: 'rev-3', routes: [route('chat', '/v1/chat', 'provider-c', 'api-key-c')]});
+  await admin.putDataPlaneDesiredState({revision: 'rev-3', routes: [routeFor(providerCModel)]});
   await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'KUBERNETES_APPLY_FAILED');
   await waitForHealth('/readyz', 503);
   await waitForHealth('/livez', 200);
@@ -131,27 +155,60 @@ try {
   await waitForReady(admin, 'rev-3');
   await waitForHealth('/readyz', 200);
 
+  const credentialD = await useCredential(admin, 'Provider D key', 'provider-d', 'provider-secret-value-d');
+  const providerDModel = await admin.updateModel(chatModel.id, {endpoint: '/v1/chat', upstreamModel: 'provider-d', credentialId: credentialD.id});
+  // With the credential fetcher configured, a Secret read failure is a
+  // synchronization failure in its own right: the status reports
+  // CREDENTIAL_UNAVAILABLE with no resource count, and the route is never
+  // rendered or applied - there is no token-less fallback that reports ready.
+  const beforeCredentialFailure = snapshot();
   kubeAvailable = false;
-  await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [route('chat', '/v1/chat', 'provider-d', 'api-key-d')]});
-  await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'KUBERNETES_APPLY_FAILED');
+  await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [routeFor(providerDModel)]});
+  await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'CREDENTIAL_UNAVAILABLE' && status.resourceCount === 0);
+  assert(snapshot() === beforeCredentialFailure, 'a credential failure still rendered or applied resources');
   await waitForHealth('/readyz', 503);
+  // Restoring the Secret store lets the same revision converge: the failure is
+  // transient, not a poisoned desired state.
   kubeAvailable = true;
   await waitForReady(admin, 'rev-4');
   await waitForHealth('/readyz', 200);
 
-  await expectProblem(admin.putDataPlaneDesiredState({revision: 'malformed', routes: [{...route('bad', '', 'provider', 'key')}]}), 400, 'INVALID_DATA_PLANE_STATE');
-  await expectProblem(admin.putDataPlaneDesiredState({revision: 'unsupported-provider', routes: [{...route('bad-provider', '/v1/chat', 'provider', 'key'), providerType: 'unknown'}]}), 400, 'INVALID_DATA_PLANE_STATE');
+  // Routes are normalized before they are checked against the catalog, so
+  // empty endpoints and unknown ai-proxy provider types never reach the
+  // renderer, whatever the catalog holds.
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'malformed', routes: [{...routeFor(providerDModel), endpoint: ''}]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'unsupported-provider', routes: [{...routeFor(providerDModel), providerType: 'unknown'}]}), 400, 'INVALID_DATA_PLANE_STATE');
 
-  // Anthropic routes: absolute endpoints only, provider types forbidden, and
-  // two models whose sanitized path prefixes collide fail at render time.
-  const anthropicRoute = (modelId, endpoint = 'https://open.bigmodel.cn/api/anthropic') =>
-    ({modelId, enabled: true, endpoint, upstreamModel: 'glm-5.3-flash', protocol: 'anthropic', credentialRef: {name: 'provider-secrets', key: 'api-key-a', namespace: 'higress-system'}});
-  await expectProblem(admin.putDataPlaneDesiredState({revision: 'anthropic-relative', routes: [anthropicRoute('bench-anthropic', '/v1')]}), 400, 'INVALID_DATA_PLANE_STATE');
-  await expectProblem(admin.putDataPlaneDesiredState({revision: 'anthropic-provider', routes: [{...anthropicRoute('bench-anthropic'), providerType: 'openai'}]}), 400, 'INVALID_DATA_PLANE_STATE');
-  await admin.putDataPlaneDesiredState({revision: 'anthropic-collision', routes: [anthropicRoute('Bench GLM'), anthropicRoute('bench-glm', 'https://api.anthropic.com')]});
+  // The catalog is the only source of endpoints and Secret names, so a route
+  // that invents either - or names a model the catalog would not publish - is
+  // refused even though it renders.
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'unknown-model', routes: [routeFor(providerDModel, {modelId: 'unpublishable'})]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'foreign-secret', routes: [routeFor(providerDModel, {credentialRef: {name: 'provider-secrets', key: 'api-key-a', namespace: 'higress-system'}})]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'foreign-endpoint', routes: [routeFor(providerDModel, {endpoint: 'https://foreign.example.test/v1'})]}), 400, 'INVALID_DATA_PLANE_STATE');
+
+  // Anthropic routes: absolute endpoints only and no ai-proxy provider type -
+  // both refused by normalization, before any catalog lookup.
+  const anthropicPassthrough = (modelId, endpoint) => ({modelId, enabled: true, endpoint, upstreamModel: 'glm-5.3-flash', protocol: 'anthropic'});
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'anthropic-relative', routes: [anthropicPassthrough('bench-anthropic', '/v1')]}), 400, 'INVALID_DATA_PLANE_STATE');
+  await expectProblem(admin.putDataPlaneDesiredState({revision: 'anthropic-provider', routes: [{...anthropicPassthrough('bench-anthropic', 'https://open.bigmodel.cn/api/anthropic'), providerType: 'openai'}]}), 400, 'INVALID_DATA_PLANE_STATE');
+
+  // Two catalog anthropic models whose client-facing path prefixes collide: the
+  // renderer truncates a model ID to 40 characters for the path prefix, so the
+  // second model's `-2` uniqueness suffix lands back on the first model's
+  // prefix. Both routes match the catalog, so the escape hatch accepts them and
+  // the reconciler is the one that refuses to render the collision.
+  const collisionName = 'Anthropic Collision Passthrough Probe AA';
+  const collisionModelA = await useModel(admin, {displayName: collisionName, protocol: 'anthropic', endpoint: 'https://open.bigmodel.cn/api/anthropic', upstreamModel: 'glm-5.3-flash'});
+  const collisionModelB = await useModel(admin, {displayName: `${collisionName} Two`, protocol: 'anthropic', endpoint: 'https://api.anthropic.com', upstreamModel: 'glm-5.3-flash'});
+  assert(collisionModelA.id.length === 40 && collisionModelB.id === `${collisionModelA.id}-2`, `anthropic collision fixture = ${collisionModelA.id} / ${collisionModelB.id}`);
+  await admin.putDataPlaneDesiredState({revision: 'anthropic-collision', routes: [routeFor(collisionModelA), routeFor(collisionModelB)]});
   await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'RENDER_FAILED');
   await waitForHealth('/readyz', 503);
-  await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [route('chat', '/v1/chat', 'provider-d', 'api-key-d')]});
+  // The collision models are scratch fixtures: the publication section derives
+  // its route set from the whole catalog.
+  await admin.deleteModel(collisionModelA.id);
+  await admin.deleteModel(collisionModelB.id);
+  await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [routeFor(providerDModel)]});
   await waitForReady(admin, 'rev-4');
   await waitForHealth('/readyz', 200);
 
@@ -164,9 +221,13 @@ try {
   startReconciler();
   await waitFor(() => assert(applyCount >= beforeRestart + 2, 'reconciler restart did not converge'));
 
-  await admin.putDataPlaneDesiredState({revision: 'rev-5', routes: [{...route('chat', '/v1/chat', 'provider-d', 'api-key-d'), enabled: false}]});
+  await admin.putDataPlaneDesiredState({revision: 'rev-5', routes: [{...routeFor(providerDModel), enabled: false}]});
   await waitForReady(admin, 'rev-5');
   assert(!snapshot().includes("path: '/v1/chat'"), 'disabled route remained in Ingress');
+
+  // The publication below derives its whole route set from the catalog, so the
+  // escape-hatch fixture model leaves the catalog before it.
+  await admin.deleteModel(chatModel.id);
 
   // Catalog-derived publication: the model catalog is the route source of truth.
   const credential = await admin.createCredential({name: 'Provider catalog key', service: 'provider-catalog', type: 'api_key', deliveryMode: 'server_only', value: 'catalog-secret-value-a', enabled: true});
@@ -213,7 +274,12 @@ try {
   const republished = await admin.publishDataPlaneRoutes();
   assert(republished.revision === published.revision && republished.contentHash === published.contentHash, 'republishing an unchanged catalog was not idempotent');
 
-  await admin.putDataPlaneDesiredState({revision: 'rev-drift', routes: [route('ghost', '/v1/ghost', 'provider-ghost', 'api-key-a')]});
+  // Drift the escape hatch can still express: routes are pinned to the catalog,
+  // so a stored route only becomes "extra" once its model leaves the catalog.
+  // Publishing a route and then deleting its model produces exactly that.
+  const ghostModel = await useModel(admin, {displayName: 'Ghost', endpoint: '/v1/ghost', upstreamModel: 'provider-ghost'});
+  await admin.putDataPlaneDesiredState({revision: 'rev-drift', routes: [routeFor(ghostModel)]});
+  await admin.deleteModel(ghostModel.id);
   comparison = (await admin.getDataPlaneStatus()).catalogComparison;
   assert(comparison.extra.includes('ghost') && comparison.missing.includes('catalog-chat'), `manual drift was not reported: ${JSON.stringify(comparison)}`);
   const corrected = await admin.publishDataPlaneRoutes();
@@ -274,8 +340,29 @@ try {
   await rm(outputDir, {recursive: true, force: true});
 }
 
-function route(modelId, endpoint, upstreamModel, key, name = 'provider-secrets', providerType = 'openai') {
-  return {modelId, enabled: true, endpoint, upstreamModel, protocol: 'openai-compatible', providerType, credentialRef: {name, key, namespace: 'higress-system'}};
+// Creates a Credential plus the conventional Secret the catalog derives for it
+// (aep-credential-<credentialId> with a single api-key entry), so the mock
+// Kubernetes API can answer every route the catalog publishes for the model.
+async function useCredential(admin, name, service, value) {
+  const credential = await admin.createCredential({name, service, type: 'api_key', deliveryMode: 'server_only', value, enabled: true});
+  kubeSecrets.set(`aep-credential-${credential.id}`, {'api-key': value});
+  return credential;
+}
+
+// Creates a publishable gateway catalog model. Its server-generated ID is what
+// routes must name, so callers keep the returned model.
+function useModel(admin, input) {
+  return admin.createModel({sourceType: 'gateway', protocol: 'openai-compatible', capabilities: ['text'], isDefault: false, enabled: true, ...input});
+}
+
+// Mirrors deriveDataPlaneRoutes: an accepted raw route carries the catalog
+// endpoint and the Secret derived from the model's credential binding. The
+// rendering fields stay overridable, which is the whole point of the hatch.
+function routeFor(model, overrides = {}) {
+  const route = {modelId: model.id, enabled: model.enabled, endpoint: model.endpoint, upstreamModel: model.upstreamModel, protocol: model.protocol};
+  if (model.protocol === 'openai-compatible') route.providerType = 'openai';
+  if (model.credentialId) route.credentialRef = {name: `aep-credential-${model.credentialId}`, key: 'api-key', namespace: 'higress-system'};
+  return {...route, ...overrides};
 }
 
 // Mirrors resourceSuffix in the reconciler so the test can predict resource

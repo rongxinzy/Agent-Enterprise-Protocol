@@ -182,7 +182,7 @@ func TestRoleAndTeamAggregateQueries(t *testing.T) {
 		t.Fatalf("ListRolesPage() = %#v, %v", roles, err)
 	}
 
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a", "team-0", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at", "member_count"}).
 			AddRow("deployment-a", "team-a", "Engineering", "Builders", false, true, now, now, 4))
@@ -191,7 +191,7 @@ func TestRoleAndTeamAggregateQueries(t *testing.T) {
 		t.Fatalf("ListTeamsPage() = %#v, %v", teams, err)
 	}
 
-	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_role_bindings AS urb`).
+	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_effective_roles AS urb`).
 		WithArgs("deployment-a", "user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"permission_id"}).AddRow("models.read").AddRow("skills.read"))
 	permissions, err := store.Deployment("deployment-a").UserPermissionIDs(context.Background(), "user-a")
@@ -257,31 +257,31 @@ func TestDeploymentAndIdentityLookupContracts(t *testing.T) {
 func TestAssignmentListsAndCredentialCreation(t *testing.T) {
 	store, mock := newMockStore(t)
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY id`).
-		WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+		WithArgs("deployment-a", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "skill_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-s", "deployment-a", "skill-a", "team", "team-a", now))
-	skills, err := store.Deployment("deployment-a").ListSkillAssignments(context.Background())
+	skills, err := store.Deployment("deployment-a").ListSkillAssignmentsPage(context.Background(), "", 1)
 	if err != nil || len(skills) != 1 || skills[0].SubjectID != "team-a" {
-		t.Fatalf("ListSkillAssignments() = %#v, %v", skills, err)
+		t.Fatalf("ListSkillAssignmentsPage() = %#v, %v", skills, err)
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id`).
-		WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 AND \(created_at, id\) > \(\$2, \$3\) ORDER BY created_at, id LIMIT \$4`).
+		WithArgs("deployment-a", time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC), "assignment-b", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "credential_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-c", "deployment-a", "credential-a", "role", "operator", now))
-	credentials, err := store.Deployment("deployment-a").ListCredentialAssignments(context.Background())
+	credentials, err := store.Deployment("deployment-a").ListCredentialAssignmentsPage(context.Background(), "2026-10-14T08:00:00Z|assignment-b", 1)
 	if err != nil || len(credentials) != 1 || credentials[0].CredentialID != "credential-a" {
-		t.Fatalf("ListCredentialAssignments() = %#v, %v", credentials, err)
+		t.Fatalf("ListCredentialAssignmentsPage() = %#v, %v", credentials, err)
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id`).
-		WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+		WithArgs("deployment-a", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-m", "deployment-a", "chat-a", "user", "user-a", now))
-	models, err := store.Deployment("deployment-a").ListModelAssignments(context.Background())
+	models, err := store.Deployment("deployment-a").ListModelAssignmentsPage(context.Background(), "", 1)
 	if err != nil || len(models) != 1 || models[0].ModelID != "chat-a" {
-		t.Fatalf("ListModelAssignments() = %#v, %v", models, err)
+		t.Fatalf("ListModelAssignmentsPage() = %#v, %v", models, err)
 	}
 
 	mock.ExpectBegin()
@@ -316,10 +316,38 @@ func TestTeamCreationAndDeletion(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at"}).
 			AddRow("deployment-a", "team-a", "Engineering", "Builders", false, true, now, now))
 	mock.ExpectBegin()
+	expectSubjectGrantCleanup(mock, "team", "team-a")
 	mock.ExpectExec(`DELETE FROM "teams" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "team-a").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	if err := store.Deployment("deployment-a").DeleteTeam(context.Background(), "team-a"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// expectSubjectGrantCleanup queues the polymorphic grant deletions that must
+// accompany a role or team delete: those columns have no foreign key, so nothing
+// else would remove them.
+func expectSubjectGrantCleanup(mock sqlmock.Sqlmock, subjectType, id string) {
+	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
+		mock.ExpectExec(`DELETE FROM "`+table+`" WHERE deployment_id = \$1 AND subject_type = \$2 AND subject_id = \$3`).
+			WithArgs("deployment-a", subjectType, id).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+}
+
+func TestRoleDeletionRemovesItsGrants(t *testing.T) {
+	store, mock := newMockStore(t)
+	now := time.Now().UTC()
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "member", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at"}).
+			AddRow("deployment-a", "member", "Member", "", false, false, now, now))
+	mock.ExpectBegin()
+	expectSubjectGrantCleanup(mock, "role", "member")
+	mock.ExpectExec(`DELETE FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
+		WithArgs("deployment-a", "member").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := store.Deployment("deployment-a").DeleteRole(context.Background(), "member"); err != nil {
 		t.Fatal(err)
 	}
 }
