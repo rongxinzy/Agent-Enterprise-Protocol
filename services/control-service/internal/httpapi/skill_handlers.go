@@ -509,11 +509,17 @@ func (s *Server) listSkillAssignments(response http.ResponseWriter, request *htt
 	pageSize := limit(request)
 	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
 		ListSkillAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	assignments, nextCursor := page(assignments, pageSize, func(item repository.SkillAssignment) string { return item.ID })
+	assignments, nextCursor := page(assignments, pageSize, func(item repository.SkillAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	items := make([]map[string]any, 0, len(assignments))
 	for _, assignment := range assignments {
 		items = append(items, map[string]any{

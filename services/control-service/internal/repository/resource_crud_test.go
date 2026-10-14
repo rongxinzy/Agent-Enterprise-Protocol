@@ -257,7 +257,7 @@ func TestDeploymentAndIdentityLookupContracts(t *testing.T) {
 func TestAssignmentListsAndCredentialCreation(t *testing.T) {
 	store, mock := newMockStore(t)
 	now := time.Now().UTC()
-	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY id LIMIT \$2`).
+	mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
 		WithArgs("deployment-a", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "skill_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-s", "deployment-a", "skill-a", "team", "team-a", now))
@@ -266,16 +266,16 @@ func TestAssignmentListsAndCredentialCreation(t *testing.T) {
 		t.Fatalf("ListSkillAssignmentsPage() = %#v, %v", skills, err)
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 AND id > \$2 ORDER BY id LIMIT \$3`).
-		WithArgs("deployment-a", "assignment-b", 1).
+	mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 AND \(created_at, id\) > \(\$2, \$3\) ORDER BY created_at, id LIMIT \$4`).
+		WithArgs("deployment-a", time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC), "assignment-b", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "credential_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-c", "deployment-a", "credential-a", "role", "operator", now))
-	credentials, err := store.Deployment("deployment-a").ListCredentialAssignmentsPage(context.Background(), "assignment-b", 1)
+	credentials, err := store.Deployment("deployment-a").ListCredentialAssignmentsPage(context.Background(), "2026-10-14T08:00:00Z|assignment-b", 1)
 	if err != nil || len(credentials) != 1 || credentials[0].CredentialID != "credential-a" {
 		t.Fatalf("ListCredentialAssignmentsPage() = %#v, %v", credentials, err)
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY id LIMIT \$2`).
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
 		WithArgs("deployment-a", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-m", "deployment-a", "chat-a", "user", "user-a", now))

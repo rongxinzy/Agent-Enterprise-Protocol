@@ -469,11 +469,17 @@ func (s *Server) listModelAssignments(response http.ResponseWriter, request *htt
 	pageSize := limit(request)
 	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
 		ListModelAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
-	items, nextCursor := page(items, pageSize, func(item repository.ModelAssignment) string { return item.ID })
+	items, nextCursor := page(items, pageSize, func(item repository.ModelAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	assignments := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		assignments = append(assignments, map[string]any{

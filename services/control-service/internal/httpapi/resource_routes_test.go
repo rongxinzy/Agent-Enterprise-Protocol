@@ -131,7 +131,7 @@ func TestAdminModelAndCredentialReadRoutes(t *testing.T) {
 		t.Fatalf("credentials response = %d %s", credentials.Code, credentials.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY id LIMIT \$2`).
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
 		WithArgs("deployment-a", 51).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-a", "deployment-a", "chat-a", "team", "engineering", now))

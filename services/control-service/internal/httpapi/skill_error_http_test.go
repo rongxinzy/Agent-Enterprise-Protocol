@@ -263,7 +263,7 @@ func TestAdminSkillVersionFailureBoundaries(t *testing.T) {
 func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 	t.Run("list database error", func(t *testing.T) {
 		application, mock, _, token := newUserHTTPApplication(t)
-		mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY id LIMIT \$2`).WithArgs("deployment-a", 51).
+		mock.ExpectQuery(`SELECT \* FROM "skill_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).WithArgs("deployment-a", 51).
 			WillReturnError(errors.New("assignments unavailable"))
 		response := adminRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/admin/skill-assignments", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
