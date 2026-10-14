@@ -347,9 +347,11 @@ describe('AepClient SDK gate', () => {
     expect((await client.updateRole('operator', {enabled: false})).id).toBe('operator');
     await client.deleteRole('operator');
     expect((await client.listTeams()).teams[0]?.id).toBe('support');
-    expect((await client.createTeam({id: 'support', name: 'Support'})).id).toBe('support');
+    expect((await client.createTeam({name: 'Support', defaultRoleIds: ['operator']})).id).toBe('support');
+    expect(server.teamBodies.at(-1)).toMatchObject({defaultRoleIds: ['operator']});
     expect((await client.getTeam('support')).id).toBe('support');
-    expect((await client.updateTeam('support', {enabled: false})).id).toBe('support');
+    expect((await client.updateTeam('support', {defaultRoleIds: []})).id).toBe('support');
+    expect(server.teamBodies.at(-1)).toMatchObject({defaultRoleIds: []});
     await client.deleteTeam('support');
     expect((await client.replaceUserRBAC('user-1', {roleIds: ['operator'], teamIds: ['support']})).userId).toBe('user-1');
     await client.revokeUserSession('session-1');
