@@ -110,10 +110,12 @@ func TestAdminSkillAssignmentExpiryBoundaries(t *testing.T) {
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 
-	t.Run("requires admin", func(t *testing.T) {
-		// /admin/skill-assignments has no permission mapping, so the admin flag
-		// is the gate - no lookup is queued, and none may be attempted.
-		application, _, _, userToken := newRuntimeHTTPApplication(t)
+	t.Run("requires permission", func(t *testing.T) {
+		// Changing a grant needs skills.assign (the assignment routes gained a
+		// permission mapping); a caller without it is refused after the lookup.
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		pool.ExpectQuery(`SELECT EXISTS \(`).WithArgs("deployment-a", "user-a", "skills.assign").
+			WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(false))
 		response := userRequest(New(application).Handler(), userToken, http.MethodPatch, "/aep/v1/admin/skill-assignments/assignment-a", `{"expiresAt":null}`)
 		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"ACCESS_DENIED"`) {
 			t.Fatalf("non-admin Skill assignment update = %d %s", response.Code, response.Body.String())
