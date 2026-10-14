@@ -12,34 +12,50 @@ import (
 func TestFetchCredentials(t *testing.T) {
 	reference := &SecretReference{Name: "provider-secrets", Key: "model-a"}
 
-	t.Run("nil fetcher yields no values", func(t *testing.T) {
+	t.Run("nil fetcher yields no values and no error", func(t *testing.T) {
 		reconciler := &Reconciler{}
-		if got := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{{Enabled: true, CredentialRef: reference}}}); got != nil {
-			t.Fatalf("fetchCredentials() = %#v, want nil", got)
+		got, err := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{{Enabled: true, CredentialRef: reference}}})
+		if got != nil || err != nil {
+			t.Fatalf("fetchCredentials() = %#v, %v; want nil, nil", got, err)
 		}
 	})
 
-	t.Run("disabled routes and duplicates are skipped, failures tolerated", func(t *testing.T) {
+	t.Run("disabled routes, duplicates, and tokenless routes are skipped", func(t *testing.T) {
 		calls := 0
 		reconciler := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, ref SecretReference) (string, error) {
 			calls++
+			return "value-" + ref.Key, nil
+		}}}
+		got, err := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{
+			{ModelID: "off", Enabled: false, CredentialRef: reference},
+			{ModelID: "a", Enabled: true, CredentialRef: reference},
+			{ModelID: "a-again", Enabled: true, CredentialRef: reference}, // same ref: deduped
+			{ModelID: "tokenless", Enabled: true},                         // no ref
+		}})
+		if err != nil || len(got) != 1 || got["provider-secrets/model-a"] != "value-model-a" {
+			t.Fatalf("fetchCredentials() = %#v, %v", got, err)
+		}
+		if calls != 1 {
+			t.Fatalf("fetcher called %d times, want 1 (dedup)", calls)
+		}
+	})
+
+	t.Run("a failing ref aborts resolution and names the ref", func(t *testing.T) {
+		reconciler := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, ref SecretReference) (string, error) {
 			if ref.Key == "broken" {
 				return "", errors.New("secret unavailable")
 			}
 			return "value-" + ref.Key, nil
 		}}}
-		got := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{
-			{ModelID: "off", Enabled: false, CredentialRef: reference},
+		got, err := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{
 			{ModelID: "a", Enabled: true, CredentialRef: reference},
-			{ModelID: "a-again", Enabled: true, CredentialRef: reference}, // same ref: deduped
 			{ModelID: "broken", Enabled: true, CredentialRef: &SecretReference{Name: "provider-secrets", Key: "broken"}},
-			{ModelID: "tokenless", Enabled: true}, // no ref
 		}})
-		if len(got) != 1 || got["provider-secrets/model-a"] != "value-model-a" {
-			t.Fatalf("fetchCredentials() = %#v", got)
+		if err == nil || !strings.Contains(err.Error(), "provider-secrets/broken") || !strings.Contains(err.Error(), "secret unavailable") {
+			t.Fatalf("fetchCredentials() error = %v, want credentialRef name/key and cause", err)
 		}
-		if calls != 2 {
-			t.Fatalf("fetcher called %d times, want 2 (dedup + one failure)", calls)
+		if got != nil {
+			t.Fatalf("fetchCredentials() = %#v, want nil on failure (no partial values)", got)
 		}
 	})
 }
