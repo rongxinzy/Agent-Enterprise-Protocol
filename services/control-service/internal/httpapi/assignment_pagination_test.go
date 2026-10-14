@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -43,35 +44,64 @@ func TestAdminSkillAssignmentListPaginates(t *testing.T) {
 	}
 }
 
-func TestAdminModelAndCredentialAssignmentListsReportCursor(t *testing.T) {
+func TestAdminModelAndCredentialAssignmentListsPaginate(t *testing.T) {
 	application, mock, _, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
+	for _, test := range []struct{ table, column, path, resourceType, resourceID string }{
+		{"model_assignments", "model_id", "/aep/v1/admin/model-assignments", "model", "model-a"},
+		{"credential_assignments", "credential_id", "/aep/v1/admin/credential-assignments", "credential", "credential-a"},
+	} {
+		mock.ExpectQuery(`SELECT \* FROM "`+test.table+`" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+			WithArgs("deployment-a", 2).
+			WillReturnRows(sqlmock.NewRows(assignmentColumns(test.column)).
+				AddRow(test.table+"-1", "deployment-a", test.resourceID, "user", "user-a", nil, assignmentNow).
+				AddRow(test.table+"-2", "deployment-a", test.resourceID, "user", "user-b", nil, assignmentNow.Add(time.Minute)))
+		first := userRequest(handler, adminToken, http.MethodGet, test.path+"?limit=1", "")
+		if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"nextCursor":"2026-10-14T08:00:00Z|`+test.table+`-1"`) || !strings.Contains(first.Body.String(), `"resourceType":"`+test.resourceType+`"`) {
+			t.Fatalf("%s first page = %d %s", test.path, first.Code, first.Body.String())
+		}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
-		WithArgs("deployment-a", 51).
-		WillReturnRows(sqlmock.NewRows(assignmentColumns("model_id")).
-			AddRow("model-assignment-a", "deployment-a", "model-a", "user", "user-a", nil, assignmentNow))
-	models := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/model-assignments", "")
-	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), `"nextCursor":null`) || !strings.Contains(models.Body.String(), `"resourceId":"model-a"`) {
-		t.Fatalf("model list = %d %s", models.Code, models.Body.String())
-	}
-
-	mock.ExpectQuery(`SELECT \* FROM "credential_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
-		WithArgs("deployment-a", 51).
-		WillReturnRows(sqlmock.NewRows(assignmentColumns("credential_id")).
-			AddRow("credential-assignment-a", "deployment-a", "credential-a", "user", "user-a", nil, assignmentNow))
-	credentials := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/credential-assignments", "")
-	if credentials.Code != http.StatusOK || !strings.Contains(credentials.Body.String(), `"nextCursor":null`) || !strings.Contains(credentials.Body.String(), `"resourceId":"credential-a"`) {
-		t.Fatalf("credential list = %d %s", credentials.Code, credentials.Body.String())
+		mock.ExpectQuery(`SELECT \* FROM "`+test.table+`" WHERE deployment_id = \$1 AND \(created_at, id\) > \(\$2, \$3\) ORDER BY created_at, id LIMIT \$4`).
+			WithArgs("deployment-a", assignmentNow, test.table+"-1", 2).
+			WillReturnRows(sqlmock.NewRows(assignmentColumns(test.column)).
+				AddRow(test.table+"-2", "deployment-a", test.resourceID, "user", "user-b", nil, assignmentNow.Add(time.Minute)))
+		second := userRequest(handler, adminToken, http.MethodGet, test.path+"?limit=1&cursor=2026-10-14T08:00:00Z%7C"+test.table+"-1", "")
+		if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"nextCursor":null`) || !strings.Contains(second.Body.String(), `"id":"`+test.table+`-2"`) {
+			t.Fatalf("%s second page = %d %s", test.path, second.Code, second.Body.String())
+		}
 	}
 }
 
 // A cursor this server did not issue cannot be positioned in the list: say so
 // instead of running a query on a guessed position.
-func TestAdminAssignmentListRejectsAnUnusableCursor(t *testing.T) {
+func TestAdminAssignmentListsRejectAnUnusableCursor(t *testing.T) {
 	application, _, _, adminToken := newUserHTTPApplication(t)
-	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/skill-assignments?cursor=not-a-cursor", "")
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"INVALID_REQUEST"`) {
-		t.Fatalf("unusable cursor = %d %s", response.Code, response.Body.String())
+	handler := New(application).Handler()
+	for _, path := range []string{
+		"/aep/v1/admin/skill-assignments?cursor=not-a-cursor",
+		"/aep/v1/admin/model-assignments?cursor=not-a-cursor",
+		"/aep/v1/admin/credential-assignments?cursor=not-a-cursor",
+	} {
+		response := userRequest(handler, adminToken, http.MethodGet, path, "")
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"INVALID_REQUEST"`) {
+			t.Fatalf("%s = %d %s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestAdminAssignmentListsReportDatabaseFailures(t *testing.T) {
+	application, mock, _, adminToken := newUserHTTPApplication(t)
+	handler := New(application).Handler()
+	for _, test := range []struct{ table, path string }{
+		{"model_assignments", "/aep/v1/admin/model-assignments"},
+		{"credential_assignments", "/aep/v1/admin/credential-assignments"},
+	} {
+		mock.ExpectQuery(`SELECT \* FROM "`+test.table+`" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+			WithArgs("deployment-a", 51).
+			WillReturnError(errors.New("assignments unavailable"))
+		response := userRequest(handler, adminToken, http.MethodGet, test.path, "")
+		if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), `"code":"INTERNAL_ERROR"`) {
+			t.Fatalf("%s = %d %s", test.path, response.Code, response.Body.String())
+		}
 	}
 }
