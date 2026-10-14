@@ -31,6 +31,7 @@ func credentialRuntimeColumns() []string {
 
 func TestAdminCredentialLifecycle(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
@@ -83,6 +84,8 @@ func TestAdminCredentialLifecycle(t *testing.T) {
 		t.Fatalf("list Credential assignments = %d %s", assignments.Code, assignments.Body.String())
 	}
 
+	// The existence probe precedes the credential lookup and the insert.
+	expectSubjectExists(pool, "operator")
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "credential-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectBegin()

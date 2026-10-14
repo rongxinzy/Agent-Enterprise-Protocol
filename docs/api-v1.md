@@ -536,7 +536,7 @@ every team carries a `path` and `depth` that are fixed at creation; parents
 never move afterwards, so cyclic hierarchies are impossible. Deleting a team
 that is still referenced returns `TEAM_HAS_CHILDREN` (409) when it has child
 teams, `TEAM_HAS_AGENTS` (409) when it is the home team of digital employees,
-or `TEAM_IN_USE` (409) for any other reference.
+or `TEAM_IN_USE` (409) for any other foreign-key reference. Grants that point at a subject through the polymorphic subject columns (skill, model, and credential assignments, plus data-scope rules) carry no foreign key: deleting the role or team removes them in the same transaction instead of blocking the delete, so a later subject that reuses the same identifier never inherits them.
 
 ### Digital employees
 

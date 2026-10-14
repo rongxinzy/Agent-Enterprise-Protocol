@@ -125,6 +125,7 @@ func TestDeleteTeamRoute(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "parent_team_id", "path", "depth", "created_at", "updated_at"}).
 				AddRow("deployment-a", "engineering", "Engineering", "Builds things", false, true, nil, "/engineering", 0, now, now))
 		mock.ExpectBegin()
+		expectSubjectGrantCleanup(mock, "team", "engineering")
 		mock.ExpectExec(`DELETE FROM "teams"`).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/engineering", "")
