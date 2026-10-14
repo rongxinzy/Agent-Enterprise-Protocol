@@ -15,8 +15,11 @@ import (
 )
 
 type dataPlaneSecretReference struct {
-	Name      string  `json:"name"`
-	Key       string  `json:"key"`
+	Name string `json:"name"`
+	Key  string `json:"key"`
+	// Namespace is accepted for compatibility with earlier clients and ignored:
+	// the namespace is resolved server-side (routes read the dedicated credential
+	// namespace), so a route cannot pick where it reads from.
 	Namespace *string `json:"namespace"`
 }
 
@@ -78,6 +81,12 @@ func normalizeDataPlaneState(input dataPlaneDesiredStateWrite) (dataPlaneDesired
 		}
 		if route.CredentialRef != nil && (strings.TrimSpace(route.CredentialRef.Name) == "" || strings.TrimSpace(route.CredentialRef.Key) == "") {
 			return dataPlaneDesiredStateWrite{}, false
+		}
+		if route.CredentialRef != nil && route.CredentialRef.Namespace != nil {
+			// The namespace comes from the server (the dedicated credential
+			// namespace), never from the request: keeping the sent value would
+			// store a namespace the reconciler is about to ignore.
+			route.CredentialRef.Namespace = nil
 		}
 	}
 	routes := make([]dataPlaneRoute, len(input.Routes))

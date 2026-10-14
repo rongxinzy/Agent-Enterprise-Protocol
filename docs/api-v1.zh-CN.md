@@ -681,7 +681,8 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 
 期望状态只引用外部 Secret 名称和键，不包含模型服务商凭证明文。目录派生路由在模型绑定
 Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key`，命名空间
-`higress-system`），该 Secret 由部署侧 Secret 系统负责供给。
+`aep-credentials`），该 Secret 由部署侧 Secret 系统负责供给。命名空间由服务端解析，
+客户端发送的 `credentialRef.namespace` 会被忽略。
 
 ### 部署设置
 

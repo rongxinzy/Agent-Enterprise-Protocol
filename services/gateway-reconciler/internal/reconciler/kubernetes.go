@@ -196,12 +196,16 @@ func kubernetesErrorStatus(err error) string {
 	return err.Error()
 }
 
-// ReadSecret reads one key from a Kubernetes Secret in higress-system and
-// returns the value. Serves as the CredentialFetcher for routes whose
-// credentialRef names a Secret there. The typed client decodes the base64
-// data field itself; a corrupt entry fails the whole read.
-func (a *KubernetesApplier) ReadSecret(ctx context.Context, name, key string) (string, error) {
-	secret, err := a.client.CoreV1().Secrets("higress-system").Get(ctx, name, metav1.GetOptions{})
+// ReadSecret reads one key from a Kubernetes Secret and returns the value.
+// Serves as the CredentialFetcher for routes, which always pass
+// CredentialSecretNamespace; an empty namespace falls back to
+// DefaultSecretNamespace for operator-configured references. The typed client
+// decodes the base64 data field itself; a corrupt entry fails the whole read.
+func (a *KubernetesApplier) ReadSecret(ctx context.Context, namespace, name, key string) (string, error) {
+	if namespace == "" {
+		namespace = DefaultSecretNamespace
+	}
+	secret, err := a.client.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		var status apierrors.APIStatus
 		if errors.As(err, &status) && status.Status().Code != 0 {

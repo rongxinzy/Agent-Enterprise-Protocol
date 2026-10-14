@@ -69,7 +69,7 @@ func TestPublishDataPlaneRoutesDerivesCatalogState(t *testing.T) {
 		t.Fatalf("derived routes = %s", published.Body.String())
 	}
 	reference := state.Routes[0].CredentialRef
-	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace == nil || *reference.Namespace != "higress-system" {
+	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace != nil {
 		t.Fatalf("derived credentialRef = %s", published.Body.String())
 	}
 	if state.Routes[0].ProviderType != "openai" || state.Routes[1].CredentialRef != nil {

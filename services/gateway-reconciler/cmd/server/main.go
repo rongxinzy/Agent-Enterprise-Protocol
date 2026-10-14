@@ -153,7 +153,7 @@ func loadConfig() (serverConfig, error) {
 		}
 		if applier, ok := workerConfig.Applier.(*reconciler.KubernetesApplier); ok {
 			workerConfig.CredentialFetcher = func(ctx context.Context, ref reconciler.SecretReference) (string, error) {
-				return applier.ReadSecret(ctx, ref.Name, ref.Key)
+				return applier.ReadSecret(ctx, ref.Namespace, ref.Name, ref.Key)
 			}
 		}
 	}

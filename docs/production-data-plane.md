@@ -31,7 +31,7 @@ kubectl -n aep-system rollout status deployment/aep-gateway-reconciler
 
 The two reconciler replicas have independent audit volumes and a disruption budget. Kubernetes mode elects a leader through the `aep-system/gateway-reconciler-leader` Lease. Only a replica that successfully acquires and renews it synchronizes; followers wait for takeover. Production RBAC allows Lease creation in `aep-system`, but get/update only for this fixed Lease name, without access to other Leases. Read/create/renewal rejection clears leadership and retries instead of panicking or continuing synchronization. The leader uses Kubernetes server-side apply with the `aep-gateway-reconciler` field manager. A `ready` status is written only after all live Kubernetes operations succeed. Any partial failure reports `KUBERNETES_APPLY_FAILED` and is retried with bounded exponential backoff.
 
-The reconciler Role and RoleBinding are deliberately scoped to Ingress, `extensions.higress.io/wasmplugins`, and `networking.istio.io/envoyfilters` in `higress-system`. The service-account token and cluster CA come from projected Kubernetes files. Validate the installed Higress CRD group and resource names before rollout.
+The reconciler Role and RoleBinding are deliberately scoped to Ingress, `extensions.higress.io/wasmplugins`, and `networking.istio.io/envoyfilters` in `higress-system`, and it reads route credential Secrets from the dedicated `aep-credentials` namespace through its own Role and RoleBinding, so it never reads a Secret of Higress' own. The service-account token and cluster CA come from projected Kubernetes files. Validate the installed Higress CRD group and resource names before rollout.
 
 Run `npm run test:e2e:m3-data-plane` for control-plane and fault convergence, and `npm run test:e2e:m3-kubernetes` for the real Kubernetes API Server and Higress-compatible CRD gate.
 
@@ -85,7 +85,7 @@ official dashboard into existing Grafana, follow [Higress monitoring](higress-mo
 
 Prefer `POST /aep/v1/admin/data-plane/publish` over hand-written desired states. The model catalog is the single source of truth: the control service derives one route per `gateway` model with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model, and atomically replaces the desired state. Disabled models ride along as `enabled: false` routes so the reconciler deletes resources a route previously owned. This eliminates the structural drift where the catalog advertises a model but the gateway WasmPlugin has no matching `modelMapping`. Republishing an unchanged catalog is a no-op; any catalog change produces a new content-addressed revision.
 
-Credential mapping is by convention. When a published model binds a Credential, its route references the Secret `aep-credential-<credentialId>` key `api-key` in `higress-system`. Provision one such Secret per referenced Credential through the deployment Secret system (for example an External Secret), with the provider key as the `api-key` value. The control service never writes Kubernetes and never emits Credential values; the reconciler reads the Secret at sync time and inlines the value into the rendered WasmPlugin. To rotate, rotate the Credential in the control plane and update the corresponding Secret; the next reconciliation picks up the new value. A route whose Secret is missing renders without an `apiToken`, and ai-proxy rejects its requests fail-closed. An anthropic passthrough route whose Secret is missing renders without the credential headers, and the upstream answers 401 itself — the failure surfaces upstream, not fail-closed at the gateway.
+Credential mapping is by convention. When a published model binds a Credential, its route references the Secret `aep-credential-<credentialId>` key `api-key` in the dedicated `aep-credentials` namespace. Deployments created before that namespace existed must move these Secrets into it: the reconciler reads route credentials there and no longer reads `higress-system`. Provision one such Secret per referenced Credential through the deployment Secret system (for example an External Secret), with the provider key as the `api-key` value. The control service never writes Kubernetes and never emits Credential values; the reconciler reads the Secret at sync time and inlines the value into the rendered WasmPlugin. To rotate, rotate the Credential in the control plane and update the corresponding Secret; the next reconciliation picks up the new value. A route whose Secret is missing renders without an `apiToken`, and ai-proxy rejects its requests fail-closed. An anthropic passthrough route whose Secret is missing renders without the credential headers, and the upstream answers 401 itself — the failure surfaces upstream, not fail-closed at the gateway.
 
 ## Anthropic Passthrough Routes
 
@@ -111,7 +111,7 @@ Set `providerType` explicitly in desired state when a route uses Higress' native
     "upstreamModel": "deepseek-reasoner",
     "protocol": "openai-compatible",
     "providerType": "deepseek",
-    "credentialRef": {"name": "provider-secrets", "key": "deepseek-api-key", "namespace": "higress-system"}
+    "credentialRef": {"name": "provider-secrets", "key": "deepseek-api-key"}
   }]
 }
 ~~~

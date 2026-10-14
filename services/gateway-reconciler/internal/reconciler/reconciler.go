@@ -42,10 +42,25 @@ type Config struct {
 	CredentialFetcher func(ctx context.Context, ref SecretReference) (string, error)
 }
 
+const (
+	// CredentialSecretNamespace holds the Secrets that route credentialRefs name.
+	// The reference is resolved to this namespace server-side: the desired state
+	// cannot steer a read into Higress' own namespace, so a route only ever reads
+	// the Secret its catalog binding names.
+	CredentialSecretNamespace = "aep-credentials"
+	// DefaultSecretNamespace is where operator-configured references (the native
+	// gateway Redis password and quota admin credential) are read from unless the
+	// reference names another namespace itself.
+	DefaultSecretNamespace = "higress-system"
+)
+
 type SecretReference struct {
-	Name      string  `json:"name"`
-	Key       string  `json:"key"`
-	Namespace *string `json:"namespace"`
+	Name string `json:"name"`
+	Key  string `json:"key"`
+	// Namespace is only read for operator-configured references. Route
+	// credentialRefs are pinned to CredentialSecretNamespace during the fetch,
+	// whatever the stored desired state carries.
+	Namespace string `json:"namespace,omitempty"`
 }
 
 type Route struct {
@@ -209,7 +224,11 @@ func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState)
 		if _, done := out[key]; done {
 			continue
 		}
-		value, err := r.config.CredentialFetcher(ctx, *route.CredentialRef)
+		// Pin the namespace here rather than trusting the desired state: the
+		// only thing a route may choose is which catalog-bound Secret it reads.
+		reference := *route.CredentialRef
+		reference.Namespace = CredentialSecretNamespace
+		value, err := r.config.CredentialFetcher(ctx, reference)
 		if err != nil {
 			continue
 		}

@@ -37,7 +37,7 @@ func TestDeriveDataPlaneRoutesFiltersCatalogAndMapsCredentials(t *testing.T) {
 		t.Fatalf("derived route = %#v", routes[0])
 	}
 	reference := routes[0].CredentialRef
-	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace == nil || *reference.Namespace != "higress-system" {
+	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace != nil {
 		t.Fatalf("credential reference = %#v", reference)
 	}
 	if routes[1].ModelID != "chat-b" || routes[1].CredentialRef != nil {
