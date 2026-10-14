@@ -88,6 +88,9 @@ func TestReferencedTeamDefaultRoleCannotBeDeleted(t *testing.T) {
 	now := time.Now()
 	mock.ExpectQuery(`SELECT \* FROM "roles"`).WithArgs("deployment-a", "reader", 1).WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "reader", "Reader", "", false, true, now, now))
 	mock.ExpectBegin()
+	// Deleting a subject also clears its polymorphic grants first; the reference
+	// that blocks the role delete is the team's default-role foreign key.
+	expectSubjectGrantCleanup(mock, "role", "reader")
 	mock.ExpectExec(`DELETE FROM "roles"`).WithArgs("deployment-a", "reader").WillReturnError(&pgconn.PgError{Code: "23503"})
 	mock.ExpectRollback()
 	result := adminRequest(New(application).Handler(), token, http.MethodDelete, "/aep/v1/admin/roles/reader", "")
