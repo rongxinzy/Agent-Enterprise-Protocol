@@ -72,6 +72,12 @@ func TestPublishDataPlaneRoutesDerivesCatalogState(t *testing.T) {
 	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace != nil {
 		t.Fatalf("derived credentialRef = %s", published.Body.String())
 	}
+	// The reconciler re-derives the desired-state hash from the routes it
+	// decodes; a namespace key written here (even as null) would make the two
+	// canonical forms disagree and fail every sync with DESIRED_HASH_MISMATCH.
+	if strings.Contains(published.Body.String(), "namespace") {
+		t.Fatalf("derived routes must not carry a namespace key: %s", published.Body.String())
+	}
 	if state.Routes[0].ProviderType != "openai" || state.Routes[1].CredentialRef != nil {
 		t.Fatalf("derived route normalization = %s", published.Body.String())
 	}

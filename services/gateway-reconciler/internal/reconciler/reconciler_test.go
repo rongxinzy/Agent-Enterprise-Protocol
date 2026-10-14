@@ -251,3 +251,24 @@ func TestNewReconcilerValidatesConfigAndSortsTenants(t *testing.T) {
 		t.Fatalf("normalized config = %#v", worker.config)
 	}
 }
+
+// The desired-state hash is computed over the routes as serialized: the control
+// service hashes the JSON it stores, and this package re-hashes the same routes
+// after decoding them. Any difference in field order or in a key that one side
+// writes and the other omits makes every sync fail with DESIRED_HASH_MISMATCH,
+// so the wire shape is pinned here. A credential reference carries no namespace
+// key: the reconciler resolves it server-side.
+func TestRouteCanonicalWireShape(t *testing.T) {
+	const wire = `{"modelId":"chat","enabled":true,"endpoint":"http://provider.example/v1","upstreamModel":"provider-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-c1","key":"api-key"}}`
+	var route Route
+	if err := json.Unmarshal([]byte(wire), &route); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != wire {
+		t.Fatalf("canonical route form = %s, want %s", encoded, wire)
+	}
+}

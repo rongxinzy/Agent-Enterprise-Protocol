@@ -20,7 +20,13 @@ type dataPlaneSecretReference struct {
 	// Namespace is accepted for compatibility with earlier clients and ignored:
 	// the namespace is resolved server-side (routes read the dedicated credential
 	// namespace), so a route cannot pick where it reads from.
-	Namespace *string `json:"namespace"`
+	//
+	// omitempty is load-bearing: the stored routes are hashed for the desired
+	// state, and the reconciler hashes the same routes after decoding them into
+	// its own struct, where an empty namespace is omitted. Serializing a null
+	// here would make the two canonical forms differ and every sync fail with
+	// DESIRED_HASH_MISMATCH.
+	Namespace *string `json:"namespace,omitempty"`
 }
 
 type dataPlaneRoute struct {
