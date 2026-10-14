@@ -4,10 +4,12 @@ import (
 	"context"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
@@ -47,6 +49,9 @@ func (r *ModelPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func (r *ModelPolicyReconciler) writeAccepted(ctx context.Context, policy *gatewayv1alpha1.ModelPolicy, status metav1.ConditionStatus, reason, message string) error {
+	// See ModelRouteReconciler.writeAccepted: meta.SetStatusCondition owns
+	// LastTransitionTime and keeps the condition's ObservedGeneration in step
+	// with policy.Generation.
 	condition := metav1.Condition{
 		Type:               gatewayv1alpha1.ConditionAccepted,
 		Status:             status,
@@ -54,21 +59,49 @@ func (r *ModelPolicyReconciler) writeAccepted(ctx context.Context, policy *gatew
 		Reason:             reason,
 		Message:            message,
 	}
-	changed := policy.Status.ObservedGeneration != policy.Generation ||
-		setCondition(&policy.Status.Conditions, condition)
-	if !changed {
+	stored := meta.FindStatusCondition(policy.Status.Conditions, gatewayv1alpha1.ConditionAccepted)
+	unchanged := stored != nil &&
+		stored.Status == condition.Status &&
+		stored.Reason == condition.Reason &&
+		stored.Message == condition.Message &&
+		stored.ObservedGeneration == condition.ObservedGeneration &&
+		policy.Status.ObservedGeneration == policy.Generation
+	if unchanged {
 		return nil
 	}
+	meta.SetStatusCondition(&policy.Status.Conditions, condition)
 	policy.Status.ObservedGeneration = policy.Generation
 	return r.Status().Update(ctx, policy)
 }
 
-// SetupWithManager registers the ModelPolicy watch. The pilot reconciles on
-// policy changes only; a policy whose target appears later is re-validated on
-// its own next change.
+// policiesForRoute maps a ModelRoute event to every ModelPolicy in the same
+// namespace that targets it, so target create/update/delete re-validates the
+// dependent policies instead of leaving a stale verdict.
+func (r *ModelPolicyReconciler) policiesForRoute(ctx context.Context, obj client.Object) []ctrl.Request {
+	var policies gatewayv1alpha1.ModelPolicyList
+	if err := r.List(ctx, &policies, client.InNamespace(obj.GetNamespace()), client.MatchingFields{"spec.targetRef.name": obj.GetName()}); err != nil {
+		log.FromContext(ctx).Error(err, "list policies for route", "route", obj.GetName(), "namespace", obj.GetNamespace())
+		return nil
+	}
+	requests := make([]ctrl.Request, 0, len(policies.Items))
+	for index := range policies.Items {
+		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&policies.Items[index])})
+	}
+	return requests
+}
+
+// SetupWithManager registers the ModelPolicy watch and a secondary watch on
+// ModelRoute so a policy is re-validated when its target appears, changes, or
+// disappears. The targetRef.name field index backs the reverse lookup.
 func (r *ModelPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &gatewayv1alpha1.ModelPolicy{}, "spec.targetRef.name", func(obj client.Object) []string {
+		return []string{obj.(*gatewayv1alpha1.ModelPolicy).Spec.TargetRef.Name}
+	}); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gatewayv1alpha1.ModelPolicy{}).
+		Watches(&gatewayv1alpha1.ModelRoute{}, handler.EnqueueRequestsFromMapFunc(r.policiesForRoute)).
 		Named("modelpolicy").
 		Complete(r)
 }

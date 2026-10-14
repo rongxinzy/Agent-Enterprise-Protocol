@@ -12,7 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -68,6 +70,10 @@ func TestControllersWithEnvtest(t *testing.T) {
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		LeaderElection:         false,
+		// The suite may run more than once in a single test binary
+		// (go test -count=N); controller-runtime's process-global controller
+		// name registry would otherwise reject the repeated registrations.
+		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
 	})
 	if err != nil {
 		t.Fatalf("manager: %v", err)
@@ -125,7 +131,7 @@ func TestControllersWithEnvtest(t *testing.T) {
 				}
 			}
 			for _, condition := range conditions {
-				if condition.Type == gatewayv1alpha1.ConditionAccepted && condition.Status == wantStatus && condition.Reason == wantReason && generation == wantGeneration {
+				if condition.Type == gatewayv1alpha1.ConditionAccepted && condition.Status == wantStatus && condition.Reason == wantReason && condition.ObservedGeneration == wantGeneration && generation == wantGeneration {
 					return
 				}
 			}
@@ -194,6 +200,47 @@ func TestControllersWithEnvtest(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitAccepted("ModelPolicy", "policy-ok", metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, 1)
+	})
+
+	t.Run("policy is revalidated when its target appears", func(t *testing.T) {
+		// The ModelRoute watch must requeue policies that reference the route,
+		// so a target created after the policy flips TargetNotFound to Accepted.
+		policy := &gatewayv1alpha1.ModelPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "late-policy", Namespace: namespace},
+			Spec: gatewayv1alpha1.ModelPolicySpec{
+				TargetRef: gatewayv1alpha1.PolicyTargetReference{Kind: "ModelRoute", Name: "late-route"},
+			},
+		}
+		if err := k8sClient.Create(ctx, policy); err != nil {
+			t.Fatal(err)
+		}
+		waitAccepted("ModelPolicy", "late-policy", metav1.ConditionFalse, gatewayv1alpha1.ReasonTargetNotFound, 1)
+
+		if err := k8sClient.Create(ctx, validRoute("late-route")); err != nil {
+			t.Fatal(err)
+		}
+		waitAccepted("ModelPolicy", "late-policy", metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, 1)
+	})
+
+	t.Run("policy is revalidated when its target is deleted", func(t *testing.T) {
+		if err := k8sClient.Create(ctx, validRoute("vanishing-route")); err != nil {
+			t.Fatal(err)
+		}
+		policy := &gatewayv1alpha1.ModelPolicy{
+			ObjectMeta: metav1.ObjectMeta{Name: "vanishing-policy", Namespace: namespace},
+			Spec: gatewayv1alpha1.ModelPolicySpec{
+				TargetRef: gatewayv1alpha1.PolicyTargetReference{Kind: "ModelRoute", Name: "vanishing-route"},
+			},
+		}
+		if err := k8sClient.Create(ctx, policy); err != nil {
+			t.Fatal(err)
+		}
+		waitAccepted("ModelPolicy", "vanishing-policy", metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, 1)
+
+		if err := k8sClient.Delete(ctx, validRoute("vanishing-route")); err != nil {
+			t.Fatal(err)
+		}
+		waitAccepted("ModelPolicy", "vanishing-policy", metav1.ConditionFalse, gatewayv1alpha1.ReasonTargetNotFound, 1)
 	})
 
 	t.Run("reconcile of a missing object is a no-op", func(t *testing.T) {

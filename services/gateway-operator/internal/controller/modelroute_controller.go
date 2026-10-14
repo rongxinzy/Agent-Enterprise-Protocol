@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -47,6 +48,9 @@ func (r *ModelRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *ModelRouteReconciler) writeAccepted(ctx context.Context, route *gatewayv1alpha1.ModelRoute, status metav1.ConditionStatus, reason, message string) error {
+	// meta.SetStatusCondition owns LastTransitionTime and always refreshes
+	// ObservedGeneration/Reason/Message on the stored condition, so the
+	// condition can never lag route.Generation behind a stale entry.
 	condition := metav1.Condition{
 		Type:               gatewayv1alpha1.ConditionAccepted,
 		Status:             status,
@@ -54,32 +58,19 @@ func (r *ModelRouteReconciler) writeAccepted(ctx context.Context, route *gateway
 		Reason:             reason,
 		Message:            message,
 	}
-	changed := route.Status.ObservedGeneration != route.Generation ||
-		setCondition(&route.Status.Conditions, condition)
-	if !changed {
+	stored := meta.FindStatusCondition(route.Status.Conditions, gatewayv1alpha1.ConditionAccepted)
+	unchanged := stored != nil &&
+		stored.Status == condition.Status &&
+		stored.Reason == condition.Reason &&
+		stored.Message == condition.Message &&
+		stored.ObservedGeneration == condition.ObservedGeneration &&
+		route.Status.ObservedGeneration == route.Generation
+	if unchanged {
 		return nil
 	}
+	meta.SetStatusCondition(&route.Status.Conditions, condition)
 	route.Status.ObservedGeneration = route.Generation
 	return r.Status().Update(ctx, route)
-}
-
-// setCondition upserts a condition, reporting whether it changed anything.
-func setCondition(conditions *[]metav1.Condition, condition metav1.Condition) bool {
-	for index := range *conditions {
-		current := &(*conditions)[index]
-		if current.Type != condition.Type {
-			continue
-		}
-		if current.Status == condition.Status && current.Reason == condition.Reason && current.Message == condition.Message {
-			return false
-		}
-		condition.LastTransitionTime = metav1.Now()
-		*current = condition
-		return true
-	}
-	condition.LastTransitionTime = metav1.Now()
-	*conditions = append(*conditions, condition)
-	return true
 }
 
 // validateModelRoute is the shallow semantic check beyond the CRD schema:

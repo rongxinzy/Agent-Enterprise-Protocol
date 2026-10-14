@@ -3,8 +3,6 @@ package controller
 import (
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
 )
 
@@ -35,32 +33,5 @@ func TestValidateModelRoute(t *testing.T) {
 				t.Fatalf("validateModelRoute(%q) = %v", test.endpoint, err)
 			}
 		})
-	}
-}
-
-func TestSetConditionUpsertSemantics(t *testing.T) {
-	accepted := metav1.Condition{Type: gatewayv1alpha1.ConditionAccepted, Status: metav1.ConditionTrue, Reason: gatewayv1alpha1.ReasonAccepted, Message: "ok"}
-	var conditions []metav1.Condition
-	if !setCondition(&conditions, accepted) {
-		t.Fatal("first insert must report a change")
-	}
-	// Identical condition is a no-op.
-	if setCondition(&conditions, metav1.Condition{Type: gatewayv1alpha1.ConditionAccepted, Status: metav1.ConditionTrue, Reason: gatewayv1alpha1.ReasonAccepted, Message: "ok"}) {
-		t.Fatal("identical condition must not report a change")
-	}
-	// A different type in the list is skipped, not matched.
-	other := metav1.Condition{Type: "Stalled", Status: metav1.ConditionTrue, Reason: "x", Message: "y"}
-	if !setCondition(&conditions, other) {
-		t.Fatal("new condition type must report a change")
-	}
-	if setCondition(&conditions, accepted) {
-		t.Fatal("accepted condition unchanged while another type exists")
-	}
-	// A changed status replaces in place.
-	if !setCondition(&conditions, metav1.Condition{Type: gatewayv1alpha1.ConditionAccepted, Status: metav1.ConditionFalse, Reason: gatewayv1alpha1.ReasonInvalidSpec, Message: "bad"}) {
-		t.Fatal("changed condition must report a change")
-	}
-	if len(conditions) != 2 {
-		t.Fatalf("conditions = %#v", conditions)
 	}
 }
