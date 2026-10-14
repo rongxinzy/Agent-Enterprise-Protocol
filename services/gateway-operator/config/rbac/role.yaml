@@ -1,0 +1,24 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gateway-operator-role
+rules:
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - modelpolicies
+  - modelroutes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - modelpolicies/status
+  - modelroutes/status
+  verbs:
+  - get
+  - patch
+  - update
