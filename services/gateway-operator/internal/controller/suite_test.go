@@ -199,12 +199,12 @@ func TestControllersWithEnvtest(t *testing.T) {
 	t.Run("reconcile of a missing object is a no-op", func(t *testing.T) {
 		routeReconciler := &ModelRouteReconciler{Client: k8sClient, Scheme: scheme}
 		result, err := routeReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "deleted-route", Namespace: namespace}})
-		if err != nil || result.Requeue {
+		if err != nil || result.RequeueAfter != 0 {
 			t.Fatalf("missing route reconcile = %v, %#v", err, result)
 		}
 		policyReconciler := &ModelPolicyReconciler{Client: k8sClient, Scheme: scheme}
 		policyResult, err := policyReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "deleted-policy", Namespace: namespace}})
-		if err != nil || policyResult.Requeue {
+		if err != nil || policyResult.RequeueAfter != 0 {
 			t.Fatalf("missing policy reconcile = %v, %#v", err, policyResult)
 		}
 	})

@@ -465,29 +465,38 @@ func requiredAdminPermission(method, path string) []string {
 		}
 		return []string{"users.read"}
 	case strings.HasPrefix(path, "/aep/v1/admin/models"):
-		if strings.Contains(path, "assignment") {
-			return []string{"models.assign"}
-		}
 		if method == http.MethodGet {
 			return []string{"models.read"}
 		}
 		return []string{"models.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/skills"):
-		if strings.Contains(path, "assignment") {
-			return []string{"skills.assign"}
-		}
 		if method == http.MethodGet {
 			return []string{"skills.read"}
 		}
 		return []string{"skills.write"}
 	case strings.HasPrefix(path, "/aep/v1/admin/credentials"):
-		if strings.Contains(path, "assignment") {
-			return []string{"credentials.assign"}
-		}
 		if method == http.MethodGet {
 			return []string{"credentials.read"}
 		}
 		return []string{"credentials.write"}
+	// Grants live under their own prefixes (`skill-assignments`), which the
+	// resource-prefix cases above cannot match: listing follows the resource
+	// read permission, changing a grant needs the matching `*.assign` one.
+	case strings.HasPrefix(path, "/aep/v1/admin/skill-assignments"):
+		if method == http.MethodGet {
+			return []string{"skills.read"}
+		}
+		return []string{"skills.assign"}
+	case strings.HasPrefix(path, "/aep/v1/admin/model-assignments"):
+		if method == http.MethodGet {
+			return []string{"models.read"}
+		}
+		return []string{"models.assign"}
+	case strings.HasPrefix(path, "/aep/v1/admin/credential-assignments"):
+		if method == http.MethodGet {
+			return []string{"credentials.read"}
+		}
+		return []string{"credentials.assign"}
 	case strings.HasPrefix(path, "/aep/v1/admin/licenses"):
 		if strings.HasSuffix(path, "/revoke") {
 			return []string{"licenses.revoke"}
