@@ -1901,6 +1901,7 @@ export interface components {
             serverTime: string;
             controlEvents: {
                 pending: boolean;
+                /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`. */
                 watermark: string;
             };
             nextHeartbeatAfterSeconds: number;
@@ -1965,6 +1966,7 @@ export interface components {
         ControlEventPage: {
             items: components["schemas"]["ControlEventDelivery"][];
             nextCursor: string | null;
+            /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. */
             watermark: string;
         };
         AcknowledgeRequest: {

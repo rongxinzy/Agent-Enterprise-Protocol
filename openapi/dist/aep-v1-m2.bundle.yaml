@@ -3959,6 +3959,7 @@ components:
               type: boolean
             watermark:
               type: string
+              description: Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds:
           type: integer
           minimum: 5
@@ -4102,6 +4103,7 @@ components:
             - 'null'
         watermark:
           type: string
+          description: Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`.
     AcknowledgeRequest:
       type: object
       required:

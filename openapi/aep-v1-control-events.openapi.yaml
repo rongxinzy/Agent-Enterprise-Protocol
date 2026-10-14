@@ -240,7 +240,12 @@ components:
           required: [pending, watermark]
           properties:
             pending: {type: boolean}
-            watermark: {type: string}
+            watermark:
+              type: string
+              description: >-
+                Largest cursor delivered to the session so far, or an empty
+                string when nothing has been delivered. Carries the same value
+                as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds: {type: integer, minimum: 5, maximum: 3600}
     ControlEventPage:
       type: object
@@ -250,7 +255,12 @@ components:
           type: array
           items: {$ref: '#/components/schemas/ControlEventDelivery'}
         nextCursor: {type: [string, 'null']}
-        watermark: {type: string}
+        watermark:
+          type: string
+          description: >-
+            Largest cursor delivered to the session so far, or an empty string
+            when nothing has been delivered. Carries the same value as
+            `HeartbeatResponse.controlEvents.watermark`.
     ControlEventDelivery:
       type: object
       required: [deliveryId, eventId, cursor, type, scope, task, createdAt, expiresAt]
