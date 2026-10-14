@@ -111,6 +111,21 @@ scheduled_audit = security["jobs"]["dependency-audit"]
 assert scheduled_audit["if"] == "github.event_name != 'pull_request'", "PR audit must execute only once"
 assert audit["steps"] == scheduled_audit["steps"], "PR and scheduled audit coverage drift"
 assert [step.get("run") for step in audit["steps"] if "run" in step] == ["npm ci", "npm run security:check"], "Required audit must run the real security scan"
+
+# Explicit SARIF categories must match the existing main baselines. Default
+# categories change with reusable callers and break introduced-alert comparison.
+for filename, name, languages, category in [
+    ("codeql.yml", "analyze", {"go", "actions"}, ".github/workflows/codeql.yml:analyze/language:${{ matrix.language }}"),
+    ("security.yml", "codeql", {"go", "javascript-typescript"}, "/language:${{ matrix.language }}"),
+]:
+    workflow = yaml.safe_load((root / "workflows" / filename).read_text(encoding="utf-8"))
+    scan = workflow["jobs"][name]
+    assert set(scan["strategy"]["matrix"]["language"]) == languages, f"CodeQL language coverage drift: {filename}"
+    init, build, analyze = scan["steps"][1:]
+    assert init["uses"] == "github/codeql-action/init@v3" and init["with"]["languages"] == "${{ matrix.language }}", "CodeQL initialization must cover each language"
+    assert build["uses"] == "github/codeql-action/autobuild@v3", "CodeQL build must remain enabled"
+    assert analyze["uses"] == "github/codeql-action/analyze@v3", "CodeQL analysis must remain enabled"
+    assert analyze.get("with") == {"category": category}, f"CodeQL baseline category drift or upload disabled: {filename}"
 tests = yaml.safe_load((root / "workflows/devops-gate-tests.yml").read_text(encoding="utf-8"))
 assert tests["permissions"] == {"contents": "read"}, "PR regression tests must have read-only permissions"
 assert "permissions" not in tests["jobs"]["gate-tests"], "PR tests must not elevate permissions"

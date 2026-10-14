@@ -46,6 +46,18 @@ audit only for PR events; main, scheduled and manual audits remain enabled.
 Policy tests reject renaming, skipping, removing the real scan, audit drift
 or removing the audit from final aggregation.
 
+CodeQL's `analyze` action also sets its public `category` input explicitly to
+`.github/workflows/codeql.yml:analyze/language:${{ matrix.language }}` for Go
+and Actions. These values preserve the existing main scan baselines; otherwise
+the PR's reusable caller changes the default prefix to `m0.yml` and GitHub
+reports `2 configurations not found`, preventing complete introduced-alert
+comparison. The security workflow retains its distinct `/language:go` and
+`/language:javascript-typescript` categories. Main, scheduled and PR scans use
+the same categories without deleting old analyses, disabling uploads or
+overriding CodeQL's internal environment. Policy tests preserve all languages
+and reject default/caller-dependent or colliding categories and disabled uploads.
+Check the actual code-scanning comparison result in addition to scan job success.
+
 For PR heads created before this repair, rerunning their existing workflow
 uses their old YAML and cannot restore the missing check name. After the
 repair merges, merge the updated main into an affected PR once and run CI

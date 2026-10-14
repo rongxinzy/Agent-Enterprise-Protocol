@@ -26,3 +26,6 @@ jobs:
           languages: ${{ matrix.language }}
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
+        with:
+          # Match the existing main baselines even when called by m0.yml.
+          category: .github/workflows/codeql.yml:analyze/language:${{ matrix.language }}

@@ -91,6 +91,43 @@ class WorkflowBoundaryTests(unittest.TestCase):
         self.assertEqual(audit["steps"], security["jobs"]["dependency-audit"]["steps"])
         self.assertIn("dependency-audit", parent["jobs"]["ci-results"]["needs"])
 
+    def test_codeql_categories_match_existing_main_baselines(self):
+        workflow = yaml.safe_load((self.root / "workflows/codeql.yml").read_text(encoding="utf-8"))
+        job = workflow["jobs"]["analyze"]
+        self.assertEqual(set(job["strategy"]["matrix"]["language"]), {"go", "actions"})
+        analyze = job["steps"][-1]
+        self.assertEqual(analyze["uses"], "github/codeql-action/analyze@v3")
+        self.assertEqual(analyze.get("with", {}).get("category"),
+                         ".github/workflows/codeql.yml:analyze/language:${{ matrix.language }}",
+                         "Reusable caller path must not replace main's original scan categories")
+
+    def test_codeql_default_caller_category_is_rejected(self):
+        self.mutate("workflows/codeql.yml", lambda data:
+                    data["jobs"]["analyze"]["steps"][-1].pop("with"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_codeql_caller_path_category_is_rejected(self):
+        self.mutate("workflows/codeql.yml", lambda data:
+                    data["jobs"]["analyze"]["steps"][-1]["with"].update(
+                        category=".github/workflows/m0.yml:analyze/language:${{ matrix.language }}"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_codeql_language_removal_is_rejected(self):
+        self.mutate("workflows/codeql.yml", lambda data:
+                    data["jobs"]["analyze"]["strategy"]["matrix"].update(language=["go"]))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_codeql_disabled_upload_is_rejected(self):
+        self.mutate("workflows/codeql.yml", lambda data:
+                    data["jobs"]["analyze"]["steps"][-1]["with"].update(upload="never"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_security_codeql_category_collision_is_rejected(self):
+        self.mutate("workflows/security.yml", lambda data:
+                    data["jobs"]["codeql"]["steps"][-1]["with"].update(
+                        category=".github/workflows/codeql.yml:analyze/language:${{ matrix.language }}"))
+        self.assertNotEqual(self.check().returncode, 0)
+
     def test_dependency_audit_renamed_check_is_rejected(self):
         self.mutate(self.parent_path(), lambda data:
                     data["jobs"]["dependency-audit"].update(name="security / dependency-audit"))
