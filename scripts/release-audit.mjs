@@ -142,7 +142,7 @@ assert(productionGatewayDeployment.includes('AEP_GATEWAY_REQUIRE_ENTITLEMENT: "t
 assert(productionGatewayDeployment.includes("secretKeyRef:"), "production gateway License status token must come from a Secret");
 
 const kubernetesApplier = await readText("services/gateway-reconciler/internal/reconciler/kubernetes.go");
-assert(kubernetesApplier.includes("application/apply-patch+yaml"), "Kubernetes server-side apply is missing");
+assert(kubernetesApplier.includes("types.ApplyPatchType"), "Kubernetes server-side apply is missing");
 assert(kubernetesApplier.includes("fieldManager"), "Kubernetes apply field ownership is missing");
 assert(packageDocument.scripts?.["test:e2e"]?.includes("test:e2e:m3-data-plane"), "default E2E gate omits M3 data-plane automation");
 assert(packageDocument.scripts?.["test:e2e:m3-kubernetes"] === "node tests/e2e/m3-kubernetes.mjs", "kind/Higress-compatible E2E gate is not wired");
