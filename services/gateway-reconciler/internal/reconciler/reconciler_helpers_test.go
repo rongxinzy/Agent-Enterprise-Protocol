@@ -22,12 +22,17 @@ func TestFetchCredentials(t *testing.T) {
 	t.Run("route references are read from the dedicated credential namespace", func(t *testing.T) {
 		var namespaces []string
 		reconciler := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, ref SecretReference) (string, error) {
-			namespaces = append(namespaces, ref.Namespace)
+			if ref.Namespace == nil {
+				namespaces = append(namespaces, "")
+			} else {
+				namespaces = append(namespaces, *ref.Namespace)
+			}
 			return "value", nil
 		}}}
 		// The stored desired state claims another namespace; the fetch must
 		// ignore it and stay in the dedicated credential namespace.
-		stored := &SecretReference{Name: "aep-credential-c1", Key: "api-key", Namespace: "higress-system"}
+		storedNamespace := "higress-system"
+		stored := &SecretReference{Name: "aep-credential-c1", Key: "api-key", Namespace: &storedNamespace}
 		reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{{ModelID: "a", Enabled: true, CredentialRef: stored}}})
 		if len(namespaces) != 1 || namespaces[0] != CredentialSecretNamespace {
 			t.Fatalf("credential namespaces = %v, want [%s]", namespaces, CredentialSecretNamespace)

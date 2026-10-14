@@ -59,9 +59,11 @@ func deriveDataPlaneRoutes(models []modelRecord) []dataPlaneRoute {
 			route.ProviderType = "openai"
 		}
 		if model.CredentialID.Valid && strings.TrimSpace(model.CredentialID.String) != "" {
-			// The namespace is deliberately absent: the reconciler resolves every
-			// route credential in the dedicated credential namespace, so storing one
-			// here would only be a second place to keep in sync.
+			// The namespace stays null: the reconciler resolves every route
+			// credential in the dedicated credential namespace, so storing one here
+			// would only be a second place to keep in sync. It is serialized
+			// explicitly so the hashed wire shape matches the rows written before
+			// the namespace was pinned.
 			route.CredentialRef = &dataPlaneSecretReference{
 				Name: dataPlaneCredentialSecretPrefix + model.CredentialID.String,
 				Key:  dataPlaneCredentialSecretKey,

@@ -21,12 +21,12 @@ type dataPlaneSecretReference struct {
 	// the namespace is resolved server-side (routes read the dedicated credential
 	// namespace), so a route cannot pick where it reads from.
 	//
-	// omitempty is load-bearing: the stored routes are hashed for the desired
-	// state, and the reconciler hashes the same routes after decoding them into
-	// its own struct, where an empty namespace is omitted. Serializing a null
-	// here would make the two canonical forms differ and every sync fail with
-	// DESIRED_HASH_MISMATCH.
-	Namespace *string `json:"namespace,omitempty"`
+	// The tag deliberately has no omitempty. Stored routes are hashed for the
+	// desired state and the reconciler re-hashes what it decodes; rows written
+	// before the namespace was pinned serialize an explicit null here, so
+	// emitting null (rather than dropping the key) keeps one canonical form for
+	// new and existing rows and avoids a hash migration.
+	Namespace *string `json:"namespace"`
 }
 
 type dataPlaneRoute struct {

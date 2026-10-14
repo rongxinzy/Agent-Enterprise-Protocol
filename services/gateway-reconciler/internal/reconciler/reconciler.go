@@ -57,10 +57,16 @@ const (
 type SecretReference struct {
 	Name string `json:"name"`
 	Key  string `json:"key"`
-	// Namespace is only read for operator-configured references. Route
-	// credentialRefs are pinned to CredentialSecretNamespace during the fetch,
+	// Namespace is only read for operator-configured references: route
+	// credentialRefs are pinned to CredentialSecretNamespace while fetching,
 	// whatever the stored desired state carries.
-	Namespace string `json:"namespace,omitempty"`
+	//
+	// The tag deliberately has no omitempty. Desired states are hashed over
+	// their serialized routes, and rows written before the namespace was pinned
+	// carry an explicit null here; emitting the field (rather than dropping it)
+	// keeps the canonical form identical for new and existing rows, so no stored
+	// state needs a hash migration.
+	Namespace *string `json:"namespace"`
 }
 
 type Route struct {
@@ -227,7 +233,8 @@ func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState)
 		// Pin the namespace here rather than trusting the desired state: the
 		// only thing a route may choose is which catalog-bound Secret it reads.
 		reference := *route.CredentialRef
-		reference.Namespace = CredentialSecretNamespace
+		namespace := CredentialSecretNamespace
+		reference.Namespace = &namespace
 		value, err := r.config.CredentialFetcher(ctx, reference)
 		if err != nil {
 			continue

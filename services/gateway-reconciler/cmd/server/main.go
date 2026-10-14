@@ -153,7 +153,14 @@ func loadConfig() (serverConfig, error) {
 		}
 		if applier, ok := workerConfig.Applier.(*reconciler.KubernetesApplier); ok {
 			workerConfig.CredentialFetcher = func(ctx context.Context, ref reconciler.SecretReference) (string, error) {
-				return applier.ReadSecret(ctx, ref.Namespace, ref.Name, ref.Key)
+				// Route references carry the pinned credential namespace; an
+				// operator-configured reference leaves it unset and ReadSecret
+				// falls back to its default namespace.
+				namespace := ""
+				if ref.Namespace != nil {
+					namespace = *ref.Namespace
+				}
+				return applier.ReadSecret(ctx, namespace, ref.Name, ref.Key)
 			}
 		}
 	}
