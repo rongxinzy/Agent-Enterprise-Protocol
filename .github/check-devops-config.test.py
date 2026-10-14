@@ -79,6 +79,60 @@ class WorkflowBoundaryTests(unittest.TestCase):
         for name in config["orchestrator"]["localNeeds"]:
             self.assertIn(name, parent["jobs"])
 
+    def test_required_dependency_audit_runs_under_original_name(self):
+        parent = yaml.safe_load((self.root / self.parent_path()).read_text(encoding="utf-8"))
+        self.assertIn("dependency-audit", parent["jobs"],
+                      "Nested security / dependency-audit cannot satisfy the required dependency-audit check")
+        audit = parent["jobs"]["dependency-audit"]
+        self.assertEqual(audit.get("name", "dependency-audit"), "dependency-audit")
+        self.assertEqual(audit["if"], "github.event_name == 'pull_request'")
+        self.assertNotIn("uses", audit)
+        security = yaml.safe_load((self.root / "workflows/security.yml").read_text(encoding="utf-8"))
+        self.assertEqual(audit["steps"], security["jobs"]["dependency-audit"]["steps"])
+        self.assertIn("dependency-audit", parent["jobs"]["ci-results"]["needs"])
+
+    def test_dependency_audit_renamed_check_is_rejected(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["dependency-audit"].update(name="security / dependency-audit"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_dependency_audit_skipping_prs_is_rejected(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["dependency-audit"].update({"if": "false"}))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_dependency_audit_fake_passing_alias_is_rejected(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["dependency-audit"].update(steps=[{"run": "true"}]))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_dependency_audit_scan_cannot_be_weakened_in_both_workflows(self):
+        def weaken(data):
+            data["jobs"]["dependency-audit"]["steps"][-1]["run"] = "echo security passed"
+        self.mutate(self.parent_path(), weaken)
+        self.mutate("workflows/security.yml", weaken)
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_dependency_audit_scheduled_coverage_drift_is_rejected(self):
+        self.mutate("workflows/security.yml", lambda data:
+                    data["jobs"]["dependency-audit"]["steps"].pop())
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_duplicate_pr_dependency_audit_is_rejected(self):
+        self.mutate("workflows/security.yml", lambda data:
+                    data["jobs"]["dependency-audit"].pop("if"))
+        self.assertNotEqual(self.check().returncode, 0)
+
+    def test_dependency_audit_missing_from_all_summary_inventory_is_rejected(self):
+        self.mutate(self.parent_path(), lambda data:
+                    data["jobs"]["ci-results"]["needs"].remove("dependency-audit"))
+        path = self.root / "devops-ci.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["orchestrator"]["localNeeds"].remove("dependency-audit")
+        config["orchestrator"]["needs"].remove("dependency-audit")
+        path.write_text(json.dumps(config), encoding="utf-8")
+        self.assertNotEqual(self.check().returncode, 0)
+
     def test_privileged_pr_checkout_is_rejected(self):
         self.mutate("workflows/devops-gate.yml", lambda data:
                     data["jobs"]["refresh-gate"]["steps"][0]["with"].update(ref="${{ github.event.pull_request.head.sha }}"))

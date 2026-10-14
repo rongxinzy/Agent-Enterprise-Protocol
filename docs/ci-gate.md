@@ -36,6 +36,23 @@ on each PR. A new PR head triggers no initial privileged publisher; only
 the parent completion triggers publication. Title/body/base edits and manual
 recovery still revalidate current metadata.
 
+AEP's dependency audit is a top-level `dependency-audit` job in the unified
+entry. GitHub branch protection matches exact check names: the nested
+`security / dependency-audit` name cannot satisfy the existing required
+`dependency-audit` context. The top-level job runs the same `npm ci` and
+`npm run security:check` steps as the scheduled security workflow and is
+required by `ci-results`. The reusable security workflow skips its duplicate
+audit only for PR events; main, scheduled and manual audits remain enabled.
+Policy tests reject renaming, skipping, removing the real scan, audit drift
+or removing the audit from final aggregation.
+
+For PR heads created before this repair, rerunning their existing workflow
+uses their old YAML and cannot restore the missing check name. After the
+repair merges, merge the updated main into an affected PR once and run CI
+on the new head. This is an actual CI configuration dependency; metadata
+refreshes alone cannot supply the missing audit. Preserve required checks
+and obtain approval for the updated head under the existing review policy.
+
 The final read-only `ci-results` job depends on all required caller results.
 AEP's existing `release-gate` continues to check its full business/E2E DAG,
 including precisely permitted scoped skips. The final publisher remains

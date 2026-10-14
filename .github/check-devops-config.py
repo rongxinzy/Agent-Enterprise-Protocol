@@ -96,6 +96,21 @@ for name, path in config["orchestrator"]["callers"].items():
     assert "workflow_call" in child_events and "pull_request" not in child_events, "Independent PR triggers duplicate the unified run"
 for name in config["orchestrator"]["localNeeds"]:
     assert name in parent["jobs"], f"Missing original local check: {name}"
+
+# Required status contexts match exact check names, not suffixes. Keep the
+# existing audit at the parent level; do not replace it with a passing alias.
+assert "dependency-audit" in config["orchestrator"]["localNeeds"], "Required dependency audit missing from summary"
+audit = parent["jobs"]["dependency-audit"]
+assert audit.get("name", "dependency-audit") == "dependency-audit", "Required dependency-audit check renamed"
+assert "uses" not in audit and "needs" not in audit, "Required audit must run directly and independently"
+assert audit["if"] == "github.event_name == 'pull_request'", "Required audit must run on every PR"
+assert audit.get("permissions", parent["permissions"]) == {"contents": "read"}, "Audit must remain read-only"
+assert audit["runs-on"] == "ubuntu-latest", "Unexpected audit runner"
+security = yaml.safe_load((root / "workflows/security.yml").read_text(encoding="utf-8"))
+scheduled_audit = security["jobs"]["dependency-audit"]
+assert scheduled_audit["if"] == "github.event_name != 'pull_request'", "PR audit must execute only once"
+assert audit["steps"] == scheduled_audit["steps"], "PR and scheduled audit coverage drift"
+assert [step.get("run") for step in audit["steps"] if "run" in step] == ["npm ci", "npm run security:check"], "Required audit must run the real security scan"
 tests = yaml.safe_load((root / "workflows/devops-gate-tests.yml").read_text(encoding="utf-8"))
 assert tests["permissions"] == {"contents": "read"}, "PR regression tests must have read-only permissions"
 assert "permissions" not in tests["jobs"]["gate-tests"], "PR tests must not elevate permissions"
