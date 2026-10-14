@@ -182,7 +182,7 @@ func TestRoleAndTeamAggregateQueries(t *testing.T) {
 		t.Fatalf("ListRolesPage() = %#v, %v", roles, err)
 	}
 
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a", "team-0", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at", "member_count"}).
 			AddRow("deployment-a", "team-a", "Engineering", "Builders", false, true, now, now, 4))
@@ -191,7 +191,7 @@ func TestRoleAndTeamAggregateQueries(t *testing.T) {
 		t.Fatalf("ListTeamsPage() = %#v, %v", teams, err)
 	}
 
-	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_role_bindings AS urb`).
+	mock.ExpectQuery(`SELECT DISTINCT rp.permission_id FROM role_permissions AS rp JOIN user_effective_roles AS urb`).
 		WithArgs("deployment-a", "user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"permission_id"}).AddRow("models.read").AddRow("skills.read"))
 	permissions, err := store.Deployment("deployment-a").UserPermissionIDs(context.Background(), "user-a")
