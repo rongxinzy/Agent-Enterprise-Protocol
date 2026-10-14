@@ -36,9 +36,13 @@ type Config struct {
 	HTTPClient    *http.Client
 	Applier       Applier
 	// CredentialFetcher resolves credentialRef values for the rendered
-	// WasmPlugin (ai-proxy requires inline apiTokens). When nil, routes with
-	// credentialRefs render without tokens — ai-proxy then rejects requests
-	// to those providers.
+	// WasmPlugin (ai-proxy requires inline apiTokens). A nil fetcher means
+	// secret-backed credentials are not configured for this reconciler: refs
+	// resolve to nothing and routes render without tokens (ai-proxy then
+	// rejects requests to those providers) — this remains intentional for
+	// deployments that do not use secret-backed providers. When a fetcher is
+	// configured and it fails to resolve a ref, Sync reports
+	// CREDENTIAL_UNAVAILABLE instead of rendering the route without its token.
 	CredentialFetcher func(ctx context.Context, ref SecretReference) (string, error)
 }
 
@@ -113,7 +117,10 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 	if err := r.writeStatus(ctx, tenant, Status{State: "applying", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, ResourceCount: len(desired.Routes)}); err != nil {
 		return err
 	}
-	credentials := r.fetchCredentials(ctx, desired)
+	credentials, err := r.fetchCredentials(ctx, desired)
+	if err != nil {
+		return r.writeFailure(ctx, tenant, "CREDENTIAL_UNAVAILABLE", err)
+	}
 	document, resources, _, err := Render(desired, credentials)
 	if err != nil {
 		return r.writeFailure(ctx, tenant, "RENDER_FAILED", err)
@@ -194,11 +201,17 @@ func (r *Reconciler) writeFailure(ctx context.Context, tenant, code string, caus
 }
 
 // fetchCredentials resolves every route's credentialRef to its value via the
-// configured CredentialFetcher. Unresolvable refs are logged and skipped —
-// the route renders without an apiToken and ai-proxy rejects its requests.
-func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState) map[string]string {
+// configured CredentialFetcher. A nil fetcher means credentials were never
+// configured for this reconciler: every ref resolves to nothing (nil, no
+// error) and the rendered routes carry no apiToken, which is the deliberate
+// behavior for deployments that do not use secret-backed providers. Once a
+// fetcher is configured, any ref it fails to resolve aborts the whole
+// resolution with an error naming the offending credentialRef (name/key); no
+// partially resolved set is returned, so a route is never rendered with a
+// missing credential.
+func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState) (map[string]string, error) {
 	if r.config.CredentialFetcher == nil {
-		return nil
+		return nil, nil
 	}
 	out := make(map[string]string)
 	for _, route := range desired.Routes {
@@ -211,11 +224,11 @@ func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState)
 		}
 		value, err := r.config.CredentialFetcher(ctx, *route.CredentialRef)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("credentialRef %s: %w", key, err)
 		}
 		out[key] = value
 	}
-	return out
+	return out, nil
 }
 
 func (r *Reconciler) addHeaders(request *http.Request, tenant string) {
