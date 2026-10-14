@@ -42,6 +42,7 @@ async function runScenario() {
   assert(connection.protocol === 'openai-compatible', 'SDK received the wrong model gateway protocol');
   await assertDeploymentSettings(admin);
   await assertComputeGovernance(admin, adminStore);
+  await assertTeamDefaultRoles(admin, modelCredential.id);
 
   const username = `model-user-${runId}`;
   const password = 'temporary-password-123';
@@ -146,6 +147,70 @@ async function runScenario() {
     'model', 'list',
   ]);
   assert(JSON.parse(cliModels).models.length === 2, 'aepctl model list did not return the administrator catalog');
+}
+
+async function assertTeamDefaultRoles(admin, credentialId) {
+  const direct = await admin.createRole({name: `Direct Role ${runId}`, permissions: ['licenses.read']});
+  const inherited = await admin.createRole({name: `Inherited Role ${runId}`, permissions: ['users.read', 'models.read']});
+  const observer = await admin.createRole({name: `Observer Role ${runId}`, permissions: ['events.read']});
+  const model = await admin.createModel({displayName: `Default Role Model ${runId}`, sourceType: 'gateway', protocol: 'openai-compatible',
+    upstreamModel: 'mock-default-role-model', credentialId, capabilities: ['text'], contextWindow: 32768, isDefault: false, enabled: true});
+  const modelGrant = await admin.createModelAssignment({modelId: model.id, subject: {type: 'role', id: inherited.id}});
+  const team = await admin.createTeam({name: `Defaults Team ${runId}`, defaultRoleIds: [inherited.id, observer.id]});
+  const other = await admin.createTeam({name: `Other Defaults Team ${runId}`});
+  const username = `defaults-user-${runId}`;
+  const password = 'temporary-default-role-password-123';
+  const created = await admin.createUser({deploymentId: 'demo', username, displayName: 'Default roles member', temporaryPassword: password,
+    requirePasswordChange: false, roleIds: [direct.id], teamIds: [team.id]});
+  const memberStore = new MemoryTokenStore();
+  const member = new AepClient({baseUrl, tokenStore: memberStore});
+  await member.loginWithPassword({deploymentId: 'demo', username, password});
+  await assertModelToken(memberStore, [model.id]);
+  const roles = async () => (await member.getCurrentIdentity()).roles;
+  const assertRoles = async expected => assert(JSON.stringify((await roles()).sort()) === JSON.stringify([...expected].sort()), 'Effective roles do not match current direct/team bindings');
+  await assertRoles([direct.id, inherited.id, observer.id]);
+  await member.listUsers();
+  await member.listAdminModels();
+  assert((await member.listModels()).models.some(item => item.id === model.id), 'Role-assigned model did not inherit through team defaults');
+  const stored = (await admin.listUsers()).items.find(user => user.id === created.id);
+  assert(JSON.stringify(stored.roleIds) === JSON.stringify([direct.id]), 'Inherited defaults leaked into explicit user role bindings');
+  await admin.updateTeam(team.id, {description: 'Preserve defaults when omitted'});
+  assert((await admin.getTeam(team.id)).defaultRoleIds.length === 2, 'PATCH without defaultRoleIds lost configured defaults');
+  await admin.updateTeam(team.id, {defaultRoleIds: []});
+  await assertRoles([direct.id]);
+  await expectProblem(member.listUsers(), 403, 'ACCESS_DENIED');
+  await expectProblem(member.listAdminModels(), 403, 'ACCESS_DENIED');
+  assert((await member.listModels()).models.length === 0, 'Cleared team defaults retained model access');
+  await member.refreshSession();
+  const refreshedScopes = decodeJwtPart((await memberStore.get()).modelAccessToken, 1).model_scopes;
+  assert(refreshedScopes === undefined || (Array.isArray(refreshedScopes) && refreshedScopes.length === 0), 'Refreshed model JWT retained revoked default-role scopes');
+  await admin.updateTeam(team.id, {defaultRoleIds: [inherited.id, observer.id]});
+  await admin.updateRole(inherited.id, {enabled: false});
+  await assertRoles([direct.id, observer.id]);
+  await admin.updateRole(inherited.id, {enabled: true});
+  await assertRoles([direct.id, inherited.id, observer.id]);
+  await admin.updateTeam(team.id, {enabled: false});
+  await assertRoles([direct.id]);
+  await admin.updateTeam(team.id, {enabled: true});
+  await assertRoles([direct.id, inherited.id, observer.id]);
+  await admin.replaceUserRBAC(created.id, {roleIds: [direct.id, inherited.id], teamIds: [team.id]});
+  await admin.updateTeam(team.id, {defaultRoleIds: []});
+  await assertRoles([direct.id, inherited.id]);
+  await admin.updateTeam(team.id, {defaultRoleIds: [observer.id]});
+  await admin.replaceUserRBAC(created.id, {roleIds: [direct.id], teamIds: [other.id]});
+  await assertRoles([direct.id]);
+  await expectProblem(admin.updateTeam(team.id, {defaultRoleIds: ['unknown-default-role']}), 400, 'INVALID_ROLE');
+  assert(JSON.stringify((await admin.getTeam(team.id)).defaultRoleIds) === JSON.stringify([observer.id]), 'Invalid default role update changed stored defaults');
+  await expectProblem(admin.deleteRole(observer.id), 409, 'ROLE_IN_USE');
+  await member.logout();
+  await admin.updateUser(created.id, {status: 'disabled'});
+  await admin.deleteTeam(team.id);
+  await admin.deleteTeam(other.id);
+  await admin.deleteModelAssignment(modelGrant.id);
+  await admin.deleteModel(model.id);
+  await admin.deleteRole(direct.id);
+  await admin.deleteRole(inherited.id);
+  await admin.deleteRole(observer.id);
 }
 
 async function assertDeploymentSettings(admin) {

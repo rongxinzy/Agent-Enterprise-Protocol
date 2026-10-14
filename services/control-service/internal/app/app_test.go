@@ -258,7 +258,7 @@ func expectUserRoles(sqlMock sqlmock.Sqlmock, roleIDs ...string) {
 	for _, roleID := range roleIDs {
 		rows.AddRow(roleID)
 	}
-	sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).
+	sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).
 		WithArgs("deployment-storage", "user-a").WillReturnRows(rows)
 }
 
@@ -598,7 +598,7 @@ func TestIssueUserSessionPasswordGateAndFailures(t *testing.T) {
 	t.Run("role lookup error", func(t *testing.T) {
 		application, pool, sqlMock := newMockApplication(t)
 		expectModelScopes(pool)
-		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role lookup failed"))
+		sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role lookup failed"))
 		if _, err := application.IssueUserSession(context.Background(), repository.User{ID: "user-a", DeploymentID: "deployment-storage"}, SessionClient{}); err == nil {
 			t.Fatal("IssueUserSession accepted a role lookup failure")
 		}
@@ -736,7 +736,7 @@ func TestRefreshUserSessionRejectsInvalidAndPropagatesFailures(t *testing.T) {
 	t.Run("role lookup error", func(t *testing.T) {
 		run(t, valid, func(pool pgxmock.PgxPoolIface, _ *App, sqlMock sqlmock.Sqlmock) {
 			expectModelScopes(pool, "chat-a")
-			sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role failed"))
+			sqlMock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles" WHERE deployment_id = \$1 AND user_id = \$2 ORDER BY role_id`).WithArgs("deployment-storage", "user-a").WillReturnError(errors.New("role failed"))
 		}, nil)
 	})
 	for _, test := range []struct {
