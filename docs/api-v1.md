@@ -386,7 +386,9 @@ by `deliveryId` and `eventId`.
 
 `watermark` is the largest `cursor` delivered to the session so far, or `""`
 when nothing has been delivered; it matches the heartbeat
-`controlEvents.watermark`.
+`controlEvents.watermark`. It is informational: page with `nextCursor`
+(`afterCursor` takes the last returned delivery's `cursor`), because the
+watermark can be ahead of deliveries that are still pending.
 
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 

@@ -1966,7 +1966,7 @@ export interface components {
         ControlEventPage: {
             items: components["schemas"]["ControlEventDelivery"][];
             nextCursor: string | null;
-            /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. */
+            /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending. */
             watermark: string;
         };
         AcknowledgeRequest: {
@@ -3497,6 +3497,12 @@ export interface operations {
     listUserControlEvents: {
         parameters: {
             query?: {
+                /**
+                 * @description Delivery cursor to resume after: pass the `nextCursor` of the previous
+                 *     page. This is not the watermark — the watermark reports progress, and
+                 *     passing it would skip deliveries with a smaller cursor that are still
+                 *     pending.
+                 */
                 afterCursor?: string | null;
                 limit?: components["parameters"]["Limit"];
             };
