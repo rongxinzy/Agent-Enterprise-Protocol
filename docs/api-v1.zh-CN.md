@@ -263,22 +263,19 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 ```json
 {
-  "manifestRevision": "43",
-  "startedAt": "2026-08-19T08:01:00Z",
-  "completedAt": "2026-08-19T08:01:03Z",
-  "status": "partial",
+  "revision": "43",
+  "status": "completed",
   "items": [
-    {"skillId": "docx", "version": "1.3.0", "action": "update", "status": "success"},
-    {
-      "skillId": "xlsx",
-      "version": "2.0.0",
-      "action": "install",
-      "status": "failed",
-      "errorCode": "PACKAGE_HASH_MISMATCH",
-      "message": "Downloaded package digest did not match the manifest."
-    }
+    {"skillId": "docx", "status": "updated"},
+    {"skillId": "xlsx", "status": "installed"}
   ]
 }
+服务端读取的是 `revision`、`status`，以及每个条目的 `skillId` 与 `status`
+（`installed`、`updated`、`unchanged` 视为已安装；`removed` 及其它取值视为未安装）。
+`startedAt`、`completedAt`、`version`、`action`、`errorCode`、`message` 会被接受并保留在
+存储的 payload 中，但不影响服务端行为。上报里若写的是 `manifestRevision` 而不是
+`revision`，会被 `400` 拒绝。
+
 ```
 
 ## 6. 遥测事件上传
