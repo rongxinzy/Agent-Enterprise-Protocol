@@ -272,11 +272,11 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 }
 ```
 
-服务端读取的是 `revision`、`status`，以及每个条目的 `skillId` 与 `status`
+服务端读取报告的 `revision`、`status` 与 `items`，以及每个条目的 `skillId` 与 `status`
 （`installed`、`updated`、`unchanged` 视为已安装；`removed` 及其它取值视为未安装）。
-条目上的 `errorCode` 与 `message` 会被接受并保留在存储的 payload 中，但不影响服务端行为。
-请求体按严格模式解析：服务端不读取的字段会被 `400` 拒绝；上报里若写的是 `manifestRevision`
-而不是 `revision`，同样会被 `400` 拒绝。
+报告级 `startedAt`、`completedAt`，以及条目级 `version`、`action`、`errorCode`、`message`
+会被接受并保留在存储的 payload 中，但不影响服务端行为。上文未列出的字段会被 `400` 拒绝；
+上报里若写的是 `manifestRevision` 而不是 `revision`，同样会被 `400` 拒绝。
 
 ## 6. 遥测事件上传
 

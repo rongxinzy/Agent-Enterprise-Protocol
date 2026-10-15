@@ -85,6 +85,49 @@ func TestSkillSyncResultKeepsFailedItemError(t *testing.T) {
 	}
 }
 
+// `version` and `action` are declared on SkillSyncItem. They are advisory, so
+// they only have to survive into the stored payload; which Skills count as
+// installed still comes from `status`.
+func TestSkillSyncResultKeepsItemVersionAndAction(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectBegin()
+	pool.ExpectExec(`INSERT INTO skill_sync_results`).
+		WithArgs(
+			pgxmock.AnyArg(),
+			"deployment-a", "user-a", "session-user",
+			"revision-12", "completed",
+			[]string{"writer"},
+			storedPayload{want: `{"revision":"revision-12","manifestRevision":null,"status":"completed","items":[{"skillId":"writer","version":"2.0.0","action":"update","status":"updated"}]}`},
+		).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectCommit()
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/skills/sync-results", `{"revision":"revision-12","status":"completed","items":[{"skillId":"writer","version":"2.0.0","action":"update","status":"updated"}]}`)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("versioned Skill report = %d %s", response.Code, response.Body.String())
+	}
+}
+
+// The contract declares `startedAt` and `completedAt` on the report itself;
+// they are kept as reported and read by nothing.
+func TestSkillSyncResultKeepsReportTimestamps(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectBegin()
+	pool.ExpectExec(`INSERT INTO skill_sync_results`).
+		WithArgs(
+			pgxmock.AnyArg(),
+			"deployment-a", "user-a", "session-user",
+			"revision-13", "completed",
+			[]string{"writer"},
+			storedPayload{want: `{"revision":"revision-13","manifestRevision":null,"startedAt":"2026-08-19T08:01:00Z","completedAt":"2026-08-19T08:02:03Z","status":"completed","items":[{"skillId":"writer","status":"unchanged"}]}`},
+		).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectCommit()
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/skills/sync-results", `{"revision":"revision-13","startedAt":"2026-08-19T08:01:00Z","completedAt":"2026-08-19T08:02:03Z","status":"completed","items":[{"skillId":"writer","status":"unchanged"}]}`)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("timestamped report = %d %s", response.Code, response.Body.String())
+	}
+}
+
 // Accepting the two documented error fields must not relax the rest: a field
 // the server does not read is still refused instead of being dropped.
 func TestSkillSyncResultRejectsUnknownItemField(t *testing.T) {
