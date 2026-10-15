@@ -182,10 +182,20 @@ type endpointAuditCase struct {
 	audited  string
 }
 
+// endpointAuditCases covers every URL shape a model endpoint can take, paired
+// with the form the audit trail must contain for it. The userinfo shape is
+// redacted wherever it is already stored; a new write carrying it is rejected
+// (see TestModelEndpointUserinfoRejected).
 func endpointAuditCases() []endpointAuditCase {
+	return append(acceptedEndpointCases(), endpointAuditCase{
+		"userinfo", "https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1", "https://model.example.test/v1",
+	})
+}
+
+// acceptedEndpointCases are the endpoint shapes a create or update accepts.
+func acceptedEndpointCases() []endpointAuditCase {
 	return []endpointAuditCase{
 		{"query", "https://model.example.test/v1?api_key=DISPOSABLE_QUERY", "https://model.example.test/v1"},
-		{"userinfo", "https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1", "https://model.example.test/v1"},
 		{"fragment", "https://model.example.test/v1#DISPOSABLE_FRAGMENT", "https://model.example.test/v1"},
 		{"no credentials", "https://model.example.test/v1", "https://model.example.test/v1"},
 	}
@@ -271,7 +281,7 @@ func TestAuditModelSnapshotRedactsEndpointCredentials(t *testing.T) {
 }
 
 func TestCreateModelAuditRedactsEndpointCredentials(t *testing.T) {
-	for _, testCase := range endpointAuditCases() {
+	for _, testCase := range acceptedEndpointCases() {
 		t.Run(testCase.name, func(t *testing.T) {
 			application, mock, adminToken := newStoreBackedHTTPApplication(t)
 			pool := attachRuntimeDatabase(t, application)
@@ -301,7 +311,7 @@ func TestCreateModelAuditRedactsEndpointCredentials(t *testing.T) {
 }
 
 func TestUpdateModelAuditRedactsEndpointCredentials(t *testing.T) {
-	for _, testCase := range endpointAuditCases() {
+	for _, testCase := range acceptedEndpointCases() {
 		t.Run(testCase.name, func(t *testing.T) {
 			application, _, adminToken := newStoreBackedHTTPApplication(t)
 			pool := attachRuntimeDatabase(t, application)
@@ -347,4 +357,60 @@ func TestListAdminAuditRedactsStoredEndpointCredentials(t *testing.T) {
 	if !strings.Contains(body, `"endpoint":"https://model.example.test/v1"`) {
 		t.Fatalf("audit reader lost the endpoint location: %s", body)
 	}
+}
+
+func TestModelEndpointUserinfoRejected(t *testing.T) {
+	endpoints := []string{
+		"https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1",
+		"https://audit-user@model.example.test/v1",
+	}
+	for _, endpoint := range endpoints {
+		t.Run("create "+endpoint, func(t *testing.T) {
+			application, _, adminToken := newStoreBackedHTTPApplication(t)
+			// The write is refused before the transaction, so the runtime pool
+			// must stay untouched.
+			attachRuntimeDatabase(t, application)
+			response := adminRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/models",
+				`{"displayName":"Audit Model","sourceType":"gateway","protocol":"openai-compatible","endpoint":"`+endpoint+`","upstreamModel":"model","capabilities":["text"],"isDefault":false,"enabled":true}`)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"INVALID_MODEL"`) {
+				t.Fatalf("create model with userinfo endpoint = %d %s", response.Code, response.Body.String())
+			}
+		})
+		t.Run("update "+endpoint, func(t *testing.T) {
+			application, _, adminToken := newStoreBackedHTTPApplication(t)
+			attachRuntimeDatabase(t, application)
+			response := adminRequest(New(application).Handler(), adminToken, http.MethodPatch, "/aep/v1/admin/models/audit-model",
+				`{"endpoint":"`+endpoint+`"}`)
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"INVALID_MODEL"`) {
+				t.Fatalf("update model with userinfo endpoint = %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestModelEndpointWithoutUserinfoAccepted(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	pool := attachRuntimeDatabase(t, application)
+	endpoint := "https://model.example.test/v1?api_key=DISPOSABLE_QUERY#DISPOSABLE_FRAGMENT"
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "models"`).
+		WithArgs("deployment-a", "audit-model").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	pool.ExpectBegin()
+	pool.ExpectQuery(`INSERT INTO models`).
+		WithArgs(
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+		).
+		WillReturnRows(modelRuntimeRowWithEndpoint("audit-model", endpoint))
+	pool.ExpectCommit()
+	capture := &pgxAuditPayloadCapture{}
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs("deployment-a", "admin-user", "create", "model", nil, nil, capture).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	response := adminRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/models",
+		`{"displayName":"Audit Model","sourceType":"gateway","protocol":"openai-compatible","endpoint":"`+endpoint+`","upstreamModel":"model","capabilities":["text"],"isDefault":false,"enabled":true}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create model without userinfo = %d %s", response.Code, response.Body.String())
+	}
+	assertAuditedEndpoint(t, string(capture.raw), endpointAuditCase{"stored endpoint", endpoint, "https://model.example.test/v1"})
 }

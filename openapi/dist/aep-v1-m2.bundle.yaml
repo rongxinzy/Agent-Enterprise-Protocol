@@ -6595,6 +6595,7 @@ components:
         endpoint:
           type: string
           format: uri
+          description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'
         upstreamModel:
           type: string
         localModelRef:
@@ -6625,6 +6626,7 @@ components:
         endpoint:
           type: string
           format: uri
+          description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'
         upstreamModel:
           type: string
         localModelRef:

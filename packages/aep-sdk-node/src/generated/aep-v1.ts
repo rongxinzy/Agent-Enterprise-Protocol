@@ -2890,7 +2890,10 @@ export interface components {
              * @enum {string}
              */
             protocol: "openai-compatible" | "anthropic";
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.
+             */
             endpoint?: string;
             upstreamModel?: string;
             localModelRef?: string;
@@ -2903,7 +2906,10 @@ export interface components {
         };
         AdminModelPatch: {
             displayName?: string;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.
+             */
             endpoint?: string;
             upstreamModel?: string;
             localModelRef?: string;

@@ -665,6 +665,10 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 
 管理端使用的 `credentialId` 不得出现在 Agent 模型目录中。
 
+`endpoint` 不得内联凭据：URL 中带 userinfo 会以 400 `INVALID_MODEL` 拒绝，
+密钥应通过 `credentialId` 引用。endpoint 在审计中的记录方式见
+[管理操作审计](#管理操作审计)。
+
 ### License
 
 | 方法 | 路径 | 用途 |

@@ -720,6 +720,10 @@ Read responses never return `value`. Rotation accepts a new `value`.
 
 Administrative `credentialId` MUST NOT appear in the Agent model catalog.
 
+An `endpoint` MUST NOT embed credentials: a URL carrying userinfo is rejected
+with 400 `INVALID_MODEL`, and secrets belong in `credentialId`. See
+[Administrative audit](#administrative-audit) for how an endpoint is recorded.
+
 ### Licenses
 
 | Method | Path | Purpose |
