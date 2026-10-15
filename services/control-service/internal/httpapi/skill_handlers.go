@@ -798,6 +798,12 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 		Items            []struct {
 			SkillID string `json:"skillId"`
 			Status  string `json:"status"`
+			// SkillSyncItem declares both fields and the guide promises they
+			// are kept in the stored payload. Decoding is strict, so a failed
+			// item has to name them here - otherwise the whole report,
+			// including the Skills that did sync, is refused with a 400.
+			ErrorCode string `json:"errorCode,omitempty"`
+			Message   string `json:"message,omitempty"`
 		} `json:"items"`
 	}
 	if !decodeJSON(response, request, &input) {

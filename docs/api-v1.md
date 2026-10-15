@@ -289,14 +289,14 @@ verifies the manifest SHA-256 before extraction.
     {"skillId": "xlsx", "status": "installed"}
   ]
 }
+```
+
 The server reads `revision`, `status`, and each item's `skillId` and `status`
 (`installed`, `updated` and `unchanged` count as installed; `removed` and any
-other value count as not installed). `startedAt`, `completedAt`, `version`,
-`action`, `errorCode` and `message` are accepted and kept in the stored payload
-but do not drive server behaviour. A report that carries `manifestRevision`
-instead of `revision` is refused with `400`.
-
-```
+other value count as not installed). A per-item `errorCode` and `message` are
+accepted and kept in the stored payload but do not drive server behaviour. The
+body is decoded strictly: a field the server does not read is refused with
+`400`, and so is a report that carries `manifestRevision` instead of `revision`.
 
 ## 6. Telemetry Event Upload
 
