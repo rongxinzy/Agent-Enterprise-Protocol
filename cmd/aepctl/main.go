@@ -225,6 +225,7 @@ func dataPlaneCommand(opts *options) *cobra.Command {
 	publish.Flags().StringVar(&file, "file", "", "desired state JSON path")
 	_ = publish.MarkFlagRequired("file")
 	command.AddCommand(publish)
+	command.AddCommand(publicationCommand(opts))
 	return command
 }
 
@@ -306,6 +307,10 @@ func (c *client) login(opts *options) error {
 	return nil
 }
 func (c *client) request(method, path string, body any, authenticated bool) (any, error) {
+	return c.requestWithKey(method, path, body, authenticated, "")
+}
+
+func (c *client) requestWithKey(method, path string, body any, authenticated bool, key string) (any, error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -320,6 +325,9 @@ func (c *client) request(method, path string, body any, authenticated bool) (any
 	}
 	request.Header.Set("X-AEP-Protocol-Version", "1.0")
 	request.Header.Set("X-Request-ID", uuid.NewString())
+	if key != "" {
+		request.Header.Set("Idempotency-Key", key)
+	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
