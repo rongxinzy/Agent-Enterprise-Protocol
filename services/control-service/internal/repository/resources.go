@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -300,9 +302,53 @@ func (s *Store) DeleteSkillVersion(ctx context.Context, skillID, version string)
 	return item.ObjectKey, nil
 }
 
-func (s *DeploymentStore) ListSkillAssignments(ctx context.Context) ([]SkillAssignment, error) {
+// ErrInvalidCursor reports a cursor this store cannot decode, so handlers can
+// answer 400 instead of a database error.
+var ErrInvalidCursor = errors.New("invalid cursor")
+
+// AssignmentCursor is the keyset position of the last row of an assignment
+// page. Assignment ids are random UUIDs, so a cursor over the id alone would
+// both lose the chronological order the console shows and skip rows that a
+// concurrent write placed behind the cursor.
+func AssignmentCursor(createdAt time.Time, id string) string {
+	return createdAt.UTC().Format(time.RFC3339Nano) + "|" + id
+}
+
+func parseAssignmentCursor(cursor string) (time.Time, string, error) {
+	encoded, id, found := strings.Cut(cursor, "|")
+	if !found || id == "" {
+		return time.Time{}, "", ErrInvalidCursor
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, encoded)
+	if err != nil {
+		return time.Time{}, "", ErrInvalidCursor
+	}
+	return createdAt, id, nil
+}
+
+func assignmentPage(query *gorm.DB, deploymentID, cursor string) (*gorm.DB, error) {
+	query = query.Where("deployment_id = ?", deploymentID)
+	if cursor == "" {
+		return query, nil
+	}
+	createdAt, id, err := parseAssignmentCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	return query.Where("(created_at, id) > (?, ?)", createdAt, id), nil
+}
+
+func (s *DeploymentStore) ListSkillAssignmentsPage(ctx context.Context, cursor string, fetchLimit int32) ([]SkillAssignment, error) {
 	items := make([]SkillAssignment, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("id").Find(&items).Error
+	query, err := assignmentPage(s.db.WithContext(ctx), s.deploymentID, cursor)
+	if err != nil {
+		return nil, err
+	}
+	query = query.Order("created_at, id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err = query.Find(&items).Error
 	return items, err
 }
 
@@ -390,9 +436,17 @@ func (s *DeploymentStore) DeleteCredential(ctx context.Context, id string) error
 	return resultError(result)
 }
 
-func (s *DeploymentStore) ListCredentialAssignments(ctx context.Context) ([]CredentialAssignment, error) {
+func (s *DeploymentStore) ListCredentialAssignmentsPage(ctx context.Context, cursor string, fetchLimit int32) ([]CredentialAssignment, error) {
 	items := make([]CredentialAssignment, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("created_at, id").Find(&items).Error
+	query, err := assignmentPage(s.db.WithContext(ctx), s.deploymentID, cursor)
+	if err != nil {
+		return nil, err
+	}
+	query = query.Order("created_at, id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err = query.Find(&items).Error
 	return items, err
 }
 
@@ -462,9 +516,17 @@ func (s *DeploymentStore) DeleteModel(ctx context.Context, id string) error {
 	return resultError(result)
 }
 
-func (s *DeploymentStore) ListModelAssignments(ctx context.Context) ([]ModelAssignment, error) {
+func (s *DeploymentStore) ListModelAssignmentsPage(ctx context.Context, cursor string, fetchLimit int32) ([]ModelAssignment, error) {
 	items := make([]ModelAssignment, 0)
-	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("created_at, id").Find(&items).Error
+	query, err := assignmentPage(s.db.WithContext(ctx), s.deploymentID, cursor)
+	if err != nil {
+		return nil, err
+	}
+	query = query.Order("created_at, id")
+	if fetchLimit > 0 {
+		query = query.Limit(int(fetchLimit))
+	}
+	err = query.Find(&items).Error
 	return items, err
 }
 

@@ -277,6 +277,11 @@ paths:
         - $ref: '#/components/parameters/RequestId'
         - name: afterCursor
           in: query
+          description: |
+            Delivery cursor to resume after: pass the `nextCursor` of the previous
+            page. This is not the watermark — the watermark reports progress, and
+            passing it would skip deliveries with a smaller cursor that are still
+            pending.
           schema:
             type:
               - string
@@ -1534,6 +1539,9 @@ paths:
       tags:
         - Admin Skills
       operationId: listSkillAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/AssignmentList'
@@ -1562,6 +1570,74 @@ paths:
       responses:
         '204':
           description: Assignment removed
+    patch:
+      tags:
+        - Admin Skills
+      operationId: updateSkillAssignment
+      description: |
+        Changes when an existing grant ends. Deleting and recreating the grant
+        would drop the Skill from the employee's desired manifest in between -
+        which can uninstall and reinstall it - so the expiry is edited in place.
+        `null` makes the grant perpetual again. The change emits the same control
+        event a grant change does, so agents reconcile promptly.
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expiresAt
+              additionalProperties: false
+              properties:
+                expiresAt:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                  description: RFC3339 expiry, or null for a perpetual grant.
+      responses:
+        '200':
+          description: Grant updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - skillId
+                  - subject
+                  - expiresAt
+                properties:
+                  id:
+                    type: string
+                  skillId:
+                    type: string
+                  subject:
+                    type: object
+                    required:
+                      - type
+                      - id
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - user
+                          - role
+                          - team
+                      id:
+                        type: string
+                  expiresAt:
+                    type:
+                      - string
+                      - 'null'
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/control-events:
     get:
       tags:
@@ -1905,6 +1981,9 @@ paths:
       tags:
         - Admin Credentials
       operationId: listCredentialAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/CredentialAssignmentList'
@@ -2047,6 +2126,9 @@ paths:
       tags:
         - Admin Models
       operationId: listModelAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/ModelAssignmentList'
@@ -2787,7 +2869,7 @@ paths:
         - Admin Data Plane
       operationId: putDataPlaneDesiredState
       deprecated: true
-      description: 'Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.'
+      description: 'Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.'
       requestBody:
         required: true
         content:
@@ -3959,6 +4041,7 @@ components:
               type: boolean
             watermark:
               type: string
+              description: Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds:
           type: integer
           minimum: 5
@@ -4102,6 +4185,7 @@ components:
             - 'null'
         watermark:
           type: string
+          description: 'Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending.'
     AcknowledgeRequest:
       type: object
       required:
@@ -4237,8 +4321,6 @@ components:
       type: object
       required:
         - skillId
-        - version
-        - action
         - status
       properties:
         skillId:
@@ -4247,16 +4329,13 @@ components:
           $ref: '#/components/schemas/SkillVersionIdentifier'
         action:
           type: string
-          enum:
-            - install
-            - update
-            - remove
-            - unchanged
+          description: Advisory when the Agent reports it; the server does not act on it.
         status:
           type: string
-          enum:
-            - success
-            - failed
+          description: |
+            Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+            `removed` and every other value count as not installed. Agents use different
+            vocabularies, so the server reads the value as reported instead of enforcing an enum.
         errorCode:
           type: string
         message:
@@ -4264,14 +4343,11 @@ components:
     SkillSyncResult:
       type: object
       required:
-        - manifestRevision
-        - startedAt
-        - completedAt
-        - status
         - items
       properties:
-        manifestRevision:
+        revision:
           type: string
+          description: The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync.
         startedAt:
           type: string
           format: date-time
@@ -4280,10 +4356,7 @@ components:
           format: date-time
         status:
           type: string
-          enum:
-            - success
-            - partial
-            - failed
+          description: Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum.
         items:
           type: array
           items:
@@ -4906,6 +4979,13 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams.
         parentId:
           type:
             - string
@@ -4946,6 +5026,13 @@ components:
         description:
           type: string
           maxLength: 1024
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold.
         parentId:
           type:
             - string
@@ -4966,6 +5053,13 @@ components:
           maxLength: 1024
         enabled:
           type: boolean
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions.
     ReplaceUserRBACRequest:
       type: object
       required:
@@ -5733,11 +5827,16 @@ components:
       type: object
       required:
         - items
+        - nextCursor
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/Assignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillAssignmentWrite:
       type: object
       required:
@@ -6283,11 +6382,16 @@ components:
       type: object
       required:
         - assignments
+        - nextCursor
       properties:
         assignments:
           type: array
           items:
             $ref: '#/components/schemas/CredentialAssignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CredentialAssignmentWrite:
       type: object
       required:
@@ -6544,11 +6648,16 @@ components:
       type: object
       required:
         - assignments
+        - nextCursor
       properties:
         assignments:
           type: array
           items:
             $ref: '#/components/schemas/ModelAssignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     ModelAssignmentWrite:
       type: object
       required:

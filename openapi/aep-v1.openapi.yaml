@@ -322,6 +322,9 @@ paths:
     get:
       tags: [Admin Skills]
       operationId: listSkillAssignments
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {$ref: '#/components/responses/AssignmentList'}
     post:
@@ -343,6 +346,50 @@ paths:
         - {$ref: '#/components/parameters/AssignmentId'}
       responses:
         '204': {description: Assignment removed}
+    patch:
+      tags: [Admin Skills]
+      operationId: updateSkillAssignment
+      description: |
+        Changes when an existing grant ends. Deleting and recreating the grant
+        would drop the Skill from the employee's desired manifest in between -
+        which can uninstall and reinstall it - so the expiry is edited in place.
+        `null` makes the grant perpetual again. The change emits the same control
+        event a grant change does, so agents reconcile promptly.
+      parameters:
+        - {$ref: '#/components/parameters/AssignmentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expiresAt]
+              additionalProperties: false
+              properties:
+                expiresAt:
+                  type: [string, 'null']
+                  format: date-time
+                  description: RFC3339 expiry, or null for a perpetual grant.
+      responses:
+        '200':
+          description: Grant updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, skillId, subject, expiresAt]
+                properties:
+                  id: {type: string}
+                  skillId: {type: string}
+                  subject:
+                    type: object
+                    required: [type, id]
+                    properties:
+                      type: {type: string, enum: [user, role, team]}
+                      id: {type: string}
+                  expiresAt: {type: [string, 'null'], format: date-time}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /admin/credentials:
     get:
       tags: [Admin Credentials]
@@ -407,6 +454,9 @@ paths:
     get:
       tags: [Admin Credentials]
       operationId: listCredentialAssignments
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {$ref: '#/components/responses/CredentialAssignmentList'}
     post:
@@ -481,6 +531,9 @@ paths:
     get:
       tags: [Admin Models]
       operationId: listModelAssignments
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
       responses:
         '200': {$ref: '#/components/responses/ModelAssignmentList'}
     post:
@@ -875,21 +928,32 @@ components:
         size: {type: integer, minimum: 0}
     SkillSyncResult:
       type: object
-      required: [manifestRevision, startedAt, completedAt, status, items]
+      required: [items]
       properties:
-        manifestRevision: {type: string}
+        revision:
+          type: string
+          description: The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync.
         startedAt: {type: string, format: date-time}
         completedAt: {type: string, format: date-time}
-        status: {type: string, enum: [success, partial, failed]}
+        status:
+          type: string
+          description: Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum.
         items: {type: array, items: {$ref: '#/components/schemas/SkillSyncItem'}}
     SkillSyncItem:
       type: object
-      required: [skillId, version, action, status]
+      required: [skillId, status]
       properties:
         skillId: {$ref: '#/components/schemas/SkillIdentifier'}
         version: {$ref: '#/components/schemas/SkillVersionIdentifier'}
-        action: {type: string, enum: [install, update, remove, unchanged]}
-        status: {type: string, enum: [success, failed]}
+        action:
+          type: string
+          description: Advisory when the Agent reports it; the server does not act on it.
+        status:
+          type: string
+          description: |
+            Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+            `removed` and every other value count as not installed. Agents use different
+            vocabularies, so the server reads the value as reported instead of enforcing an enum.
         errorCode: {type: string}
         message: {type: string}
     EventBatchRequest:
@@ -1106,9 +1170,10 @@ components:
           description: Temporary grant that stops authorizing at this time; null for a perpetual grant. Only an administrator can set it.
     AssignmentList:
       type: object
-      required: [items]
+      required: [items, nextCursor]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Assignment'}}
+        nextCursor: {type: [string, 'null']}
     ModelSubject:
       type: object
       required: [type, id]
@@ -1126,9 +1191,10 @@ components:
         createdAt: {type: string, format: date-time}
     ModelAssignmentList:
       type: object
-      required: [assignments]
+      required: [assignments, nextCursor]
       properties:
         assignments: {type: array, items: {$ref: '#/components/schemas/ModelAssignment'}}
+        nextCursor: {type: [string, 'null']}
     CredentialSubject:
       type: object
       required: [type, id]
@@ -1146,9 +1212,10 @@ components:
         createdAt: {type: string, format: date-time}
     CredentialAssignmentList:
       type: object
-      required: [assignments]
+      required: [assignments, nextCursor]
       properties:
         assignments: {type: array, items: {$ref: '#/components/schemas/CredentialAssignment'}}
+        nextCursor: {type: [string, 'null']}
     SkillAssignmentWrite:
       type: object
       required: [skillId, subject]

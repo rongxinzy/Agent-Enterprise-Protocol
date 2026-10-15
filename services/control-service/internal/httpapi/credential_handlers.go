@@ -100,7 +100,7 @@ AND EXISTS (
   WHERE ca.deployment_id=c.deployment_id AND ca.credential_id=c.id
     AND (ca.expires_at IS NULL OR ca.expires_at>now()) AND (
     (ca.subject_type='user' AND ca.subject_id=$2)
-    OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
+    OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
     OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
   )
 )
@@ -174,7 +174,7 @@ JOIN users u ON u.id=$2 AND u.deployment_id=$1
 WHERE ca.deployment_id=$1 AND ca.credential_id=$3
   AND (ca.expires_at IS NULL OR ca.expires_at>now()) AND (
   (ca.subject_type='user' AND ca.subject_id=$2)
-  OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
+  OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
   OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
 ))`, claims.DeploymentID, claims.Subject, credentialID).Scan(&authorized)
 		if err != nil {
@@ -483,11 +483,20 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListCredentialAssignments(request.Context())
+	pageSize := limit(request)
+	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListCredentialAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	items, nextCursor := page(items, pageSize, func(item repository.CredentialAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	assignments := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		assignments = append(assignments, map[string]any{
@@ -495,7 +504,7 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 			"subject": map[string]string{"type": item.SubjectType, "id": item.SubjectID}, "createdAt": item.CreatedAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments})
+	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments, "nextCursor": nextCursor})
 }
 
 func (s *Server) createCredentialAssignment(response http.ResponseWriter, request *http.Request) {
@@ -508,6 +517,9 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 	}
 	if input.CredentialID == "" || input.Subject.ID == "" || !validCredentialSubject(input.Subject.Type) {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The credential and a valid assignment subject are required.")
+		return
+	}
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
 		return
 	}
 	tenant := claimsFrom(request).DeploymentID

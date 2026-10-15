@@ -1,4 +1,4 @@
-package reconciler
+package gatewayrender
 
 import (
 	"encoding/json"
@@ -6,24 +6,34 @@ import (
 	"sort"
 )
 
+const (
+	quotaURL     = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-quota@sha256:2684810410de2803200f21d4971fe30161a7c0060c39ccab3906f6bcd4b8a509"
+	quotaAuthURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/key-auth@sha256:18587fac5be178a2260c37ed74eb7abb9ed9b24915d3e2f037b69983772a4700"
+)
+
+// RenderGatewayQuota renders the quota admin route and its guard plugins.
 // Quota management uses a dedicated native key-auth route. An end user cannot
 // become its admin by sending X-Mse-Consumer through the authorizer.
-func RenderGatewayQuota(desired DesiredState, cfg NativeGatewayConfig, password, adminCredential string) ([]RenderedResource, error) {
+func RenderGatewayQuota(input Input, cfg NativeGatewayConfig, password, adminCredential string) ([]RenderedResource, error) {
 	if adminCredential == "" || cfg.RedisService == "" {
 		return nil, errors.New("native quota secrets unavailable")
 	}
-	suffix := resourceSuffix(desired.TenantID())
+	suffix := ResourceSuffix(input.Deployment)
 	name := "aep-quota-" + suffix
 	path := "/" + name + "/v1/chat/completions/quota"
 	ingresses := []string{name}
-	for _, route := range desired.Routes {
+	for _, route := range input.Routes {
 		if !route.Enabled {
 			continue
 		}
-		if route.Protocol == "anthropic" {
-			ingresses = append(ingresses, anthropicResourceName(route.ModelID))
+		strategy, err := StrategyFor(route)
+		if err != nil {
+			return nil, err
+		}
+		if strategy.Bucket() == BucketAnthropic {
+			ingresses = append(ingresses, AnthropicResourceName(route.ModelID))
 		} else {
-			ingresses = append(ingresses, openAIResourceName(desired.TenantID(), route.ModelID))
+			ingresses = append(ingresses, OpenAIResourceName(input.Deployment, route.ModelID))
 		}
 	}
 	sort.Strings(ingresses)
@@ -40,7 +50,7 @@ func RenderGatewayQuota(desired DesiredState, cfg NativeGatewayConfig, password,
 	authPlugin := nativePlugin("aep-quota-auth-"+suffix, quotaAuthURL, "AUTHN", 310, []string{name}, auth)
 	ingress := map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": name, "namespace": "higress-system"}, "spec": map[string]any{"ingressClassName": "higress", "rules": []any{map[string]any{"http": map[string]any{"paths": []any{map[string]any{"path": path, "pathType": "Prefix", "backend": map[string]any{"service": map[string]any{"name": "aep-model-gateway", "port": map[string]int{"number": 80}}}}}}}}}}
 	body, _ := json.Marshal(ingress)
-	return []RenderedResource{{Kind: ResourceGatewayNative, APIPath: ingressAPIPath(name), Body: string(body) + "\n"}, quotaPlugin, authPlugin}, nil
+	return []RenderedResource{{Kind: ResourceGatewayNative, APIPath: IngressAPIPath(name), Body: string(body) + "\n"}, quotaPlugin, authPlugin}, nil
 }
 
 func nativePlugin(name, plugin, phase string, priority int, ingresses []string, config map[string]any) RenderedResource {

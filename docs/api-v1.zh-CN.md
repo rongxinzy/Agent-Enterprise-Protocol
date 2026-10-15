@@ -263,22 +263,19 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 ```json
 {
-  "manifestRevision": "43",
-  "startedAt": "2026-08-19T08:01:00Z",
-  "completedAt": "2026-08-19T08:01:03Z",
-  "status": "partial",
+  "revision": "43",
+  "status": "completed",
   "items": [
-    {"skillId": "docx", "version": "1.3.0", "action": "update", "status": "success"},
-    {
-      "skillId": "xlsx",
-      "version": "2.0.0",
-      "action": "install",
-      "status": "failed",
-      "errorCode": "PACKAGE_HASH_MISMATCH",
-      "message": "Downloaded package digest did not match the manifest."
-    }
+    {"skillId": "docx", "status": "updated"},
+    {"skillId": "xlsx", "status": "installed"}
   ]
 }
+服务端读取的是 `revision`、`status`，以及每个条目的 `skillId` 与 `status`
+（`installed`、`updated`、`unchanged` 视为已安装；`removed` 及其它取值视为未安装）。
+`startedAt`、`completedAt`、`version`、`action`、`errorCode`、`message` 会被接受并保留在
+存储的 payload 中，但不影响服务端行为。上报里若写的是 `manifestRevision` 而不是
+`revision`，会被 `400` 拒绝。
+
 ```
 
 ## 6. 遥测事件上传
@@ -361,6 +358,11 @@ pending 标志只用于查询优化，不是可靠性边界。Agent 仍需定期
 
 读取响应不代表消费。在 Agent 确认接收前，服务端可以再次返回该投递。Agent 使用
 `deliveryId` 和 `eventId` 去重。
+
+`watermark` 是该会话已投递的最大 `cursor`，从未投递时为空串 `""`；取值与心跳
+`controlEvents.watermark` 一致。它只用于报告进度：翻页请用 `nextCursor`
+（`afterCursor` 传上一页最后一条投递的 `cursor`），因为水印可能超前于仍在
+pending 的投递。
 
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 
@@ -502,7 +504,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 团队构成一个森林。`POST /admin/teams` 接受可选的 `parentId`，每个团队都带有创建时即固定的
 `path` 和 `depth`；父团队创建后不可变更，因此不可能出现环形层级。删除仍被引用的团队时，
 存在子团队返回 `TEAM_HAS_CHILDREN`（409），是数字员工主团队返回 `TEAM_HAS_AGENTS`（409），
-其他引用返回 `TEAM_IN_USE`（409）。
+其他**外键**引用返回 `TEAM_IN_USE`（409）。通过多态 subject 列指向主体的授权（技能/模型/凭据授权与数据范围规则）**不带外键**：删除角色或团队会在同一事务内把它们一并删除，而不是拦下删除 —— 因此之后复用同一标识符的主体不会继承它们。
 
 ### 数字员工
 
@@ -612,6 +614,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | 撤回版本 |
 | GET, POST | `/admin/skill-assignments` | 查询或创建授权关系 |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | 删除授权关系 |
+| PATCH | `/admin/skill-assignments/{assignmentId}` | 修改授权的到期时间（`expiresAt` 为 RFC3339，`null` 表示永久） |
 
 Skill ID 是最长 64 个字符的可移植标识符，版本标识符最长 128 个字符。两者都必须
 以字母或数字开头和结尾；Skill ID 内部可使用 `.`、`_`、`-`，版本还可使用 `+`。
@@ -788,3 +791,5 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 
 安全的读取请求采用指数退避重试。事件批次依据 `eventId` 幂等。授权码交换和凭证获取不得
 盲目重试。收到 `429` 或 `503` 时遵守 `Retry-After`。
+
+团队 `defaultRoleIds` 配置与有效角色继承规则见[团队默认角色](team-default-roles.zh-CN.md)。

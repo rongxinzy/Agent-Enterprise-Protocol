@@ -101,7 +101,7 @@ func TestDeleteTeamRoute(t *testing.T) {
 
 	t.Run("built-in teams are protected", func(t *testing.T) {
 		mock.ExpectBegin()
-		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 			WithArgs("deployment-a").
 			WillReturnRows(teamRow("everyone", "Everyone", "All users", true, true, 0, now))
 		mock.ExpectQuery(`SELECT \* FROM "teams"`).
@@ -116,7 +116,7 @@ func TestDeleteTeamRoute(t *testing.T) {
 
 	t.Run("missing team is a 404", func(t *testing.T) {
 		mock.ExpectBegin()
-		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 			WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
 		mock.ExpectRollback()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/ghost", "")
@@ -127,12 +127,14 @@ func TestDeleteTeamRoute(t *testing.T) {
 
 	t.Run("deletable team is removed", func(t *testing.T) {
 		mock.ExpectBegin()
-		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 			WithArgs("deployment-a").
 			WillReturnRows(teamRow("engineering", "Engineering", "Builds things", false, true, 0, now))
 		mock.ExpectQuery(`SELECT \* FROM "teams"`).
 			WithArgs("deployment-a", "engineering", 1).
 			WillReturnRows(teamDetailRow("engineering", "Engineering", "Builds things", false, true, now))
+		mock.ExpectExec(`SAVEPOINT sp[0-9]+`).WillReturnResult(sqlmock.NewResult(0, 0))
+		expectSubjectGrantCleanup(mock, "team", "engineering")
 		mock.ExpectExec(`DELETE FROM "teams"`).WillReturnResult(sqlmock.NewResult(0, 1))
 		expectAuditInsert(mock)
 		mock.ExpectCommit()
@@ -215,7 +217,7 @@ func TestDataScopeContextRoute(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "users"`).
 			WithArgs("deployment-a", "user-a", 1).
 			WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", nil, "hash", "active", false, false, "human", now, now))
-		mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+		mock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles"`).
 			WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
 		pool.ExpectQuery(`JOIN user_team_bindings`).
 			WithArgs("deployment-a", "user-a").WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))

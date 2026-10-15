@@ -80,7 +80,7 @@ func TestAdminResourceListRoutes(t *testing.T) {
 		t.Fatalf("roles response = %d %s", roles.Code, roles.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at", "member_count"}).
 			AddRow("deployment-a", "engineering", "Engineering", "Builders", false, true, now, now, 4))
@@ -131,8 +131,8 @@ func TestAdminModelAndCredentialReadRoutes(t *testing.T) {
 		t.Fatalf("credentials response = %d %s", credentials.Code, credentials.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id`).
-		WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+		WithArgs("deployment-a", 51).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-a", "deployment-a", "chat-a", "team", "engineering", now))
 	assignments := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/model-assignments", "")

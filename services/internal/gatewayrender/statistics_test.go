@@ -1,4 +1,4 @@
-package reconciler
+package gatewayrender
 
 import (
 	"strings"
@@ -13,13 +13,13 @@ func TestStatisticsOnlyMatchesEnabledManagedIngresses(t *testing.T) {
 	active := anthropicRoute("active", "https://provider.example/v1")
 	disabled := anthropicRoute("disabled", "https://provider.example/v1")
 	disabled.Enabled = false
-	desired := DesiredState{DeploymentID: "demo", Revision: "rev-1", Routes: []Route{disabled, active, openAI}}
+	desired := Input{Deployment: "demo", Revision: "rev-1", Routes: []Route{disabled, active, openAI}}
 	_, resources, _, err := Render(desired, map[string]string{"aep-credential-bigmodel/api-key": "fixture-provider-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	resource := resources[len(resources)-1]
-	if resource.Kind != ResourceAIStatistics || resource.APIPath != aiStatisticsAPIPath(resourceSuffix("demo")) {
+	if resource.Kind != ResourceAIStatistics || resource.APIPath != AIStatisticsAPIPath(ResourceSuffix("demo")) {
 		t.Fatalf("statistics resource identity = %s %s", resource.Kind, resource.APIPath)
 	}
 	var plugin struct {
@@ -45,21 +45,21 @@ func TestStatisticsOnlyMatchesEnabledManagedIngresses(t *testing.T) {
 		t.Fatalf("match rules = %#v", plugin.Spec.MatchRules)
 	}
 	rule := plugin.Spec.MatchRules[0]
-	want := []string{openAIResourceName("demo", "chat"), anthropicResourceName("active")}
+	want := []string{OpenAIResourceName("demo", "chat"), AnthropicResourceName("active")}
 	if rule.ConfigDisable || len(rule.Ingress) != len(want) || rule.Ingress[0] != want[0] || rule.Ingress[1] != want[1] {
 		t.Fatalf("statistics must only match enabled managed ingresses: %v", rule.Ingress)
 	}
 	if rule.Config["use_default_attributes"] != false || rule.Config["use_default_response_attributes"] != true || rule.Config["attributes"] != nil {
 		t.Fatalf("statistics must not capture prompt/answer attributes: %#v", rule.Config)
 	}
-	if strings.Contains(resource.Body, "fixture-provider-secret") || strings.Contains(resource.Body, anthropicResourceName("disabled")) {
+	if strings.Contains(resource.Body, "fixture-provider-secret") || strings.Contains(resource.Body, AnthropicResourceName("disabled")) {
 		t.Fatal("statistics contains provider material or a disabled route")
 	}
 }
 
 func TestStatisticsStopsMatchingWhenAllRoutesAreDisabled(t *testing.T) {
 	t.Parallel()
-	_, resources, _, err := Render(DesiredState{DeploymentID: "demo", Revision: "rev-disabled"}, nil)
+	_, resources, _, err := Render(Input{Deployment: "demo", Revision: "rev-disabled"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

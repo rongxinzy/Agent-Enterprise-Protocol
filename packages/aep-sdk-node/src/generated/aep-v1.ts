@@ -856,7 +856,14 @@ export interface paths {
         delete: operations["deleteSkillAssignment"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * @description Changes when an existing grant ends. Deleting and recreating the grant
+         *     would drop the Skill from the employee's desired manifest in between -
+         *     which can uninstall and reinstall it - so the expiry is edited in place.
+         *     `null` makes the grant perpetual again. The change emits the same control
+         *     event a grant change does, so agents reconcile promptly.
+         */
+        patch: operations["updateSkillAssignment"];
         trace?: never;
     };
     "/aep/v1/admin/control-events": {
@@ -1429,7 +1436,7 @@ export interface paths {
         get: operations["getDataPlaneDesiredState"];
         /**
          * @deprecated
-         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.
+         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.
          */
         put: operations["putDataPlaneDesiredState"];
         post?: never;
@@ -1901,6 +1908,7 @@ export interface components {
             serverTime: string;
             controlEvents: {
                 pending: boolean;
+                /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`. */
                 watermark: string;
             };
             nextHeartbeatAfterSeconds: number;
@@ -1965,6 +1973,7 @@ export interface components {
         ControlEventPage: {
             items: components["schemas"]["ControlEventDelivery"][];
             nextCursor: string | null;
+            /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending. */
             watermark: string;
         };
         AcknowledgeRequest: {
@@ -2031,22 +2040,27 @@ export interface components {
         };
         SkillSyncItem: {
             skillId: components["schemas"]["SkillIdentifier"];
-            version: components["schemas"]["SkillVersionIdentifier"];
-            /** @enum {string} */
-            action: "install" | "update" | "remove" | "unchanged";
-            /** @enum {string} */
-            status: "success" | "failed";
+            version?: components["schemas"]["SkillVersionIdentifier"];
+            /** @description Advisory when the Agent reports it; the server does not act on it. */
+            action?: string;
+            /**
+             * @description Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+             *     `removed` and every other value count as not installed. Agents use different
+             *     vocabularies, so the server reads the value as reported instead of enforcing an enum.
+             */
+            status: string;
             errorCode?: string;
             message?: string;
         };
         SkillSyncResult: {
-            manifestRevision: string;
+            /** @description The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync. */
+            revision?: string;
             /** Format: date-time */
-            startedAt: string;
+            startedAt?: string;
             /** Format: date-time */
-            completedAt: string;
-            /** @enum {string} */
-            status: "success" | "partial" | "failed";
+            completedAt?: string;
+            /** @description Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum. */
+            status?: string;
             items: components["schemas"]["SkillSyncItem"][];
         };
         EventResource: {
@@ -2265,6 +2279,8 @@ export interface components {
             builtIn: boolean;
             enabled: boolean;
             memberCount: number;
+            /** @description Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Omitted for root teams. */
             parentId?: string | null;
             /** @description Materialized team path, for example /hq/engineering. */
@@ -2280,6 +2296,8 @@ export interface components {
         CreateTeamRequest: {
             name: string;
             description?: string;
+            /** @description Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible. */
             parentId?: string | null;
         };
@@ -2287,6 +2305,8 @@ export interface components {
             name?: string;
             description?: string;
             enabled?: boolean;
+            /** @description Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions. */
+            defaultRoleIds?: string[];
         };
         ReplaceUserRBACRequest: {
             roleIds: string[];
@@ -2583,6 +2603,7 @@ export interface components {
         };
         AssignmentList: {
             items: components["schemas"]["Assignment"][];
+            nextCursor: string | null;
         };
         SkillAssignmentWrite: {
             skillId: components["schemas"]["SkillIdentifier"];
@@ -2783,6 +2804,7 @@ export interface components {
         };
         CredentialAssignmentList: {
             assignments: components["schemas"]["CredentialAssignment"][];
+            nextCursor: string | null;
         };
         CredentialAssignmentWrite: {
             credentialId: string;
@@ -2888,6 +2910,7 @@ export interface components {
         };
         ModelAssignmentList: {
             assignments: components["schemas"]["ModelAssignment"][];
+            nextCursor: string | null;
         };
         ModelAssignmentWrite: {
             modelId: string;
@@ -3481,6 +3504,12 @@ export interface operations {
     listUserControlEvents: {
         parameters: {
             query?: {
+                /**
+                 * @description Delivery cursor to resume after: pass the `nextCursor` of the previous
+                 *     page. This is not the watermark — the watermark reports progress, and
+                 *     passing it would skip deliveries with a smaller cursor that are still
+                 *     pending.
+                 */
                 afterCursor?: string | null;
                 limit?: components["parameters"]["Limit"];
             };
@@ -4874,7 +4903,10 @@ export interface operations {
     };
     listSkillAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4919,6 +4951,50 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    updateSkillAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description RFC3339 expiry, or null for a perpetual grant.
+                     */
+                    expiresAt: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Grant updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        skillId: string;
+                        subject: {
+                            /** @enum {string} */
+                            type: "user" | "role" | "team";
+                            id: string;
+                        };
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
         };
     };
     listControlEvents: {
@@ -5285,7 +5361,10 @@ export interface operations {
     };
     listCredentialAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5482,7 +5561,10 @@ export interface operations {
     };
     listModelAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
