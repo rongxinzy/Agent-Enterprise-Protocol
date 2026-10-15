@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"slices"
@@ -93,6 +95,34 @@ func skillArchiveEntries(t *testing.T, archive []byte) []string {
 	return names
 }
 
+// skillArchiveBody returns the content of one entry of a stored package, so a
+// test can prove the rewrite lifted the descriptor without altering its bytes:
+// the archive is recompressed, so the entry list alone does not show that.
+func skillArchiveBody(t *testing.T, archive []byte, name string) string {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range reader.File {
+		if entry.Name != name {
+			continue
+		}
+		source, err := entry.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(source)
+		_ = source.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	t.Fatalf("entry %q not found in %v", name, archive)
+	return ""
+}
+
 func TestNormalizeSkillPackage(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -177,6 +207,10 @@ func TestNormalizeSkillPackage(t *testing.T) {
 			if !slices.Contains(entries, "SKILL.md") {
 				t.Fatalf("normalized package has no root SKILL.md: %v", entries)
 			}
+			// Every lifted row keeps the descriptor's bytes: "body" in this table.
+			if body := skillArchiveBody(t, normalized, "SKILL.md"); body != "body" {
+				t.Fatalf("lifted SKILL.md = %q, want %q", body, "body")
+			}
 		})
 	}
 }
@@ -192,6 +226,47 @@ func TestNormalizeSkillPackageRejectsAmbiguousDescriptor(t *testing.T) {
 	if !strings.Contains(err.Error(), "alpha/SKILL.md") || !strings.Contains(err.Error(), "beta/SKILL.md") {
 		t.Fatalf("normalizeSkillPackage() error = %q, want both paths named", err)
 	}
+}
+
+// No Agent should install a package whose entry writes outside the Skill
+// directory, and the control plane must not expand a small archive without
+// bound. Both are refused at upload - including on the identity path, where a
+// descriptor already at the archive root would otherwise be stored verbatim.
+func TestNormalizeSkillPackageRejectsUnsafeEntries(t *testing.T) {
+	t.Run("escaping entry below the Skill root", func(t *testing.T) {
+		archive := skillPackage(t, map[string]string{"outer/SKILL.md": "body", "outer/../../outside.txt": "x"})
+		if _, err := normalizeSkillPackage(archive); !errors.Is(err, errSkillPackageEscape) {
+			t.Fatalf("normalizeSkillPackage() = %v, want %v", err, errSkillPackageEscape)
+		}
+	})
+
+	t.Run("escaping entry beside a root descriptor", func(t *testing.T) {
+		archive := skillPackage(t, map[string]string{"SKILL.md": "body", "../outside.txt": "x"})
+		if _, err := normalizeSkillPackage(archive); !errors.Is(err, errSkillPackageEscape) {
+			t.Fatalf("normalizeSkillPackage() = %v, want %v", err, errSkillPackageEscape)
+		}
+	})
+
+	t.Run("symbolic link", func(t *testing.T) {
+		archive := skillPackageWithModes(t, []struct {
+			name string
+			body string
+			mode fs.FileMode
+		}{
+			{name: "SKILL.md", body: "body", mode: 0o644},
+			{name: "escape", body: "../outside", mode: fs.ModeSymlink | 0o777},
+		})
+		if _, err := normalizeSkillPackage(archive); !errors.Is(err, errSkillPackageSymlink) {
+			t.Fatalf("normalizeSkillPackage() = %v, want %v", err, errSkillPackageSymlink)
+		}
+	})
+
+	t.Run("expands past the budget", func(t *testing.T) {
+		archive := skillPackage(t, map[string]string{"SKILL.md": "body", "assets/blob.bin": strings.Repeat("x", 4096)})
+		if _, err := normalizeSkillPackageWithin(archive, 1024); !errors.Is(err, errSkillPackageExpanded) {
+			t.Fatalf("normalizeSkillPackageWithin() = %v, want %v", err, errSkillPackageExpanded)
+		}
+	})
 }
 
 // The same upload must always yield the same stored bytes, so the manifest
