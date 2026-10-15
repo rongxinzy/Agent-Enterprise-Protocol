@@ -59,9 +59,8 @@ func TestAdminAssignmentPermissionAllowsDelegatedWrite(t *testing.T) {
 	application, pool, _, userToken := newRuntimeHTTPApplication(t)
 	pool.ExpectQuery(`SELECT EXISTS \(`).WithArgs("deployment-a", "user-a", "skills.assign").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
-	pool.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM`).WithArgs("deployment-a", "user-a").
-		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectBegin()
+	expectSubjectGuard(pool, "user", "user-a", true)
 	pool.ExpectExec(`INSERT INTO skill_assignments`).
 		WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "user", "user-a", pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
