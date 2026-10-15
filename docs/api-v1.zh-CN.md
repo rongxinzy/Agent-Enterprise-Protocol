@@ -359,6 +359,11 @@ pending 标志只用于查询优化，不是可靠性边界。Agent 仍需定期
 读取响应不代表消费。在 Agent 确认接收前，服务端可以再次返回该投递。Agent 使用
 `deliveryId` 和 `eventId` 去重。
 
+`watermark` 是该会话已投递的最大 `cursor`，从未投递时为空串 `""`；取值与心跳
+`controlEvents.watermark` 一致。它只用于报告进度：翻页请用 `nextCursor`
+（`afterCursor` 传上一页最后一条投递的 `cursor`），因为水印可能超前于仍在
+pending 的投递。
+
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 
 Agent 只有在事件已经提交到本地持久化收件箱后才能调用该接口。该操作必须幂等。
