@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 
 import {AepClient, type ControlEvent, type JsonObject} from '@aep/sdk-node';
 
-import {SkillReconciler} from './skills.js';
+import {SkillReconciler, type SkillSyncOutcome} from './skills.js';
 import {AgentState} from './state.js';
 
 export interface ExampleAgentOptions {
@@ -32,8 +32,18 @@ export class ExampleAgent {
   }
 
   async reconcileSkills(): Promise<void> {
-    const result = await this.options.reconciler.reconcile();
-    await this.options.client.reportSkillSyncResult({revision: result.revision, status: 'succeeded', items: result.items});
+    await this.reportSkillSync(await this.options.reconciler.reconcile());
+  }
+
+  // The outcome is reported item by item first, so the server keeps the partial
+  // result, and then raised: a reconcile that did not finish must not look like
+  // a success to the caller waiting on this Task.
+  private async reportSkillSync(result: SkillSyncOutcome): Promise<void> {
+    await this.options.client.reportSkillSyncResult({revision: result.revision, status: result.status, items: result.items});
+    if (result.status !== 'succeeded') {
+      const failed = result.items.filter(item => item.status === 'failed').map(item => `${item.skillId} (${item.errorCode}: ${item.message})`);
+      throw new Error(`Skill reconciliation did not complete: ${failed.join(', ')}`);
+    }
   }
 
   private async receiveControlEvents(): Promise<void> {
@@ -63,7 +73,7 @@ export class ExampleAgent {
       if (event.task.type === 'skill.reconcile') {
         const result = await this.options.reconciler.reconcile();
         appliedRevision = result.revision;
-        await this.options.client.reportSkillSyncResult({revision: result.revision, status: 'succeeded', items: result.items});
+        await this.reportSkillSync(result);
       } else {
         throw new Error(`Unsupported M0 task: ${event.task.type}`);
       }

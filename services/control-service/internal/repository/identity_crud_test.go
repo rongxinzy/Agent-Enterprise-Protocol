@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -78,3 +79,54 @@ func TestUserUpdateAndPasswordNotFound(t *testing.T) {
 }
 
 func stringPtr(value string) *string { return &value }
+
+// Deleting a user must not be blocked by the history that references it. The
+// foreign keys from telemetry_events, credential_resolution_audit,
+// skill_sync_results, control_events and data_scope_rules are ON DELETE SET
+// NULL, so a row that already exists is anonymized by the database and the
+// delete transaction must not touch those tables at all. sqlmock rejects every
+// statement that was not expected, which is what makes this test cover a user
+// that already has such rows.
+func TestDeleteUserLeavesHistoryToTheForeignKeys(t *testing.T) {
+	store, mock := newMockStore(t)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).
+		WithArgs("user-a").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).
+		WithArgs("user-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM "users"`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := store.Deployment("deployment-a").DeleteUser(context.Background(), "user-a"); err != nil {
+		t.Fatalf("DeleteUser(): %v", err)
+	}
+}
+
+// Revoking the sessions and removing the user are one unit of work: when the
+// removal cannot complete, the revocation must not survive on its own.
+func TestDeleteUserRollsBackTheRevocation(t *testing.T) {
+	t.Run("missing user", func(t *testing.T) {
+		store, mock := newMockStore(t)
+		mock.ExpectBegin()
+		mock.ExpectExec(`UPDATE user_session_tokens`).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`UPDATE user_sessions`).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`DELETE FROM "users"`).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectRollback()
+		if err := store.Deployment("deployment-a").DeleteUser(context.Background(), "missing"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("DeleteUser(missing) = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("session revocation failure", func(t *testing.T) {
+		store, mock := newMockStore(t)
+		revocationErr := errors.New("revocation failed")
+		mock.ExpectBegin()
+		mock.ExpectExec(`UPDATE user_session_tokens`).WillReturnError(revocationErr)
+		mock.ExpectRollback()
+		if err := store.Deployment("deployment-a").DeleteUser(context.Background(), "user-a"); !errors.Is(err, revocationErr) {
+			t.Fatalf("DeleteUser() = %v, want the revocation failure", err)
+		}
+	})
+}

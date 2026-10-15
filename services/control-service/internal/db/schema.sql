@@ -209,7 +209,7 @@ CREATE TABLE IF NOT EXISTS credential_resolution_audit (
   id text PRIMARY KEY,
   deployment_id text NOT NULL REFERENCES deployments(id),
   credential_id text NOT NULL,
-  user_id text NOT NULL REFERENCES users(id),
+  user_id text REFERENCES users(id) ON DELETE SET NULL,
   session_id text REFERENCES user_sessions(session_id) ON DELETE SET NULL,
   purpose text NOT NULL,
   outcome text NOT NULL CHECK (outcome IN ('resolved', 'denied')),
@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS control_events (
   supersedes_key text,
   state text NOT NULL DEFAULT 'active',
   expires_at timestamptz NOT NULL,
-  created_by text NOT NULL REFERENCES users(id),
+  created_by text REFERENCES users(id) ON DELETE SET NULL,
   include_descendants boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -290,7 +290,7 @@ CREATE TABLE IF NOT EXISTS session_control_deliveries (
 CREATE TABLE IF NOT EXISTS telemetry_events (
   event_id text PRIMARY KEY,
   deployment_id text NOT NULL REFERENCES deployments(id),
-  user_id text NOT NULL REFERENCES users(id),
+  user_id text REFERENCES users(id) ON DELETE SET NULL,
   session_id text REFERENCES user_sessions(session_id) ON DELETE SET NULL,
   type text NOT NULL,
   resource_type text,
@@ -304,7 +304,7 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
 CREATE TABLE IF NOT EXISTS skill_sync_results (
   id text PRIMARY KEY,
   deployment_id text NOT NULL REFERENCES deployments(id),
-  user_id text NOT NULL REFERENCES users(id),
+  user_id text REFERENCES users(id) ON DELETE SET NULL,
   session_id text REFERENCES user_sessions(session_id) ON DELETE SET NULL,
   revision text NOT NULL,
   status text NOT NULL,
@@ -483,7 +483,7 @@ CREATE TABLE IF NOT EXISTS data_scope_rules (
   starts_at timestamptz,
   expires_at timestamptz,
   reason text NOT NULL DEFAULT '',
-  created_by text NOT NULL REFERENCES users(id),
+  created_by text REFERENCES users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (deployment_id, id),
