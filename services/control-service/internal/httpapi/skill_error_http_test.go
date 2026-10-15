@@ -401,6 +401,7 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 		pool.ExpectQuery(`DELETE FROM skill_assignments`).WithArgs("assignment-a", "deployment-a").
 			WillReturnRows(pgxmock.NewRows([]string{"skill_id", "subject_type", "subject_id"}).AddRow("writer", "team", "engineering"))
 		expectSkillAssignmentEvent(pool)
+		expectAuditTx(pool)
 		pool.ExpectCommit().WillReturnError(errors.New("commit unavailable"))
 		pool.ExpectRollback()
 		response := adminRequest(New(application).Handler(), token, http.MethodDelete, "/aep/v1/admin/skill-assignments/assignment-a", "")

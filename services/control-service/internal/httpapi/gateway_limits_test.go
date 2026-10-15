@@ -37,21 +37,28 @@ func TestGatewayRuleVersionsAndPublication(t *testing.T) {
 	}
 	pool.ExpectBegin()
 	pool.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+	pool.ExpectQuery(`SELECT configuration FROM gateway_limits`).WithArgs("deployment-a", "rule-a").WillReturnError(pgx.ErrNoRows)
 	pool.ExpectQuery(`SELECT count`).WithArgs("deployment-a").WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(0))
 	pool.ExpectQuery(`INSERT INTO gateway_limits`).WithArgs("deployment-a", "rule-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"version", "updated_at"}).AddRow(int64(1), now))
+	expectAuditTx(pool)
 	pool.ExpectCommit()
 	if got := adminRequest(h, token, http.MethodPut, "/aep/v1/admin/model-gateway/limits/rule-a", ruleBody); got.Code != 200 {
 		t.Fatal(got.Code, got.Body.String())
 	}
 	pool.ExpectBegin()
 	pool.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+	pool.ExpectQuery(`SELECT configuration FROM gateway_limits`).WithArgs("deployment-a", "rule-a").
+		WillReturnRows(pgxmock.NewRows([]string{"configuration"}).AddRow([]byte(ruleBody)))
 	pool.ExpectQuery(`UPDATE gateway_limits`).WithArgs("deployment-a", "rule-a", pgxmock.AnyArg(), int64(1)).WillReturnRows(pgxmock.NewRows([]string{"version", "updated_at"}).AddRow(int64(2), now))
+	expectAuditTx(pool)
 	pool.ExpectCommit()
 	if got := adminRequest(h, token, http.MethodPut, "/aep/v1/admin/model-gateway/limits/rule-a", strings.Replace(ruleBody, `"expectedVersion":0`, `"expectedVersion":1`, 1)); got.Code != 200 {
 		t.Fatal(got.Code, got.Body.String())
 	}
 	pool.ExpectBegin()
 	pool.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+	pool.ExpectQuery(`SELECT configuration FROM gateway_limits`).WithArgs("deployment-a", "rule-a").
+		WillReturnRows(pgxmock.NewRows([]string{"configuration"}).AddRow([]byte(ruleBody)))
 	pool.ExpectQuery(`UPDATE gateway_limits`).WithArgs("deployment-a", "rule-a", pgxmock.AnyArg(), int64(1)).WillReturnError(pgx.ErrNoRows)
 	pool.ExpectRollback()
 	if got := adminRequest(h, token, http.MethodPut, "/aep/v1/admin/model-gateway/limits/rule-a", strings.Replace(ruleBody, `"expectedVersion":0`, `"expectedVersion":1`, 1)); got.Code != 409 {
@@ -59,7 +66,10 @@ func TestGatewayRuleVersionsAndPublication(t *testing.T) {
 	}
 	pool.ExpectBegin()
 	pool.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+	pool.ExpectQuery(`SELECT configuration FROM gateway_limits`).WithArgs("deployment-a", "rule-a").
+		WillReturnRows(pgxmock.NewRows([]string{"configuration"}).AddRow([]byte(ruleBody)))
 	pool.ExpectExec(`UPDATE gateway_limits SET deleted=true`).WithArgs("deployment-a", "rule-a", int64(2)).WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	expectAuditTx(pool)
 	pool.ExpectCommit()
 	if got := adminRequest(h, token, http.MethodDelete, "/aep/v1/admin/model-gateway/limits/rule-a?expectedVersion=2", ""); got.Code != 204 {
 		t.Fatal(got.Code, got.Body.String())
@@ -249,6 +259,11 @@ func TestNativeRuleDatabaseFailures(t *testing.T) {
 				pool.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnError(errors.New("lock unavailable"))
 			} else {
 				pool.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnResult(pgxmock.NewResult("SELECT", 1))
+				// Before-values are only read on the native rule writes.
+				if !strings.HasPrefix(failure, "publish") {
+					pool.ExpectQuery(`SELECT configuration FROM gateway_limits`).WithArgs("deployment-a", "rule-a").
+						WillReturnError(pgx.ErrNoRows)
+				}
 			}
 			method, path, body := "PUT", "/aep/v1/admin/model-gateway/limits/rule-a", ruleBody
 			switch failure {
@@ -261,6 +276,7 @@ func TestNativeRuleDatabaseFailures(t *testing.T) {
 					q.WillReturnError(errors.New("write unavailable"))
 				} else {
 					q.WillReturnRows(pgxmock.NewRows([]string{"version", "updated_at"}).AddRow(int64(1), time.Now().UTC()))
+					expectAuditTx(pool)
 					pool.ExpectCommit().WillReturnError(errors.New("commit unavailable"))
 				}
 			case "delete-missing":

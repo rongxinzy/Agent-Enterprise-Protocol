@@ -223,6 +223,55 @@ func TestKubernetesApplierRemovesAbsoluteUpstreamOnRelativeTransition(t *testing
 	}
 }
 
+func TestKubernetesApplierDeletesRoutesThatLeftTheDesiredState(t *testing.T) {
+	t.Parallel()
+	deleted := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodDelete {
+			deleted = append(deleted, request.URL.Path)
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghost := DesiredState{DeploymentID: "demo", Revision: "rev-drift", Routes: []gatewayrender.Route{{ModelID: "ghost", Enabled: true, Endpoint: "/v1/ghost", UpstreamModel: "provider-ghost", Protocol: "openai-compatible"}}}
+	_, ghostResources, _, err := gatewayrender.Render(renderInput(ghost), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applier.Apply(t.Context(), ghost, ghostResources); err != nil {
+		t.Fatal(err)
+	}
+	catalog := DesiredState{DeploymentID: "demo", Revision: "catalog-1", Routes: []gatewayrender.Route{{ModelID: "catalog-chat", Enabled: true, Endpoint: "/v1", UpstreamModel: "provider-catalog-chat", Protocol: "openai-compatible"}}}
+	_, catalogResources, _, err := gatewayrender.Render(renderInput(catalog), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted = nil
+	if err := applier.Apply(t.Context(), catalog, catalogResources); err != nil {
+		t.Fatal(err)
+	}
+	ghostIngress := gatewayrender.IngressAPIPath(gatewayrender.OpenAIResourceName("demo", "ghost"))
+	if !strings.Contains(strings.Join(deleted, "\n"), ghostIngress) {
+		t.Fatalf("catalog apply did not delete the departed route: %#v", deleted)
+	}
+
+	restarted, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", StateDir: applier.stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted = nil
+	if err := restarted.Apply(t.Context(), catalog, catalogResources); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(deleted, "\n"), ghostIngress) {
+		t.Fatalf("restarted applier deleted a route it had already dropped: %#v", deleted)
+	}
+}
+
 func TestKubernetesApplierDeletesAnthropicPairWhenRouteDisabled(t *testing.T) {
 	t.Parallel()
 	operations := make([]string, 0, 8)

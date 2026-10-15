@@ -252,6 +252,17 @@ func (s *DeploymentStore) ListIdentityMappings(ctx context.Context, sourceID, su
 	return mappings, err
 }
 
+// GetIdentityMapping reads one mapping so a write can record its
+// before-values.
+func (s *DeploymentStore) GetIdentityMapping(ctx context.Context, sourceID, subjectType, externalID string) (IdentityMapping, error) {
+	var mapping IdentityMapping
+	err := s.db.WithContext(ctx).
+		Where("deployment_id = ? AND source_id = ? AND external_subject_type = ? AND external_id = ?",
+			s.deploymentID, sourceID, subjectType, externalID).
+		Take(&mapping).Error
+	return mapping, err
+}
+
 func (s *DeploymentStore) DeleteIdentityMapping(ctx context.Context, sourceID, subjectType, externalID string) error {
 	return s.db.WithContext(ctx).
 		Where("deployment_id = ? AND source_id = ? AND external_subject_type = ? AND external_id = ?",

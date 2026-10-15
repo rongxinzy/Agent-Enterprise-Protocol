@@ -210,11 +210,26 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, "MEMBERSHIP_UPDATE_UNSUPPORTED", "teamIds and roleIds cannot be changed on user update; they are set at creation or import.")
 		return
 	}
-	user, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateUser(
-		request.Context(), chi.URLParam(request, "userId"), repository.UpdateUserParams{
+	claims := claimsFrom(request)
+	userID := chi.URLParam(request, "userId")
+	var user repository.UserRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetUserRecord(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		updated, err := tx.UpdateUser(request.Context(), userID, repository.UpdateUserParams{
 			DisplayName: input.DisplayName, Email: input.Email, Status: input.Status,
-		},
-	)
+		})
+		if err != nil {
+			return err
+		}
+		user = updated
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "user", ResourceID: userID, Result: "success",
+			Changes: auditUserChanges(before, updated),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
 		return
@@ -223,6 +238,7 @@ func (s *Server) updateUser(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	if user.Status == "disabled" {
 		if err := s.app.RevokeUserSessionSet(request.Context(), user.ID); err != nil {
 			databaseFailure(response, request, err)
@@ -257,16 +273,26 @@ func (s *Server) resetUserPassword(response http.ResponseWriter, request *http.R
 	if input.RequirePasswordChange != nil {
 		requireChange = *input.RequirePasswordChange
 	}
+	claims := claimsFrom(request)
 	userID := chi.URLParam(request, "userId")
-	if requireChange && userID == claimsFrom(request).Subject {
+	if requireChange && userID == claims.Subject {
 		writeProblem(response, request, http.StatusConflict, "SELF_PASSWORD_RESET_RESTRICTED", "Requiring a password change on your own account would lock you into a restricted session; use the self-service password change endpoint or set requirePasswordChange to false.")
 		return
 	}
-	if err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		UpdatePassword(request.Context(), userID, hash, requireChange); err != nil {
+	err = s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		if err := tx.UpdatePassword(request.Context(), userID, hash, requireChange); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "reset_password", ResourceType: "user", ResourceID: userID, Result: "success",
+			Changes: map[string]any{"after": map[string]any{"requirePasswordChange": requireChange}},
+		})
+	})
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	if err := s.app.RevokeUserSessionSet(request.Context(), userID); err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -309,8 +335,9 @@ func (s *Server) getUser(response http.ResponseWriter, request *http.Request) {
 // repository.DeleteUser), so a failed deletion can never leave the account
 // alive but signed out everywhere. The bootstrap admin cannot be deleted.
 func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request) {
+	claims := claimsFrom(request)
 	userID := chi.URLParam(request, "userId")
-	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
+	store := s.app.Store.Deployment(claims.DeploymentID)
 	user, err := store.GetUser(request.Context(), userID)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
@@ -324,9 +351,39 @@ func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusForbidden, "FORBIDDEN", "The bootstrap admin user cannot be deleted.")
 		return
 	}
-	if err := store.DeleteUser(request.Context(), userID); err != nil {
+	var removed repository.UserRecord
+	err = store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		record, err := tx.GetUserRecord(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		removed = record
+		if err := tx.DeleteUser(request.Context(), userID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "user", ResourceID: userID, Result: "success",
+			Changes: auditRemoval(auditUserSnapshot(removed)),
+		})
+	})
+	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// auditUserChanges reports the profile fields an update can touch, masked by
+// the same allowlist the request payload goes through.
+func auditUserChanges(before, after repository.UserRecord) map[string]any {
+	return auditChanges(auditUserSnapshot(before), auditUserSnapshot(after))
+}
+
+func auditUserSnapshot(record repository.UserRecord) map[string]any {
+	email := any(nil)
+	if record.Email != nil {
+		email = *record.Email
+	}
+	return map[string]any{"displayName": record.DisplayName, "email": email, "status": record.Status}
 }

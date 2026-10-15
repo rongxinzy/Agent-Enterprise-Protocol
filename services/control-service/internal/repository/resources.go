@@ -461,6 +461,14 @@ func (s *DeploymentStore) DeleteCredentialAssignment(ctx context.Context, id str
 	return resultError(result)
 }
 
+// GetCredentialAssignment reads one assignment so a delete can record the
+// revoked grant's before-values.
+func (s *DeploymentStore) GetCredentialAssignment(ctx context.Context, id string) (CredentialAssignment, error) {
+	var value CredentialAssignment
+	err := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Take(&value).Error
+	return value, err
+}
+
 func (s *DeploymentStore) ListModels(ctx context.Context) ([]Model, error) {
 	return s.ListModelsPage(ctx, "", 0)
 }
@@ -531,4 +539,12 @@ func (s *DeploymentStore) CreateModelAssignment(ctx context.Context, value Model
 func (s *DeploymentStore) DeleteModelAssignment(ctx context.Context, id string) error {
 	result := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&ModelAssignment{})
 	return resultError(result)
+}
+
+// GetModelAssignment reads one assignment so a delete can record the revoked
+// grant's before-values.
+func (s *DeploymentStore) GetModelAssignment(ctx context.Context, id string) (ModelAssignment, error) {
+	var value ModelAssignment
+	err := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Take(&value).Error
+	return value, err
 }
