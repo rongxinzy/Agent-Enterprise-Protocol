@@ -77,6 +77,9 @@ Go 服务（`services/control-service`、`services/gateway-authorizer`、`servic
 
 ## Operator Development
 
+- Share pure Higress rendering through `services/internal/gatewayrender/`;
+  do not fork the protocol strategies or resource naming in controllers.
+  Credential reads and Kubernetes writes belong to callers, not renderers.
 - Kubernetes operators live in `services/gateway-operator/` and use the standard
   kubebuilder/controller-runtime layout (`api/` types, `internal/controller/`
   reconcilers, `cmd/main.go`, `config/crd|rbac` generated output).
