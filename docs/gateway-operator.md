@@ -42,3 +42,36 @@ outbox, explicit async API/SDK evolution, bounded cache consistency and DB
 reference validation are required before routing Console writes to CRs.
 Direct CR writes are an administrator-only local acceptance/break-glass path,
 not a new unauthenticated product configuration entry point.
+
+## Formal apply runtime
+
+The project metadata was scaffolded with kubebuilder v4.9.0, go/v4, project
+version 3. It uses the repository's root module and existing controller-runtime
+and Kubernetes versions; no nested module or Dockerfile is introduced.
+
+The Manager watches CRs in `aep-system`. ModelRoute owns only per-route
+Ingress/EnvoyFilter objects; DeploymentConfig owns aggregate plugins and the
+quota-admin route. Routes wait for the aggregate's matching input digest.
+On invalid/missing inputs they withdraw owned routing objects rather than
+opening an anonymous or unconstrained route. Ready remains Unknown until
+independent effectiveness observation is added in the integration stage.
+
+Provider references resolve in `aep-credentials`. A metadata-only Secret watch
+triggers aggregation; values are read through the uncached APIReader.
+Native references resolve in `higress-system` and refresh on the bounded
+30-second resync. Resync also detects rendered-resource deletion/drift.
+API operations use a bounded reconciliation context.
+
+SSA uses `aep-operator` without forced takeover. Existing objects must carry
+the CR's owner UID label; unowned or foreign objects cause a conflict.
+Cleanup queries live labels and uses UID/resourceVersion delete preconditions.
+An apply/status crash or forged status inventory cannot authorize deletion
+of another writer's objects. No cross-namespace OwnerReferences are used.
+Replacements are installed before obsolete resources are pruned. Route
+deletion waits for the aggregate without that route; deployment deletion
+requires routes to be removed first. Invalid references retain a finalizer
+until repaired, while route resources are withdrawn.
+
+This stage does not adopt legacy reconciler resources or switch deployments.
+Reviewed ownership handover, narrow RBAC revocation, outbox, DB-reference
+validation and data-plane observation remain cutover prerequisites.
