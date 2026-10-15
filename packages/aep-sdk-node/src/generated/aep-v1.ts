@@ -386,7 +386,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Imports at most 1000 administrator-provisioned accounts. */
+        /** @description Imports at most 1000 administrator-provisioned accounts. Every created account is audited in the same transaction that creates it. A batch that creates at least one account answers 200 with the created and rejected counts; a batch whose every row is rejected answers 422 USER_IMPORT_REJECTED with the same counts and the per-row reasons attached to the problem document, because an import that created no account did not apply. */
         post: operations["importPlatformUsers"];
         delete?: never;
         options?: never;
@@ -3969,6 +3969,15 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            /** @description No row could be created: the problem document carries the import result counts and the rejected rows as extension members. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"] & components["schemas"]["ImportPlatformUsersResponse"];
+                };
+            };
         };
     };
     getPlatformUser: {

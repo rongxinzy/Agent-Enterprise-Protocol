@@ -597,13 +597,34 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 
 func writeProblem(response http.ResponseWriter, request *http.Request, status int, code, detail string) {
 	noteAuditProblem(request, code)
-	response.Header().Set("Content-Type", "application/problem+json")
-	response.WriteHeader(status)
-	_ = json.NewEncoder(response).Encode(map[string]any{
+	writeProblemDocument(response, status, problemDocument(request, status, code, detail))
+}
+
+// writeProblemWithExtensions writes a problem document that carries extra
+// members beside the standard ones, as RFC 7807 allows. A batch endpoint uses
+// it to keep the per-row rejections a caller needs to repair its input next to
+// the stable problem code.
+func writeProblemWithExtensions(response http.ResponseWriter, request *http.Request, status int, code, detail string, extensions map[string]any) {
+	noteAuditProblem(request, code)
+	document := problemDocument(request, status, code, detail)
+	for key, value := range extensions {
+		document[key] = value
+	}
+	writeProblemDocument(response, status, document)
+}
+
+func problemDocument(request *http.Request, status int, code, detail string) map[string]any {
+	return map[string]any{
 		"type":  "https://aep.example/problems/" + strings.ToLower(strings.ReplaceAll(code, "_", "-")),
 		"title": http.StatusText(status), "status": status, "detail": detail, "code": code,
 		"requestId": request.Context().Value(contextKey("request-id")),
-	})
+	}
+}
+
+func writeProblemDocument(response http.ResponseWriter, status int, document map[string]any) {
+	response.Header().Set("Content-Type", "application/problem+json")
+	response.WriteHeader(status)
+	_ = json.NewEncoder(response).Encode(document)
 }
 
 func databaseFailure(response http.ResponseWriter, request *http.Request, err error) {
