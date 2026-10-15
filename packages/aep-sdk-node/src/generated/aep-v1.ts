@@ -1480,6 +1480,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/data-plane/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Requires data_plane.write. Captures the catalog-derived route snapshot using the same route derivation rules as the synchronous publish API. Atomically commits the immutable snapshot, operation, audit event and outbox intent before returning 202. This is durable queue acceptance, not CR validation, resource application or data-plane readiness. This endpoint publishes routes only; it does not publish gateway limits or change role assignments. Deployment scope comes from the session. Authenticate and authorize every request before looking up its key. A deployment-scoped Idempotency-Key binds to the normalized request and its first captured snapshot. Replays return the same operation with its current status, even if the catalog has changed; they neither derive a new snapshot nor enqueue another intent. A different request under that key returns 409 IDEMPOTENCY_KEY_CONFLICT. The server retains the binding and operation at least until idempotencyExpiresAt (at least 24 hours after creation). A key reused after expiry may create new work. Transient delivery failures retry with backoff; a delayed older intent must never overwrite a newer publication for the same deployment. Contract/SDK stage only: do not assume service availability or fall back automatically to synchronous publish when this endpoint is unavailable. */
+        post: operations["createDataPlanePublication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/data-plane/publications/{operationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Requires data_plane.write, matching the existing data-plane management surface. Returns only an operation belonging to the session's deployment. Unknown, expired and cross-deployment IDs all return 404 RESOURCE_NOT_FOUND. Operator observations must match the publication's immutable revision; missing or stale evidence is Unknown, never inferred from a successful write or from the legacy reconciliation ready flag. Contract/SDK stage only; the query handler follows with the outbox stage. */
+        get: operations["getDataPlanePublication"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/data-plane/status": {
         parameters: {
             query?: never;
@@ -1732,6 +1766,49 @@ export interface components {
             /** Format: date-time */
             publishedAt: string;
             contentHash: string;
+        };
+        DataPlanePublicationRequest: {
+            /** @description Optional human-readable revision. Trim surrounding whitespace; reject an empty result. Omission selects a server-assigned revision. An explicit revision already bound to different route content is invalid (422); revision labels are not ordering tokens. Idempotency comparison uses the normalized body, not the current catalog. */
+            revision?: string;
+        };
+        DataPlanePublication: {
+            /** Format: uuid */
+            operationId: string;
+            deploymentId: string;
+            /** @description Immutable identity of the captured snapshot, never rebound to different content. */
+            revision: string;
+            /** @description SHA-256 of the normalized revision and routes, using the existing desired-state hash definition. Contains no credential values. */
+            contentHash: string;
+            /**
+             * @description Delivery lifecycle only: queued -> projecting -> projected, failed or superseded. Transient failures remain queued/projecting and retry; failed means an unrecoverable projection error. Superseded means replaced by newer intent; it must not subsequently write older configuration. Projected means all AEP CR writes/deletions for this snapshot were verified, not that operator application or readiness succeeded. Projected may later become superseded; failed and superseded are terminal. Conditions evolve independently of phase.
+             * @enum {string}
+             */
+            phase: "queued" | "projecting" | "projected" | "failed" | "superseded";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /**
+             * Format: date-time
+             * @description Earliest time at which the server may evict the key binding and operation; at least 24 hours after createdAt. Replays do not extend this bound.
+             */
+            idempotencyExpiresAt: string;
+            /** @description Exactly one each of Accepted, Applied and Ready. All start Unknown. Accepted is operator semantic validation; Applied is rendered Kubernetes resources written; Ready requires independent evidence that the intended configuration is loaded in the data plane, with the relevant route and replica coverage. SSA success, an HTTP probe alone, or legacy ready status is insufficient. Missing/mismatched observations remain Unknown. No raw CRs, credentials or provider responses are returned. */
+            conditions: components["schemas"]["DataPlanePublicationCondition"][];
+            /** @description Sanitized stable projection error code; null unless phase is failed. Operator rejection is represented by conditions instead. */
+            errorCode: string | null;
+        };
+        DataPlanePublicationCondition: {
+            /** @enum {string} */
+            type: "Accepted" | "Applied" | "Ready";
+            /** @enum {string} */
+            status: "True" | "False" | "Unknown";
+            /** @description The enclosing publication revision for a matching observation; null when no matching evidence exists (status must then be Unknown). */
+            observedRevision: string | null;
+            /** @description Stable machine-readable reason, such as NotObserved or ReadinessNotImplemented. Never a downstream error dump. */
+            reason: string;
+            /** Format: date-time */
+            lastTransitionTime: string;
         };
         DataPlaneStatus: {
             /** @enum {string} */
@@ -6217,6 +6294,93 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem-2"];
+        };
+    };
+    createDataPlanePublication: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Caller-generated opaque token; reuse unchanged for retries of this request. Never use a secret. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataPlanePublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Durably queued publication, or current operation for an idempotent replay (including terminal phases). */
+            202: {
+                headers: {
+                    /** @description Relative operation URL under /aep/v1/admin/data-plane/publications/. */
+                    Location: string;
+                    "Cache-Control": "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlanePublication"];
+                };
+            };
+            /** @description Malformed JSON or missing/invalid Idempotency-Key (INVALID_IDEMPOTENCY_KEY). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem-2"];
+                };
+            };
+            401: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            /** @description IDEMPOTENCY_KEY_CONFLICT; the key is already bound to a different normalized request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem-2"];
+                };
+            };
+            /** @description INVALID_DATA_PLANE_STATE; invalid revision or catalog-derived snapshot. No operation or outbox intent is committed. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem-2"];
+                };
+            };
+            503: components["responses"]["Problem-2"];
+        };
+    };
+    getDataPlanePublication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current delivery phase and revision-specific observations. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlanePublication"];
+                };
+            };
+            401: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+            503: components["responses"]["Problem-2"];
         };
     };
     getDataPlaneStatus: {
