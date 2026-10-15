@@ -3,12 +3,17 @@ package reconciler
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,11 +41,17 @@ type KubernetesConfig struct {
 	// token captured once at startup silently 401s after its first TTL.
 	TokenFile string
 	CAFile    string
+	// StateDir persists the resource inventory used to prune departed routes.
+	// Empty keeps the inventory in process only.
+	StateDir string
 }
 
 type KubernetesApplier struct {
-	config *rest.Config
-	client kubernetes.Interface
+	config   *rest.Config
+	client   kubernetes.Interface
+	stateDir string
+	mu       sync.Mutex
+	applied  map[string][]string
 }
 
 func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
@@ -91,7 +102,7 @@ func newKubernetesApplier(config KubernetesConfig, client kubernetes.Interface) 
 			return nil, err
 		}
 	}
-	return &KubernetesApplier{config: restConfig, client: client}, nil
+	return &KubernetesApplier{config: restConfig, client: client, stateDir: config.StateDir, applied: map[string][]string{}}, nil
 }
 
 // Apply server-side-applies every rendered resource and first deletes what
@@ -108,6 +119,10 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 		if strings.TrimSpace(resource.APIPath) == "" || strings.TrimSpace(resource.Body) == "" {
 			return fmt.Errorf("rendered %s resource has an empty API path or body", resource.Kind)
 		}
+	}
+	kept := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		kept[resource.APIPath] = struct{}{}
 	}
 	deletions := make([]string, 0, 4)
 	for _, route := range desired.Routes {
@@ -132,6 +147,9 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 			deletions = append(deletions, gatewayrender.EnvoyFilterAPIPath(name))
 		}
 	}
+	for _, path := range deletions {
+		delete(kept, path)
+	}
 	sort.Strings(deletions)
 	for _, path := range deletions {
 		if err := a.delete(ctx, path); err != nil {
@@ -143,7 +161,77 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	}
 	// Remove the legacy shared ingress only after replacement routes/plugins
 	// have been applied. It otherwise remains an unscoped fallback route.
-	return a.delete(ctx, gatewayrender.OpenAIIngressAPIPath(gatewayrender.ResourceSuffix(desired.TenantID())))
+	if err := a.delete(ctx, gatewayrender.OpenAIIngressAPIPath(gatewayrender.ResourceSuffix(desired.TenantID()))); err != nil {
+		return err
+	}
+	// Routes that left the desired state are not in the deletion list above.
+	// A manual route replaced by a catalog republish would otherwise stay on
+	// the gateway after the control plane reports the old revision ready.
+	return a.pruneAbsent(ctx, desired.TenantID(), kept)
+}
+
+func (a *KubernetesApplier) pruneAbsent(ctx context.Context, tenant string, kept map[string]struct{}) error {
+	for _, path := range a.loadApplied(tenant) {
+		if _, ok := kept[path]; ok {
+			continue
+		}
+		if err := a.delete(ctx, path); err != nil {
+			return err
+		}
+	}
+	paths := slices.Sorted(maps.Keys(kept))
+	return a.storeApplied(tenant, paths)
+}
+
+func (a *KubernetesApplier) loadApplied(tenant string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if paths, ok := a.applied[tenant]; ok {
+		return slices.Clone(paths)
+	}
+	if a.stateDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(a.pathsFile(tenant))
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	if json.Unmarshal(data, &paths) != nil {
+		return nil
+	}
+	a.applied[tenant] = slices.Clone(paths)
+	return slices.Clone(paths)
+}
+
+func (a *KubernetesApplier) storeApplied(tenant string, paths []string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applied[tenant] = slices.Clone(paths)
+	if a.stateDir == "" {
+		return nil
+	}
+	data, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(a.pathsFile(tenant), data)
+}
+
+func (a *KubernetesApplier) pathsFile(tenant string) string {
+	var name strings.Builder
+	for _, r := range tenant {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			name.WriteRune(r)
+		default:
+			name.WriteByte('_')
+		}
+	}
+	if name.Len() == 0 {
+		name.WriteString("tenant")
+	}
+	return filepath.Join(a.stateDir, name.String()+".applied-paths.json")
 }
 
 func hasResourcePath(resources []gatewayrender.RenderedResource, path string) bool {
@@ -202,12 +290,16 @@ func kubernetesErrorStatus(err error) string {
 	return err.Error()
 }
 
-// ReadSecret reads one key from a Kubernetes Secret in higress-system and
-// returns the value. Serves as the CredentialFetcher for routes whose
-// credentialRef names a Secret there. The typed client decodes the base64
-// data field itself; a corrupt entry fails the whole read.
-func (a *KubernetesApplier) ReadSecret(ctx context.Context, name, key string) (string, error) {
-	secret, err := a.client.CoreV1().Secrets("higress-system").Get(ctx, name, metav1.GetOptions{})
+// ReadSecret reads one key from a Kubernetes Secret and returns the value.
+// Serves as the CredentialFetcher for routes, which always pass
+// CredentialSecretNamespace; an empty namespace falls back to
+// DefaultSecretNamespace for operator-configured references. The typed client
+// decodes the base64 data field itself; a corrupt entry fails the whole read.
+func (a *KubernetesApplier) ReadSecret(ctx context.Context, namespace, name, key string) (string, error) {
+	if namespace == "" {
+		namespace = DefaultSecretNamespace
+	}
+	secret, err := a.client.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		var status apierrors.APIStatus
 		if errors.As(err, &status) && status.Status().Code != 0 {

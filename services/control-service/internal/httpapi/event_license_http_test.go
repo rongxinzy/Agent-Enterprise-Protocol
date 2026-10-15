@@ -61,12 +61,14 @@ func TestHeartbeatAndControlDeliveryLifecycle(t *testing.T) {
 	}
 
 	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+		WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(ptrString("42")))
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(0), int32(50)).
 		WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}).
 			AddRow("delivery-1", "event-1", int64(42), "skill.manifest.changed", "user", nil, nil, nil, nil, "skill.reconcile", now, now.Add(time.Hour)))
 	events := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=0&limit=50", "")
-	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"deliveryId":"delivery-1"`) {
+	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"deliveryId":"delivery-1"`) || !strings.Contains(events.Body.String(), `"watermark":"42"`) {
 		t.Fatalf("events = %d %s", events.Code, events.Body.String())
 	}
 
@@ -87,6 +89,38 @@ func TestHeartbeatAndControlDeliveryLifecycle(t *testing.T) {
 	if result.Code != http.StatusNoContent {
 		t.Fatalf("result = %d %s", result.Code, result.Body.String())
 	}
+}
+
+// The control-event list must report the same session watermark as the
+// heartbeat: the largest cursor ever delivered, or an empty string when the
+// session has no deliveries. This test pins both cases, including a session
+// whose pending page is empty but whose delivery history is not.
+func TestListControlEventsReportsWatermark(t *testing.T) {
+	t.Run("no deliveries", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+		pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+			WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(nil))
+		pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(0), int32(50)).
+			WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}))
+		events := userRequest(New(application).Handler(), userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=0&limit=50", "")
+		if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"watermark":""`) || !strings.Contains(events.Body.String(), `"items":[]`) {
+			t.Fatalf("events = %d %s", events.Code, events.Body.String())
+		}
+	})
+
+	t.Run("delivered history with empty page", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+		pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+			WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(ptrString("147")))
+		pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(140), int32(50)).
+			WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}))
+		events := userRequest(New(application).Handler(), userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=140&limit=50", "")
+		if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"watermark":"147"`) {
+			t.Fatalf("events = %d %s", events.Code, events.Body.String())
+		}
+	})
 }
 
 func TestCreateControlEventExpandsTeamDescendants(t *testing.T) {

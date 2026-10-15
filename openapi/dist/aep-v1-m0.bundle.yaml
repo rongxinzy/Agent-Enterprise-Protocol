@@ -269,6 +269,11 @@ paths:
         - $ref: '#/components/parameters/RequestId'
         - name: afterCursor
           in: query
+          description: |
+            Delivery cursor to resume after: pass the `nextCursor` of the previous
+            page. This is not the watermark — the watermark reports progress, and
+            passing it would skip deliveries with a smaller cursor that are still
+            pending.
           schema:
             type:
               - string
@@ -1040,6 +1045,74 @@ paths:
       responses:
         '204':
           description: Assignment removed
+    patch:
+      tags:
+        - Admin Skills
+      operationId: updateSkillAssignment
+      description: |
+        Changes when an existing grant ends. Deleting and recreating the grant
+        would drop the Skill from the employee's desired manifest in between -
+        which can uninstall and reinstall it - so the expiry is edited in place.
+        `null` makes the grant perpetual again. The change emits the same control
+        event a grant change does, so agents reconcile promptly.
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expiresAt
+              additionalProperties: false
+              properties:
+                expiresAt:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                  description: RFC3339 expiry, or null for a perpetual grant.
+      responses:
+        '200':
+          description: Grant updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - skillId
+                  - subject
+                  - expiresAt
+                properties:
+                  id:
+                    type: string
+                  skillId:
+                    type: string
+                  subject:
+                    type: object
+                    required:
+                      - type
+                      - id
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - user
+                          - role
+                          - team
+                      id:
+                        type: string
+                  expiresAt:
+                    type:
+                      - string
+                      - 'null'
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/control-events:
     get:
       tags:
@@ -1298,6 +1371,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticationAuditPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/audit/operations:
+    get:
+      tags:
+        - Admin Audit
+      operationId: listAdminAudit
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: actorUserId
+          in: query
+          schema:
+            type: string
+        - name: createdAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Administrative audit result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuditPage'
         '400':
           $ref: '#/components/responses/Problem-2'
         '403':
@@ -1826,6 +1945,7 @@ components:
               type: boolean
             watermark:
               type: string
+              description: Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds:
           type: integer
           minimum: 5
@@ -1969,6 +2089,7 @@ components:
             - 'null'
         watermark:
           type: string
+          description: 'Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending.'
     AcknowledgeRequest:
       type: object
       required:
@@ -3367,6 +3488,61 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AuthenticationAuditRecord'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    AdminAuditRecord:
+      type: object
+      required:
+        - cursor
+        - action
+        - resourceType
+        - result
+        - createdAt
+      properties:
+        cursor:
+          type: string
+        actorUserId:
+          type:
+            - string
+            - 'null'
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type:
+            - string
+            - 'null'
+        result:
+          type: string
+          enum:
+            - success
+            - failure
+        reason:
+          type:
+            - string
+            - 'null'
+        changes:
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+          description: Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted.
+        createdAt:
+          type: string
+          format: date-time
+    AdminAuditPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditRecord'
         nextCursor:
           type:
             - string

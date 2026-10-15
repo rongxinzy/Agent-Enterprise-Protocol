@@ -69,8 +69,15 @@ func TestPublishDataPlaneRoutesDerivesCatalogState(t *testing.T) {
 		t.Fatalf("derived routes = %s", published.Body.String())
 	}
 	reference := state.Routes[0].CredentialRef
-	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace == nil || *reference.Namespace != "higress-system" {
+	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace != nil {
 		t.Fatalf("derived credentialRef = %s", published.Body.String())
+	}
+	// The reconciler re-derives the desired-state hash from the routes it
+	// decodes, so the wire shape must match what rows written before the
+	// namespace was pinned carry: an explicit null, not a dropped key and not a
+	// resolved namespace.
+	if !strings.Contains(published.Body.String(), `"credentialRef":{"name":"aep-credential-credential-a","key":"api-key","namespace":null}`) {
+		t.Fatalf("derived credentialRef shape = %s", published.Body.String())
 	}
 	if state.Routes[0].ProviderType != "openai" || state.Routes[1].CredentialRef != nil {
 		t.Fatalf("derived route normalization = %s", published.Body.String())

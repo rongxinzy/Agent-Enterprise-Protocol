@@ -603,11 +603,88 @@ func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	if err := recordAdminAuditTx(request.Context(), tx, claims.DeploymentID, repository.AdminAuditEntry{
+		ActorUserID: claims.Subject, Action: "delete", ResourceType: "skill_assignment", ResourceID: assignmentID, Result: "success",
+		Changes: auditRemoval(map[string]any{
+			"skillId": skillID, "subjectType": subjectType, "subjectId": subjectID,
+		}),
+	}); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	if err := tx.Commit(request.Context()); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// updateSkillAssignment changes when an existing grant ends. Deleting and
+// recreating the grant would drop the Skill from the employee's desired
+// manifest in between, which can uninstall and reinstall it, so the expiry is
+// edited in place. `null` makes the grant perpetual again. The change emits the
+// same control event a grant change does, so agents reconcile promptly.
+func (s *Server) updateSkillAssignment(response http.ResponseWriter, request *http.Request) {
+	assignmentID := chi.URLParam(request, "assignmentId")
+	var input map[string]json.RawMessage
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	raw, ok := input["expiresAt"]
+	if !ok || len(input) != 1 {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "expiresAt is the only field this request accepts.")
+		return
+	}
+	var expiresAt *time.Time
+	if string(raw) != "null" {
+		var parsed time.Time
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "expiresAt must be an RFC3339 timestamp or null.")
+			return
+		}
+		expiresAt = &parsed
+	}
+	claims := claimsFrom(request)
+	tx, err := s.app.Database().Begin(request.Context())
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(request.Context()) }()
+	// Pass an untyped value: a typed nil pointer would reach the driver as a
+	// *time.Time instead of a plain NULL.
+	var expiryArg any
+	if expiresAt != nil {
+		expiryArg = *expiresAt
+	}
+	var skillID, subjectType, subjectID string
+	err = tx.QueryRow(request.Context(), `UPDATE skill_assignments SET expires_at=$1 WHERE id=$2 AND deployment_id=$3 RETURNING skill_id,subject_type,subject_id`, expiryArg, assignmentID, claims.DeploymentID).Scan(&skillID, &subjectType, &subjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The assignment was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	revision := "expiry:" + assignmentID + ":perpetual"
+	if expiresAt != nil {
+		revision = "expiry:" + assignmentID + ":" + expiresAt.UTC().Format(time.RFC3339)
+	}
+	if err := createSkillAssignmentEvent(request.Context(), tx, claims.DeploymentID, claims.Subject, skillID, subjectType, subjectID, revision); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := tx.Commit(request.Context()); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"id": assignmentID, "skillId": skillID,
+		"subject":   map[string]string{"type": subjectType, "id": subjectID},
+		"expiresAt": expiresAt,
+	})
 }
 
 func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, createdBy, skillID, subjectType, subjectID, revision string) error {

@@ -48,6 +48,8 @@ func TestTeamDefaultRolesCreateAndPatchContract(t *testing.T) {
 				if create {
 					mock.ExpectExec(`INSERT INTO "teams"`).WillReturnResult(sqlmock.NewResult(0, 1))
 				} else {
+					mock.ExpectQuery(`FROM "teams"`).WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(append(teamJoinColumns(), "default_role_ids")).AddRow("deployment-a", "engineering", "Engineering", "", false, true, nil, "/engineering", 0, time.Now(), time.Now(), 1, `["old-reader"]`))
+					mock.ExpectExec(`SAVEPOINT sp[0-9]+`).WillReturnResult(sqlmock.NewResult(0, 0))
 					mock.ExpectExec(`UPDATE "teams" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 					expectTeamRecord(mock, "engineering", "Engineering", "", true, 1, time.Now())
 				}
@@ -57,12 +59,21 @@ func TestTeamDefaultRolesCreateAndPatchContract(t *testing.T) {
 				}
 				mock.ExpectQuery(`SELECT count\(\*\) FROM "roles"`).WithArgs("deployment-a", "reader").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(count))
 				if unknown {
+					if !create {
+						mock.ExpectExec(`ROLLBACK TO SAVEPOINT sp[0-9]+`).WillReturnResult(sqlmock.NewResult(0, 0))
+					}
 					mock.ExpectRollback()
 				} else {
 					mock.ExpectExec(`DELETE FROM "team_default_roles"`).WithArgs("deployment-a", "engineering").WillReturnResult(sqlmock.NewResult(0, 0))
 					mock.ExpectExec(`INSERT INTO "team_default_roles"`).WithArgs("deployment-a", "engineering", "reader").WillReturnResult(sqlmock.NewResult(0, 1))
 					if !create {
 						mock.ExpectQuery(`FROM "teams"`).WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "enabled", "member_count", "default_role_ids"}).AddRow("deployment-a", "engineering", "Engineering", true, 1, `["reader"]`))
+					}
+				}
+				var capture auditPayloadCapture
+				if !unknown {
+					if !create {
+						expectAuditInsertCapturing(mock, &capture)
 					}
 					mock.ExpectCommit()
 				}
@@ -78,6 +89,19 @@ func TestTeamDefaultRolesCreateAndPatchContract(t *testing.T) {
 				} else if (response.Code != http.StatusOK && response.Code != http.StatusCreated) || !strings.Contains(response.Body.String(), `"defaultRoleIds":["reader"]`) {
 					t.Fatalf("persisted defaults = %d %s", response.Code, response.Body.String())
 				}
+				if !create && !unknown {
+					var payload struct {
+						Before struct {
+							DefaultRoleIDs []string `json:"defaultRoleIds"`
+						} `json:"before"`
+						After struct {
+							DefaultRoleIDs []string `json:"defaultRoleIds"`
+						} `json:"after"`
+					}
+					if err := json.Unmarshal(capture.raw, &payload); err != nil || len(payload.Before.DefaultRoleIDs) != 1 || payload.Before.DefaultRoleIDs[0] != "old-reader" || len(payload.After.DefaultRoleIDs) != 1 || payload.After.DefaultRoleIDs[0] != "reader" {
+						t.Fatalf("default-role audit = %s, error = %v", capture.raw, err)
+					}
+				}
 			})
 		}
 	}
@@ -86,12 +110,15 @@ func TestTeamDefaultRolesCreateAndPatchContract(t *testing.T) {
 func TestReferencedTeamDefaultRoleCannotBeDeleted(t *testing.T) {
 	application, mock, token := newStoreBackedHTTPApplication(t)
 	now := time.Now()
-	mock.ExpectQuery(`SELECT \* FROM "roles"`).WithArgs("deployment-a", "reader", 1).WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "reader", "Reader", "", false, true, now, now))
 	mock.ExpectBegin()
+	expectRoleRecord(mock, "reader", "Reader", "", true, nil, now)
+	mock.ExpectQuery(`SELECT \* FROM "roles"`).WithArgs("deployment-a", "reader", 1).WillReturnRows(sqlmock.NewRows(roleHTTPColumns()).AddRow("deployment-a", "reader", "Reader", "", false, true, now, now))
+	mock.ExpectExec(`SAVEPOINT sp[0-9]+`).WillReturnResult(sqlmock.NewResult(0, 0))
 	// Deleting a subject also clears its polymorphic grants first; the reference
 	// that blocks the role delete is the team's default-role foreign key.
 	expectSubjectGrantCleanup(mock, "role", "reader")
 	mock.ExpectExec(`DELETE FROM "roles"`).WithArgs("deployment-a", "reader").WillReturnError(&pgconn.PgError{Code: "23503"})
+	mock.ExpectExec(`ROLLBACK TO SAVEPOINT sp[0-9]+`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
 	result := adminRequest(New(application).Handler(), token, http.MethodDelete, "/aep/v1/admin/roles/reader", "")
 	if result.Code != http.StatusConflict || !strings.Contains(result.Body.String(), "ROLE_IN_USE") {

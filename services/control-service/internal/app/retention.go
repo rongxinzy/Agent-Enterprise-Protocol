@@ -17,6 +17,7 @@ type RetentionResult struct {
 	AuthenticationAudit       int64
 	CredentialResolutionAudit int64
 	LicenseAudit              int64
+	AdminAudit                int64
 	Telemetry                 int64
 	SkillSync                 int64
 	ControlDeliveries         int64
@@ -29,7 +30,7 @@ type RetentionResult struct {
 
 func (result RetentionResult) Total() int64 {
 	return result.AuthenticationAudit + result.CredentialResolutionAudit + result.LicenseAudit +
-		result.Telemetry + result.SkillSync + result.ControlDeliveries + result.ControlEvents +
+		result.AdminAudit + result.Telemetry + result.SkillSync + result.ControlDeliveries + result.ControlEvents +
 		result.SessionTokens + result.Sessions + result.LoginRateLimits + result.ExpiredAssignments
 }
 
@@ -64,6 +65,9 @@ func (a *App) CleanupRetention(ctx context.Context, now time.Time) (result Reten
 			return result, err
 		}
 		if result.LicenseAudit, err = retentionDelete(ctx, tx, "license audit", `DELETE FROM license_audit_events WHERE id IN (SELECT id FROM license_audit_events WHERE created_at<$1 ORDER BY created_at LIMIT $2)`, cutoff, batchSize); err != nil {
+			return result, err
+		}
+		if result.AdminAudit, err = retentionDelete(ctx, tx, "administrative audit", `DELETE FROM admin_audit_events WHERE cursor IN (SELECT cursor FROM admin_audit_events WHERE created_at<$1 ORDER BY created_at LIMIT $2)`, cutoff, batchSize); err != nil {
 			return result, err
 		}
 	}
@@ -148,6 +152,7 @@ func (a *App) RunRetention(ctx context.Context) {
 				"authentication_audit", result.AuthenticationAudit,
 				"credential_resolution_audit", result.CredentialResolutionAudit,
 				"license_audit", result.LicenseAudit,
+				"admin_audit", result.AdminAudit,
 				"telemetry", result.Telemetry,
 				"skill_sync", result.SkillSync,
 				"control_deliveries", result.ControlDeliveries,

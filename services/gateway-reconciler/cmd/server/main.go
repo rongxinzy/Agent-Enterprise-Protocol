@@ -148,13 +148,20 @@ func loadConfig() (serverConfig, error) {
 		if err != nil {
 			return serverConfig{}, err
 		}
-		workerConfig.Applier, err = reconciler.NewKubernetesApplier(reconciler.KubernetesConfig{URL: kubernetesURL, Token: kubernetesToken, TokenFile: os.Getenv("AEP_RECONCILER_KUBERNETES_TOKEN_FILE"), CAFile: os.Getenv("AEP_RECONCILER_KUBERNETES_CA_FILE")})
+		workerConfig.Applier, err = reconciler.NewKubernetesApplier(reconciler.KubernetesConfig{URL: kubernetesURL, Token: kubernetesToken, TokenFile: os.Getenv("AEP_RECONCILER_KUBERNETES_TOKEN_FILE"), CAFile: os.Getenv("AEP_RECONCILER_KUBERNETES_CA_FILE"), StateDir: workerConfig.OutputDir})
 		if err != nil {
 			return serverConfig{}, err
 		}
 		if applier, ok := workerConfig.Applier.(*reconciler.KubernetesApplier); ok {
 			workerConfig.CredentialFetcher = func(ctx context.Context, ref gatewayrender.SecretReference) (string, error) {
-				return applier.ReadSecret(ctx, ref.Name, ref.Key)
+				// Route references carry the pinned credential namespace; an
+				// operator-configured reference leaves it unset and ReadSecret
+				// falls back to its default namespace.
+				namespace := ""
+				if ref.Namespace != nil {
+					namespace = *ref.Namespace
+				}
+				return applier.ReadSecret(ctx, namespace, ref.Name, ref.Key)
 			}
 		}
 	}

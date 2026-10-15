@@ -856,7 +856,14 @@ export interface paths {
         delete: operations["deleteSkillAssignment"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * @description Changes when an existing grant ends. Deleting and recreating the grant
+         *     would drop the Skill from the employee's desired manifest in between -
+         *     which can uninstall and reinstall it - so the expiry is edited in place.
+         *     `null` makes the grant perpetual again. The change emits the same control
+         *     event a grant change does, so agents reconcile promptly.
+         */
+        patch: operations["updateSkillAssignment"];
         trace?: never;
     };
     "/aep/v1/admin/control-events": {
@@ -1016,6 +1023,23 @@ export interface paths {
         };
         /** @description Returns the persisted authentication audit trail (login success, failure, throttle, and password change) recorded by the control service, newest first. Read-only, cursor paginated, and always scoped to the caller's deployment. */
         get: operations["listAuthenticationAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/audit/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        get: operations["listAdminAudit"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1448,7 +1472,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in higress-system; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. */
+        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in the dedicated aep-credentials namespace; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. */
         post: operations["publishDataPlaneRoutes"];
         delete?: never;
         options?: never;
@@ -1670,6 +1694,11 @@ export interface components {
         DataPlaneSecretReference: {
             name: string;
             key: string;
+            /**
+             * @description Accepted for compatibility with earlier clients and ignored: the reconciler
+             *     reads every route credential from the dedicated credential namespace, so a
+             *     route cannot choose where it reads from.
+             */
             namespace?: string | null;
         };
         DataPlaneRoute: {
@@ -1901,6 +1930,7 @@ export interface components {
             serverTime: string;
             controlEvents: {
                 pending: boolean;
+                /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`. */
                 watermark: string;
             };
             nextHeartbeatAfterSeconds: number;
@@ -1965,6 +1995,7 @@ export interface components {
         ControlEventPage: {
             items: components["schemas"]["ControlEventDelivery"][];
             nextCursor: string | null;
+            /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending. */
             watermark: string;
         };
         AcknowledgeRequest: {
@@ -2759,6 +2790,26 @@ export interface components {
             items: components["schemas"]["AuthenticationAuditRecord"][];
             nextCursor: string | null;
         };
+        AdminAuditRecord: {
+            cursor: string;
+            actorUserId?: string | null;
+            action: string;
+            resourceType: string;
+            resourceId?: string | null;
+            /** @enum {string} */
+            result: "success" | "failure";
+            reason?: string | null;
+            /** @description Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted. */
+            changes?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AdminAuditPage: {
+            items: components["schemas"]["AdminAuditRecord"][];
+            nextCursor: string | null;
+        };
         CredentialCreate: {
             name: string;
             service: string;
@@ -3495,6 +3546,12 @@ export interface operations {
     listUserControlEvents: {
         parameters: {
             query?: {
+                /**
+                 * @description Delivery cursor to resume after: pass the `nextCursor` of the previous
+                 *     page. This is not the watermark — the watermark reports progress, and
+                 *     passing it would skip deliveries with a smaller cursor that are still
+                 *     pending.
+                 */
                 afterCursor?: string | null;
                 limit?: components["parameters"]["Limit"];
             };
@@ -4938,6 +4995,50 @@ export interface operations {
             };
         };
     };
+    updateSkillAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description RFC3339 expiry, or null for a perpetual grant.
+                     */
+                    expiresAt: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Grant updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        skillId: string;
+                        subject: {
+                            /** @enum {string} */
+                            type: "user" | "role" | "team";
+                            id: string;
+                        };
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
     listControlEvents: {
         parameters: {
             query?: {
@@ -5184,6 +5285,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthenticationAuditPage"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    listAdminAudit: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+                action?: string;
+                resourceType?: string;
+                resourceId?: string;
+                actorUserId?: string;
+                createdAfter?: string;
+                createdBefore?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Administrative audit result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditPage"];
                 };
             };
             400: components["responses"]["Problem-2"];

@@ -69,6 +69,25 @@ func TestAdminControlEventsPaginate(t *testing.T) {
 	}
 }
 
+// Deleting the author of a control event anonymizes the row instead of
+// removing it, so the listing has to render the missing author as an empty
+// string instead of failing on the NULL.
+func TestAdminControlEventsRenderDeletedAuthors(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+	columns := []string{"event_id", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "expires_at", "state", "created_at", "created_by", "pending", "received", "running", "succeeded", "failed", "expired", "superseded"}
+	pool.ExpectQuery(`SELECT e.event_id,e.type,e.scope_type`).WithArgs("deployment-a", "", 51).
+		WillReturnRows(pgxmock.NewRows(columns).AddRow(
+			"event-1", "skill.manifest.changed", "global", nil, nil, nil, nil, "skill.reconcile",
+			now.Add(time.Hour), "active", now, nil, int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0),
+		))
+	got := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/control-events", "")
+	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"createdBy":""`) || !strings.Contains(got.Body.String(), `"eventId":"event-1"`) {
+		t.Fatalf("deleted author = %d %s", got.Code, got.Body.String())
+	}
+}
+
 func TestControlEventDeliveriesPaginate(t *testing.T) {
 	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
 	handler := New(application).Handler()
