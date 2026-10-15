@@ -2,6 +2,10 @@
 
 `deploy/kubernetes/production` 是 AEP control-service、gateway-authorizer 和 gateway-reconciler 的生产部署基线，目标是已通过 Helm 部署 Higress 的 Kubernetes 集群。`higress-standalone` 仅用于本地 Compose 和 CI 夹具。
 
+Admin Console 录入的供应商凭据也可通过可选的[凭据直接交付组件](credential-publisher.zh-CN.md)
+从 AEP 加密 DB 自动生成约定的网关 Secret，无须额外外部密钥库。它使用独立部署和身份，
+不改变本基线的启动 Secret 供给；同一个供应商 Secret 应只由 ESO 或该组件之一维护。
+
 ## 前置条件
 
 - Kubernetes 对 `aep-system` 强制 restricted Pod Security Standard。

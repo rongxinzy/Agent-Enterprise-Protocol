@@ -23,6 +23,12 @@ The protocol spec (`aep-v1.md`) names the Control, Event, and Asset participants
 
 Retention, migrations, and bootstrap stay with the control-service (`app.Open` is idempotent — advisory-locked migrations — so a racing agent-control boot is harmless).
 
+The optional [credential publisher](credential-publisher.md) is a separate,
+read-only database consumer with the matching Credential keyring. It supplies
+only eligible provider Secrets in `aep-credentials`. The HTTP services gain no
+Secret write permissions, and the gateway Operator gains no database/keyring
+access. It introduces no new public credential-resolution endpoint.
+
 ## Network policy (production)
 
 The agent-control ingress is the widest control-plane policy: desktop-agent runtime traffic (heartbeats, event polling, skill downloads) arrives through the shared higress ingress. The control-service accepts traffic only from the gateway authorizer, the gateway reconciler, and the ingress namespace. Both egress to DNS, 443 (RustFS/external), 5432 (PostgreSQL), 9000 (RustFS).

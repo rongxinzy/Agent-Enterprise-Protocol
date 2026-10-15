@@ -21,6 +21,11 @@ Use this file as the repository-specific entry point before changing code.
   forwarding an OpenAI-compatible request.
 - `services/gateway-reconciler/` renders approved data-plane desired state and
   applies it to Kubernetes/Higress.
+- `services/control-service/cmd/credential-publisher/` is an opt-in, separate
+  credential delivery process. It reads sealed provider Credentials and writes
+  only owned Secrets in `aep-credentials`; keep its DB/keyring access and Secret
+  write identity separate from the HTTP service and gateway Operator. See
+  [direct credential delivery](docs/credential-publisher.md).
 - `cmd/aepctl/` is the administrator CLI and must use the public management API;
   it must not access the database directly.
 - `examples/node-agent/` is the reference client used for SDK and E2E coverage.

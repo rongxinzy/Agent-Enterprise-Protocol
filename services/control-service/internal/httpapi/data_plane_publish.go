@@ -14,8 +14,8 @@ import (
 
 // Catalog-derived routes bridge a model's Credential to a conventional
 // Kubernetes Secret the reconciler resolves at sync time. The control plane
-// never writes Kubernetes and never emits Credential values; the deployment
-// Secret system provisions these Secrets out of band.
+// never writes Kubernetes and never emits Credential values. The dedicated
+// credential publisher or deployment Secret system supplies the target Secret.
 const (
 	dataPlaneCredentialSecretPrefix = "aep-credential-"
 	dataPlaneCredentialSecretKey    = "api-key"
