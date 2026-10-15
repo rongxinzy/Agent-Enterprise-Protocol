@@ -130,7 +130,7 @@ func TestListAdminAudit(t *testing.T) {
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT cursor,actor_user_id,action,resource_type,resource_id,result,reason,payload,created_at FROM admin_audit_events`).
-		WithArgs("deployment-a", 51).
+		WithArgs("deployment-a", auditWindowArg{time.Now().UTC().Add(-7 * 24 * time.Hour)}, 51).
 		WillReturnRows(pgxmock.NewRows([]string{"cursor", "actor_user_id", "action", "resource_type", "resource_id", "result", "reason", "payload", "created_at"}).
 			AddRow(int64(3), "admin-user", "update", "model", "m-1", "success", nil, []byte(`{"enabled":false}`), now))
 
@@ -138,7 +138,8 @@ func TestListAdminAudit(t *testing.T) {
 	if response.Code != http.StatusOK ||
 		!strings.Contains(response.Body.String(), `"action":"update"`) ||
 		!strings.Contains(response.Body.String(), `"resourceType":"model"`) ||
-		!strings.Contains(response.Body.String(), `"nextCursor":null`) {
+		!strings.Contains(response.Body.String(), `"nextCursor":null`) ||
+		!strings.Contains(response.Body.String(), `"timeRange":{"after":`) {
 		t.Fatalf("admin audit = %d %s", response.Code, response.Body.String())
 	}
 }
@@ -157,7 +158,7 @@ func TestMaskAuditPayloadKeepsUsername(t *testing.T) {
 func TestListAdminAuditAllowsMissingPayload(t *testing.T) {
 	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
 	pool.ExpectQuery(`SELECT cursor,actor_user_id,action,resource_type,resource_id,result,reason,payload,created_at FROM admin_audit_events`).
-		WithArgs("deployment-a", 51).
+		WithArgs("deployment-a", auditWindowArg{time.Now().UTC().Add(-7 * 24 * time.Hour)}, 51).
 		WillReturnRows(pgxmock.NewRows([]string{"cursor", "actor_user_id", "action", "resource_type", "resource_id", "result", "reason", "payload", "created_at"}).
 			AddRow(int64(3), nil, "delete", "user", "deleted-user", "success", nil, nil, time.Now().UTC()))
 	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/audit/operations", "")
@@ -169,5 +170,56 @@ func TestListAdminAuditAllowsMissingPayload(t *testing.T) {
 	}
 	if changes, exists := page.Items[0]["changes"]; !exists || changes != nil {
 		t.Fatalf("changes must be explicit null, got %v", page.Items[0])
+	}
+}
+
+// auditWindowArg matches the timestamp the default operations-log window
+// injects, without freezing the clock.
+type auditWindowArg struct{ want time.Time }
+
+func (arg auditWindowArg) Match(value interface{}) bool {
+	stamp, ok := value.(time.Time)
+	if !ok {
+		return false
+	}
+	delta := stamp.Sub(arg.want)
+	return delta < time.Minute && delta > -time.Minute
+}
+
+func TestListAdminAuditFiltersByResult(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	pool.ExpectQuery(`FROM admin_audit_events WHERE deployment_id=\$1 AND result=\$2 AND created_at >= \$3 ORDER BY cursor DESC LIMIT \$4`).
+		WithArgs("deployment-a", "failure", auditWindowArg{time.Now().UTC().Add(-7 * 24 * time.Hour)}, 51).
+		WillReturnRows(pgxmock.NewRows([]string{"cursor", "actor_user_id", "action", "resource_type", "resource_id", "result", "reason", "payload", "created_at"}).
+			AddRow(int64(3), "admin-user", "delete", "model", "m-1", "failure", nil, nil, time.Now().UTC()))
+
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/audit/operations?result=failure", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"result":"failure"`) {
+		t.Fatalf("result filter = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestListAdminAuditHonoursExplicitRange(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	after := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	before := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	pool.ExpectQuery(`FROM admin_audit_events WHERE deployment_id=\$1 AND created_at >= \$2 AND created_at <= \$3 ORDER BY cursor DESC LIMIT \$4`).
+		WithArgs("deployment-a", after, before, 51).
+		WillReturnRows(pgxmock.NewRows([]string{"cursor", "actor_user_id", "action", "resource_type", "resource_id", "result", "reason", "payload", "created_at"}))
+
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet,
+		"/aep/v1/admin/audit/operations?createdAfter=2026-10-01T00:00:00Z&createdBefore=2026-10-02T00:00:00Z", "")
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"after":"2026-10-01T00:00:00Z"`) ||
+		!strings.Contains(response.Body.String(), `"before":"2026-10-02T00:00:00Z"`) {
+		t.Fatalf("explicit range = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestListAdminAuditRejectsInvalidCreatedAfter(t *testing.T) {
+	application, _, adminToken, _ := newRuntimeHTTPApplication(t)
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/audit/operations?createdAfter=yesterday", "")
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_REQUEST") {
+		t.Fatalf("invalid createdAfter = %d %s", response.Code, response.Body.String())
 	}
 }

@@ -1038,7 +1038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied. */
         get: operations["listAdminAudit"];
         put?: never;
         post?: never;
@@ -2809,6 +2809,13 @@ export interface components {
         AdminAuditPage: {
             items: components["schemas"]["AdminAuditRecord"][];
             nextCursor: string | null;
+            /** @description The created_at window actually applied to this page. after is null only when the caller bounded the range with createdBefore alone; before is null when the caller did not set an upper bound. */
+            timeRange: {
+                /** Format: date-time */
+                after: string | null;
+                /** Format: date-time */
+                before: string | null;
+            };
         };
         CredentialCreate: {
             name: string;
@@ -5300,6 +5307,7 @@ export interface operations {
                 resourceType?: string;
                 resourceId?: string;
                 actorUserId?: string;
+                result?: "success" | "failure";
                 createdAfter?: string;
                 createdBefore?: string;
             };
