@@ -856,7 +856,14 @@ export interface paths {
         delete: operations["deleteSkillAssignment"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * @description Changes when an existing grant ends. Deleting and recreating the grant
+         *     would drop the Skill from the employee's desired manifest in between -
+         *     which can uninstall and reinstall it - so the expiry is edited in place.
+         *     `null` makes the grant perpetual again. The change emits the same control
+         *     event a grant change does, so agents reconcile promptly.
+         */
+        patch: operations["updateSkillAssignment"];
         trace?: never;
     };
     "/aep/v1/admin/control-events": {
@@ -4944,6 +4951,50 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    updateSkillAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description RFC3339 expiry, or null for a perpetual grant.
+                     */
+                    expiresAt: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Grant updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        skillId: string;
+                        subject: {
+                            /** @enum {string} */
+                            type: "user" | "role" | "team";
+                            id: string;
+                        };
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
         };
     };
     listControlEvents: {
