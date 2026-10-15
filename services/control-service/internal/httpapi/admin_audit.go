@@ -29,6 +29,7 @@ const auditPayloadLimit = 64 << 10
 // auditOperationDefaultWindow is the default operations-log window: the audit
 // page loads the last seven days unless the caller narrows the range.
 const auditOperationDefaultWindow = 7 * 24 * time.Hour
+
 // auditFailureWindow collapses an identical repeated failing administrative
 // write into a single row: a client stuck retrying a denied or rejected call
 // must not turn one policy decision into unbounded audit traffic. Distinct
