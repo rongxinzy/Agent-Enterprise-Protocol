@@ -155,6 +155,40 @@ func TestMaskAuditPayloadKeepsUsername(t *testing.T) {
 	}
 }
 
+// TestMaskAuditValueKeepsFailedOperationEvidence preserves the row shape the
+// failed-operation audit writes, {"requestId","status","request"}: the read
+// path re-runs every stored row through maskAuditValue, so without requestId
+// and request in the allowlist the whole evidence block would be withheld.
+// The nested request stays recursive, so a secret inside it is still masked.
+func TestMaskAuditValueKeepsFailedOperationEvidence(t *testing.T) {
+	masked := maskAuditValue(map[string]any{
+		"requestId": "audit-request-1",
+		"status":    400,
+		"request": map[string]any{
+			"displayName": "X",
+			"unknownKey":  "v",
+			"password":    "hunter2",
+		},
+	})
+	record, ok := masked.(map[string]any)
+	if !ok {
+		t.Fatalf("masked payload = %#v", masked)
+	}
+	if record["requestId"] != "audit-request-1" || record["status"] != 400 {
+		t.Fatalf("failure envelope redacted: %#v", record)
+	}
+	request, ok := record["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request must stay an object, got %#v", record["request"])
+	}
+	if request["displayName"] != "X" {
+		t.Fatalf("allowlisted nested field changed: %#v", request)
+	}
+	if request["password"] != "[redacted]" || request["unknownKey"] != "[redacted]" {
+		t.Fatalf("fail-closed masking degraded inside request: %#v", request)
+	}
+}
+
 func TestListAdminAuditAllowsMissingPayload(t *testing.T) {
 	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
 	pool.ExpectQuery(`SELECT cursor,actor_user_id,action,resource_type,resource_id,result,reason,payload,created_at FROM admin_audit_events`).
