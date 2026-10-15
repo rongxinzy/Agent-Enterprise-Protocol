@@ -383,7 +383,11 @@ FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.eve
 	var lastCreatedAt time.Time
 	lastEventID := ""
 	for rows.Next() {
-		var id, eventType, scopeType, taskType, state, createdBy string
+		// created_by is NULL only once the author's account was deleted (the
+		// event row is kept and anonymized). createdBy is a required string in
+		// the API contract, so a deleted author reads as the empty string.
+		var id, eventType, scopeType, taskType, state string
+		var createdBy pgtype.Text
 		var scopeID, resourceType, resourceID, resourceRevision *string
 		var expiresAt, createdAt time.Time
 		counts := make([]int64, 7)
@@ -396,7 +400,7 @@ FROM control_events e LEFT JOIN session_control_deliveries d ON d.event_id=e.eve
 			nextCursor = &value
 			break
 		}
-		item := map[string]any{"eventId": id, "type": eventType, "scope": map[string]any{"type": scopeType, "id": scopeID}, "resource": map[string]any{"type": resourceType, "id": resourceID, "revision": resourceRevision}, "task": map[string]string{"type": taskType}, "expiresAt": expiresAt, "state": state, "createdAt": createdAt, "createdBy": createdBy, "deliverySummary": map[string]int64{"pending": counts[0], "received": counts[1], "running": counts[2], "succeeded": counts[3], "failed": counts[4], "expired": counts[5], "superseded": counts[6]}}
+		item := map[string]any{"eventId": id, "type": eventType, "scope": map[string]any{"type": scopeType, "id": scopeID}, "resource": map[string]any{"type": resourceType, "id": resourceID, "revision": resourceRevision}, "task": map[string]string{"type": taskType}, "expiresAt": expiresAt, "state": state, "createdAt": createdAt, "createdBy": createdBy.String, "deliverySummary": map[string]int64{"pending": counts[0], "received": counts[1], "running": counts[2], "succeeded": counts[3], "failed": counts[4], "expired": counts[5], "superseded": counts[6]}}
 		items = append(items, item)
 		lastCreatedAt, lastEventID = createdAt, id
 	}
@@ -711,8 +715,11 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 	var nextCursor *string
 	var lastCursor pageCursor
 	for rows.Next() {
-		var eventID, userID, eventType string
-		var sessionID pgtype.Text
+		// user_id is NULL only once the user's account was deleted (the
+		// telemetry row is kept and anonymized). userId is a required string in
+		// the API contract, so a deleted account reads as the empty string.
+		var eventID, eventType string
+		var userID, sessionID pgtype.Text
 		var resourceType, resourceID, result pgtype.Text
 		var payload []byte
 		var occurredAt, receivedAt time.Time
@@ -727,7 +734,7 @@ func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *ht
 		}
 		var data any
 		_ = json.Unmarshal(payload, &data)
-		items = append(items, map[string]any{"eventId": eventID, "userId": userID, "sessionId": nullablePGText(sessionID), "type": eventType, "resourceType": nullablePGText(resourceType), "resourceId": nullablePGText(resourceID), "result": nullablePGText(result), "data": data, "occurredAt": occurredAt, "receivedAt": receivedAt})
+		items = append(items, map[string]any{"eventId": eventID, "userId": userID.String, "sessionId": nullablePGText(sessionID), "type": eventType, "resourceType": nullablePGText(resourceType), "resourceId": nullablePGText(resourceID), "result": nullablePGText(result), "data": data, "occurredAt": occurredAt, "receivedAt": receivedAt})
 		lastCursor = pageCursor{OccurredAt: occurredAt, EventID: eventID}
 	}
 	if err := rows.Err(); err != nil {

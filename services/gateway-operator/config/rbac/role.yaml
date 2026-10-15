@@ -5,20 +5,76 @@ metadata:
   name: gateway-operator-role
 rules:
 - apiGroups:
-  - gateway.aep.zhiyuan.io
+  - ""
   resources:
-  - modelpolicies
-  - modelroutes
+  - secrets
   verbs:
   - get
   - list
   - watch
 - apiGroups:
+  - extensions.higress.io
+  resources:
+  - wasmplugins
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+- apiGroups:
   - gateway.aep.zhiyuan.io
   resources:
+  - deploymentconfigs
+  - modelroutes
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - deploymentconfigs/finalizers
+  - modelroutes/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - deploymentconfigs/status
   - modelpolicies/status
   - modelroutes/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - modelpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.istio.io
+  resources:
+  - envoyfilters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch

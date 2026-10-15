@@ -4,14 +4,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Condition types reported by the gateway operator. Only Accepted exists at
-// the watch-only pilot stage; Applied/Ready land with the render/apply stage
-// (see the hybrid architecture doc: Accepted = API server accepted, Applied =
-// rendered resources in place, Ready = data plane observed effective).
+// Applied reports Kubernetes writes, while Ready requires an independent
+// data-plane observation. Successful SSA must never imply Ready=True.
 const (
 	// ConditionAccepted reports whether the spec passed the operator's
 	// shallow validation (shape beyond the CRD schema, reference existence).
 	ConditionAccepted = "Accepted"
+	ConditionApplied  = "Applied"
+	ConditionReady    = "Ready"
 )
 
 // Accepted condition reasons.
@@ -35,8 +35,7 @@ type ModelRouteUpstream struct {
 }
 
 // CredentialReference names the Secret key holding the provider credential.
-// The operator never reads the value at this stage; later stages resolve it
-// through the protected delivery path only.
+// Namespaces are fixed by the operator deployment, never supplied by a CR.
 type CredentialReference struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -59,15 +58,26 @@ type TenantScope struct {
 
 // ModelRouteSpec is one model route, owned at the route level by this CRD.
 type ModelRouteSpec struct {
+	// DeploymentRef selects the singleton DeploymentConfig in this namespace.
+	// +optional
+	// +kubebuilder:default=deployment
+	// +kubebuilder:validation:Enum=deployment
+	DeploymentRef string `json:"deploymentRef,omitempty"`
 	// ModelID is the catalog model identifier this route serves. AEP caps
 	// model ids at 40 characters (control-service identifier_slug).
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=40
+	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9-]*$`
 	ModelID string `json:"modelId"`
 	// Protocol is the wire protocol the route serves.
 	// +kubebuilder:validation:Enum=openai;anthropic
-	Protocol string             `json:"protocol"`
-	Upstream ModelRouteUpstream `json:"upstream"`
+	Protocol string `json:"protocol"`
+	// ProviderType selects the native ai-proxy adapter; empty defaults to openai.
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9-]*$`
+	ProviderType string             `json:"providerType,omitempty"`
+	Upstream     ModelRouteUpstream `json:"upstream"`
 	// +optional
 	CredentialRef *CredentialReference `json:"credentialRef,omitempty"`
 	// +kubebuilder:default=true
@@ -82,12 +92,14 @@ type ModelRouteStatus struct {
 	// reconciled.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Conditions report the reconciliation state; the pilot stage writes only
-	// the Accepted condition.
+	// Conditions report validation, Kubernetes writes and data-plane observation.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+	// AppliedResources records route-level resources only, never aggregate plugins.
+	// +optional
+	AppliedResources []AppliedResource `json:"appliedResources,omitempty"`
 }
 
 // +kubebuilder:object:root=true
