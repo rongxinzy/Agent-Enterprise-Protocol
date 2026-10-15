@@ -59,8 +59,7 @@ spec:
               credentialRef:
                 description: |-
                   CredentialReference names the Secret key holding the provider credential.
-                  The operator never reads the value at this stage; later stages resolve it
-                  through the protected delivery path only.
+                  Namespaces are fixed by the operator deployment, never supplied by a CR.
                 properties:
                   key:
                     maxLength: 253
@@ -74,6 +73,13 @@ spec:
                 - key
                 - name
                 type: object
+              deploymentRef:
+                default: deployment
+                description: DeploymentRef selects the singleton DeploymentConfig
+                  in this namespace.
+                enum:
+                - deployment
+                type: string
               enabled:
                 default: true
                 type: boolean
@@ -83,12 +89,19 @@ spec:
                   model ids at 40 characters (control-service identifier_slug).
                 maxLength: 40
                 minLength: 1
+                pattern: ^[a-z0-9][a-z0-9-]*$
                 type: string
               protocol:
                 description: Protocol is the wire protocol the route serves.
                 enum:
                 - openai
                 - anthropic
+                type: string
+              providerType:
+                description: ProviderType selects the native ai-proxy adapter; empty
+                  defaults to openai.
+                maxLength: 64
+                pattern: ^[a-z0-9][a-z0-9-]*$
                 type: string
               tenantScope:
                 description: |-
@@ -136,10 +149,32 @@ spec:
             description: ModelRouteStatus carries the operator's observations for
               one ModelRoute.
             properties:
+              appliedResources:
+                description: AppliedResources records route-level resources only,
+                  never aggregate plugins.
+                items:
+                  description: |-
+                    AppliedResource identifies an operator-owned object. Cross-namespace
+                    ownership uses UID labels and finalizers, not invalid OwnerReferences.
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  - namespace
+                  type: object
+                type: array
               conditions:
-                description: |-
-                  Conditions report the reconciliation state; the pilot stage writes only
-                  the Accepted condition.
+                description: Conditions report validation, Kubernetes writes and data-plane
+                  observation.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

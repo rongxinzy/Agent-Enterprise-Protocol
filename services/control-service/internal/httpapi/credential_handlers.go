@@ -519,29 +519,43 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The credential and a valid assignment subject are required.")
 		return
 	}
-	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
-		return
-	}
 	tenant := claimsFrom(request).DeploymentID
-	exists, err := s.app.Store.Deployment(tenant).HasCredential(request.Context(), input.CredentialID)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	if !exists {
-		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
-		return
-	}
 	id := uuid.NewString()
-	assignment, err := s.app.Store.Deployment(tenant).CreateCredentialAssignment(request.Context(), repository.CredentialAssignment{
-		ID: id, CredentialID: input.CredentialID, SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
-		ExpiresAt: input.ExpiresAt,
+	var assignment repository.CredentialAssignment
+	// The subject guard, the credential probe, and the insert share one
+	// transaction. The guard takes the subject lock before the probe and holds it
+	// until the commit, so a concurrent role or team deletion cannot slip in
+	// between.
+	err := s.app.Store.Deployment(tenant).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		if err := tx.GuardSubject(request.Context(), input.Subject.Type, input.Subject.ID); err != nil {
+			return err
+		}
+		exists, err := tx.HasCredential(request.Context(), input.CredentialID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return errGrantResourceMissing
+		}
+		created, err := tx.CreateCredentialAssignment(request.Context(), repository.CredentialAssignment{
+			ID: id, CredentialID: input.CredentialID, SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
+			ExpiresAt: input.ExpiresAt,
+		})
+		assignment = created
+		return err
 	})
-	if isUniqueViolation(err) {
-		writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The credential assignment already exists.")
-		return
-	}
 	if err != nil {
+		if subjectGuardError(response, request, input.Subject.Type, input.Subject.ID, err) {
+			return
+		}
+		if errors.Is(err, errGrantResourceMissing) {
+			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
+			return
+		}
+		if isUniqueViolation(err) {
+			writeProblem(response, request, http.StatusConflict, "ASSIGNMENT_EXISTS", "The credential assignment already exists.")
+			return
+		}
 		databaseFailure(response, request, err)
 		return
 	}
