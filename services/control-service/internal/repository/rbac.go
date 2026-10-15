@@ -3,8 +3,6 @@ package repository
 import (
 	"context"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 func (s *Store) ListPermissions(ctx context.Context) ([]Permission, error) {
@@ -183,18 +181,23 @@ func (s *DeploymentStore) DeleteRole(ctx context.Context, id string) error {
 }
 
 // deleteSubject removes a role or team together with every grant that names it,
-// in one transaction. Subjects are addressed by a name-derived id and the
-// polymorphic subject columns (subject_type, subject_id) carry no foreign key,
-// so a leftover grant would silently attach itself to a later subject that
-// reuses the same id.
+// in one transaction that first takes the subject lock. Subjects are addressed
+// by a name-derived id and the polymorphic subject columns (subject_type,
+// subject_id) carry no foreign key, so a leftover grant would silently attach
+// itself to a later subject that reuses the same id. Taking the lock the
+// creating paths take also stops a grant that already passed its existence check
+// from committing after this cleanup.
 func (s *DeploymentStore) deleteSubject(ctx context.Context, subjectType, id string, subject any) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return s.transaction(ctx, func(tx *DeploymentStore) error {
+		if err := tx.lockSubject(ctx, subjectType, id); err != nil {
+			return err
+		}
 		for _, grant := range []any{&SkillAssignment{}, &ModelAssignment{}, &CredentialAssignment{}, &DataScopeRule{}} {
-			if err := tx.Where("deployment_id = ? AND subject_type = ? AND subject_id = ?", s.deploymentID, subjectType, id).Delete(grant).Error; err != nil {
+			if err := tx.db.Where("deployment_id = ? AND subject_type = ? AND subject_id = ?", tx.deploymentID, subjectType, id).Delete(grant).Error; err != nil {
 				return err
 			}
 		}
-		return tx.Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(subject).Error
+		return tx.db.Where("deployment_id = ? AND id = ?", tx.deploymentID, id).Delete(subject).Error
 	})
 }
 
