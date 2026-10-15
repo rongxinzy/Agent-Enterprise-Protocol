@@ -1905,7 +1905,7 @@ paths:
       tags:
         - Admin Audit
       operationId: listAdminAudit
-      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. A URL field keeps only its scheme, host, port and path — its query, fragment and userinfo are removed both when the record is written and when it is read back. Read-only, cursor paginated, and always scoped to the caller's deployment.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit-2'
@@ -6801,6 +6801,7 @@ components:
         endpoint:
           type: string
           format: uri
+          description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'
         upstreamModel:
           type: string
         localModelRef:
@@ -6831,6 +6832,7 @@ components:
         endpoint:
           type: string
           format: uri
+          description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'
         upstreamModel:
           type: string
         localModelRef:
