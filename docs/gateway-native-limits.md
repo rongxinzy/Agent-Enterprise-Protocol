@@ -27,7 +27,10 @@ Mount an operator-owned configuration file into the reconciler and set
 `deploy/kubernetes/monitoring/gateway-native-config.example.json`. Redis is an
 additional native plugin dependency; Prometheus/Grafana cannot serve as its
 counter store. Provision the Redis service and named Kubernetes Secrets in
-`higress-system` through the existing Secret system. Credentials are resolved
+`higress-system` through the existing Secret system. These operator-configured
+references keep their own namespace and need an RBAC rule that covers it; route
+credential Secrets are read from the dedicated `aep-credentials` namespace
+instead. Credentials are resolved
 only inside the reconciler, never returned in administrative APIs. The
 example is opt-in and does not deploy a database or change production values.
 

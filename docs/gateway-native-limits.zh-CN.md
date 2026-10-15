@@ -15,7 +15,9 @@ AEP PostgreSQL 仅保存规则、乐观版本与发布快照，不保存计数�
 给 reconciler 挂载运维配置文件，设置 `AEP_RECONCILER_NATIVE_GATEWAY_CONFIG_FILE`。
 样例为 `deploy/kubernetes/monitoring/gateway-native-config.example.json`。Redis 是新增
 的插件依赖，Prometheus/Grafana 无法替代计数器存储；Redis 与管理凭据通过已有 Secret
-系统部署到 `higress-system`，只有 reconciler 能解析，API 不返回凭据。
+系统部署到 `higress-system`。这类运维配置的引用保留自己的命名空间，需要一条覆盖该
+命名空间的 RBAC 规则；路由凭据的 Secret 则从专用命名空间 `aep-credentials` 读取。
+只有 reconciler 能解析，API 不返回凭据。
 
 规则发布状态为 pending/applied/error。applied 只确认 Kubernetes apply 和对应版本
 回执，`runtimeVerified` 仍为 false，不把 apply 成功当成 Redis 连通和实际限流证明。

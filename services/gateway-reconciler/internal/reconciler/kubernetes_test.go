@@ -223,6 +223,55 @@ func TestKubernetesApplierRemovesAbsoluteUpstreamOnRelativeTransition(t *testing
 	}
 }
 
+func TestKubernetesApplierDeletesRoutesThatLeftTheDesiredState(t *testing.T) {
+	t.Parallel()
+	deleted := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodDelete {
+			deleted = append(deleted, request.URL.Path)
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghost := DesiredState{DeploymentID: "demo", Revision: "rev-drift", Routes: []gatewayrender.Route{{ModelID: "ghost", Enabled: true, Endpoint: "/v1/ghost", UpstreamModel: "provider-ghost", Protocol: "openai-compatible"}}}
+	_, ghostResources, _, err := gatewayrender.Render(renderInput(ghost), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applier.Apply(t.Context(), ghost, ghostResources); err != nil {
+		t.Fatal(err)
+	}
+	catalog := DesiredState{DeploymentID: "demo", Revision: "catalog-1", Routes: []gatewayrender.Route{{ModelID: "catalog-chat", Enabled: true, Endpoint: "/v1", UpstreamModel: "provider-catalog-chat", Protocol: "openai-compatible"}}}
+	_, catalogResources, _, err := gatewayrender.Render(renderInput(catalog), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted = nil
+	if err := applier.Apply(t.Context(), catalog, catalogResources); err != nil {
+		t.Fatal(err)
+	}
+	ghostIngress := gatewayrender.IngressAPIPath(gatewayrender.OpenAIResourceName("demo", "ghost"))
+	if !strings.Contains(strings.Join(deleted, "\n"), ghostIngress) {
+		t.Fatalf("catalog apply did not delete the departed route: %#v", deleted)
+	}
+
+	restarted, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token", StateDir: applier.stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted = nil
+	if err := restarted.Apply(t.Context(), catalog, catalogResources); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(deleted, "\n"), ghostIngress) {
+		t.Fatalf("restarted applier deleted a route it had already dropped: %#v", deleted)
+	}
+}
+
 func TestKubernetesApplierDeletesAnthropicPairWhenRouteDisabled(t *testing.T) {
 	t.Parallel()
 	operations := make([]string, 0, 8)
@@ -299,7 +348,7 @@ func TestBearerTokenFlowsFromStaticValueAndTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+	if _, err := applier.ReadSecret(context.Background(), "", "provider", "api-key"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("rotated-token\n"), 0o600); err != nil {
@@ -309,14 +358,14 @@ func TestBearerTokenFlowsFromStaticValueAndTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rotated.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+	if _, err := rotated.ReadSecret(context.Background(), "", "provider", "api-key"); err != nil {
 		t.Fatal(err)
 	}
 	static, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "static"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := static.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+	if _, err := static.ReadSecret(context.Background(), "", "provider", "api-key"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"Bearer first-token", "Bearer rotated-token", "Bearer static"}
@@ -345,19 +394,19 @@ func TestKubernetesApplierReadSecretThroughTypedClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value, err := applier.ReadSecret(context.Background(), "good", "api-key")
+	value, err := applier.ReadSecret(context.Background(), "", "good", "api-key")
 	if err != nil || value != "secret-value" {
 		t.Fatalf("ReadSecret(good) = %q, %v", value, err)
 	}
-	if _, err := applier.ReadSecret(context.Background(), "missing-key", "api-key"); err == nil || !strings.Contains(err.Error(), "has no key api-key") {
+	if _, err := applier.ReadSecret(context.Background(), "", "missing-key", "api-key"); err == nil || !strings.Contains(err.Error(), "has no key api-key") {
 		t.Fatalf("ReadSecret(missing-key) = %v", err)
 	}
 	// The typed client decodes data fields itself: corrupt base64 fails the
 	// whole read instead of surfacing a per-key decode step.
-	if _, err := applier.ReadSecret(context.Background(), "bad-base64", "api-key"); err == nil {
+	if _, err := applier.ReadSecret(context.Background(), "", "bad-base64", "api-key"); err == nil {
 		t.Fatal("ReadSecret(bad-base64) succeeded")
 	}
-	if _, err := applier.ReadSecret(context.Background(), "absent", "api-key"); err == nil || !strings.Contains(err.Error(), "returned 404") {
+	if _, err := applier.ReadSecret(context.Background(), "", "absent", "api-key"); err == nil || !strings.Contains(err.Error(), "returned 404") {
 		t.Fatalf("ReadSecret(absent) = %v", err)
 	}
 }
@@ -405,7 +454,7 @@ func TestBearerTokenRunningInstanceSurvivesFileRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+	if _, err := applier.ReadSecret(context.Background(), "", "provider", "api-key"); err != nil {
 		t.Fatal(err)
 	}
 	// Rotate the projected token in place mid-flight; the running instance
@@ -413,13 +462,43 @@ func TestBearerTokenRunningInstanceSurvivesFileRotation(t *testing.T) {
 	if err := os.WriteFile(path, []byte("rotated-token\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+	if _, err := applier.ReadSecret(context.Background(), "", "provider", "api-key"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applier.ReadSecret(context.Background(), "provider", "api-key"); err != nil {
+	if _, err := applier.ReadSecret(context.Background(), "", "provider", "api-key"); err != nil {
 		t.Fatal(err)
 	}
 	if len(tokens) != 3 || tokens[0] != "Bearer first-token" || tokens[1] != "Bearer first-token" || tokens[2] != "Bearer first-token" {
 		t.Fatalf("authorization headers across rotation = %v", tokens)
+	}
+}
+
+// Route credentials are read from the dedicated namespace; operator-configured
+// references keep their own, with higress-system as the fallback.
+func TestKubernetesApplierReadSecretUsesTheRequestedNamespace(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		paths = append(paths, request.URL.Path)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"shared","namespace":"aep-credentials"},"data":{"api-key":"c2VjcmV0"}}`))
+	}))
+	defer server.Close()
+	applier, err := NewKubernetesApplier(KubernetesConfig{URL: server.URL, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, namespace := range []string{CredentialSecretNamespace, "", DefaultSecretNamespace} {
+		if _, err := applier.ReadSecret(context.Background(), namespace, "shared", "api-key"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"/api/v1/namespaces/aep-credentials/secrets/shared",
+		"/api/v1/namespaces/higress-system/secrets/shared",
+		"/api/v1/namespaces/higress-system/secrets/shared",
+	}
+	if strings.Join(paths, ",") != strings.Join(want, ",") {
+		t.Fatalf("secret paths = %v, want %v", paths, want)
 	}
 }

@@ -17,10 +17,9 @@ import (
 // never writes Kubernetes and never emits Credential values; the deployment
 // Secret system provisions these Secrets out of band.
 const (
-	dataPlaneCredentialSecretPrefix    = "aep-credential-"
-	dataPlaneCredentialSecretKey       = "api-key"
-	dataPlaneCredentialSecretNamespace = "higress-system"
-	dataPlaneDerivedRevisionPrefix     = "catalog-"
+	dataPlaneCredentialSecretPrefix = "aep-credential-"
+	dataPlaneCredentialSecretKey    = "api-key"
+	dataPlaneDerivedRevisionPrefix  = "catalog-"
 )
 
 type dataPlanePublishRequest struct {
@@ -60,11 +59,14 @@ func deriveDataPlaneRoutes(models []modelRecord) []dataPlaneRoute {
 			route.ProviderType = "openai"
 		}
 		if model.CredentialID.Valid && strings.TrimSpace(model.CredentialID.String) != "" {
-			namespace := dataPlaneCredentialSecretNamespace
+			// The namespace stays null: the reconciler resolves every route
+			// credential in the dedicated credential namespace, so storing one here
+			// would only be a second place to keep in sync. It is serialized
+			// explicitly so the hashed wire shape matches the rows written before
+			// the namespace was pinned.
 			route.CredentialRef = &dataPlaneSecretReference{
-				Name:      dataPlaneCredentialSecretPrefix + model.CredentialID.String,
-				Key:       dataPlaneCredentialSecretKey,
-				Namespace: &namespace,
+				Name: dataPlaneCredentialSecretPrefix + model.CredentialID.String,
+				Key:  dataPlaneCredentialSecretKey,
 			}
 		}
 		routes = append(routes, route)
@@ -182,8 +184,9 @@ func (s *Server) catalogComparison(request *http.Request) (dataPlaneCatalogCompa
 }
 
 // compareCatalogRoutes diffs stored desired routes against catalog-derived
-// ones. credentialRef comparison covers name and key, the parts the
-// reconciler resolves; the namespace is currently always higress-system.
+// ones. credentialRef comparison covers name and key, the parts the reconciler
+// resolves; the namespace is resolved server-side and never travels in the
+// desired state.
 func compareCatalogRoutes(stored, derived []dataPlaneRoute) dataPlaneCatalogComparison {
 	comparison := dataPlaneCatalogComparison{Missing: []string{}, Extra: []string{}, Mismatched: []dataPlaneRouteMismatch{}}
 	storedByID := make(map[string]dataPlaneRoute, len(stored))

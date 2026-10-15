@@ -359,6 +359,11 @@ pending 标志只用于查询优化，不是可靠性边界。Agent 仍需定期
 读取响应不代表消费。在 Agent 确认接收前，服务端可以再次返回该投递。Agent 使用
 `deliveryId` 和 `eventId` 去重。
 
+`watermark` 是该会话已投递的最大 `cursor`，从未投递时为空串 `""`；取值与心跳
+`controlEvents.watermark` 一致。它只用于报告进度：翻页请用 `nextCursor`
+（`afterCursor` 传上一页最后一条投递的 `cursor`），因为水印可能超前于仍在
+pending 的投递。
+
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 
 Agent 只有在事件已经提交到本地持久化收件箱后才能调用该接口。该操作必须幂等。
@@ -609,6 +614,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | 撤回版本 |
 | GET, POST | `/admin/skill-assignments` | 查询或创建授权关系 |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | 删除授权关系 |
+| PATCH | `/admin/skill-assignments/{assignmentId}` | 修改授权的到期时间（`expiresAt` 为 RFC3339，`null` 表示永久） |
 
 Skill ID 是最长 64 个字符的可移植标识符，版本标识符最长 128 个字符。两者都必须
 以字母或数字开头和结尾；Skill ID 内部可使用 `.`、`_`、`-`，版本还可使用 `+`。
@@ -681,7 +687,8 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 
 期望状态只引用外部 Secret 名称和键，不包含模型服务商凭证明文。目录派生路由在模型绑定
 Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key`，命名空间
-`higress-system`），该 Secret 由部署侧 Secret 系统负责供给。
+`aep-credentials`），该 Secret 由部署侧 Secret 系统负责供给。命名空间由服务端解析，
+客户端发送的 `credentialRef.namespace` 会被忽略。
 
 ### 部署设置
 
@@ -764,6 +771,18 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 
 `GET /admin/events` 支持 `cursor`、`limit`、`userId`、`sessionId`、`type`、
 `resourceType`、`resourceId`、`result`、`occurredAfter` 和 `occurredBefore`。
+
+### 管理操作审计
+
+`GET /admin/audit/operations` 要求 `audit.read` 权限，只返回调用者部署内的记录，
+按 cursor 倒序排列。支持 `cursor`、`limit`、`action`、`resourceType`、
+`resourceId`、`actorUserId`、`createdAfter` 和 `createdBefore`；时间筛选使用
+RFC 3339。响应包含 `items` 和可空的 `nextCursor`。
+
+每条记录包含操作人、动作、资源、结果、时间和 `changes`：脱敏的变更前后快照或
+兜底捕获的请求字段；没有载荷时为 `null`。创建账号的载荷保留用户名，密码与未知
+字段继续打码。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
+配置说明见[生产运行基线](production-runtime.zh-CN.md)。
 
 ## 11. 错误与重试
 

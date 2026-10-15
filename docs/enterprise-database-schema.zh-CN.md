@@ -199,7 +199,7 @@ Skill ZIP 存在对象存储中，版本表只保存对象键、SHA-256 和大�
 | `id` | `text` | PK |
 | `deployment_id` | `text` | NN, FK |
 | `credential_id` | `text` | NN |
-| `user_id` | `text` | NN, FK -> `users.id` |
+| `user_id` | `text` | 可空；FK -> `users.id` ON DELETE SET NULL（删除用户时匿名化，审计行保留） |
 | `session_id` | `text` | 可空，FK -> `user_sessions` ON DELETE SET NULL |
 | `purpose` | `text` | NN |
 | `outcome` | `text` | NN, CK `resolved`/`denied` |
@@ -255,7 +255,7 @@ Skill ZIP 存在对象存储中，版本表只保存对象键、SHA-256 和大�
 | `supersedes_key` | `text` | 可空 |
 | `state` | `text` | NN, DF `active` |
 | `expires_at` | `timestamptz` | NN |
-| `created_by` | `text` | NN, FK -> `users.id` |
+| `created_by` | `text` | 可空；FK -> `users.id` ON DELETE SET NULL（删除用户时匿名化，事件保留） |
 | `created_at` | `timestamptz` | NN, DF `now()` |
 
 ### `session_control_deliveries`
@@ -284,8 +284,8 @@ UQ：`(event_id, session_id)`。
 
 | 表 | 主键 | 主要字段/约束 |
 | --- | --- | --- |
-| `telemetry_events` | `event_id` | `deployment_id`；`user_id`；`session_id` 可空且删除会话时置空；`type`；可空资源/结果字段；`payload jsonb` DF `{}`；`occurred_at`；`received_at` |
-| `skill_sync_results` | `id` | `deployment_id`；`user_id`；`session_id` 可空且删除会话时置空；`revision`；`status`；`installed_skill_ids text[]`；`payload jsonb`；`created_at` |
+| `telemetry_events` | `event_id` | `deployment_id`；`user_id` 可空且删除用户时置空；`session_id` 可空且删除会话时置空；`type`；可空资源/结果字段；`payload jsonb` DF `{}`；`occurred_at`；`received_at` |
+| `skill_sync_results` | `id` | `deployment_id`；`user_id` 可空且删除用户时置空；`session_id` 可空且删除会话时置空；`revision`；`status`；`installed_skill_ids text[]`；`payload jsonb`；`created_at` |
 
 `telemetry_events.event_id` 提供重复上报去重语义。
 
