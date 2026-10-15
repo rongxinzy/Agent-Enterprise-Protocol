@@ -1,0 +1,29 @@
+# Explicit opt-in only. Not included in the production kustomization.
+# Apply only during reviewed operator handover; flags remain disabled by default.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-publication-relay
+  namespace: aep-system
+rules:
+  - apiGroups: [gateway.aep.zhiyuan.io]
+    resources: [modelroutes]
+    verbs: [get, list, create, update]
+  - apiGroups: [gateway.aep.zhiyuan.io]
+    resources: [deploymentconfigs]
+    resourceNames: [deployment]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-publication-relay
+  namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-publication-relay
+subjects:
+  - kind: ServiceAccount
+    name: aep-control-service
+    namespace: aep-system

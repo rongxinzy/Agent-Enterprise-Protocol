@@ -21,6 +21,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {AepClient, MemoryTokenStore} from '../../packages/aep-sdk-node/dist/index.js';
+import {verifyDataPlanePublications} from './data-plane-publications.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const composeFile = path.join(root, 'deploy', 'compose', 'compose.yaml');
@@ -31,7 +32,7 @@ const kubePort = process.env.AEP_M3_KUBERNETES_E2E_PORT ?? '18089';
 const baseUrl = `http://localhost:${port}`;
 const kubeUrl = `http://127.0.0.1:${kubePort}`;
 const reconcilerHealthUrl = 'http://127.0.0.1:18091';
-const composeEnv = {AEP_PORT: port, AEP_MINIO_CONSOLE_PORT: process.env.AEP_M3_MINIO_CONSOLE_PORT ?? '19008'};
+const composeEnv = {AEP_PORT: port, AEP_MINIO_CONSOLE_PORT: process.env.AEP_M3_MINIO_CONSOLE_PORT ?? '19008', AEP_CONTROL_SERVICE_IMAGE: 'aep-m3-data-plane-e2e-control-service'};
 const outputDir = await mkdtemp(path.join(tmpdir(), 'aep-m3-reconciler-'));
 const reconcilerBinary = path.join(outputDir, process.platform === 'win32' ? 'aep-gateway-reconciler.exe' : 'aep-gateway-reconciler');
 const resources = new Map();
@@ -112,6 +113,15 @@ try {
   // binding come first: routes below are that catalog entry plus overrides.
   const credentialA = await useCredential(admin, 'Provider A key', 'provider-a', 'provider-secret-value-a');
   const chatModel = await useModel(admin, {displayName: 'Chat', endpoint: '/v1/chat', upstreamModel: 'provider-a', credentialId: credentialA.id});
+
+  await verifyDataPlanePublications({
+    admin, model: chatModel, sql: publicationSQL,
+    restart: async () => {
+      await compose('restart', 'control-service');
+      await waitFor(async () => assert((await fetch(`${baseUrl}/readyz`)).ok, 'control service did not recover'));
+    },
+  });
+  assert(resources.size === 0, 'queue-only publication unexpectedly wrote Kubernetes resources');
 
   const first = await admin.putDataPlaneDesiredState({revision: 'rev-1', routes: [routeFor(chatModel, {providerType: 'deepseek'})]});
   await waitForReady(admin, 'rev-1');
@@ -460,6 +470,19 @@ function compose(...args) {
   let allowFailure = false;
   if (args.at(-1) === true) { allowFailure = true; args.pop(); }
   return command('docker', ['compose', '-p', project, '-f', composeFile, '-f', overlayFile, ...args], composeEnv, allowFailure);
+}
+
+function publicationSQL(sql) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('docker', ['compose', '-p', project, '-f', composeFile, '-f', overlayFile,
+      'exec', '-T', 'postgres', 'psql', '-U', 'aep', '-d', 'aep', '-v', 'ON_ERROR_STOP=1', '-t', '-A', '-c', sql],
+    {cwd: root, env: {...process.env, ...composeEnv}, stdio: ['ignore', 'pipe', 'pipe'], shell: false});
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve(stdout.trim()) : reject(new Error(`Publication fixture SQL failed: ${stderr}`)));
+  });
 }
 
 function command(executable, args, extraEnv = {}, allowFailure = false) {
