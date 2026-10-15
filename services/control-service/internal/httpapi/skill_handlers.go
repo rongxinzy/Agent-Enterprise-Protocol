@@ -253,7 +253,8 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusRequestEntityTooLarge, "PACKAGE_TOO_LARGE", "The Skill package exceeds 32 MiB.")
 		return
 	}
-	if err := validateSkillPackage(archive); err != nil {
+	archive, err = normalizeSkillPackage(archive)
+	if err != nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
 		return
 	}
@@ -549,7 +550,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !requireSkillIdentifier(response, request, input.SkillID) {
 		return
 	}
-	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
+	if !requireSubjectType(response, request, input.Subject.Type) {
 		return
 	}
 	id := uuid.NewString()
@@ -560,6 +561,17 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
+	// Take the subject lock and probe the subject inside this transaction,
+	// before the insert. A deletion holding the same lock either ran before the
+	// probe or waits for this transaction, so the grant cannot outlive the
+	// subject it names.
+	if err := repository.GuardSubjectTx(request.Context(), tx, claims.DeploymentID, input.Subject.Type, input.Subject.ID); err != nil {
+		if subjectGuardError(response, request, input.Subject.Type, input.Subject.ID, err) {
+			return
+		}
+		databaseFailure(response, request, err)
+		return
+	}
 	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,deployment_id,skill_id,subject_type,subject_id,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`, id, claims.DeploymentID, input.SkillID, input.Subject.Type, input.Subject.ID, input.ExpiresAt)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -715,20 +727,40 @@ func skillAssignmentEventScope(subjectType, subjectID string) (string, *string) 
 	return subjectType, &subjectID
 }
 
+// skillEffectivenessQuery is the one definition of when a Skill version is
+// effective for the caller: the Skill is enabled, the version is published, the
+// grant belongs to the deployment and has not expired, and the grant's subject
+// (the user itself, a live role or a live team) resolves to the caller. The
+// manifest and the package download both build on this fragment rather than
+// each carrying their own copy, because a copy that skipped `sk.enabled` kept
+// serving packages for a Skill the manifest had already dropped: the download
+// never joined `skills` at all.
+const skillEffectivenessQuery = `WITH effective AS (
+SELECT DISTINCT sk.id AS skill_id,sk.name,sv.version,sv.sha256,sv.size_bytes,sv.published_at,sv.object_key
+FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id
+JOIN skill_assignments sa ON sa.skill_id=sk.id
+JOIN users u ON u.id=$2
+WHERE sk.enabled=true AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
+)`
+
+// skillManifestQuery keeps the newest published version of every effective
+// Skill. "latest" is the most recently published version, not the
+// lexicographically largest version string: version is free-form text, so
+// `version DESC` would pick 1.9.0 over 1.10.0. published_at (set by
+// PublishSkillVersion) is the only monotonic key; version DESC is a
+// deterministic tie-break.
+const skillManifestQuery = skillEffectivenessQuery + `, latest AS (SELECT DISTINCT ON (skill_id) * FROM effective ORDER BY skill_id,published_at DESC NULLS LAST,version DESC)
+SELECT skill_id,name,version,sha256,size_bytes FROM latest ORDER BY skill_id`
+
+// skillPackageQuery resolves one version of one effective Skill to the object
+// key of its package. It shares skillEffectivenessQuery with the manifest, so a
+// Skill that is absent from the manifest (disabled, unpublished, grant expired
+// or grant subject not live) cannot hand out a package either.
+const skillPackageQuery = skillEffectivenessQuery + ` SELECT object_key FROM effective WHERE skill_id=$3 AND version=$4 LIMIT 1`
+
 func (s *Server) skillManifest(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
-	// "latest" is the most recently published version, not the lexicographically
-	// largest version string: version is free-form text, so `version DESC` would
-	// pick 1.9.0 over 1.10.0. published_at (set by PublishSkillVersion) is the
-	// only monotonic key; version DESC is a deterministic tie-break.
-	rows, err := s.app.Database().Query(request.Context(), `WITH authorized AS (
-SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes,sv.published_at
-FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
-JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
-JOIN users u ON u.id=$2
-WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
-), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,published_at DESC NULLS LAST,version DESC)
-SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.DeploymentID, claims.Subject)
+	rows, err := s.app.Database().Query(request.Context(), skillManifestQuery, claims.DeploymentID, claims.Subject)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -743,6 +775,16 @@ SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.Deploy
 			return
 		}
 		items = append(items, map[string]any{"id": id, "name": name, "version": version, "enabled": true, "package": map[string]any{"url": "/aep/v1/user/skills/" + id + "/versions/" + version + "/package", "sha256": sha, "size": size}})
+	}
+	// The manifest is desired state: the client removes every managed Skill it
+	// does not find here. A read that ended in an error (connection reset,
+	// timeout, server-side termination) leaves a prefix of the rows, and
+	// Next() returning false says nothing about whether the read completed, so
+	// publishing that prefix would tell the client to uninstall Skills it is
+	// still authorized for. Only a complete read may produce a revision.
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
 	}
 	encoded, _ := json.Marshal(items)
 	digest := sha256.Sum256(encoded)
@@ -763,7 +805,11 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 		return
 	}
 	var objectKey string
-	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
+	// Same effectiveness rules as the manifest: a Skill version the caller's
+	// manifest does not list is not downloadable either. The refusal stays the
+	// "not assigned" one, so it reveals nothing about a Skill the caller cannot
+	// see.
+	err := s.app.Database().QueryRow(request.Context(), skillPackageQuery, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusForbidden, "SKILL_NOT_ASSIGNED", "The Skill version is not assigned.")
 		return
@@ -795,9 +841,22 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 		// clear refusal for anything still built against the old guide.
 		ManifestRevision *string `json:"manifestRevision"`
 		Status           string  `json:"status"`
-		Items            []struct {
+		// The contract declares timestamps on the report. They are kept in the
+		// stored payload and drive no behaviour.
+		StartedAt   string `json:"startedAt,omitempty"`
+		CompletedAt string `json:"completedAt,omitempty"`
+		Items       []struct {
 			SkillID string `json:"skillId"`
-			Status  string `json:"status"`
+			// `version` and `action` are advisory per the contract, and
+			// `errorCode`/`message` carry why a Skill failed. Decoding is
+			// strict, so every field the contract declares has to be named
+			// here, or a report that follows the contract is refused with a
+			// 400 - taking the Skills that did sync down with it.
+			Version   string `json:"version,omitempty"`
+			Action    string `json:"action,omitempty"`
+			Status    string `json:"status"`
+			ErrorCode string `json:"errorCode,omitempty"`
+			Message   string `json:"message,omitempty"`
 		} `json:"items"`
 	}
 	if !decodeJSON(response, request, &input) {
