@@ -119,7 +119,24 @@ func (s *Server) updateRole(response http.ResponseWriter, request *http.Request)
 	if input.Permissions != nil && !s.authorizeDelegatedPermissions(response, request, *input.Permissions) {
 		return
 	}
-	role, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateRole(request.Context(), chi.URLParam(request, "roleId"), input.Name, input.Description, input.Enabled, input.Permissions)
+	claims := claimsFrom(request)
+	roleID := chi.URLParam(request, "roleId")
+	var role repository.RoleRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetRoleRecord(request.Context(), roleID)
+		if err != nil {
+			return err
+		}
+		updated, err := tx.UpdateRole(request.Context(), roleID, input.Name, input.Description, input.Enabled, input.Permissions)
+		if err != nil {
+			return err
+		}
+		role = updated
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "role", ResourceID: roleID, Result: "success",
+			Changes: auditRoleChanges(before, updated),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The role was not found.")
 		return
@@ -136,11 +153,28 @@ func (s *Server) updateRole(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, publicRole(role))
 }
 
 func (s *Server) deleteRole(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).DeleteRole(request.Context(), chi.URLParam(request, "roleId"))
+	claims := claimsFrom(request)
+	roleID := chi.URLParam(request, "roleId")
+	var removed repository.RoleRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		existing, err := tx.GetRoleRecord(request.Context(), roleID)
+		if err != nil {
+			return err
+		}
+		removed = existing
+		if err := tx.DeleteRole(request.Context(), roleID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "role", ResourceID: roleID, Result: "success",
+			Changes: auditRemoval(auditRoleSnapshot(removed)),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The role was not found.")
 		return
@@ -150,9 +184,14 @@ func (s *Server) deleteRole(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	if err != nil {
+		if isForeignKeyViolation(err) {
+			writeProblem(response, request, http.StatusConflict, "ROLE_IN_USE", "The role is referenced by a team default. Remove the default role first.")
+			return
+		}
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
@@ -173,15 +212,19 @@ func (s *Server) listTeams(response http.ResponseWriter, request *http.Request) 
 
 func (s *Server) createTeam(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		ParentID    string `json:"parentId"`
+		DefaultRoleIDs *[]string `json:"defaultRoleIds"`
+		Name           string    `json:"name"`
+		Description    string    `json:"description"`
+		ParentID       string    `json:"parentId"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
 	}
 	if strings.TrimSpace(input.Name) == "" {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The team name is invalid.")
+		return
+	}
+	if !s.authorizeTeamDefaults(response, request, input.DefaultRoleIDs) {
 		return
 	}
 	tenant := claimsFrom(request).DeploymentID
@@ -215,8 +258,16 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 	} else {
 		team.Path = "/" + identifier
 	}
-	err = store.CreateTeam(request.Context(), team)
+	if input.DefaultRoleIDs != nil {
+		err = store.CreateTeam(request.Context(), team, *input.DefaultRoleIDs)
+	} else {
+		err = store.CreateTeam(request.Context(), team)
+	}
 	if err != nil {
+		if errors.Is(err, repository.ErrUnknownRole) {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The team contains an unknown default role.")
+			return
+		}
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "TEAM_EXISTS", "The team already exists.")
 			return
@@ -224,7 +275,11 @@ func (s *Server) createTeam(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusCreated, map[string]any{"id": identifier, "name": strings.TrimSpace(input.Name), "parentId": input.ParentID, "path": team.Path, "depth": team.Depth})
+	defaults := []string{}
+	if input.DefaultRoleIDs != nil {
+		defaults = *input.DefaultRoleIDs
+	}
+	writeJSON(response, http.StatusCreated, map[string]any{"id": identifier, "name": strings.TrimSpace(input.Name), "parentId": input.ParentID, "path": team.Path, "depth": team.Depth, "defaultRoleIds": defaults})
 }
 
 func (s *Server) getTeam(response http.ResponseWriter, request *http.Request) {
@@ -242,14 +297,15 @@ func (s *Server) getTeam(response http.ResponseWriter, request *http.Request) {
 
 func (s *Server) updateTeam(response http.ResponseWriter, request *http.Request) {
 	var input struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		Enabled     *bool   `json:"enabled"`
+		DefaultRoleIDs *[]string `json:"defaultRoleIds"`
+		Name           *string   `json:"name"`
+		Description    *string   `json:"description"`
+		Enabled        *bool     `json:"enabled"`
 	}
 	if !decodeJSON(response, request, &input) {
 		return
 	}
-	if input.Name == nil && input.Description == nil && input.Enabled == nil {
+	if input.Name == nil && input.Description == nil && input.Enabled == nil && input.DefaultRoleIDs == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "At least one Team field is required.")
 		return
 	}
@@ -257,7 +313,51 @@ func (s *Server) updateTeam(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_TEAM", "The Team name is required.")
 		return
 	}
-	team, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateTeam(request.Context(), chi.URLParam(request, "teamId"), input.Name, input.Description, input.Enabled)
+	if !s.authorizeTeamDefaults(response, request, input.DefaultRoleIDs) {
+		return
+	}
+	store := s.app.Store.Deployment(claimsFrom(request).DeploymentID)
+	if !claimsFrom(request).Admin && input.Enabled != nil && *input.Enabled && input.DefaultRoleIDs == nil {
+		existing, err := store.GetTeamRecord(request.Context(), chi.URLParam(request, "teamId"))
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Team was not found.")
+			} else {
+				databaseFailure(response, request, err)
+			}
+			return
+		}
+		if len(existing.DefaultRoleIDs) > 0 && !s.authorizeRoleGrant(response, request, existing.DefaultRoleIDs) {
+			return
+		}
+	}
+	claims := claimsFrom(request)
+	teamID := chi.URLParam(request, "teamId")
+	var team repository.TeamRecord
+	err := store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetTeamRecord(request.Context(), teamID)
+		if err != nil {
+			return err
+		}
+		var updated repository.TeamRecord
+		if input.DefaultRoleIDs != nil {
+			updated, err = tx.UpdateTeam(request.Context(), teamID, input.Name, input.Description, input.Enabled, *input.DefaultRoleIDs)
+		} else {
+			updated, err = tx.UpdateTeam(request.Context(), teamID, input.Name, input.Description, input.Enabled)
+		}
+		if err != nil {
+			return err
+		}
+		team = updated
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "team", ResourceID: teamID, Result: "success",
+			Changes: auditTeamChanges(before, updated),
+		})
+	})
+	if errors.Is(err, repository.ErrUnknownRole) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The team contains an unknown default role.")
+		return
+	}
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Team was not found.")
 		return
@@ -266,11 +366,28 @@ func (s *Server) updateTeam(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, publicTeam(team))
 }
 
 func (s *Server) deleteTeam(response http.ResponseWriter, request *http.Request) {
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).DeleteTeam(request.Context(), chi.URLParam(request, "teamId"))
+	claims := claimsFrom(request)
+	teamID := chi.URLParam(request, "teamId")
+	var removed repository.TeamRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		existing, err := tx.GetTeamRecord(request.Context(), teamID)
+		if err != nil {
+			return err
+		}
+		removed = existing
+		if err := tx.DeleteTeam(request.Context(), teamID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "team", ResourceID: teamID, Result: "success",
+			Changes: auditRemoval(auditTeamSnapshot(removed)),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Team was not found.")
 		return
@@ -295,6 +412,7 @@ func (s *Server) deleteTeam(response http.ResponseWriter, request *http.Request)
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
 
@@ -306,6 +424,11 @@ func publicTeam(team repository.TeamRecord) map[string]any {
 	if team.ParentTeamID != nil {
 		response["parentId"] = *team.ParentTeamID
 	}
+	defaults := team.DefaultRoleIDs
+	if defaults == nil {
+		defaults = []string{}
+	}
+	response["defaultRoleIds"] = defaults
 	return response
 }
 
@@ -340,8 +463,26 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 	if !s.authorizeTeamGrant(response, request, input.TeamIDs) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		ReplaceUserRBAC(request.Context(), userID, input.RoleIDs, input.TeamIDs)
+	claims := claimsFrom(request)
+	var before repository.UserRecord
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		current, err := tx.GetUserRecord(request.Context(), userID)
+		if err != nil {
+			return err
+		}
+		before = current
+		if err := tx.ReplaceUserRBAC(request.Context(), userID, input.RoleIDs, input.TeamIDs); err != nil {
+			return err
+		}
+		masked, _ := maskAuditValue(map[string]any{
+			"before": map[string]any{"roleIds": before.RoleIDs, "teamIds": before.TeamIDs},
+			"after":  map[string]any{"roleIds": input.RoleIDs, "teamIds": input.TeamIDs},
+		}).(map[string]any)
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "user_rbac", ResourceID: userID, Result: "success",
+			Changes: masked,
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
 		return
@@ -358,6 +499,7 @@ func (s *Server) replaceUserRBAC(response http.ResponseWriter, request *http.Req
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, map[string]any{"userId": userID, "roleIds": input.RoleIDs, "teamIds": input.TeamIDs})
 }
 
@@ -405,7 +547,39 @@ func (s *Server) authorizeTeamGrant(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusForbidden, "TEAM_GRANT_FORBIDDEN", "Administrators cannot grant Team memberships they do not hold.")
 		return false
 	}
+	for _, teamID := range teamIDs {
+		team, err := s.app.Store.Deployment(claims.DeploymentID).GetTeamRecord(request.Context(), teamID)
+		if err != nil {
+			databaseFailure(response, request, err)
+			return false
+		}
+		if len(team.DefaultRoleIDs) > 0 && !s.authorizeRoleGrant(response, request, team.DefaultRoleIDs) {
+			return false
+		}
+	}
 	return true
+}
+
+func (s *Server) authorizeTeamDefaults(response http.ResponseWriter, request *http.Request, defaults *[]string) bool {
+	if defaults == nil {
+		return true
+	}
+	seen := make(map[string]bool)
+	if len(*defaults) > 64 {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The team contains too many default roles.")
+		return false
+	}
+	for _, roleID := range *defaults {
+		if !validRBACID(roleID) || seen[roleID] {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_ROLE", "The team contains invalid or duplicate default roles.")
+			return false
+		}
+		seen[roleID] = true
+	}
+	if len(*defaults) == 0 {
+		return true
+	}
+	return s.authorizeRoleGrant(response, request, *defaults)
 }
 
 func (s *Server) authorizeDelegatedPermissions(response http.ResponseWriter, request *http.Request, requested []string) bool {
@@ -478,4 +652,24 @@ func validRBACID(value string) bool {
 		}
 	}
 	return true
+}
+
+// auditRoleChanges reports the role fields an update can touch, masked by the
+// same allowlist the request payload goes through.
+func auditRoleChanges(before, after repository.RoleRecord) map[string]any {
+	return auditChanges(auditRoleSnapshot(before), auditRoleSnapshot(after))
+}
+
+func auditRoleSnapshot(record repository.RoleRecord) map[string]any {
+	return map[string]any{"name": record.Name, "description": record.Description, "enabled": record.Enabled, "permissions": record.Permissions}
+}
+
+// auditTeamChanges reports the team fields an update can touch, masked by the
+// same allowlist the request payload goes through.
+func auditTeamChanges(before, after repository.TeamRecord) map[string]any {
+	return auditChanges(auditTeamSnapshot(before), auditTeamSnapshot(after))
+}
+
+func auditTeamSnapshot(record repository.TeamRecord) map[string]any {
+	return map[string]any{"name": record.Name, "description": record.Description, "enabled": record.Enabled, "defaultRoleIds": record.DefaultRoleIDs}
 }

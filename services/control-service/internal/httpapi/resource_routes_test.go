@@ -80,7 +80,7 @@ func TestAdminResourceListRoutes(t *testing.T) {
 		t.Fatalf("roles response = %d %s", roles.Code, roles.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count FROM "teams" LEFT JOIN user_team_bindings`).
+	mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
 		WithArgs("deployment-a", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at", "member_count"}).
 			AddRow("deployment-a", "engineering", "Engineering", "Builders", false, true, now, now, 4))
@@ -131,8 +131,8 @@ func TestAdminModelAndCredentialReadRoutes(t *testing.T) {
 		t.Fatalf("credentials response = %d %s", credentials.Code, credentials.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id`).
-		WithArgs("deployment-a").
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 ORDER BY created_at, id LIMIT \$2`).
+		WithArgs("deployment-a", 51).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "created_at"}).
 			AddRow("assignment-a", "deployment-a", "chat-a", "team", "engineering", now))
 	assignments := adminRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/model-assignments", "")
@@ -155,8 +155,12 @@ func TestAdminResourceDeleteRoutes(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "chat-a", 1).
+		WillReturnRows(modelHTTPRow())
 	mock.ExpectExec(`DELETE FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "chat-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	model := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/chat-a", "")
 	if model.Code != http.StatusNoContent {
@@ -164,8 +168,12 @@ func TestAdminResourceDeleteRoutes(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "credentials" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "credential-a", 1).
+		WillReturnRows(credentialRows("credential-a", "Provider", "deepseek", "server_only", "ciphertext", "nonce", "key-a", "****alue", true))
 	mock.ExpectExec(`DELETE FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "credential-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	credential := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/credentials/credential-a", "")
 	if credential.Code != http.StatusNoContent {

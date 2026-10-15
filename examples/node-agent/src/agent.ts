@@ -78,13 +78,13 @@ export class ExampleAgent {
     }
   }
 
-  private queueTelemetry(event: ControlEvent, result: string, message?: string): void {
+  private queueTelemetry(event: ControlEvent, result: 'succeeded' | 'failed', message?: string): void {
     this.options.state.enqueueTelemetry({
       eventId: randomUUID(),
       type: result === 'succeeded' ? 'skill.sync.completed' : 'skill.sync.failed',
       occurredAt: new Date().toISOString(),
       resource: event.resource ? {type: event.resource.type, id: event.resource.id} : null,
-      result,
+      result: result === 'succeeded' ? 'success' : 'failure',
       data: message ? {message} : {},
     });
   }

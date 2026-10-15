@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
@@ -331,12 +333,193 @@ func (s *Server) deleteSkillVersion(response http.ResponseWriter, request *http.
 	response.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
-	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListSkillAssignments(request.Context())
+// skillInstallations answers the question the sync reports exist for: of the
+// users this Skill is granted to, whose last report shows it installed?
+//
+// Reports arrive per session, so only the newest one per user counts, and they
+// are pruned by the telemetry retention window - this is the retained window,
+// not all history. A withdrawn Skill distributes to nobody, so its grant set is
+// empty here, matching the manifest's own rule.
+//
+// It reports what was reported, not a verdict: the per-item status vocabularies
+// disagree across layers (see skillSyncItemStatus), and an Agent that fails to
+// install writes no result row at all, so "failed" cannot be derived. The raw
+// item status is passed through instead.
+func (s *Server) skillInstallations(response http.ResponseWriter, request *http.Request) {
+	skillID := chi.URLParam(request, "skillId")
+	if !requireSkillIdentifier(response, request, skillID) {
+		return
+	}
+	claims := claimsFrom(request)
+	skill, err := s.app.Store.GetSkill(request.Context(), skillID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The Skill was not found.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	rows, err := s.app.Database().Query(request.Context(), `
+WITH latest AS (
+  SELECT DISTINCT ON (user_id) user_id,revision,created_at,installed_skill_ids,payload
+  FROM skill_sync_results
+  WHERE deployment_id=$1
+  ORDER BY user_id,created_at DESC,id DESC
+)
+SELECT u.id,latest.revision,latest.created_at,latest.installed_skill_ids,latest.payload
+FROM users u
+LEFT JOIN latest ON latest.user_id=u.id
+WHERE u.deployment_id=$1 AND EXISTS (
+  SELECT 1 FROM skill_assignments sa
+  JOIN skills sk ON sk.id=sa.skill_id AND sk.enabled=true
+  WHERE sa.deployment_id=$1 AND sa.skill_id=$2 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND (
+    (sa.subject_type='user' AND sa.subject_id=u.id)
+    OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id))
+    OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))
+  )
+)
+ORDER BY u.id`, claims.DeploymentID, skillID)
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	defer rows.Close()
+	pageLimit := int(limit(request))
+	counts := map[string]int{}
+	items := make([]map[string]any, 0)
+	var latestReport time.Time
+	for rows.Next() {
+		var userID string
+		var revision pgtype.Text
+		var reportedAt pgtype.Timestamptz
+		var installedSkillIDs []string
+		var payload []byte
+		if err := rows.Scan(&userID, &revision, &reportedAt, &installedSkillIDs, &payload); err != nil {
+			databaseFailure(response, request, err)
+			return
+		}
+		reported := revision.Valid
+		state := skillInstallationState(reported, installedSkillIDs, skillID)
+		counts["granted"]++
+		counts[state]++
+		if reported {
+			counts["reported"]++
+			if reportedAt.Valid && reportedAt.Time.After(latestReport) {
+				latestReport = reportedAt.Time
+			}
+		}
+		if state == "installed" {
+			continue
+		}
+		item := map[string]any{"userId": userID, "state": state}
+		if reported {
+			item["revision"] = revision.String
+			if reportedAt.Valid {
+				item["reportedAt"] = reportedAt.Time
+			}
+			if status := skillSyncItemStatus(payload, skillID); status != "" {
+				item["itemStatus"] = status
+			}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	// A user whose report still shows the Skill missing needs attention before
+	// one that never reported, and the list stays deterministic past the limit.
+	sort.SliceStable(items, func(i, j int) bool {
+		return installationStateRank(items[i]["state"].(string)) < installationStateRank(items[j]["state"].(string))
+	})
+	truncated := false
+	if len(items) > pageLimit {
+		items = items[:pageLimit]
+		truncated = true
+	}
+	var latestReportValue any
+	if !latestReport.IsZero() {
+		latestReportValue = latestReport
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"skillId": skill.ID,
+		"summary": map[string]any{
+			"granted":          counts["granted"],
+			"reported":         counts["reported"],
+			"installed":        counts["installed"],
+			"missing":          counts["missing"],
+			"unreported":       counts["unreported"],
+			"latestReportedAt": latestReportValue,
+		},
+		"items":     items,
+		"truncated": truncated,
+	})
+}
+
+// skillInstallationState classifies one user from the last report they made.
+// "installed" is the writer's own rule (the Skill is in installed_skill_ids);
+// everything else is either reported without it or never reported at all.
+func skillInstallationState(reported bool, installedSkillIDs []string, skillID string) string {
+	if !reported {
+		return "unreported"
+	}
+	if slices.Contains(installedSkillIDs, skillID) {
+		return "installed"
+	}
+	return "missing"
+}
+
+func installationStateRank(state string) int {
+	if state == "missing" {
+		return 0
+	}
+	return 1
+}
+
+// skillSyncItemStatus returns the raw per-item status a report carried for one
+// Skill. The vocabularies disagree across layers - the contract declares
+// success|failed, the writer counts installed|updated|unchanged as installed,
+// and the shipping Agent reports installed|updated|unchanged|removed - so the
+// value is passed through as reported instead of being mapped to a verdict.
+// Decoding into typed fields also absorbs `"items": null`, which would otherwise
+// break a JSON-level query.
+func skillSyncItemStatus(payload []byte, skillID string) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var report struct {
+		Items []struct {
+			SkillID string `json:"skillId"`
+			Status  string `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(payload, &report) != nil {
+		return ""
+	}
+	for _, item := range report.Items {
+		if item.SkillID == skillID {
+			return item.Status
+		}
+	}
+	return ""
+}
+
+func (s *Server) listSkillAssignments(response http.ResponseWriter, request *http.Request) {
+	pageSize := limit(request)
+	assignments, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListSkillAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	assignments, nextCursor := page(assignments, pageSize, func(item repository.SkillAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	items := make([]map[string]any, 0, len(assignments))
 	for _, assignment := range assignments {
 		items = append(items, map[string]any{
@@ -348,7 +531,7 @@ func (s *Server) listSkillAssignments(response http.ResponseWriter, request *htt
 			"expiresAt": assignment.ExpiresAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items})
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) createSkillAssignment(response http.ResponseWriter, request *http.Request) {
@@ -366,8 +549,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !requireSkillIdentifier(response, request, input.SkillID) {
 		return
 	}
-	if input.Subject.Type != "user" && input.Subject.Type != "role" && input.Subject.Type != "team" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
 		return
 	}
 	id := uuid.NewString()
@@ -421,11 +603,88 @@ func (s *Server) deleteSkillAssignment(response http.ResponseWriter, request *ht
 		databaseFailure(response, request, err)
 		return
 	}
+	if err := recordAdminAuditTx(request.Context(), tx, claims.DeploymentID, repository.AdminAuditEntry{
+		ActorUserID: claims.Subject, Action: "delete", ResourceType: "skill_assignment", ResourceID: assignmentID, Result: "success",
+		Changes: auditRemoval(map[string]any{
+			"skillId": skillID, "subjectType": subjectType, "subjectId": subjectID,
+		}),
+	}); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	if err := tx.Commit(request.Context()); err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// updateSkillAssignment changes when an existing grant ends. Deleting and
+// recreating the grant would drop the Skill from the employee's desired
+// manifest in between, which can uninstall and reinstall it, so the expiry is
+// edited in place. `null` makes the grant perpetual again. The change emits the
+// same control event a grant change does, so agents reconcile promptly.
+func (s *Server) updateSkillAssignment(response http.ResponseWriter, request *http.Request) {
+	assignmentID := chi.URLParam(request, "assignmentId")
+	var input map[string]json.RawMessage
+	if !decodeJSON(response, request, &input) {
+		return
+	}
+	raw, ok := input["expiresAt"]
+	if !ok || len(input) != 1 {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "expiresAt is the only field this request accepts.")
+		return
+	}
+	var expiresAt *time.Time
+	if string(raw) != "null" {
+		var parsed time.Time
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "expiresAt must be an RFC3339 timestamp or null.")
+			return
+		}
+		expiresAt = &parsed
+	}
+	claims := claimsFrom(request)
+	tx, err := s.app.Database().Begin(request.Context())
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(request.Context()) }()
+	// Pass an untyped value: a typed nil pointer would reach the driver as a
+	// *time.Time instead of a plain NULL.
+	var expiryArg any
+	if expiresAt != nil {
+		expiryArg = *expiresAt
+	}
+	var skillID, subjectType, subjectID string
+	err = tx.QueryRow(request.Context(), `UPDATE skill_assignments SET expires_at=$1 WHERE id=$2 AND deployment_id=$3 RETURNING skill_id,subject_type,subject_id`, expiryArg, assignmentID, claims.DeploymentID).Scan(&skillID, &subjectType, &subjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The assignment was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	revision := "expiry:" + assignmentID + ":perpetual"
+	if expiresAt != nil {
+		revision = "expiry:" + assignmentID + ":" + expiresAt.UTC().Format(time.RFC3339)
+	}
+	if err := createSkillAssignmentEvent(request.Context(), tx, claims.DeploymentID, claims.Subject, skillID, subjectType, subjectID, revision); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if err := tx.Commit(request.Context()); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
+		"id": assignmentID, "skillId": skillID,
+		"subject":   map[string]string{"type": subjectType, "id": subjectID},
+		"expiresAt": expiresAt,
+	})
 }
 
 func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, createdBy, skillID, subjectType, subjectID, revision string) error {
@@ -444,7 +703,7 @@ func createSkillAssignmentEvent(ctx context.Context, tx pgx.Tx, enterpriseID, cr
 SELECT gen_random_uuid()::text,$1,s.session_id
 FROM user_sessions s JOIN users u ON u.id=s.user_id
 WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
-  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)) OR ($3='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4)))
+  AND ($3='global' OR ($3='user' AND s.user_id=$4) OR ($3='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id=$4)) OR ($3='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4)))
 ON CONFLICT (event_id,session_id) DO NOTHING`, eventID, enterpriseID, scopeType, scopeID)
 	if err != nil {
 		return err
@@ -467,7 +726,7 @@ SELECT DISTINCT sk.id,sk.name,sv.version,sv.sha256,sv.size_bytes,sv.published_at
 FROM skills sk JOIN skill_versions sv ON sv.skill_id=sk.id AND sv.published=true
 JOIN skill_assignments sa ON sa.skill_id=sk.id AND sa.deployment_id=$1
 JOIN users u ON u.id=$2
-WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
+WHERE sk.enabled=true AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id)))
 ), latest AS (SELECT DISTINCT ON (id) * FROM authorized ORDER BY id,published_at DESC NULLS LAST,version DESC)
 SELECT id,name,version,sha256,size_bytes FROM latest ORDER BY id`, claims.DeploymentID, claims.Subject)
 	if err != nil {
@@ -504,7 +763,7 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 		return
 	}
 	var objectKey string
-	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT sv.object_key FROM skill_versions sv JOIN skill_assignments sa ON sa.skill_id=sv.skill_id JOIN users u ON u.id=$2 WHERE sv.skill_id=$3 AND sv.version=$4 AND sv.published=true AND sa.deployment_id=$1 AND (sa.expires_at IS NULL OR sa.expires_at>now()) AND ((sa.subject_type='user' AND sa.subject_id=$2) OR (sa.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=sa.subject_id)) OR (sa.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=sa.subject_id))) LIMIT 1`, claims.DeploymentID, claims.Subject, skillID, version).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeProblem(response, request, http.StatusForbidden, "SKILL_NOT_ASSIGNED", "The Skill version is not assigned.")
 		return
@@ -531,13 +790,21 @@ func (s *Server) downloadSkillPackage(response http.ResponseWriter, request *htt
 func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *http.Request) {
 	var input struct {
 		Revision string `json:"revision"`
-		Status   string `json:"status"`
-		Items    []struct {
+		// The guide used to name this field `manifestRevision` while the server
+		// has always read `revision`; naming it here turns a silent drop into a
+		// clear refusal for anything still built against the old guide.
+		ManifestRevision *string `json:"manifestRevision"`
+		Status           string  `json:"status"`
+		Items            []struct {
 			SkillID string `json:"skillId"`
 			Status  string `json:"status"`
 		} `json:"items"`
 	}
 	if !decodeJSON(response, request, &input) {
+		return
+	}
+	if input.Revision == "" && input.ManifestRevision != nil {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The sync result must carry `revision`; the server does not read `manifestRevision`.")
 		return
 	}
 	installed := make([]string, 0)

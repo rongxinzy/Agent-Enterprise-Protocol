@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ var environmentKeys = []string{
 	"AEP_LOGIN_FAILURE_LIMIT", "AEP_LOGIN_SOURCE_FAILURE_LIMIT", "AEP_LOGIN_FAILURE_WINDOW", "AEP_LOGIN_BACKOFF_BASE", "AEP_LOGIN_BACKOFF_MAX",
 	"AEP_RETENTION_CLEANUP_INTERVAL", "AEP_OPERATIONAL_RETENTION", "AEP_TELEMETRY_RETENTION", "AEP_AUDIT_RETENTION", "AEP_RETENTION_CLEANUP_BATCH_SIZE",
 	"AEP_TRUSTED_PROXY_CIDRS",
+	"AEP_COMPUTE_TIERS_FILE", "AEP_COMPUTE_DEFAULT_TIER", "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "AEP_COMPUTE_CONCURRENCY_CAP",
 }
 
 func TestLoadDevelopmentDefaults(t *testing.T) {
@@ -32,7 +34,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Environment != "development" || cfg.LogFormat != "text" || !cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" || cfg.RetentionCleanupInterval != 15*time.Minute || cfg.OperationalRetention != 30*24*time.Hour || cfg.TelemetryRetention != 90*24*time.Hour || cfg.AuditRetention != 365*24*time.Hour || cfg.RetentionCleanupBatchSize != 1000 {
+	if cfg.Environment != "development" || cfg.LogFormat != "text" || cfg.EnableMockFederatedAuth || cfg.HTTPReadTimeout <= 0 || cfg.LoginFailureLimit != 5 || cfg.LoginSourceFailureLimit != 100 || cfg.LoginBackoffBase != 30*time.Second || cfg.DeploymentID != "demo" || cfg.DeploymentName != "Demo Deployment" || cfg.RetentionCleanupInterval != 15*time.Minute || cfg.OperationalRetention != 30*24*time.Hour || cfg.TelemetryRetention != 90*24*time.Hour || cfg.AuditRetention != 365*24*time.Hour || cfg.RetentionCleanupBatchSize != 1000 {
 		t.Fatalf("unexpected development defaults: %#v", cfg)
 	}
 }
@@ -65,6 +67,12 @@ func TestLoadRejectsInvalidTypedValues(t *testing.T) {
 		{key: "AEP_RETENTION_CLEANUP_INTERVAL", value: "-1s"},
 		{key: "AEP_RETENTION_CLEANUP_BATCH_SIZE", value: "0"},
 		{key: "AEP_TRUSTED_PROXY_CIDRS", value: "not-a-cidr"},
+		{key: "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", value: "59"},
+		{key: "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", value: "86401"},
+		{key: "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", value: "5m"},
+		{key: "AEP_COMPUTE_CONCURRENCY_CAP", value: "0"},
+		{key: "AEP_COMPUTE_CONCURRENCY_CAP", value: "10001"},
+		{key: "AEP_COMPUTE_CONCURRENCY_CAP", value: "many"},
 	} {
 		t.Run(test.key, func(t *testing.T) {
 			clearEnvironment(t)
@@ -102,6 +110,38 @@ func TestLoadParsesModelFallbackIDs(t *testing.T) {
 	t.Setenv("AEP_MODEL_FALLBACK_IDS", "a,b,c,d,e,f,g,h,i")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_MODEL_FALLBACK_IDS") {
 		t.Fatalf("nine entries must be rejected, got %v", err)
+	}
+}
+
+func TestLoadParsesComputeGovernanceEnvironment(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_COMPUTE_TIERS_FILE", " /etc/aep/tiers.json ")
+	t.Setenv("AEP_COMPUTE_DEFAULT_TIER", " standard ")
+	t.Setenv("AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "300")
+	t.Setenv("AEP_COMPUTE_CONCURRENCY_CAP", "25")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ComputeTiersFile != "/etc/aep/tiers.json" || cfg.ComputeDefaultTier != "standard" || cfg.ComputeIdleHibernateSeconds != 300 || cfg.ComputeConcurrencyCap != 25 {
+		t.Fatalf("unexpected compute governance config: %#v", cfg)
+	}
+
+	clearEnvironment(t)
+	defaults, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.ComputeTiersFile != "" || defaults.ComputeDefaultTier != "" || defaults.ComputeIdleHibernateSeconds != 0 || defaults.ComputeConcurrencyCap != 0 {
+		t.Fatalf("compute governance values must stay unset by default: %#v", defaults)
+	}
+}
+
+func TestLoadRejectsOversizedComputeDefaultTier(t *testing.T) {
+	clearEnvironment(t)
+	t.Setenv("AEP_COMPUTE_DEFAULT_TIER", strings.Repeat("x", 201))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AEP_COMPUTE_DEFAULT_TIER") {
+		t.Fatalf("Load() error = %v", err)
 	}
 }
 
@@ -377,5 +417,34 @@ func TestNonNegativeInteger(t *testing.T) {
 	t.Setenv("TEST_NNI_GARBAGE", "abc")
 	if _, err = nonNegativeInteger("TEST_NNI_GARBAGE", 42); err == nil {
 		t.Fatal("garbage must be rejected")
+	}
+}
+
+func TestMockFederatedAuthRequiresLoopbackAddress(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		address string
+		enabled bool
+		wantErr bool
+	}{
+		{name: "default wildcard address is refused", address: ":8080", enabled: true, wantErr: true},
+		{name: "wildcard IPv4 is refused", address: "0.0.0.0:8080", enabled: true, wantErr: true},
+		{name: "loopback IPv4 is accepted", address: "127.0.0.1:8080", enabled: true},
+		{name: "loopback IPv6 is accepted", address: "[::1]:8080", enabled: true},
+		{name: "localhost is accepted", address: "localhost:8080", enabled: true},
+		{name: "wildcard with the fixture disabled is accepted", address: ":8080", enabled: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearEnvironment(t)
+			t.Setenv("AEP_ENABLE_MOCK_FEDERATED_AUTH", strconv.FormatBool(test.enabled))
+			t.Setenv("AEP_ADDRESS", test.address)
+			_, err := Load()
+			if test.wantErr && err == nil {
+				t.Fatal("Load() accepted mock federated authentication on a non-loopback address")
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("Load() = %v", err)
+			}
+		})
 	}
 }

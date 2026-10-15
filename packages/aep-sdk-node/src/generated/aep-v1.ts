@@ -802,6 +802,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/skills/{skillId}/installations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description Reported installation state for the users one Skill is granted to: the
+         *     newest sync report per user decides, and only retained reports are
+         *     visible (telemetry retention window). A withdrawn Skill distributes to
+         *     nobody, so its grant set is empty, matching the manifest. Per-item
+         *     statuses are passed through as reported: the vocabularies differ across
+         *     contract, writer and Agent, and an Agent that fails to install writes no
+         *     report at all, so no failure verdict is derived here.
+         */
+        get: operations["listSkillInstallations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/skill-assignments": {
         parameters: {
             query?: never;
@@ -831,7 +856,14 @@ export interface paths {
         delete: operations["deleteSkillAssignment"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * @description Changes when an existing grant ends. Deleting and recreating the grant
+         *     would drop the Skill from the employee's desired manifest in between -
+         *     which can uninstall and reinstall it - so the expiry is edited in place.
+         *     `null` makes the grant perpetual again. The change emits the same control
+         *     event a grant change does, so agents reconcile promptly.
+         */
+        patch: operations["updateSkillAssignment"];
         trace?: never;
     };
     "/aep/v1/admin/control-events": {
@@ -1006,7 +1038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and the masked request payload), newest first. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. */
         get: operations["listAdminAudit"];
         put?: never;
         post?: never;
@@ -1421,7 +1453,7 @@ export interface paths {
         get: operations["getDataPlaneDesiredState"];
         /**
          * @deprecated
-         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.
+         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.
          */
         put: operations["putDataPlaneDesiredState"];
         post?: never;
@@ -1476,6 +1508,59 @@ export interface paths {
         get: operations["getDeploymentSettings"];
         /** @description Partially updates deployment runtime settings. An omitted field stays unchanged, while an explicit null clears the runtime override so the environment-configured value applies again. Values are validated before they are stored. */
         put: operations["updateDeploymentSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/compute/tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Returns the compute tier catalog available to digital-employee runtime instances. Tiers are deployment-owned and read-only through the API: the control plane loads them from the JSON file named by the AEP_COMPUTE_TIERS_FILE environment variable (an object with an items array whose entries match ComputeTier). Requires the deployment.read permission. items is empty when no catalog file is configured. */
+        get: operations["getComputeTierCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/compute/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Lists per-agent compute tier assignments. Every assignment reports its stored runtime override, the effective tier after the deployment default tier, and the source of that effective tier. Requires the deployment.read permission. */
+        get: operations["listComputeAssignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/compute/assignments/{agentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Requires the agents.compute.write permission — the delegable digital-employee compute grant that cannot touch human accounts (full administrators always qualify). Stores a per-agent compute tier override; an explicit null tier clears the override so the deployment default tier applies again. The write is recorded in the deployment audit trail and takes effect at the employee instance's next creation: v1 does not mutate running instances in place. Unknown agents return 404; tier names that are not in the compute tier catalog return 422. */
+        put: operations["updateComputeAssignment"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1840,6 +1925,7 @@ export interface components {
             serverTime: string;
             controlEvents: {
                 pending: boolean;
+                /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`. */
                 watermark: string;
             };
             nextHeartbeatAfterSeconds: number;
@@ -1904,6 +1990,7 @@ export interface components {
         ControlEventPage: {
             items: components["schemas"]["ControlEventDelivery"][];
             nextCursor: string | null;
+            /** @description Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending. */
             watermark: string;
         };
         AcknowledgeRequest: {
@@ -1970,22 +2057,27 @@ export interface components {
         };
         SkillSyncItem: {
             skillId: components["schemas"]["SkillIdentifier"];
-            version: components["schemas"]["SkillVersionIdentifier"];
-            /** @enum {string} */
-            action: "install" | "update" | "remove" | "unchanged";
-            /** @enum {string} */
-            status: "success" | "failed";
+            version?: components["schemas"]["SkillVersionIdentifier"];
+            /** @description Advisory when the Agent reports it; the server does not act on it. */
+            action?: string;
+            /**
+             * @description Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+             *     `removed` and every other value count as not installed. Agents use different
+             *     vocabularies, so the server reads the value as reported instead of enforcing an enum.
+             */
+            status: string;
             errorCode?: string;
             message?: string;
         };
         SkillSyncResult: {
-            manifestRevision: string;
+            /** @description The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync. */
+            revision?: string;
             /** Format: date-time */
-            startedAt: string;
+            startedAt?: string;
             /** Format: date-time */
-            completedAt: string;
-            /** @enum {string} */
-            status: "success" | "partial" | "failed";
+            completedAt?: string;
+            /** @description Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum. */
+            status?: string;
             items: components["schemas"]["SkillSyncItem"][];
         };
         EventResource: {
@@ -2204,6 +2296,8 @@ export interface components {
             builtIn: boolean;
             enabled: boolean;
             memberCount: number;
+            /** @description Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Omitted for root teams. */
             parentId?: string | null;
             /** @description Materialized team path, for example /hq/engineering. */
@@ -2219,6 +2313,8 @@ export interface components {
         CreateTeamRequest: {
             name: string;
             description?: string;
+            /** @description Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold. */
+            defaultRoleIds?: string[];
             /** @description Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible. */
             parentId?: string | null;
         };
@@ -2226,6 +2322,8 @@ export interface components {
             name?: string;
             description?: string;
             enabled?: boolean;
+            /** @description Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions. */
+            defaultRoleIds?: string[];
         };
         ReplaceUserRBACRequest: {
             roleIds: string[];
@@ -2468,6 +2566,40 @@ export interface components {
             /** @enum {string} */
             state?: "active" | "withdrawn";
         };
+        SkillInstallation: {
+            userId: string;
+            /** @enum {string} */
+            state: "missing" | "unreported";
+            /** @description Present when the user has a retained report; the revision that report carried. */
+            revision?: string;
+            /**
+             * Format: date-time
+             * @description Present when the user has a retained report.
+             */
+            reportedAt?: string;
+            /** @description Raw per-item status for this Skill in that report, passed through as reported. */
+            itemStatus?: string;
+        };
+        SkillInstallationPage: {
+            skillId: string;
+            summary: {
+                /** @description Users the Skill is granted to, ignoring expired grants and a withdrawn Skill. */
+                granted: number;
+                /** @description Granted users with at least one retained report. */
+                reported: number;
+                installed: number;
+                /** @description Reported, but the report does not list the Skill as installed. */
+                missing: number;
+                /** @description Granted users with no retained report. */
+                unreported: number;
+                /** Format: date-time */
+                latestReportedAt: string | null;
+            };
+            /** @description Granted users whose report does not show the Skill installed; `missing` before `unreported`. */
+            items: components["schemas"]["SkillInstallation"][];
+            /** @description More users need attention than the limit returned. */
+            truncated: boolean;
+        };
         Subject: {
             /** @enum {string} */
             type: "user" | "role" | "team";
@@ -2488,6 +2620,7 @@ export interface components {
         };
         AssignmentList: {
             items: components["schemas"]["Assignment"][];
+            nextCursor: string | null;
         };
         SkillAssignmentWrite: {
             skillId: components["schemas"]["SkillIdentifier"];
@@ -2661,10 +2794,10 @@ export interface components {
             /** @enum {string} */
             result: "success" | "failure";
             reason?: string | null;
-            /** @description Only allowlisted request fields keep their value; every other key is redacted. */
+            /** @description Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted. */
             changes?: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** Format: date-time */
             createdAt: string;
         };
@@ -2708,6 +2841,7 @@ export interface components {
         };
         CredentialAssignmentList: {
             assignments: components["schemas"]["CredentialAssignment"][];
+            nextCursor: string | null;
         };
         CredentialAssignmentWrite: {
             credentialId: string;
@@ -2813,6 +2947,7 @@ export interface components {
         };
         ModelAssignmentList: {
             assignments: components["schemas"]["ModelAssignment"][];
+            nextCursor: string | null;
         };
         ModelAssignmentWrite: {
             modelId: string;
@@ -2873,12 +3008,30 @@ export interface components {
              */
             source: "override" | "env" | "unset";
         };
+        /** @description One deployment-level integer runtime setting with its override and resolution state. */
+        DeploymentIntegerSettingValue: {
+            /** @description Runtime override stored in the control plane; null when no override is set. */
+            override: number | null;
+            /** @description Value currently in effect — the runtime override when set, otherwise the environment-configured value; null when neither exists. */
+            effectiveValue: number | null;
+            /**
+             * @description Origin of the effective value.
+             * @enum {string}
+             */
+            source: "override" | "env" | "unset";
+        };
         /** @description Deployment-level runtime settings maintained through the administration API. */
         DeploymentSettings: {
             /** @description Base URL of the OpenAI-compatible model gateway advertised to clients through service metadata. */
             modelGatewayBaseUrl: components["schemas"]["DeploymentSettingValue"];
             /** @description Ordered fallback model chain used by platform failover: when an employee's default model is unhealthy, the first healthy model in this list takes over (and the original is restored once it recovers). Empty disables automatic failover. */
             modelFallbackIds: components["schemas"]["DeploymentListSettingValue"];
+            /** @description Default compute tier for digital-employee runtime instances; the effective value must name a tier from the compute tier catalog. Falls back to AEP_COMPUTE_DEFAULT_TIER. */
+            computeDefaultTier: components["schemas"]["DeploymentSettingValue"];
+            /** @description Idle duration in seconds before an employee runtime instance scales to zero. Falls back to AEP_COMPUTE_IDLE_HIBERNATE_SECONDS. */
+            computeIdleHibernateSeconds: components["schemas"]["DeploymentIntegerSettingValue"];
+            /** @description Maximum number of concurrent employee runtime instances for the deployment. Falls back to AEP_COMPUTE_CONCURRENCY_CAP. */
+            computeConcurrencyCap: components["schemas"]["DeploymentIntegerSettingValue"];
         };
         /** @description Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback. */
         DeploymentSettingsUpdate: {
@@ -2886,6 +3039,68 @@ export interface components {
             modelGatewayBaseUrl?: string | null;
             /** @description New ordered fallback model chain. Every id must reference an enabled gateway model of this deployment with a complete absolute endpoint and upstream model (the same set the health prober observes); duplicates are removed and unknown or unprobeable ids are rejected. An explicit empty array disables automatic failover; null clears the override and restores the environment-configured chain. */
             modelFallbackIds?: string[] | null;
+            /** @description New default compute tier for digital-employee runtime instances. The value is validated against the compute tier catalog at write time; unknown tier names are rejected with 422. Null clears the override so the AEP_COMPUTE_DEFAULT_TIER environment value applies again. */
+            computeDefaultTier?: string | null;
+            /** @description New idle duration in seconds before an employee runtime instance scales to zero. Null clears the override so the AEP_COMPUTE_IDLE_HIBERNATE_SECONDS environment value applies again. */
+            computeIdleHibernateSeconds?: number | null;
+            /** @description New maximum number of concurrent employee runtime instances for the deployment. Null clears the override so the AEP_COMPUTE_CONCURRENCY_CAP environment value applies again. */
+            computeConcurrencyCap?: number | null;
+        };
+        /** @description One deployment-owned compute tier for digital-employee runtime instances. */
+        ComputeTier: {
+            /** @description Stable tier name referenced by computeDefaultTier and per-agent compute assignments. */
+            name: string;
+            /** @description Operator-facing explanation of the tier. */
+            description?: string;
+            /** @description Requested CPU in Kubernetes quantity syntax, for example 250m. */
+            cpuRequest: string;
+            /** @description CPU limit in Kubernetes quantity syntax, for example 1000m. */
+            cpuLimit: string;
+            /** @description Requested memory in Kubernetes quantity syntax, for example 512Mi. */
+            memoryRequest: string;
+            /** @description Memory limit in Kubernetes quantity syntax, for example 1Gi. */
+            memoryLimit: string;
+            /**
+             * @description Origin of the tier definition; tiers are always deployment-owned.
+             * @enum {string}
+             */
+            source: "deployment";
+        };
+        ComputeTierCatalog: {
+            items: components["schemas"]["ComputeTier"][];
+        };
+        /** @description One agent's compute tier assignment with its override and resolution state. */
+        ComputeAssignment: {
+            agentId: string;
+            /** @description Display title of the agent when it can be resolved. */
+            agentName?: string;
+            /** @description Tier resolution for this agent. */
+            tier: {
+                /** @description Runtime override stored in the control plane; null when no override is set. */
+                override: string | null;
+                /** @description Tier currently in effect — the runtime override when set, otherwise the deployment default tier. */
+                effective: string;
+                /**
+                 * @description Origin of the effective tier.
+                 * @enum {string}
+                 */
+                source: "override" | "default";
+            };
+            /**
+             * Format: date-time
+             * @description When the override was last changed; absent when no override was ever stored.
+             */
+            updatedAt?: string;
+            /** @description Operator user id that last changed the override. */
+            updatedBy?: string;
+        };
+        ComputeAssignmentList: {
+            items: components["schemas"]["ComputeAssignment"][];
+        };
+        /** @description Per-agent compute tier override update. */
+        ComputeAssignmentUpdate: {
+            /** @description Catalog tier name to store as the agent's override, validated against the compute tier catalog at write time; unknown names are rejected with 422. Null clears the override so the deployment default tier applies. */
+            tier: string | null;
         };
     };
     responses: {
@@ -3326,6 +3541,12 @@ export interface operations {
     listUserControlEvents: {
         parameters: {
             query?: {
+                /**
+                 * @description Delivery cursor to resume after: pass the `nextCursor` of the previous
+                 *     page. This is not the watermark — the watermark reports progress, and
+                 *     passing it would skip deliveries with a smaller cursor that are still
+                 *     pending.
+                 */
                 afterCursor?: string | null;
                 limit?: components["parameters"]["Limit"];
             };
@@ -4691,9 +4912,38 @@ export interface operations {
             400: components["responses"]["Problem-2"];
         };
     };
+    listSkillInstallations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path: {
+                skillId: components["parameters"]["SkillId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reported installation state, grouped by user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillInstallationPage"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
     listSkillAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4738,6 +4988,50 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    updateSkillAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: date-time
+                     * @description RFC3339 expiry, or null for a perpetual grant.
+                     */
+                    expiresAt: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Grant updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        skillId: string;
+                        subject: {
+                            /** @enum {string} */
+                            type: "user" | "role" | "team";
+                            id: string;
+                        };
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
         };
     };
     listControlEvents: {
@@ -5135,7 +5429,10 @@ export interface operations {
     };
     listCredentialAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5332,7 +5629,10 @@ export interface operations {
     };
     listModelAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5979,6 +6279,78 @@ export interface operations {
             };
             400: components["responses"]["Problem-2"];
             403: components["responses"]["Problem-2"];
+            422: components["responses"]["Problem-2"];
+        };
+    };
+    getComputeTierCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compute tier catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeTierCatalog"];
+                };
+            };
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    listComputeAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compute assignment list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeAssignmentList"];
+                };
+            };
+            403: components["responses"]["Problem-2"];
+        };
+    };
+    updateComputeAssignment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComputeAssignmentUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated compute assignment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeAssignment"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
             422: components["responses"]["Problem-2"];
         };
     };

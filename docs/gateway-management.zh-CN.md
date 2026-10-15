@@ -28,9 +28,16 @@ Loki 表示 AEP 目录模型，响应通过 `modelDimension` 明确区分。维�
 之前返回的 `expectedDefinition=definition.id`；来源选择导致口径变化时返回 422
 `GATEWAY_METRIC_DEFINITION_MISMATCH`，不查询来源、不自动降级。
 
-`windowSeconds` 是每个点的原生回看窗口：速率及速率均值使用 120 秒，其他指标使用
+`windowSeconds` 是每个点的原生回看窗口：AI 平均耗时使用 `max(step, 120)` 秒，
+部署运行速率使用 120 秒，其他指标使用
 `step`（默认 60 秒）。`step` 是输出采样间隔，两者不一定相同；计数曲线不是整个所选
 时间范围的总量，不能由前端求和充当汇总。缺失 usage、空序列和未知值不转为零。
+
+AI 平均耗时使用 Prometheus 原生 `sum(rate(duration[window])) / sum(rate(count[window]))`，
+分子和分母使用相同的分组与窗口。这一标准计数器均值覆盖窗口内稀疏的完成请求，
+并由 Prometheus 处理计数器重置，不再依赖 `irate` 的最后两个采样点。
+首 Token 耗时的分母仅包含流式完成请求，非流式调用不增加首 Token 样本；
+窗口内没有对应完成请求仍显示未知，不能用旧值回填或补零。
 
 Prometheus 的调用、失败、输入/输出 Token 与鉴权请求增量使用
 `round(sum(increase(...)))`，分组查询则在 `sum by (...)` 后执行原生 `round()`。
@@ -89,6 +96,14 @@ Loki 访问日志流需要 `aep_deployment_id` 和 `aep_source=gateway|authorize
 仅采集部署指南允许的元数据。查询只输出请求/模型/用户、成员关系、状态、token 和
 原生耗时字段；不返回提示词、回答、工具参数、凭据或自由文本的供应商错误。
 AEP 不另存监控历史。
+
+鉴权服务验证或生成对客户端可见的 `X-Request-ID`，清除客户端所有 `X-AEP-*`
+头后，以可信的 `X-AEP-Request-ID` 将同一 ID 传入网关。元数据访问日志的
+EnvoyFilter 读取该可信头，避免 Envoy 为追踪而改写自己的 `X-Request-ID`。
+上游响应头不能覆盖鉴权服务返回的 ID。先更新鉴权服务，再应用新版 EnvoyFilter；
+仅更新日志配置无法关联旧鉴权服务。Higress 仍必须仅允许可信鉴权服务访问。
+历史日志的 ID 不做回写。调用者可能重复使用 ID，展示详情须保留各来源的时间戳
+及可信身份，不能仅凭相同 ID 假定是唯一一次调用。
 
 ## 主动模型测试
 

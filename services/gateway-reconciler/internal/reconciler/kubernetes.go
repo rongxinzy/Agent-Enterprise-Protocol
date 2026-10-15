@@ -2,60 +2,65 @@ package reconciler
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
 const fieldManager = "aep-gateway-reconciler"
 
 type Applier interface {
-	Apply(context.Context, DesiredState, []RenderedResource) error
+	Apply(context.Context, DesiredState, []gatewayrender.RenderedResource) error
 }
 
 type KubernetesConfig struct {
 	URL   string
 	Token string
-	// TokenFile is re-read on every request when set: projected
-	// service-account tokens expire hourly and are rotated in place, so a
+	// TokenFile is read by the client-go transport, which re-reads the file
+	// through its cached file token source (one-minute cache tuned to the
+	// kubelet's projected-token refresh cadence, last good value kept on a
+	// failed read). Projected service-account tokens rotate in place, so a
 	// token captured once at startup silently 401s after its first TTL.
-	TokenFile  string
-	CAFile     string
-	HTTPClient *http.Client
+	TokenFile string
+	CAFile    string
+	// StateDir persists the resource inventory used to prune departed routes.
+	// Empty keeps the inventory in process only.
+	StateDir string
 }
 
 type KubernetesApplier struct {
-	baseURL   string
-	token     string
-	tokenFile string
-	client    *http.Client
-}
-
-// bearerToken returns the current credential, re-reading the token file when
-// one is configured (projected tokens rotate in place).
-func (a *KubernetesApplier) bearerToken() string {
-	if a.tokenFile == "" {
-		return a.token
-	}
-	if data, err := os.ReadFile(a.tokenFile); err == nil {
-		if value := strings.TrimSpace(string(data)); value != "" {
-			return value
-		}
-	}
-	return a.token
+	config   *rest.Config
+	client   kubernetes.Interface
+	stateDir string
+	mu       sync.Mutex
+	applied  map[string][]string
 }
 
 func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
+	return newKubernetesApplier(config, nil)
+}
+
+// newKubernetesApplier builds the applier from the Kubernetes connection
+// configuration; an injected client replaces the connection in tests.
+func newKubernetesApplier(config KubernetesConfig, client kubernetes.Interface) (*KubernetesApplier, error) {
 	baseURL := strings.TrimRight(config.URL, "/")
 	if baseURL == "" || (config.Token == "" && config.TokenFile == "") {
 		return nil, errors.New("kubernetes URL and service-account token are required")
@@ -64,26 +69,40 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, errors.New("kubernetes URL must be an absolute HTTP(S) URL")
 	}
-	client := config.HTTPClient
-	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		if config.CAFile != "" {
-			certificate, err := os.ReadFile(config.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("read Kubernetes CA: %w", err)
-			}
-			pool, err := x509.SystemCertPool()
-			if err != nil || pool == nil {
-				pool = x509.NewCertPool()
-			}
-			if !pool.AppendCertsFromPEM(certificate) {
-				return nil, errors.New("kubernetes CA file contains no certificates")
-			}
-			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
-		}
-		client = &http.Client{Timeout: 10 * time.Second, Transport: transport}
+	restConfig := &rest.Config{
+		Host:            baseURL,
+		Timeout:         10 * time.Second,
+		BearerToken:     config.Token,
+		BearerTokenFile: config.TokenFile,
 	}
-	return &KubernetesApplier{baseURL: baseURL, token: config.Token, tokenFile: config.TokenFile, client: client}, nil
+	// Pin the wire format to JSON. client-go's generated typed clients prefer
+	// protobuf for built-in resources (the coordination Lease included), and
+	// the request-level default only applies when no explicit content type is
+	// set — so the pin is the only switch. JSON is fully supported by every
+	// API server and stays parseable by JSON-only test doubles.
+	restConfig.ContentType = "application/json"
+	if config.CAFile != "" {
+		certificate, err := os.ReadFile(config.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read Kubernetes CA: %w", err)
+		}
+		// Validate the PEM eagerly, before any request fails mid-reconcile.
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(certificate) {
+			return nil, errors.New("kubernetes CA file contains no certificates")
+		}
+		restConfig.TLSClientConfig = rest.TLSClientConfig{CAData: certificate}
+	}
+	if client == nil {
+		client, err = kubernetes.NewForConfig(restConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &KubernetesApplier{config: restConfig, client: client, stateDir: config.StateDir, applied: map[string][]string{}}, nil
 }
 
 // Apply server-side-applies every rendered resource and first deletes what
@@ -92,8 +111,8 @@ func NewKubernetesApplier(config KubernetesConfig) (*KubernetesApplier, error) {
 // Ingress+EnvoyFilter pair for every disabled anthropic route. Both WasmPlugins
 // are always present in the render (with empty matchRules when idle) and are
 // therefore always applied, never deleted.
-func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, resources []RenderedResource) error {
-	if !hasResourceKind(resources, ResourceWasmPlugin) {
+func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, resources []gatewayrender.RenderedResource) error {
+	if !hasResourceKind(resources, gatewayrender.ResourceWasmPlugin) {
 		return errors.New("rendered data plane must include the ai-proxy WasmPlugin")
 	}
 	for _, resource := range resources {
@@ -101,24 +120,35 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 			return fmt.Errorf("rendered %s resource has an empty API path or body", resource.Kind)
 		}
 	}
+	kept := make(map[string]struct{}, len(resources))
+	for _, resource := range resources {
+		kept[resource.APIPath] = struct{}{}
+	}
 	deletions := make([]string, 0, 4)
 	for _, route := range desired.Routes {
-		if route.Protocol == "anthropic" {
+		strategy, err := gatewayrender.StrategyFor(route)
+		if err != nil {
+			return err
+		}
+		if strategy.Bucket() == gatewayrender.BucketAnthropic {
 			if !route.Enabled {
-				name := anthropicResourceName(route.ModelID)
-				deletions = append(deletions, ingressAPIPath(name), envoyFilterAPIPath(name))
+				name := gatewayrender.AnthropicResourceName(route.ModelID)
+				deletions = append(deletions, gatewayrender.IngressAPIPath(name), gatewayrender.EnvoyFilterAPIPath(name))
 			}
 			continue
 		}
-		name := openAIResourceName(desired.TenantID(), route.ModelID)
+		name := gatewayrender.OpenAIResourceName(desired.TenantID(), route.ModelID)
 		if !route.Enabled {
-			deletions = append(deletions, ingressAPIPath(name))
+			deletions = append(deletions, gatewayrender.IngressAPIPath(name))
 		}
 		// Also remove the old absolute upstream when an enabled model switches
 		// back to a relative/preconfigured endpoint.
-		if !route.Enabled || !hasResourcePath(resources, envoyFilterAPIPath(name)) {
-			deletions = append(deletions, envoyFilterAPIPath(name))
+		if !route.Enabled || !hasResourcePath(resources, gatewayrender.EnvoyFilterAPIPath(name)) {
+			deletions = append(deletions, gatewayrender.EnvoyFilterAPIPath(name))
 		}
+	}
+	for _, path := range deletions {
+		delete(kept, path)
 	}
 	sort.Strings(deletions)
 	for _, path := range deletions {
@@ -131,10 +161,80 @@ func (a *KubernetesApplier) Apply(ctx context.Context, desired DesiredState, res
 	}
 	// Remove the legacy shared ingress only after replacement routes/plugins
 	// have been applied. It otherwise remains an unscoped fallback route.
-	return a.delete(ctx, openAIIngressAPIPath(resourceSuffix(desired.TenantID())))
+	if err := a.delete(ctx, gatewayrender.OpenAIIngressAPIPath(gatewayrender.ResourceSuffix(desired.TenantID()))); err != nil {
+		return err
+	}
+	// Routes that left the desired state are not in the deletion list above.
+	// A manual route replaced by a catalog republish would otherwise stay on
+	// the gateway after the control plane reports the old revision ready.
+	return a.pruneAbsent(ctx, desired.TenantID(), kept)
 }
 
-func hasResourcePath(resources []RenderedResource, path string) bool {
+func (a *KubernetesApplier) pruneAbsent(ctx context.Context, tenant string, kept map[string]struct{}) error {
+	for _, path := range a.loadApplied(tenant) {
+		if _, ok := kept[path]; ok {
+			continue
+		}
+		if err := a.delete(ctx, path); err != nil {
+			return err
+		}
+	}
+	paths := slices.Sorted(maps.Keys(kept))
+	return a.storeApplied(tenant, paths)
+}
+
+func (a *KubernetesApplier) loadApplied(tenant string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if paths, ok := a.applied[tenant]; ok {
+		return slices.Clone(paths)
+	}
+	if a.stateDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(a.pathsFile(tenant))
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	if json.Unmarshal(data, &paths) != nil {
+		return nil
+	}
+	a.applied[tenant] = slices.Clone(paths)
+	return slices.Clone(paths)
+}
+
+func (a *KubernetesApplier) storeApplied(tenant string, paths []string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.applied[tenant] = slices.Clone(paths)
+	if a.stateDir == "" {
+		return nil
+	}
+	data, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(a.pathsFile(tenant), data)
+}
+
+func (a *KubernetesApplier) pathsFile(tenant string) string {
+	var name strings.Builder
+	for _, r := range tenant {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			name.WriteRune(r)
+		default:
+			name.WriteByte('_')
+		}
+	}
+	if name.Len() == 0 {
+		name.WriteString("tenant")
+	}
+	return filepath.Join(a.stateDir, name.String()+".applied-paths.json")
+}
+
+func hasResourcePath(resources []gatewayrender.RenderedResource, path string) bool {
 	for _, resource := range resources {
 		if resource.APIPath == path {
 			return true
@@ -145,33 +245,25 @@ func hasResourcePath(resources []RenderedResource, path string) bool {
 
 // ApplyGatewayNative applies only supplied resources. Disabled/tombstone rules
 // render disabled plugins instead of deleting unrelated routes or resources.
-func (a *KubernetesApplier) ApplyGatewayNative(ctx context.Context, resources []RenderedResource) error {
+func (a *KubernetesApplier) ApplyGatewayNative(ctx context.Context, resources []gatewayrender.RenderedResource) error {
 	for _, resource := range resources {
-		query := url.Values{"fieldManager": {fieldManager}, "force": {"true"}}
-		request, err := http.NewRequestWithContext(ctx, http.MethodPatch, a.baseURL+resource.APIPath+"?"+query.Encode(), strings.NewReader(resource.Body))
+		err := a.client.CoreV1().RESTClient().Patch(types.ApplyPatchType).
+			AbsPath(resource.APIPath).
+			Param("fieldManager", fieldManager).
+			// force=true keeps takeover parity with the previous raw-HTTP
+			// client; reporting SSA conflicts instead of stealing ownership is
+			// a deliberate follow-up.
+			Param("force", "true").
+			Body([]byte(resource.Body)).
+			Do(ctx).Error()
 		if err != nil {
-			return err
-		}
-		request.Header.Set("Authorization", "Bearer "+a.bearerToken())
-		request.Header.Set("Content-Type", "application/apply-patch+yaml")
-		request.Header.Set("Accept", "application/json")
-		response, err := a.client.Do(request)
-		if err != nil {
-			return err
-		}
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-		_ = response.Body.Close()
-		if readErr != nil {
-			return readErr
-		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("kubernetes apply %s returned %d: %s", resource.APIPath, response.StatusCode, strings.TrimSpace(string(body)))
+			return fmt.Errorf("kubernetes apply %s returned %s", resource.APIPath, kubernetesErrorStatus(err))
 		}
 	}
 	return nil
 }
 
-func hasResourceKind(resources []RenderedResource, kind ResourceKind) bool {
+func hasResourceKind(resources []gatewayrender.RenderedResource, kind gatewayrender.ResourceKind) bool {
 	for _, resource := range resources {
 		if resource.Kind == kind {
 			return true
@@ -181,63 +273,39 @@ func hasResourceKind(resources []RenderedResource, kind ResourceKind) bool {
 }
 
 func (a *KubernetesApplier) delete(ctx context.Context, path string) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+path, nil)
-	if err != nil {
-		return err
+	err := a.client.CoreV1().RESTClient().Delete().AbsPath(path).Do(ctx).Error()
+	if err == nil || apierrors.IsNotFound(err) {
+		return nil
 	}
-	request.Header.Set("Authorization", "Bearer "+a.bearerToken())
-	request.Header.Set("Accept", "application/json")
-	response, err := a.client.Do(request)
-	if err != nil {
-		return err
+	return fmt.Errorf("kubernetes delete %s returned %s", path, kubernetesErrorStatus(err))
+}
+
+// kubernetesErrorStatus renders a client-go failure with its HTTP status code
+// when the API server produced one, keeping the historical log shape.
+func kubernetesErrorStatus(err error) string {
+	var status apierrors.APIStatus
+	if errors.As(err, &status) && status.Status().Code != 0 {
+		return fmt.Sprintf("%d: %s", status.Status().Code, status.Status().Message)
 	}
-	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-	_ = response.Body.Close()
-	if readErr != nil {
-		return readErr
-	}
-	if (response.StatusCode < 200 || response.StatusCode >= 300) && response.StatusCode != http.StatusNotFound {
-		return fmt.Errorf("kubernetes delete %s returned %d: %s", path, response.StatusCode, strings.TrimSpace(string(body)))
-	}
-	return nil
+	return err.Error()
 }
 
 // ReadSecret reads one key from a Kubernetes Secret in higress-system and
 // returns the value. Serves as the CredentialFetcher for routes whose
-// credentialRef names a Secret there.
+// credentialRef names a Secret there. The typed client decodes the base64
+// data field itself; a corrupt entry fails the whole read.
 func (a *KubernetesApplier) ReadSecret(ctx context.Context, name, key string) (string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		a.baseURL+"/api/v1/namespaces/higress-system/secrets/"+name, nil)
+	secret, err := a.client.CoreV1().Secrets("higress-system").Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return "", err
+		var status apierrors.APIStatus
+		if errors.As(err, &status) && status.Status().Code != 0 {
+			return "", fmt.Errorf("read secret %s returned %d", name, status.Status().Code)
+		}
+		return "", fmt.Errorf("read secret %s: %w", name, err)
 	}
-	request.Header.Set("Authorization", "Bearer "+a.bearerToken())
-	request.Header.Set("Accept", "application/json")
-	response, err := a.client.Do(request)
-	if err != nil {
-		return "", err
-	}
-	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-	_ = response.Body.Close()
-	if readErr != nil {
-		return "", readErr
-	}
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("read secret %s returned %d", name, response.StatusCode)
-	}
-	var secret struct {
-		Data map[string]string `json:"data"`
-	}
-	if err := json.Unmarshal(body, &secret); err != nil {
-		return "", err
-	}
-	encoded, ok := secret.Data[key]
+	value, ok := secret.Data[key]
 	if !ok {
 		return "", fmt.Errorf("secret %s has no key %s", name, key)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", fmt.Errorf("secret %s key %s is not valid base64: %w", name, key, err)
-	}
-	return string(decoded), nil
+	return string(value), nil
 }

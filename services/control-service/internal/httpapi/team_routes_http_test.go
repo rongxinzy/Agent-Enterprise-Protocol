@@ -100,10 +100,14 @@ func TestDeleteTeamRoute(t *testing.T) {
 	now := time.Now().UTC()
 
 	t.Run("built-in teams are protected", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
+			WithArgs("deployment-a").
+			WillReturnRows(teamRow("everyone", "Everyone", "All users", true, true, 0, now))
 		mock.ExpectQuery(`SELECT \* FROM "teams"`).
 			WithArgs("deployment-a", "everyone", 1).
-			WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "parent_team_id", "path", "depth", "created_at", "updated_at"}).
-				AddRow("deployment-a", "everyone", "Everyone", "All users", true, true, nil, "/everyone", 0, now, now))
+			WillReturnRows(teamDetailRow("everyone", "Everyone", "All users", true, true, now))
+		mock.ExpectRollback()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/everyone", "")
 		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "BUILT_IN_RESOURCE") {
 			t.Fatalf("builtin = %d %s", response.Code, response.Body.String())
@@ -111,8 +115,10 @@ func TestDeleteTeamRoute(t *testing.T) {
 	})
 
 	t.Run("missing team is a 404", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT \* FROM "teams"`).
-			WithArgs("deployment-a", "ghost", 1).WillReturnError(gorm.ErrRecordNotFound)
+		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
+			WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows(teamHTTPColumns()))
+		mock.ExpectRollback()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/ghost", "")
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("missing = %d %s", response.Code, response.Body.String())
@@ -120,12 +126,17 @@ func TestDeleteTeamRoute(t *testing.T) {
 	})
 
 	t.Run("deletable team is removed", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT teams\.\*, COUNT\(user_team_bindings\.user_id\) AS member_count,.* FROM "teams" LEFT JOIN user_team_bindings`).
+			WithArgs("deployment-a").
+			WillReturnRows(teamRow("engineering", "Engineering", "Builds things", false, true, 0, now))
 		mock.ExpectQuery(`SELECT \* FROM "teams"`).
 			WithArgs("deployment-a", "engineering", 1).
-			WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "parent_team_id", "path", "depth", "created_at", "updated_at"}).
-				AddRow("deployment-a", "engineering", "Engineering", "Builds things", false, true, nil, "/engineering", 0, now, now))
-		mock.ExpectBegin()
+			WillReturnRows(teamDetailRow("engineering", "Engineering", "Builds things", false, true, now))
+		mock.ExpectExec(`SAVEPOINT sp[0-9]+`).WillReturnResult(sqlmock.NewResult(0, 0))
+		expectSubjectGrantCleanup(mock, "team", "engineering")
 		mock.ExpectExec(`DELETE FROM "teams"`).WillReturnResult(sqlmock.NewResult(0, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/teams/engineering", "")
 		if response.Code != http.StatusNoContent {
@@ -151,20 +162,29 @@ func TestUpdateRoleRoute(t *testing.T) {
 			return sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at"}).
 				AddRow("deployment-a", "operator", "Operator", "Operates", false, true, now, now)
 		}
-		// Transaction: take the role, apply the name update, commit.
+		permissionRows := func() *sqlmock.Rows {
+			return sqlmock.NewRows([]string{"deployment_id", "role_id", "permission_id"})
+		}
+		// Transaction: read the before-values, take the role, apply the name
+		// update, read the record back, and append the audit row.
 		mock.ExpectBegin()
-		mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
-			WithArgs("deployment-a", "operator", 1).WillReturnRows(roleRows())
-		mock.ExpectExec(`UPDATE "roles"`).WillReturnResult(sqlmock.NewResult(0, 1))
-		mock.ExpectCommit()
-		// Post-transaction read: the record with its permissions.
 		mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
 			WithArgs("deployment-a", "operator", 1).WillReturnRows(roleRows())
 		mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 ORDER BY id`).
 			WithArgs("deployment-a").WillReturnRows(roleRows())
 		mock.ExpectQuery(`SELECT \* FROM "role_permissions" WHERE deployment_id = \$1 AND role_id IN`).
-			WithArgs("deployment-a", "operator").
-			WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "role_id", "permission_id"}))
+			WithArgs("deployment-a", "operator").WillReturnRows(permissionRows())
+		mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "operator", 1).WillReturnRows(roleRows())
+		mock.ExpectExec(`UPDATE "roles"`).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2`).
+			WithArgs("deployment-a", "operator", 1).WillReturnRows(roleRows())
+		mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 ORDER BY id`).
+			WithArgs("deployment-a").WillReturnRows(roleRows())
+		mock.ExpectQuery(`SELECT \* FROM "role_permissions" WHERE deployment_id = \$1 AND role_id IN`).
+			WithArgs("deployment-a", "operator").WillReturnRows(permissionRows())
+		expectAuditInsert(mock)
+		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/roles/operator", `{"name":"运维"}`)
 		if response.Code != http.StatusOK {
 			t.Fatalf("rename = %d %s", response.Code, response.Body.String())
@@ -197,7 +217,7 @@ func TestDataScopeContextRoute(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "users"`).
 			WithArgs("deployment-a", "user-a", 1).
 			WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", nil, "hash", "active", false, false, "human", now, now))
-		mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).
+		mock.ExpectQuery(`SELECT "role_id" FROM "user_effective_roles"`).
 			WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
 		pool.ExpectQuery(`JOIN user_team_bindings`).
 			WithArgs("deployment-a", "user-a").WillReturnRows(pgxmock.NewRows([]string{"id", "parent", "path"}))
@@ -224,8 +244,10 @@ func TestDeleteAgentRoute(t *testing.T) {
 	}
 
 	t.Run("missing profile is a 404", func(t *testing.T) {
+		mock.ExpectBegin()
 		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
 			WithArgs("deployment-a", "agent-1", 1).WillReturnError(gorm.ErrRecordNotFound)
+		mock.ExpectRollback()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/agents/agent-1", "")
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("missing = %d %s", response.Code, response.Body.String())
@@ -233,9 +255,9 @@ func TestDeleteAgentRoute(t *testing.T) {
 	})
 
 	t.Run("agent with live sessions is refused", func(t *testing.T) {
+		mock.ExpectBegin()
 		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
 			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows())
-		mock.ExpectBegin()
 		mock.ExpectQuery(`SELECT count\(\*\) FROM user_sessions`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 		mock.ExpectRollback()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/agents/agent-1", "")
@@ -245,9 +267,9 @@ func TestDeleteAgentRoute(t *testing.T) {
 	})
 
 	t.Run("deletable agent is removed", func(t *testing.T) {
+		mock.ExpectBegin()
 		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
 			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows())
-		mock.ExpectBegin()
 		mock.ExpectQuery(`SELECT count\(\*\) FROM user_sessions`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 		for _, stmt := range []string{
 			`DELETE FROM user_role_bindings`, `DELETE FROM user_team_bindings`,
@@ -257,6 +279,7 @@ func TestDeleteAgentRoute(t *testing.T) {
 		} {
 			mock.ExpectExec(stmt).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/agents/agent-1", "")
 		if response.Code != http.StatusNoContent {

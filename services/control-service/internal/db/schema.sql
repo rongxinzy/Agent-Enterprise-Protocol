@@ -88,6 +88,29 @@ CREATE TABLE IF NOT EXISTS user_team_bindings (
   FOREIGN KEY (deployment_id, team_id) REFERENCES teams(deployment_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE team_default_roles (
+  deployment_id text NOT NULL,
+  team_id text NOT NULL,
+  role_id text NOT NULL,
+  PRIMARY KEY (deployment_id, team_id, role_id),
+  FOREIGN KEY (deployment_id, team_id) REFERENCES teams(deployment_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (deployment_id, role_id) REFERENCES roles(deployment_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX team_default_roles_role_idx ON team_default_roles(deployment_id, role_id);
+
+-- Keep inherited roles separate from explicit grants: leaving/disabling a
+-- team or changing defaults must never delete a user's explicit binding.
+CREATE VIEW user_effective_roles AS
+SELECT b.deployment_id, b.user_id, b.role_id
+FROM user_role_bindings b
+JOIN roles r ON r.deployment_id=b.deployment_id AND r.id=b.role_id AND r.enabled
+UNION
+SELECT b.deployment_id, b.user_id, d.role_id
+FROM user_team_bindings b
+JOIN teams t ON t.deployment_id=b.deployment_id AND t.id=b.team_id AND t.enabled
+JOIN team_default_roles d ON d.deployment_id=b.deployment_id AND d.team_id=b.team_id
+JOIN roles r ON r.deployment_id=d.deployment_id AND r.id=d.role_id AND r.enabled;
+
 CREATE TABLE IF NOT EXISTS user_sessions (
   session_id text PRIMARY KEY,
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
@@ -408,6 +431,7 @@ CREATE INDEX IF NOT EXISTS idx_license_audit_retention ON license_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_retention ON telemetry_events (received_at, event_id);
 CREATE INDEX IF NOT EXISTS idx_skill_sync_retention ON skill_sync_results (created_at, id);
+CREATE INDEX IF NOT EXISTS idx_skill_sync_latest_per_user ON skill_sync_results (deployment_id, user_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_session_deliveries_retention ON session_control_deliveries (updated_at, delivery_id) WHERE state IN ('succeeded', 'expired', 'superseded');
 CREATE INDEX IF NOT EXISTS idx_control_events_retention ON control_events (GREATEST(created_at, expires_at), event_id);
 CREATE INDEX IF NOT EXISTS idx_control_events_deployment_created ON control_events (deployment_id, created_at DESC);
@@ -416,6 +440,7 @@ CREATE INDEX IF NOT EXISTS idx_session_tokens_retention ON user_session_tokens (
 CREATE INDEX IF NOT EXISTS idx_user_sessions_retention ON user_sessions (GREATEST(last_seen_at, COALESCE(revoked_at, last_seen_at)), session_id);
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_type_time ON telemetry_events (deployment_id, type, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_deployment_time ON telemetry_events (deployment_id, occurred_at DESC, event_id DESC);
 
 CREATE TABLE IF NOT EXISTS identity_sources (
   deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
@@ -503,6 +528,18 @@ CREATE TABLE IF NOT EXISTS deployment_settings (
   deployment_id text PRIMARY KEY REFERENCES deployments(id) ON DELETE CASCADE,
   model_gateway_base_url text,
   agent_control_base_url text,
+  compute_default_tier text,
+  compute_idle_hibernate_seconds integer,
+  compute_concurrency_cap integer,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_compute_assignments (
+  deployment_id text NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+  agent_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tier text NOT NULL,
+  updated_by text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (deployment_id, agent_id)
 );

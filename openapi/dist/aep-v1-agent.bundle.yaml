@@ -312,6 +312,11 @@ paths:
         - $ref: '#/components/parameters/RequestId'
         - name: afterCursor
           in: query
+          description: |
+            Delivery cursor to resume after: pass the `nextCursor` of the previous
+            page. This is not the watermark — the watermark reports progress, and
+            passing it would skip deliveries with a smaller cursor that are still
+            pending.
           schema:
             type:
               - string
@@ -1169,6 +1174,7 @@ components:
               type: boolean
             watermark:
               type: string
+              description: Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds:
           type: integer
           minimum: 5
@@ -1312,6 +1318,7 @@ components:
             - 'null'
         watermark:
           type: string
+          description: 'Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending.'
     AcknowledgeRequest:
       type: object
       required:
@@ -1447,8 +1454,6 @@ components:
       type: object
       required:
         - skillId
-        - version
-        - action
         - status
       properties:
         skillId:
@@ -1457,16 +1462,13 @@ components:
           $ref: '#/components/schemas/SkillVersionIdentifier'
         action:
           type: string
-          enum:
-            - install
-            - update
-            - remove
-            - unchanged
+          description: Advisory when the Agent reports it; the server does not act on it.
         status:
           type: string
-          enum:
-            - success
-            - failed
+          description: |
+            Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+            `removed` and every other value count as not installed. Agents use different
+            vocabularies, so the server reads the value as reported instead of enforcing an enum.
         errorCode:
           type: string
         message:
@@ -1474,14 +1476,11 @@ components:
     SkillSyncResult:
       type: object
       required:
-        - manifestRevision
-        - startedAt
-        - completedAt
-        - status
         - items
       properties:
-        manifestRevision:
+        revision:
           type: string
+          description: The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync.
         startedAt:
           type: string
           format: date-time
@@ -1490,10 +1489,7 @@ components:
           format: date-time
         status:
           type: string
-          enum:
-            - success
-            - partial
-            - failed
+          description: Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum.
         items:
           type: array
           items:

@@ -2,230 +2,149 @@ package reconciler
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"os"
-	"strings"
 	"sync/atomic"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
 // LeaderElector uses a Kubernetes Lease (coordination.k8s.io/v1) to ensure
 // only one reconciler instance runs the reconcile loop at a time. Followers
 // stay idle but healthy (the readiness endpoint keeps responding), so a
 // pod failure triggers a fast failover without split-brain applies.
+//
+// Lifecycle contract (client-go's elector never re-enters an election after
+// losing a lease): work started through StartWork runs on the lease-scoped
+// context and stops with it, and Run returns a non-nil error when leadership
+// ends on its own so the caller can terminate the process for Kubernetes to
+// restart — a passive-but-ready forever-follower is a silent outage.
 type LeaderElector struct {
-	applier   *KubernetesApplier
-	baseURL   string
-	client    *http.Client
+	client    kubernetes.Interface
 	namespace string
 	leaseName string
 	identity  string
-	leaseDur  time.Duration
-	renewDur  time.Duration
+	// The timing maps the previous hand-rolled loop: the 15s lease duration is
+	// unchanged; the 5s renew ticker becomes a 10s renew deadline (the longest
+	// gap without a successful renew before stepping down) with a 2s retry
+	// cadence, the client-go decomposition of that contract.
+	leaseDuration time.Duration
+	renewDeadline time.Duration
+	retryPeriod   time.Duration
+	// StartWork drives the reconcile workers with a context that is cancelled
+	// synchronously inside OnStoppedLeading (client-go invokes that callback
+	// before Run returns), so no in-flight reconcile survives a lost lease and
+	// the cancellation is observable as soon as Run returns. Set before Run.
+	StartWork func(ctx context.Context)
 	isLeader  atomic.Bool
 }
 
-// NewLeaderElector creates a Lease-based elector reusing the applier's HTTP
-// client and credentials (same ServiceAccount, same token).
+// NewLeaderElector creates a Lease-based elector reusing the applier's
+// Kubernetes client (same ServiceAccount, same token).
 func NewLeaderElector(applier *KubernetesApplier, namespace, leaseName, identity string) *LeaderElector {
 	return &LeaderElector{
-		applier:   applier,
-		baseURL:   applier.baseURL,
-		client:    applier.client,
-		namespace: namespace,
-		leaseName: leaseName,
-		identity:  identity,
-		leaseDur:  15 * time.Second,
-		renewDur:  5 * time.Second,
-	}
-}
-
-// Run blocks until the context is cancelled, continuously acquiring or
-// renewing the lease. Call IsLeader() from the reconcile loop to gate work.
-func (l *LeaderElector) Run(ctx context.Context) {
-	ticker := time.NewTicker(l.renewDur)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			l.release()
-			return
-		case <-ticker.C:
-			wasLeader := l.IsLeader()
-			if err := l.acquireOrRenew(ctx); err != nil {
-				if wasLeader || os.Getenv("AEP_LEADER_ELECTION_DEBUG") != "" {
-					slog.Warn("leader election: lost lease", "error", err)
-				}
-			} else if !wasLeader && l.IsLeader() {
-				slog.Info("leader election: acquired lease", "identity", l.identity)
-			}
-		}
+		client:        applier.client,
+		namespace:     namespace,
+		leaseName:     leaseName,
+		identity:      identity,
+		leaseDuration: 15 * time.Second,
+		renewDeadline: 10 * time.Second,
+		retryPeriod:   2 * time.Second,
 	}
 }
 
 // IsLeader reports whether this instance holds the lease.
 func (l *LeaderElector) IsLeader() bool { return l.isLeader.Load() }
 
-type leaseSpec struct {
-	HolderIdentity       string `json:"holderIdentity"`
-	LeaseDurationSeconds int    `json:"leaseDurationSeconds"`
-	AcquireTime          string `json:"acquireTime,omitempty"`
-	RenewTime            string `json:"renewTime"`
-}
-
-// leaseMetadata keeps only the fields a renew PUT needs. The API server adds
-// complex metadata (managedFields, ownerReferences — arrays/objects) to Lease
-// responses after any write; decoding into map[string]string dies on those,
-// so unknown fields must be ignored rather than typed.
-type leaseMetadata struct {
-	Name            string `json:"name"`
-	Namespace       string `json:"namespace"`
-	ResourceVersion string `json:"resourceVersion"`
-}
-
-type lease struct {
-	APIVersion string        `json:"apiVersion"`
-	Kind       string        `json:"kind"`
-	Metadata   leaseMetadata `json:"metadata"`
-	Spec       leaseSpec     `json:"spec"`
-}
-
-func (l *LeaderElector) leasePath() string {
-	return fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases/%s", l.namespace, l.leaseName)
-}
-
-func (l *LeaderElector) acquireOrRenew(ctx context.Context) (err error) {
-	defer func() {
-		if err != nil {
-			l.isLeader.Store(false)
-		}
-	}()
-	now := leaseTimestamp()
-
-	// Read the current lease (if any).
-	current, code, err := l.get(ctx)
-	if err != nil && code != http.StatusNotFound {
-		return fmt.Errorf("read lease: %w", err)
-	}
-
-	if code == http.StatusNotFound {
-		// Create the lease.
-		body, _ := json.Marshal(lease{
-			APIVersion: "coordination.k8s.io/v1",
-			Kind:       "Lease",
-			Metadata:   leaseMetadata{Name: l.leaseName, Namespace: l.namespace},
-			Spec: leaseSpec{
-				HolderIdentity:       l.identity,
-				LeaseDurationSeconds: int(l.leaseDur.Seconds()),
-				AcquireTime:          now,
-				RenewTime:            now,
+// Run blocks until ctx is cancelled or leadership ends. A nil return means the
+// caller's context ended the election (clean shutdown; the lease is released
+// with a fresh holder guard); a non-nil return means the election ended on its
+// own and the caller must terminate the process so Kubernetes restarts it —
+// client-go never re-elects in-process, and idling would leave a permanently
+// passive replica that still reports ready.
+func (l *LeaderElector) Run(ctx context.Context) error {
+	// workCtx is ours, not client-go's internal lease context: we cancel it
+	// synchronously inside OnStoppedLeading, which client-go invokes before Run
+	// returns (vendored leaderelection.go:213/219), so when Run returns after a
+	// lost lease the workers' context is already cancelled.
+	workCtx, workCancel := context.WithCancel(ctx)
+	defer workCancel()
+	elector, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
+		Lock: &resourcelock.LeaseLock{
+			LeaseMeta:  metav1.ObjectMeta{Namespace: l.namespace, Name: l.leaseName},
+			Client:     l.client.CoordinationV1(),
+			LockConfig: resourcelock.ResourceLockConfig{Identity: l.identity},
+		},
+		LeaseDuration: l.leaseDuration,
+		RenewDeadline: l.renewDeadline,
+		RetryPeriod:   l.retryPeriod,
+		// The release is ours, not client-go's: its tryRelease trusts the
+		// locally observed record and, after a pause or partition, can clear a
+		// successor's holder identity. The guarded release below re-reads the
+		// Lease instead (reproduced in TestFormerLeaderReleaseSkipsSuccessor).
+		ReleaseOnCancel: false,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(_ context.Context) {
+				l.isLeader.Store(true)
+				slog.Info("leader election: acquired lease", "identity", l.identity)
+				if l.StartWork != nil {
+					l.StartWork(workCtx)
+				}
 			},
-		})
-		_, code, err := l.request(ctx, http.MethodPost,
-			fmt.Sprintf("/apis/coordination.k8s.io/v1/namespaces/%s/leases", l.namespace), body)
-		if err != nil || code != http.StatusCreated {
-			return fmt.Errorf("create lease: status=%d error=%v", code, err)
-		}
-		l.isLeader.Store(true)
+			// client-go retries renewals until the renew deadline, so this
+			// fires only for a sustained loss, not one transient failure. The
+			// synchronous cancellation here is the ordering guarantee: no
+			// reconcile work survives leadership loss.
+			OnStoppedLeading: func() {
+				workCancel()
+				if l.isLeader.Swap(false) {
+					slog.Warn("leader election: lost lease", "identity", l.identity)
+				}
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("leader election: invalid configuration: %w", err)
+	}
+	elector.Run(ctx)
+	if ctx.Err() != nil {
+		// Clean shutdown: release the lease with a holder guard so a follower
+		// takes over immediately instead of after natural expiry.
+		l.guardedRelease()
 		return nil
 	}
-
-	// Check if the lease is expired or held by us.
-	if current.Spec.HolderIdentity != l.identity {
-		renewTime, err := time.Parse(time.RFC3339Nano, current.Spec.RenewTime)
-		if err == nil && time.Since(renewTime) < l.leaseDur {
-			// Someone else holds a valid lease.
-			l.isLeader.Store(false)
-			return nil
-		}
-		// Lease expired — take over.
-		slog.Info("leader election: lease expired, taking over", "previous", current.Spec.HolderIdentity)
-	}
-
-	// Renew (or take over) the lease.
-	current.Spec.HolderIdentity = l.identity
-	current.Spec.RenewTime = now
-	if current.Spec.AcquireTime == "" {
-		current.Spec.AcquireTime = now
-	}
-	body, _ := json.Marshal(current)
-	_, code, err = l.request(ctx, http.MethodPut, l.leasePath(), body)
-	if err != nil || code != http.StatusOK {
-		return fmt.Errorf("renew lease: status=%d error=%v", code, err)
-	}
-	l.isLeader.Store(true)
-	return nil
+	return errors.New("leader election ended without a shutdown request; leadership was lost")
 }
 
-// leaseTimestamp renders microsecond-precision RFC3339: the coordination API
-// rejects metav1.Time strings with nanosecond digits (RFC3339Nano emits up to
-// nine and trims trailing zeros, so some timestamps parse and most do not).
-func leaseTimestamp() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.000000Z07:00")
-}
-
-func (l *LeaderElector) release() {
-	if !l.isLeader.Swap(false) {
-		return
-	}
+// guardedRelease clears our holder identity so a follower takes over
+// immediately, but only when a fresh read still names us: after a pause or a
+// partition the remote lease may already belong to a successor, and clearing
+// it would split the election. A resourceVersion conflict means exactly that
+// race happened, so the release is abandoned instead of retried.
+func (l *LeaderElector) guardedRelease() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	// Best-effort: clear the holder so the follower can acquire immediately.
-	current, code, err := l.get(ctx)
-	if err != nil || code != http.StatusOK || current.Spec.HolderIdentity != l.identity {
+	lease, err := l.client.CoordinationV1().Leases(l.namespace).Get(ctx, l.leaseName, metav1.GetOptions{})
+	if err != nil {
+		slog.Debug("leader election: release skipped, lease unreadable", "identity", l.identity, "error", err)
 		return
 	}
-	current.Spec.HolderIdentity = ""
-	body, _ := json.Marshal(current)
-	_, _, _ = l.request(ctx, http.MethodPut, l.leasePath(), body)
-}
-
-func (l *LeaderElector) get(ctx context.Context) (*lease, int, error) {
-	body, code, err := l.request(ctx, http.MethodGet, l.leasePath(), nil)
-	if err != nil {
-		return nil, code, err
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != l.identity {
+		return
 	}
-	if code != http.StatusOK {
-		return nil, code, fmt.Errorf("lease request returned %d", code)
-	}
-	var result lease
-	if err := json.NewDecoder(strings.NewReader(string(body))).Decode(&result); err != nil {
-		return nil, code, fmt.Errorf("decode lease: %w", err)
-	}
-	return &result, code, nil
-}
-
-func (l *LeaderElector) request(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
-	var reader *strings.Reader
-	if body != nil {
-		reader = strings.NewReader(string(body))
-	} else {
-		reader = strings.NewReader("")
-	}
-	req, err := http.NewRequestWithContext(ctx, method, l.baseURL+path, reader)
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+l.applier.bearerToken())
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := l.client.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	// Read the whole body: a single Read may legally return a partial chunk.
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if readErr != nil {
-		return nil, resp.StatusCode, readErr
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if os.Getenv("AEP_LEADER_ELECTION_DEBUG") != "" {
-			slog.Warn("leader election: api error body", "status", resp.StatusCode, "body", string(body))
+	cleared := lease.DeepCopy()
+	cleared.Spec.HolderIdentity = nil
+	if _, err := l.client.CoordinationV1().Leases(l.namespace).Update(ctx, cleared, metav1.UpdateOptions{}); err != nil {
+		if apierrors.IsConflict(err) {
+			slog.Debug("leader election: release abandoned, lease changed hands", "identity", l.identity)
+			return
 		}
+		slog.Warn("leader election: release failed", "identity", l.identity, "error", err)
 	}
-	return body, resp.StatusCode, nil
 }

@@ -282,22 +282,20 @@ verifies the manifest SHA-256 before extraction.
 
 ```json
 {
-  "manifestRevision": "43",
-  "startedAt": "2026-08-19T08:01:00Z",
-  "completedAt": "2026-08-19T08:01:03Z",
-  "status": "partial",
+  "revision": "43",
+  "status": "completed",
   "items": [
-    {"skillId": "docx", "version": "1.3.0", "action": "update", "status": "success"},
-    {
-      "skillId": "xlsx",
-      "version": "2.0.0",
-      "action": "install",
-      "status": "failed",
-      "errorCode": "PACKAGE_HASH_MISMATCH",
-      "message": "Downloaded package digest did not match the manifest."
-    }
+    {"skillId": "docx", "status": "updated"},
+    {"skillId": "xlsx", "status": "installed"}
   ]
 }
+The server reads `revision`, `status`, and each item's `skillId` and `status`
+(`installed`, `updated` and `unchanged` count as installed; `removed` and any
+other value count as not installed). `startedAt`, `completedAt`, `version`,
+`action`, `errorCode` and `message` are accepted and kept in the stored payload
+but do not drive server behaviour. A report that carries `manifestRevision`
+instead of `revision` is refused with `400`.
+
 ```
 
 ## 6. Telemetry Event Upload
@@ -385,6 +383,12 @@ role/team bindings.
 Reading this response does not consume an event. Until receipt is
 acknowledged, the server may return the delivery again. The Agent deduplicates
 by `deliveryId` and `eventId`.
+
+`watermark` is the largest `cursor` delivered to the session so far, or `""`
+when nothing has been delivered; it matches the heartbeat
+`controlEvents.watermark`. It is informational: page with `nextCursor`
+(`afterCursor` takes the last returned delivery's `cursor`), because the
+watermark can be ahead of deliveries that are still pending.
 
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 
@@ -536,7 +540,7 @@ every team carries a `path` and `depth` that are fixed at creation; parents
 never move afterwards, so cyclic hierarchies are impossible. Deleting a team
 that is still referenced returns `TEAM_HAS_CHILDREN` (409) when it has child
 teams, `TEAM_HAS_AGENTS` (409) when it is the home team of digital employees,
-or `TEAM_IN_USE` (409) for any other reference.
+or `TEAM_IN_USE` (409) for any other foreign-key reference. Grants that point at a subject through the polymorphic subject columns (skill, model, and credential assignments, plus data-scope rules) carry no foreign key: deleting the role or team removes them in the same transaction instead of blocking the delete, so a later subject that reuses the same identifier never inherits them.
 
 ### Digital employees
 
@@ -663,6 +667,7 @@ Error codes:
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | Withdraw a version |
 | GET, POST | `/admin/skill-assignments` | List or create assignments |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | Remove an assignment |
+| PATCH | `/admin/skill-assignments/{assignmentId}` | Change when an assignment ends (`expiresAt` RFC3339, or `null` for perpetual) |
 
 Skill IDs are portable identifiers of at most 64 characters. Version
 identifiers are at most 128 characters. Both must start and end with a letter
@@ -765,6 +770,48 @@ hosts (`*.svc.cluster.local` or single-label names) are rejected, and
 production deployments additionally reject loopback addresses. Invalid values
 return `422` with code `INVALID_DEPLOYMENT_SETTINGS`.
 
+Three settings govern digital-employee compute. `computeDefaultTier` is the
+default resource tier for employee runtime instances; a `PUT` value is
+validated against the compute tier catalog at write time and unknown tier
+names are rejected with `422`. `computeIdleHibernateSeconds` (60-86400) is the
+idle duration before an employee runtime instance scales to zero, and
+`computeConcurrencyCap` (1-10000) caps concurrent employee runtime instances
+for the deployment. As with every setting, an explicit `null` clears the
+override and restores the environment fallback (`AEP_COMPUTE_DEFAULT_TIER`,
+`AEP_COMPUTE_IDLE_HIBERNATE_SECONDS`, `AEP_COMPUTE_CONCURRENCY_CAP`). Integer
+settings report the same override/effectiveValue/source shape with integer
+values.
+
+### Compute governance
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/compute/tiers` | Read the deployment-owned compute tier catalog |
+| GET | `/admin/compute/assignments` | List per-agent compute tier assignments |
+| PUT | `/admin/compute/assignments/{agentId}` | Set or clear one agent's compute tier override |
+
+Both `GET`s require the `deployment.read` permission; the `PUT` requires
+`agents.compute.write`, the delegable digital-employee compute grant that
+cannot touch human accounts (full administrators always qualify).
+
+Tiers are deployment-owned and read-only through the API: the control plane
+loads the catalog from the JSON file named by `AEP_COMPUTE_TIERS_FILE` (an
+object with an `items` array of tier entries: `name`, optional `description`,
+`cpuRequest`/`cpuLimit`/`memoryRequest`/`memoryLimit` in Kubernetes quantity
+syntax such as `250m` or `512Mi`, and `source` fixed to `deployment`). `GET
+/admin/compute/tiers` returns an empty `items` array when no catalog file is
+configured.
+
+Each assignment row reports the agent, its stored tier `override`, the
+`effective` tier after the deployment default tier, and the `source` of the
+effective tier (`override` or `default`), plus `updatedAt` and `updatedBy`
+when an override exists. A `PUT` body of `{"tier": "standard"}` stores the
+override; `{"tier": null}` clears it so the deployment default tier applies.
+The write is recorded in the deployment audit trail and takes effect at the
+employee instance's next creation — v1 does not mutate running instances in
+place. Unknown agents return `404`; tier names missing from the catalog return
+`422`.
+
 ### Control Events
 
 | Method | Path | Purpose |
@@ -797,6 +844,21 @@ deliveries as `superseded`.
 `GET /admin/events` supports `cursor`, `limit`, `userId`, `sessionId`, `type`,
 `resourceType`, `resourceId`, `result`, `occurredAfter`, and `occurredBefore`.
 
+### Administrative audit
+
+`GET /admin/audit/operations` requires `audit.read` and returns only records in
+the caller's deployment, ordered by descending cursor. It accepts `cursor`,
+`limit`, `action`, `resourceType`, `resourceId`, `actorUserId`, `createdAfter`,
+and `createdBefore`; time filters use RFC 3339. The response contains `items`
+and a nullable `nextCursor`.
+
+Each record includes the actor, action, resource, result, timestamp, and
+`changes`: masked before/after snapshots or a fallback request payload, or
+`null` when no payload was recorded. Account-creation payloads retain the
+username; passwords and unknown fields remain redacted. This read-only endpoint
+does not expose credential values. Records follow `AEP_AUDIT_RETENTION`, as
+described in the [production runtime guide](production-runtime.md).
+
 ## 11. Errors and Retry
 
 ```json
@@ -818,3 +880,6 @@ Common codes are `INVALID_REQUEST`, `TOKEN_INVALID`, `ACCESS_DENIED`,
 Retry safe reads with exponential backoff. Event batches are idempotent by
 `eventId`. Do not blindly retry authorization-code exchange or credential
 resolution. Honor `Retry-After` on `429` and `503`.
+
+Team `defaultRoleIds` and effective role inheritance are documented in
+[Team default roles](team-default-roles.md).

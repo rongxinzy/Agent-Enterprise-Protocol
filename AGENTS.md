@@ -62,6 +62,40 @@ npm run release:check
 This includes OpenAPI drift checks, Node workspace tests, SDK package checks,
 Go tests/race/vet/build, release audit, and every Compose E2E scenario.
 
+## 出镜像
+
+Go 服务（`services/control-service`、`services/gateway-authorizer`、`services/gateway-reconciler`）出镜像时，**优先用 ko（https://ko.build），不新增、不修改 Dockerfile**：
+
+- 只出镜像：`KO_DOCKER_REPO=<内网仓> ko build ./services/control-service`（不需要 Docker 守护进程）。
+- 出镜像并落到集群：清单里写 `image: ko://<module-path>/services/control-service`，再 `ko apply -f <清单目录>/`。
+- 依赖拉取：`export GOPROXY=<内网 goproxy>,direct`。
+- 保持非 root 与 CA 信任：`defaultBaseImage` 用 distroless / chainguard static（自带 CA，`USER 65532`）。
+
+验收：构建后确认 entrypoint 与 `USER` 与 Dockerfile 构建结果一致，再 apply 到集群验证。
+
+> 性能数字（ko vs docker build）待实测，暂不写入。同一段落亦见于 `aep-deerflow-governance`，改动请同步两处。
+
+## Operator Development
+
+- Share pure Higress rendering through `services/internal/gatewayrender/`;
+  do not fork the protocol strategies or resource naming in controllers.
+  Credential reads and Kubernetes writes belong to callers, not renderers.
+- Kubernetes operators live in `services/gateway-operator/` and use the standard
+  kubebuilder/controller-runtime layout (`api/` types, `internal/controller/`
+  reconcilers, `cmd/main.go`, `config/crd|rbac` generated output).
+- CRD changes go through `services/gateway-operator/generate.sh`
+  (controller-gen pinned to the controller-tools release matching the root
+  module's client-go line); CI fails on drift. Never hand-edit generated files
+  (`zz_generated.deepcopy.go`, `config/crd/bases/*`, `config/rbac/*`).
+- Every controller needs an envtest suite covering CRD install, reconcile on
+  create/update, and status-condition writes; the status subresource write must
+  never clobber the spec. CI installs the pinned envtest binaries; locally set
+  `KUBEBUILDER_ASSETS` or drop the pinned tarball under
+  `services/gateway-operator/bin/` (git-ignored).
+- Exclusive-write discipline: an operator never writes resources it does not
+  own; ownership is enforced by RBAC (no other service account gets write verbs
+  on those resources), not by fieldManager alone.
+
 ## Contract-First Development
 
 For a new protocol feature, follow this order:
@@ -160,6 +194,12 @@ E2E scripts use isolated Compose project names and clean up their own
 containers/volumes. For failures, inspect the scoped project with
 `docker compose ... ps` and `docker compose ... logs <service>` before changing
 the test or deleting data.
+
+PR CI selects E2E by reviewed dependency scopes; unknown/shared paths run all
+scenarios. Main and manual runs remain full. See
+[E2E selection policy](docs/ci-e2e-selection.md), and update the mapping when
+changing cross-component dependencies. Scoped E2E does not replace the existing
+unit, coverage, security, approval or release gates.
 
 ## SDK and Reference Agent Rules
 

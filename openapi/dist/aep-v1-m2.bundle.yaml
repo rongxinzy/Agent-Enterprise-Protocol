@@ -277,6 +277,11 @@ paths:
         - $ref: '#/components/parameters/RequestId'
         - name: afterCursor
           in: query
+          description: |
+            Delivery cursor to resume after: pass the `nextCursor` of the previous
+            page. This is not the watermark — the watermark reports progress, and
+            passing it would skip deliveries with a smaller cursor that are still
+            pending.
           schema:
             type:
               - string
@@ -1502,11 +1507,41 @@ paths:
           description: Version withdrawn
         '400':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/skills/{skillId}/installations:
+    get:
+      tags:
+        - Admin Skills
+      operationId: listSkillInstallations
+      description: |
+        Reported installation state for the users one Skill is granted to: the
+        newest sync report per user decides, and only retained reports are
+        visible (telemetry retention window). A withdrawn Skill distributes to
+        nobody, so its grant set is empty, matching the manifest. Per-item
+        statuses are passed through as reported: the vocabularies differ across
+        contract, writer and Agent, and an Agent that fails to install writes no
+        report at all, so no failure verdict is derived here.
+      parameters:
+        - $ref: '#/components/parameters/SkillId'
+        - $ref: '#/components/parameters/Limit-2'
+      responses:
+        '200':
+          description: Reported installation state, grouped by user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillInstallationPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/skill-assignments:
     get:
       tags:
         - Admin Skills
       operationId: listSkillAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/AssignmentList'
@@ -1535,6 +1570,74 @@ paths:
       responses:
         '204':
           description: Assignment removed
+    patch:
+      tags:
+        - Admin Skills
+      operationId: updateSkillAssignment
+      description: |
+        Changes when an existing grant ends. Deleting and recreating the grant
+        would drop the Skill from the employee's desired manifest in between -
+        which can uninstall and reinstall it - so the expiry is edited in place.
+        `null` makes the grant perpetual again. The change emits the same control
+        event a grant change does, so agents reconcile promptly.
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expiresAt
+              additionalProperties: false
+              properties:
+                expiresAt:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                  description: RFC3339 expiry, or null for a perpetual grant.
+      responses:
+        '200':
+          description: Grant updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - skillId
+                  - subject
+                  - expiresAt
+                properties:
+                  id:
+                    type: string
+                  skillId:
+                    type: string
+                  subject:
+                    type: object
+                    required:
+                      - type
+                      - id
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - user
+                          - role
+                          - team
+                      id:
+                        type: string
+                  expiresAt:
+                    type:
+                      - string
+                      - 'null'
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/control-events:
     get:
       tags:
@@ -1802,7 +1905,7 @@ paths:
       tags:
         - Admin Audit
       operationId: listAdminAudit
-      description: Returns the recorded administrative write operations (actor, action, resource, result, and the masked request payload), newest first. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit-2'
@@ -1924,6 +2027,9 @@ paths:
       tags:
         - Admin Credentials
       operationId: listCredentialAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/CredentialAssignmentList'
@@ -2066,6 +2172,9 @@ paths:
       tags:
         - Admin Models
       operationId: listModelAssignments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
       responses:
         '200':
           $ref: '#/components/responses/ModelAssignmentList'
@@ -2806,7 +2915,7 @@ paths:
         - Admin Data Plane
       operationId: putDataPlaneDesiredState
       deprecated: true
-      description: 'Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Secret references identify external Secret material and never contain values.'
+      description: 'Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.'
       requestBody:
         required: true
         content:
@@ -2894,6 +3003,65 @@ paths:
         '400':
           $ref: '#/components/responses/Problem-2'
         '403':
+          $ref: '#/components/responses/Problem-2'
+        '422':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/compute/tiers:
+    get:
+      tags:
+        - Admin Deployment
+      operationId: getComputeTierCatalog
+      description: 'Returns the compute tier catalog available to digital-employee runtime instances. Tiers are deployment-owned and read-only through the API: the control plane loads them from the JSON file named by the AEP_COMPUTE_TIERS_FILE environment variable (an object with an items array whose entries match ComputeTier). Requires the deployment.read permission. items is empty when no catalog file is configured.'
+      responses:
+        '200':
+          description: Compute tier catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeTierCatalog'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/compute/assignments:
+    get:
+      tags:
+        - Admin Deployment
+      operationId: listComputeAssignments
+      description: Lists per-agent compute tier assignments. Every assignment reports its stored runtime override, the effective tier after the deployment default tier, and the source of that effective tier. Requires the deployment.read permission.
+      responses:
+        '200':
+          description: Compute assignment list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeAssignmentList'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/compute/assignments/{agentId}:
+    parameters:
+      - $ref: '#/components/parameters/AgentId'
+    put:
+      tags:
+        - Admin Deployment
+      operationId: updateComputeAssignment
+      description: 'Requires the agents.compute.write permission — the delegable digital-employee compute grant that cannot touch human accounts (full administrators always qualify). Stores a per-agent compute tier override; an explicit null tier clears the override so the deployment default tier applies again. The write is recorded in the deployment audit trail and takes effect at the employee instance''s next creation: v1 does not mutate running instances in place. Unknown agents return 404; tier names that are not in the compute tier catalog return 422.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputeAssignmentUpdate'
+      responses:
+        '200':
+          description: Updated compute assignment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeAssignment'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
           $ref: '#/components/responses/Problem-2'
         '422':
           $ref: '#/components/responses/Problem-2'
@@ -3919,6 +4087,7 @@ components:
               type: boolean
             watermark:
               type: string
+              description: Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds:
           type: integer
           minimum: 5
@@ -4062,6 +4231,7 @@ components:
             - 'null'
         watermark:
           type: string
+          description: 'Largest cursor delivered to the session so far, or an empty string when nothing has been delivered. Carries the same value as `HeartbeatResponse.controlEvents.watermark`. Informational: page with `nextCursor`, not with this value, which can be ahead of deliveries that are still pending.'
     AcknowledgeRequest:
       type: object
       required:
@@ -4197,8 +4367,6 @@ components:
       type: object
       required:
         - skillId
-        - version
-        - action
         - status
       properties:
         skillId:
@@ -4207,16 +4375,13 @@ components:
           $ref: '#/components/schemas/SkillVersionIdentifier'
         action:
           type: string
-          enum:
-            - install
-            - update
-            - remove
-            - unchanged
+          description: Advisory when the Agent reports it; the server does not act on it.
         status:
           type: string
-          enum:
-            - success
-            - failed
+          description: |
+            Per-skill outcome. `installed`, `updated` and `unchanged` count as installed;
+            `removed` and every other value count as not installed. Agents use different
+            vocabularies, so the server reads the value as reported instead of enforcing an enum.
         errorCode:
           type: string
         message:
@@ -4224,14 +4389,11 @@ components:
     SkillSyncResult:
       type: object
       required:
-        - manifestRevision
-        - startedAt
-        - completedAt
-        - status
         - items
       properties:
-        manifestRevision:
+        revision:
           type: string
+          description: The manifest revision the report was produced from. The Agent sends the revision it last applied, which may be empty on a first sync.
         startedAt:
           type: string
           format: date-time
@@ -4240,10 +4402,7 @@ components:
           format: date-time
         status:
           type: string
-          enum:
-            - success
-            - partial
-            - failed
+          description: Outcome summary reported by the Agent (`completed`, `succeeded`, `partial` and `failed` are the values seen in practice). The server stores it verbatim and does not enforce an enum.
         items:
           type: array
           items:
@@ -4866,6 +5025,13 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams.
         parentId:
           type:
             - string
@@ -4906,6 +5072,13 @@ components:
         description:
           type: string
           maxLength: 1024
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold.
         parentId:
           type:
             - string
@@ -4926,6 +5099,13 @@ components:
           maxLength: 1024
         enabled:
           type: boolean
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+          description: Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions.
     ReplaceUserRBACRequest:
       type: object
       required:
@@ -5577,6 +5757,81 @@ components:
           enum:
             - active
             - withdrawn
+    SkillInstallation:
+      type: object
+      required:
+        - userId
+        - state
+      properties:
+        userId:
+          type: string
+        state:
+          type: string
+          enum:
+            - missing
+            - unreported
+        revision:
+          type: string
+          description: Present when the user has a retained report; the revision that report carried.
+        reportedAt:
+          type: string
+          format: date-time
+          description: Present when the user has a retained report.
+        itemStatus:
+          type: string
+          description: Raw per-item status for this Skill in that report, passed through as reported.
+    SkillInstallationPage:
+      type: object
+      required:
+        - skillId
+        - summary
+        - items
+        - truncated
+      properties:
+        skillId:
+          type: string
+        summary:
+          type: object
+          required:
+            - granted
+            - reported
+            - installed
+            - missing
+            - unreported
+            - latestReportedAt
+          properties:
+            granted:
+              type: integer
+              minimum: 0
+              description: Users the Skill is granted to, ignoring expired grants and a withdrawn Skill.
+            reported:
+              type: integer
+              minimum: 0
+              description: Granted users with at least one retained report.
+            installed:
+              type: integer
+              minimum: 0
+            missing:
+              type: integer
+              minimum: 0
+              description: Reported, but the report does not list the Skill as installed.
+            unreported:
+              type: integer
+              minimum: 0
+              description: Granted users with no retained report.
+            latestReportedAt:
+              type:
+                - string
+                - 'null'
+              format: date-time
+        items:
+          type: array
+          description: Granted users whose report does not show the Skill installed; `missing` before `unreported`.
+          items:
+            $ref: '#/components/schemas/SkillInstallation'
+        truncated:
+          type: boolean
+          description: More users need attention than the limit returned.
     Subject:
       type: object
       required:
@@ -5618,11 +5873,16 @@ components:
       type: object
       required:
         - items
+        - nextCursor
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/Assignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     SkillAssignmentWrite:
       type: object
       required:
@@ -6106,9 +6366,11 @@ components:
             - string
             - 'null'
         changes:
-          type: object
+          type:
+            - object
+            - 'null'
           additionalProperties: true
-          description: Only allowlisted request fields keep their value; every other key is redacted.
+          description: Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted.
         createdAt:
           type: string
           format: date-time
@@ -6221,11 +6483,16 @@ components:
       type: object
       required:
         - assignments
+        - nextCursor
       properties:
         assignments:
           type: array
           items:
             $ref: '#/components/schemas/CredentialAssignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     CredentialAssignmentWrite:
       type: object
       required:
@@ -6482,11 +6749,16 @@ components:
       type: object
       required:
         - assignments
+        - nextCursor
       properties:
         assignments:
           type: array
           items:
             $ref: '#/components/schemas/ModelAssignment'
+        nextCursor:
+          type:
+            - string
+            - 'null'
     ModelAssignmentWrite:
       type: object
       required:
@@ -6648,12 +6920,40 @@ components:
             - override
             - env
             - unset
+    DeploymentIntegerSettingValue:
+      description: One deployment-level integer runtime setting with its override and resolution state.
+      type: object
+      required:
+        - override
+        - effectiveValue
+        - source
+      properties:
+        override:
+          description: Runtime override stored in the control plane; null when no override is set.
+          type:
+            - integer
+            - 'null'
+        effectiveValue:
+          description: Value currently in effect — the runtime override when set, otherwise the environment-configured value; null when neither exists.
+          type:
+            - integer
+            - 'null'
+        source:
+          description: Origin of the effective value.
+          type: string
+          enum:
+            - override
+            - env
+            - unset
     DeploymentSettings:
       description: Deployment-level runtime settings maintained through the administration API.
       type: object
       required:
         - modelGatewayBaseUrl
         - modelFallbackIds
+        - computeDefaultTier
+        - computeIdleHibernateSeconds
+        - computeConcurrencyCap
       properties:
         modelGatewayBaseUrl:
           $ref: '#/components/schemas/DeploymentSettingValue'
@@ -6661,6 +6961,15 @@ components:
         modelFallbackIds:
           $ref: '#/components/schemas/DeploymentListSettingValue'
           description: 'Ordered fallback model chain used by platform failover: when an employee''s default model is unhealthy, the first healthy model in this list takes over (and the original is restored once it recovers). Empty disables automatic failover.'
+        computeDefaultTier:
+          $ref: '#/components/schemas/DeploymentSettingValue'
+          description: Default compute tier for digital-employee runtime instances; the effective value must name a tier from the compute tier catalog. Falls back to AEP_COMPUTE_DEFAULT_TIER.
+        computeIdleHibernateSeconds:
+          $ref: '#/components/schemas/DeploymentIntegerSettingValue'
+          description: Idle duration in seconds before an employee runtime instance scales to zero. Falls back to AEP_COMPUTE_IDLE_HIBERNATE_SECONDS.
+        computeConcurrencyCap:
+          $ref: '#/components/schemas/DeploymentIntegerSettingValue'
+          description: Maximum number of concurrent employee runtime instances for the deployment. Falls back to AEP_COMPUTE_CONCURRENCY_CAP.
     DeploymentSettingsUpdate:
       description: Partial update of deployment runtime settings. Omitted fields stay unchanged; an explicit null clears the runtime override and restores the environment fallback.
       type: object
@@ -6683,6 +6992,136 @@ components:
             minLength: 1
             maxLength: 200
           maxItems: 8
+        computeDefaultTier:
+          description: New default compute tier for digital-employee runtime instances. The value is validated against the compute tier catalog at write time; unknown tier names are rejected with 422. Null clears the override so the AEP_COMPUTE_DEFAULT_TIER environment value applies again.
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 200
+        computeIdleHibernateSeconds:
+          description: New idle duration in seconds before an employee runtime instance scales to zero. Null clears the override so the AEP_COMPUTE_IDLE_HIBERNATE_SECONDS environment value applies again.
+          type:
+            - integer
+            - 'null'
+          minimum: 60
+          maximum: 86400
+        computeConcurrencyCap:
+          description: New maximum number of concurrent employee runtime instances for the deployment. Null clears the override so the AEP_COMPUTE_CONCURRENCY_CAP environment value applies again.
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 10000
+    ComputeTier:
+      description: One deployment-owned compute tier for digital-employee runtime instances.
+      type: object
+      required:
+        - name
+        - cpuRequest
+        - cpuLimit
+        - memoryRequest
+        - memoryLimit
+        - source
+      properties:
+        name:
+          description: Stable tier name referenced by computeDefaultTier and per-agent compute assignments.
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          description: Operator-facing explanation of the tier.
+          type: string
+        cpuRequest:
+          description: Requested CPU in Kubernetes quantity syntax, for example 250m.
+          type: string
+        cpuLimit:
+          description: CPU limit in Kubernetes quantity syntax, for example 1000m.
+          type: string
+        memoryRequest:
+          description: Requested memory in Kubernetes quantity syntax, for example 512Mi.
+          type: string
+        memoryLimit:
+          description: Memory limit in Kubernetes quantity syntax, for example 1Gi.
+          type: string
+        source:
+          description: Origin of the tier definition; tiers are always deployment-owned.
+          type: string
+          enum:
+            - deployment
+    ComputeTierCatalog:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComputeTier'
+    ComputeAssignment:
+      description: One agent's compute tier assignment with its override and resolution state.
+      type: object
+      required:
+        - agentId
+        - tier
+      properties:
+        agentId:
+          type: string
+        agentName:
+          description: Display title of the agent when it can be resolved.
+          type: string
+        tier:
+          description: Tier resolution for this agent.
+          type: object
+          required:
+            - override
+            - effective
+            - source
+          properties:
+            override:
+              description: Runtime override stored in the control plane; null when no override is set.
+              type:
+                - string
+                - 'null'
+            effective:
+              description: Tier currently in effect — the runtime override when set, otherwise the deployment default tier.
+              type: string
+            source:
+              description: Origin of the effective tier.
+              type: string
+              enum:
+                - override
+                - default
+        updatedAt:
+          description: When the override was last changed; absent when no override was ever stored.
+          type: string
+          format: date-time
+        updatedBy:
+          description: Operator user id that last changed the override.
+          type: string
+    ComputeAssignmentList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComputeAssignment'
+    ComputeAssignmentUpdate:
+      description: Per-agent compute tier override update.
+      type: object
+      additionalProperties: false
+      required:
+        - tier
+      properties:
+        tier:
+          description: Catalog tier name to store as the agent's override, validated against the compute tier catalog at write time; unknown names are rejected with 422. Null clears the override so the deployment default tier applies.
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 200
   responses:
     Problem:
       description: AEP Problem Details

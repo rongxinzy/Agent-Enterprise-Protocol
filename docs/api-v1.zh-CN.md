@@ -263,22 +263,19 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 ```json
 {
-  "manifestRevision": "43",
-  "startedAt": "2026-08-19T08:01:00Z",
-  "completedAt": "2026-08-19T08:01:03Z",
-  "status": "partial",
+  "revision": "43",
+  "status": "completed",
   "items": [
-    {"skillId": "docx", "version": "1.3.0", "action": "update", "status": "success"},
-    {
-      "skillId": "xlsx",
-      "version": "2.0.0",
-      "action": "install",
-      "status": "failed",
-      "errorCode": "PACKAGE_HASH_MISMATCH",
-      "message": "Downloaded package digest did not match the manifest."
-    }
+    {"skillId": "docx", "status": "updated"},
+    {"skillId": "xlsx", "status": "installed"}
   ]
 }
+服务端读取的是 `revision`、`status`，以及每个条目的 `skillId` 与 `status`
+（`installed`、`updated`、`unchanged` 视为已安装；`removed` 及其它取值视为未安装）。
+`startedAt`、`completedAt`、`version`、`action`、`errorCode`、`message` 会被接受并保留在
+存储的 payload 中，但不影响服务端行为。上报里若写的是 `manifestRevision` 而不是
+`revision`，会被 `400` 拒绝。
+
 ```
 
 ## 6. 遥测事件上传
@@ -361,6 +358,11 @@ pending 标志只用于查询优化，不是可靠性边界。Agent 仍需定期
 
 读取响应不代表消费。在 Agent 确认接收前，服务端可以再次返回该投递。Agent 使用
 `deliveryId` 和 `eventId` 去重。
+
+`watermark` 是该会话已投递的最大 `cursor`，从未投递时为空串 `""`；取值与心跳
+`controlEvents.watermark` 一致。它只用于报告进度：翻页请用 `nextCursor`
+（`afterCursor` 传上一页最后一条投递的 `cursor`），因为水印可能超前于仍在
+pending 的投递。
 
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 
@@ -502,7 +504,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 团队构成一个森林。`POST /admin/teams` 接受可选的 `parentId`，每个团队都带有创建时即固定的
 `path` 和 `depth`；父团队创建后不可变更，因此不可能出现环形层级。删除仍被引用的团队时，
 存在子团队返回 `TEAM_HAS_CHILDREN`（409），是数字员工主团队返回 `TEAM_HAS_AGENTS`（409），
-其他引用返回 `TEAM_IN_USE`（409）。
+其他**外键**引用返回 `TEAM_IN_USE`（409）。通过多态 subject 列指向主体的授权（技能/模型/凭据授权与数据范围规则）**不带外键**：删除角色或团队会在同一事务内把它们一并删除，而不是拦下删除 —— 因此之后复用同一标识符的主体不会继承它们。
 
 ### 数字员工
 
@@ -612,6 +614,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | 撤回版本 |
 | GET, POST | `/admin/skill-assignments` | 查询或创建授权关系 |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | 删除授权关系 |
+| PATCH | `/admin/skill-assignments/{assignmentId}` | 修改授权的到期时间（`expiresAt` 为 RFC3339，`null` 表示永久） |
 
 Skill ID 是最长 64 个字符的可移植标识符，版本标识符最长 128 个字符。两者都必须
 以字母或数字开头和结尾；Skill ID 内部可使用 `.`、`_`、`-`，版本还可使用 `+`。
@@ -705,6 +708,37 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 （`*.svc.cluster.local` 或无 `.` 的单段裸主机名）会被拒绝，生产部署还会
 禁止 localhost 等回环地址。非法取值返回 `422`，错误码为 `INVALID_DEPLOYMENT_SETTINGS`。
 
+三个设置项用于数字员工计算资源治理。`computeDefaultTier` 是员工运行实例的默认资源
+档位，写入时会对照计算档位目录校验，未知档位名返回 `422`；
+`computeIdleHibernateSeconds`（60-86400）是员工运行实例空闲多久后缩容到零；
+`computeConcurrencyCap`（1-10000）限制部署内并发员工运行实例数。与其他设置项一致，
+显式 `null` 会清除覆盖并回落到环境变量（`AEP_COMPUTE_DEFAULT_TIER`、
+`AEP_COMPUTE_IDLE_HIBERNATE_SECONDS`、`AEP_COMPUTE_CONCURRENCY_CAP`）。整数设置项以
+相同的 override/effectiveValue/source 结构返回整数值。
+
+### 计算治理
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/admin/compute/tiers` | 读取部署侧拥有的计算档位目录 |
+| GET | `/admin/compute/assignments` | 查询按 Agent 的计算档位分配 |
+| PUT | `/admin/compute/assignments/{agentId}` | 设置或清除单个 Agent 的计算档位覆盖 |
+
+两个 `GET` 都需要 `deployment.read` 权限；`PUT` 需要 `agents.compute.write` ——
+可委托的数字员工计算资源授权，不能操作真人账号（完整管理员始终具备）。
+
+档位由部署侧拥有，API 只读：控制面从 `AEP_COMPUTE_TIERS_FILE` 指向的 JSON 文件加载
+目录（对象包含 `items` 数组，条目为 `name`、可选 `description`、Kubernetes quantity
+语法的 `cpuRequest`/`cpuLimit`/`memoryRequest`/`memoryLimit`（如 `250m`、`512Mi`），
+以及固定为 `deployment` 的 `source`）。未配置目录文件时 `GET /admin/compute/tiers`
+返回空 `items`。
+
+每行分配返回 Agent、已存储的档位 `override`、经部署默认档位回落后的 `effective`，
+以及生效档位来源 `source`（`override` 或 `default`），存在覆盖时附带 `updatedAt`
+和 `updatedBy`。请求体 `{"tier": "standard"}` 写入覆盖；`{"tier": null}` 清除覆盖并
+回落到部署默认档位。写入会记录到部署审计轨迹，并在员工实例下次创建时生效——v1
+不就地变更运行中实例。未知 Agent 返回 `404`，不在目录中的档位名返回 `422`。
+
 ### 管控事件
 
 | 方法 | 路径 | 用途 |
@@ -737,6 +771,18 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 `GET /admin/events` 支持 `cursor`、`limit`、`userId`、`sessionId`、`type`、
 `resourceType`、`resourceId`、`result`、`occurredAfter` 和 `occurredBefore`。
 
+### 管理操作审计
+
+`GET /admin/audit/operations` 要求 `audit.read` 权限，只返回调用者部署内的记录，
+按 cursor 倒序排列。支持 `cursor`、`limit`、`action`、`resourceType`、
+`resourceId`、`actorUserId`、`createdAfter` 和 `createdBefore`；时间筛选使用
+RFC 3339。响应包含 `items` 和可空的 `nextCursor`。
+
+每条记录包含操作人、动作、资源、结果、时间和 `changes`：脱敏的变更前后快照或
+兜底捕获的请求字段；没有载荷时为 `null`。创建账号的载荷保留用户名，密码与未知
+字段继续打码。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
+配置说明见[生产运行基线](production-runtime.zh-CN.md)。
+
 ## 11. 错误与重试
 
 ```json
@@ -757,3 +803,5 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 
 安全的读取请求采用指数退避重试。事件批次依据 `eventId` 幂等。授权码交换和凭证获取不得
 盲目重试。收到 `429` 或 `503` 时遵守 `Retry-After`。
+
+团队 `defaultRoleIds` 配置与有效角色继承规则见[团队默认角色](team-default-roles.zh-CN.md)。

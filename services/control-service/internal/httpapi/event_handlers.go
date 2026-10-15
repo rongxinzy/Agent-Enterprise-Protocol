@@ -51,10 +51,16 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 	s.heartbeatUserSession(response, request, claims.SessionID, input.LastControlEventCursor)
 }
 
+// controlEventWatermarkSubquery yields the largest cursor ever delivered to the
+// session as text, or NULL when nothing has been delivered. The heartbeat and
+// the control-event list both report this value as `watermark`, so they must
+// share one expression and cannot drift apart.
+const controlEventWatermarkSubquery = `(SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`
+
 func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *http.Request, sessionID string, _ *string) {
 	var pending bool
 	var watermark *string
-	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`, sessionID).Scan(&pending, &watermark)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), `+controlEventWatermarkSubquery, sessionID).Scan(&pending, &watermark)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -93,6 +99,11 @@ func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, requ
 		databaseFailure(response, request, err)
 		return
 	}
+	var watermark *string
+	if err := s.app.Database().QueryRow(request.Context(), `SELECT `+controlEventWatermarkSubquery, sessionID).Scan(&watermark); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	rows, err := s.app.Database().Query(request.Context(), `SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.created_at,e.expires_at FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now() AND d.cursor>$2 ORDER BY d.cursor LIMIT $3`, sessionID, after, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
@@ -122,7 +133,7 @@ func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, requ
 		value := strconv.FormatInt(cursor, 10)
 		next = &value
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": next, "watermark": stringValue(watermark)})
 }
 
 func (s *Server) acknowledgeControlEvent(response http.ResponseWriter, request *http.Request) {
@@ -157,6 +168,10 @@ func (s *Server) acknowledgeUserSessionDelivery(response http.ResponseWriter, re
 		err = s.app.Database().QueryRow(request.Context(), `SELECT state FROM session_control_deliveries WHERE delivery_id=$1 AND session_id=$2`, deliveryID, sessionID).Scan(&state)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The delivery was not found.")
+			return
+		}
+		if err != nil {
+			databaseFailure(response, request, err)
 			return
 		}
 		if state != "received" && state != "running" && state != "succeeded" && state != "failed" {
@@ -302,7 +317,7 @@ WHERE s.deployment_id=$2 AND s.revoked_at IS NULL
     SELECT 1 FROM user_team_bindings utb
     WHERE utb.deployment_id=$2 AND utb.user_id=s.user_id AND utb.team_id IN (SELECT id FROM scope_teams)
   )) OR ($3='role' AND EXISTS (
-    SELECT 1 FROM user_role_bindings urb
+    SELECT 1 FROM user_effective_roles urb
     JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true
     WHERE urb.deployment_id=$2 AND urb.user_id=s.user_id AND urb.role_id=$4
   )))
@@ -483,17 +498,23 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 		return
 	}
 	claims := claimsFrom(request)
+	now := time.Now().UTC()
 	accepted := make([]string, 0, len(input.Events))
 	rejected := make([]map[string]string, 0)
 	// Rows land in ONE multi-VALUES statement: a single network round trip
 	// and a single transaction, where the per-row path autocommitted up to
 	// a hundred inserts per batch (571ms p50 per 100 rows at scale; see the
-	// scale-round findings). Duplicates stay "accepted" via ON CONFLICT
-	// DO NOTHING, matching the previous per-row semantics.
+	// scale-round findings).
 	rows := make([][]any, 0, len(input.Events))
+	batchIDs := make([]string, 0, len(input.Events))
 	for _, event := range input.Events {
 		if claims.SessionID == "" {
 			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": "SESSION_REQUIRED", "message": "A user session is required."})
+			continue
+		}
+		code, message, occurredAt := telemetryEventProblem(event.EventID, event.Type, event.Result, event.OccurredAt, now)
+		if code != "" {
+			rejected = append(rejected, map[string]string{"eventId": event.EventID, "code": code, "message": message})
 			continue
 		}
 		payload, _ := json.Marshal(event.Data)
@@ -502,8 +523,22 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 			resourceType = &event.Resource.Type
 			resourceID = &event.Resource.ID
 		}
-		rows = append(rows, []any{event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, event.OccurredAt})
-		accepted = append(accepted, event.EventID)
+		rows = append(rows, []any{event.EventID, claims.DeploymentID, claims.Subject, claims.SessionID, event.Type, resourceType, resourceID, event.Result, payload, occurredAt})
+		batchIDs = append(batchIDs, event.EventID)
+	}
+	// A batch may repeat an event_id; the lookup and the response must name
+	// each identifier once.
+	if len(batchIDs) > 0 {
+		seen := make(map[string]struct{}, len(batchIDs))
+		unique := batchIDs[:0]
+		for _, id := range batchIDs {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			unique = append(unique, id)
+		}
+		batchIDs = unique
 	}
 	if len(rows) > 0 {
 		values := make([]string, 0, len(rows))
@@ -519,13 +554,83 @@ func (s *Server) uploadTelemetryBatch(response http.ResponseWriter, request *htt
 		if _, err := s.app.Database().Exec(request.Context(), `INSERT INTO telemetry_events(event_id,deployment_id,user_id,session_id,type,resource_type,resource_id,result,payload,occurred_at) VALUES `+strings.Join(values, ",")+` ON CONFLICT(event_id) DO NOTHING`, args...); err != nil {
 			// A single statement cannot fail per row, so a database error
 			// rejects the whole insertable set at once.
-			accepted = accepted[:0]
 			for _, row := range rows {
 				rejected = append(rejected, map[string]string{"eventId": fmt.Sprint(row[0]), "code": "INTERNAL_ERROR", "message": "The telemetry batch could not be stored."})
+			}
+		} else {
+			// ON CONFLICT skips an event_id owned by another deployment. Only
+			// ids present in this deployment count as accepted; a duplicate of
+			// our own event stays accepted so a retry is idempotent.
+			stored, err := s.app.Database().Query(request.Context(), `SELECT event_id FROM telemetry_events WHERE deployment_id=$1 AND event_id=ANY($2)`, claims.DeploymentID, batchIDs)
+			if err != nil {
+				databaseFailure(response, request, err)
+				return
+			}
+			present := make(map[string]struct{}, len(batchIDs))
+			for stored.Next() {
+				var id string
+				if err := stored.Scan(&id); err != nil {
+					stored.Close()
+					databaseFailure(response, request, err)
+					return
+				}
+				present[id] = struct{}{}
+			}
+			if err := stored.Err(); err != nil {
+				stored.Close()
+				databaseFailure(response, request, err)
+				return
+			}
+			stored.Close()
+			for _, id := range batchIDs {
+				if _, ok := present[id]; ok {
+					accepted = append(accepted, id)
+					continue
+				}
+				rejected = append(rejected, map[string]string{"eventId": id, "code": "EVENT_ID_CONFLICT", "message": "The event identifier already exists in another deployment."})
 			}
 		}
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"accepted": accepted, "rejected": rejected})
+}
+
+// telemetryMaxAge bounds how far in the past a client-reported occurrence time
+// may be. An event older than this is refused. The bound is deliberately
+// independent of AEP_TELEMETRY_RETENTION: changing the retention window does
+// not move it.
+const telemetryMaxAge = 90 * 24 * time.Hour
+
+// telemetryEventProblem validates a client-reported event and normalizes its
+// occurrence time. The client controls occurredAt, which orders the audit list
+// and drives the cursor: a future value is clamped to server time rather than
+// trusted (and rather than dropped, which would lose legitimate telemetry
+// whenever a client clock runs fast), and a value older than the retention
+// window is refused.
+func telemetryEventProblem(eventID, eventType string, result *string, occurredAt, now time.Time) (string, string, time.Time) {
+	normalized := occurredAt
+	if strings.TrimSpace(eventID) == "" || len(eventID) > 256 {
+		return "INVALID_EVENT_ID", "The event identifier must be between 1 and 256 characters.", normalized
+	}
+	if strings.TrimSpace(eventType) == "" || len(eventType) > 128 {
+		return "INVALID_TYPE", "The event type must be between 1 and 128 characters.", normalized
+	}
+	if result != nil {
+		switch *result {
+		case "success", "failure", "info":
+		default:
+			return "INVALID_RESULT", "The event result must be success, failure, or info.", normalized
+		}
+	}
+	if occurredAt.IsZero() {
+		return "INVALID_OCCURRED_AT", "The event occurrence time is required.", normalized
+	}
+	if occurredAt.After(now) {
+		normalized = now
+	}
+	if normalized.Before(now.Add(-telemetryMaxAge)) {
+		return "INVALID_OCCURRED_AT", "The event occurrence time is older than the retention window.", normalized
+	}
+	return "", "", normalized
 }
 
 func (s *Server) searchTelemetryEvents(response http.ResponseWriter, request *http.Request) {

@@ -100,7 +100,7 @@ AND EXISTS (
   WHERE ca.deployment_id=c.deployment_id AND ca.credential_id=c.id
     AND (ca.expires_at IS NULL OR ca.expires_at>now()) AND (
     (ca.subject_type='user' AND ca.subject_id=$2)
-    OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
+    OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
     OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
   )
 )
@@ -174,7 +174,7 @@ JOIN users u ON u.id=$2 AND u.deployment_id=$1
 WHERE ca.deployment_id=$1 AND ca.credential_id=$3
   AND (ca.expires_at IS NULL OR ca.expires_at>now()) AND (
   (ca.subject_type='user' AND ca.subject_id=$2)
-  OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_role_bindings urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
+  OR (ca.subject_type='role' AND EXISTS (SELECT 1 FROM user_effective_roles urb JOIN roles r ON r.deployment_id=urb.deployment_id AND r.id=urb.role_id AND r.enabled=true WHERE urb.deployment_id=$1 AND urb.user_id=u.id AND urb.role_id=ca.subject_id))
   OR (ca.subject_type='team' AND EXISTS (SELECT 1 FROM user_team_bindings utb JOIN teams t ON t.deployment_id=utb.deployment_id AND t.id=utb.team_id AND t.enabled=true WHERE utb.deployment_id=$1 AND utb.user_id=u.id AND utb.team_id=ca.subject_id))
 ))`, claims.DeploymentID, claims.Subject, credentialID).Scan(&authorized)
 		if err != nil {
@@ -330,11 +330,28 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 		value := strings.TrimSpace(*input.Service)
 		input.Service = &value
 	}
-	record, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).UpdateCredential(
-		request.Context(), chi.URLParam(request, "credentialId"), repository.UpdateCredentialParams{
-			Name: input.Name, Service: input.Service, DeliveryMode: input.DeliveryMode, Enabled: input.Enabled,
-		},
-	)
+	claims := claimsFrom(request)
+	credentialID := chi.URLParam(request, "credentialId")
+	var record repository.Credential
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetCredential(request.Context(), credentialID)
+		if err != nil {
+			return err
+		}
+		updated, err := tx.UpdateCredential(
+			request.Context(), credentialID, repository.UpdateCredentialParams{
+				Name: input.Name, Service: input.Service, DeliveryMode: input.DeliveryMode, Enabled: input.Enabled,
+			},
+		)
+		if err != nil {
+			return err
+		}
+		record = updated
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "update", ResourceType: "credential", ResourceID: credentialID, Result: "success",
+			Changes: auditCredentialChanges(before, updated),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential was not found.")
 		return
@@ -343,6 +360,7 @@ func (s *Server) updateCredential(response http.ResponseWriter, request *http.Re
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, credentialJSON(record))
 }
 
@@ -375,13 +393,26 @@ func (s *Server) rotateCredential(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusInternalServerError, "CREDENTIAL_ENCRYPT_FAILED", "The credential could not be encrypted.")
 		return
 	}
-	record, err := s.app.Store.Deployment(tenant).RotateCredential(
-		request.Context(), id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value),
-	)
+	var record repository.Credential
+	err = s.app.Store.Deployment(tenant).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		rotated, err := tx.RotateCredential(
+			request.Context(), id, envelope.Ciphertext, envelope.Nonce, envelope.KeyID, credential.Mask(input.Value),
+		)
+		if err != nil {
+			return err
+		}
+		record = rotated
+		// The value itself is never audited; only the rotation event is.
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claimsFrom(request).Subject, Action: "rotate", ResourceType: "credential", ResourceID: id, Result: "success",
+			Changes: map[string]any{"after": map[string]any{"rotated": true}},
+		})
+	})
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, credentialJSON(record))
 }
 
@@ -389,8 +420,23 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		DeleteCredential(request.Context(), chi.URLParam(request, "credentialId"))
+	claims := claimsFrom(request)
+	credentialID := chi.URLParam(request, "credentialId")
+	var removed repository.Credential
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetCredential(request.Context(), credentialID)
+		if err != nil {
+			return err
+		}
+		removed = before
+		if err := tx.DeleteCredential(request.Context(), credentialID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "credential", ResourceID: credentialID, Result: "success",
+			Changes: auditRemoval(auditCredentialSnapshot(removed)),
+		})
+	})
 	if isForeignKeyViolation(err) {
 		writeProblem(response, request, http.StatusConflict, "CREDENTIAL_IN_USE", "The credential is referenced by a model and cannot be deleted.")
 		return
@@ -403,7 +449,19 @@ func (s *Server) deleteCredential(response http.ResponseWriter, request *http.Re
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
+}
+
+// auditCredentialChanges reports the credential fields an update can touch,
+// masked by the same allowlist the request payload goes through. The secret
+// value is never part of the snapshot.
+func auditCredentialChanges(before, after repository.Credential) map[string]any {
+	return auditChanges(auditCredentialSnapshot(before), auditCredentialSnapshot(after))
+}
+
+func auditCredentialSnapshot(record repository.Credential) map[string]any {
+	return map[string]any{"name": record.Name, "service": record.Service, "deliveryMode": record.DeliveryMode, "enabled": record.Enabled}
 }
 
 func isForeignKeyViolation(err error) bool {
@@ -425,11 +483,20 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).ListCredentialAssignments(request.Context())
+	pageSize := limit(request)
+	items, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
+		ListCredentialAssignmentsPage(request.Context(), request.URL.Query().Get("cursor"), pageSize+1)
+	if errors.Is(err, repository.ErrInvalidCursor) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The cursor is not valid for this list.")
+		return
+	}
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
 	}
+	items, nextCursor := page(items, pageSize, func(item repository.CredentialAssignment) string {
+		return repository.AssignmentCursor(item.CreatedAt, item.ID)
+	})
 	assignments := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		assignments = append(assignments, map[string]any{
@@ -437,7 +504,7 @@ func (s *Server) listCredentialAssignments(response http.ResponseWriter, request
 			"subject": map[string]string{"type": item.SubjectType, "id": item.SubjectID}, "createdAt": item.CreatedAt,
 		})
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments})
+	writeJSON(response, http.StatusOK, map[string]any{"assignments": assignments, "nextCursor": nextCursor})
 }
 
 func (s *Server) createCredentialAssignment(response http.ResponseWriter, request *http.Request) {
@@ -450,6 +517,9 @@ func (s *Server) createCredentialAssignment(response http.ResponseWriter, reques
 	}
 	if input.CredentialID == "" || input.Subject.ID == "" || !validCredentialSubject(input.Subject.Type) {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The credential and a valid assignment subject are required.")
+		return
+	}
+	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
 		return
 	}
 	tenant := claimsFrom(request).DeploymentID
@@ -485,8 +555,25 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 	if !s.requireCredentialService(response, request) {
 		return
 	}
-	err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).
-		DeleteCredentialAssignment(request.Context(), chi.URLParam(request, "assignmentId"))
+	claims := claimsFrom(request)
+	assignmentID := chi.URLParam(request, "assignmentId")
+	var removed repository.CredentialAssignment
+	err := s.app.Store.Deployment(claims.DeploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		before, err := tx.GetCredentialAssignment(request.Context(), assignmentID)
+		if err != nil {
+			return err
+		}
+		removed = before
+		if err := tx.DeleteCredentialAssignment(request.Context(), assignmentID); err != nil {
+			return err
+		}
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "delete", ResourceType: "credential_assignment", ResourceID: assignmentID, Result: "success",
+			Changes: auditRemoval(map[string]any{
+				"credentialId": removed.CredentialID, "subjectType": removed.SubjectType, "subjectId": removed.SubjectID,
+			}),
+		})
+	})
 	if errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The credential assignment was not found.")
 		return
@@ -495,6 +582,7 @@ func (s *Server) deleteCredentialAssignment(response http.ResponseWriter, reques
 		databaseFailure(response, request, err)
 		return
 	}
+	markAdminAuditRecorded(request)
 	response.WriteHeader(http.StatusNoContent)
 }
 

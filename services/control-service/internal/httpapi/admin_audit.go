@@ -2,16 +2,21 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 // auditPayloadLimit bounds how much of a mutating request body is retained in
@@ -23,40 +28,98 @@ const auditPayloadLimit = 64 << 10
 // sensitive field it did not name (a credential "value", for example), so the
 // default is to withhold. Comparison is case-insensitive.
 var auditSafeKeys = map[string]struct{}{
-	"name":         {},
-	"displayname":  {},
-	"description":  {},
-	"enabled":      {},
-	"status":       {},
-	"kind":         {},
-	"type":         {},
-	"protocol":     {},
-	"subjecttype":  {},
-	"subjectid":    {},
-	"roleids":      {},
-	"teamids":      {},
-	"userids":      {},
-	"username":     {},
-	"modelid":      {},
-	"modelids":     {},
-	"resourcetype": {},
-	"resourceid":   {},
-	"revision":     {},
-	"scopes":       {},
-	"tags":         {},
-	"parentid":     {},
-	"expiresat":    {},
-	"service":      {},
-	"deliverymode": {},
-	"capabilities": {},
-	"reason":       {},
-	"quota":        {},
-	"action":       {},
-	"sourcetype":   {},
-	"identifier":   {},
-	"version":      {},
-	"title":        {},
-	"path":         {},
+	"name":                   {},
+	"displayname":            {},
+	"description":            {},
+	"enabled":                {},
+	"status":                 {},
+	"kind":                   {},
+	"type":                   {},
+	"protocol":               {},
+	"subjecttype":            {},
+	"subjectid":              {},
+	"roleids":                {},
+	"defaultroleids":         {},
+	"teamids":                {},
+	"userids":                {},
+	"username":               {},
+	"modelid":                {},
+	"modelids":               {},
+	"resourcetype":           {},
+	"resourceid":             {},
+	"revision":               {},
+	"scopes":                 {},
+	"tags":                   {},
+	"parentid":               {},
+	"expiresat":              {},
+	"service":                {},
+	"deliverymode":           {},
+	"capabilities":           {},
+	"reason":                 {},
+	"quota":                  {},
+	"action":                 {},
+	"sourcetype":             {},
+	"identifier":             {},
+	"version":                {},
+	"title":                  {},
+	"path":                   {},
+	"email":                  {},
+	"before":                 {},
+	"after":                  {},
+	"rotated":                {},
+	"endpoint":               {},
+	"upstreammodel":          {},
+	"localmodelref":          {},
+	"contextwindow":          {},
+	"isdefault":              {},
+	"credentialid":           {},
+	"hometeamid":             {},
+	"promptskillid":          {},
+	"rulekind":               {},
+	"resourcekind":           {},
+	"startsat":               {},
+	"localsubjectid":         {},
+	"externalid":             {},
+	"scopetype":              {},
+	"scopeid":                {},
+	"maximum":                {},
+	"interval":               {},
+	"permissions":            {},
+	"displaytitle":           {},
+	"reasoningcompatibility": {},
+	"skillid":                {},
+}
+
+// auditChanges documents a mutation's before/after state, masked by the
+// fail-closed allowlist so an unlisted field can never reach the audit row.
+func auditChanges(before, after map[string]any) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": before, "after": after}).(map[string]any)
+	return masked
+}
+
+// auditRemoval documents the state a delete removed. It runs through the same
+// allowlist as every other snapshot, so a delete cannot leak a field that an
+// update would have redacted.
+func auditRemoval(before map[string]any) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"before": before}).(map[string]any)
+	return masked
+}
+
+// auditCreation documents the state a create established; there is no before.
+func auditCreation(after map[string]any) map[string]any {
+	masked, _ := maskAuditValue(map[string]any{"after": after}).(map[string]any)
+	return masked
+}
+
+// stripURLQuery drops a URL's query and fragment before it is audited: an
+// endpoint may carry an inline credential in its query string.
+func stripURLQuery(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.RawQuery == "" && parsed.Fragment == "") {
+		return raw
+	}
+	parsed.RawQuery, parsed.Fragment = "", ""
+	return parsed.String()
 }
 
 type auditStatusWriter struct {
@@ -81,9 +144,41 @@ func (writer *auditStatusWriter) Write(body []byte) (int, error) {
 	return writer.ResponseWriter.Write(body)
 }
 
-// auditAdminWrites records every successful administrative write. It is
-// deliberately best-effort: an audit failure never turns a completed operation
-// into an error response, but it is logged so the gap is visible.
+// auditRecorded marks a request whose handler already wrote the audit row
+// inside its own transaction, so the fallback middleware must not duplicate it.
+type auditRecorded struct{ done bool }
+
+const auditRecordedKey contextKey = "aep-audit-recorded"
+
+// recordAdminAuditTx appends an administrative audit row through an open pgx
+// transaction, so the row commits with the change it describes. Handlers that
+// own a raw pgx transaction use this instead of the store's gorm writer.
+func recordAdminAuditTx(ctx context.Context, tx pgx.Tx, deploymentID string, entry repository.AdminAuditEntry) error {
+	var payload any
+	if entry.Changes != nil {
+		raw, err := json.Marshal(entry.Changes)
+		if err != nil {
+			return err
+		}
+		payload = raw
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO admin_audit_events (deployment_id,actor_user_id,action,resource_type,resource_id,result,reason,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		deploymentID, nullableString(entry.ActorUserID), entry.Action, entry.ResourceType, nullableString(entry.ResourceID), entry.Result, nullableString(entry.Reason), payload)
+	return err
+}
+
+func markAdminAuditRecorded(request *http.Request) {
+	if flag, ok := request.Context().Value(auditRecordedKey).(*auditRecorded); ok {
+		flag.done = true
+	}
+}
+
+// auditAdminWrites records every successful administrative write that its
+// handler did not record itself. It is deliberately best-effort: an audit
+// failure never turns a completed operation into an error response, but it is
+// logged so the gap is visible. Handlers that write the audit in their own
+// transaction take precedence.
 func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
@@ -103,7 +198,11 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 			}
 		}
 		recorder := &auditStatusWriter{ResponseWriter: response, status: http.StatusOK}
-		next.ServeHTTP(recorder, request)
+		recorded := &auditRecorded{}
+		next.ServeHTTP(recorder, request.WithContext(context.WithValue(request.Context(), auditRecordedKey, recorded)))
+		if recorded.done {
+			return
+		}
 		if recorder.status < 200 || recorder.status >= 300 {
 			return
 		}
@@ -206,7 +305,9 @@ func adminAuditTarget(method, path string) (action, resourceType, resourceID str
 	case "test-access":
 		action = "test"
 	}
-	if len(segments) > 1 && !adminAuditVerbSegment(segments[1]) {
+	if collection == "compute" && len(segments) > 2 && segments[1] == "assignments" {
+		resourceID = segments[2]
+	} else if len(segments) > 1 && !adminAuditVerbSegment(segments[1]) {
 		resourceID = segments[1]
 	}
 	return action, resourceType, resourceID
@@ -262,6 +363,11 @@ func adminAuditResourceType(collection string, segments []string) string {
 		return "data_plane"
 	case "deployment":
 		return "deployment_settings"
+	case "compute":
+		if len(segments) > 1 && segments[1] == "assignments" {
+			return "compute_assignment"
+		}
+		return "compute_tier"
 	case "model-gateway":
 		if len(segments) > 1 {
 			switch segments[1] {

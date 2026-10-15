@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -60,12 +61,14 @@ func TestHeartbeatAndControlDeliveryLifecycle(t *testing.T) {
 	}
 
 	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+		WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(ptrString("42")))
 	now := time.Now().UTC()
 	pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(0), int32(50)).
 		WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}).
 			AddRow("delivery-1", "event-1", int64(42), "skill.manifest.changed", "user", nil, nil, nil, nil, "skill.reconcile", now, now.Add(time.Hour)))
 	events := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=0&limit=50", "")
-	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"deliveryId":"delivery-1"`) {
+	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"deliveryId":"delivery-1"`) || !strings.Contains(events.Body.String(), `"watermark":"42"`) {
 		t.Fatalf("events = %d %s", events.Code, events.Body.String())
 	}
 
@@ -86,6 +89,38 @@ func TestHeartbeatAndControlDeliveryLifecycle(t *testing.T) {
 	if result.Code != http.StatusNoContent {
 		t.Fatalf("result = %d %s", result.Code, result.Body.String())
 	}
+}
+
+// The control-event list must report the same session watermark as the
+// heartbeat: the largest cursor ever delivered, or an empty string when the
+// session has no deliveries. This test pins both cases, including a session
+// whose pending page is empty but whose delivery history is not.
+func TestListControlEventsReportsWatermark(t *testing.T) {
+	t.Run("no deliveries", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+		pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+			WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(nil))
+		pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(0), int32(50)).
+			WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}))
+		events := userRequest(New(application).Handler(), userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=0&limit=50", "")
+		if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"watermark":""`) || !strings.Contains(events.Body.String(), `"items":[]`) {
+			t.Fatalf("events = %d %s", events.Code, events.Body.String())
+		}
+	})
+
+	t.Run("delivered history with empty page", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+		pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+			WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(ptrString("147")))
+		pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(140), int32(50)).
+			WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}))
+		events := userRequest(New(application).Handler(), userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=140&limit=50", "")
+		if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"watermark":"147"`) {
+			t.Fatalf("events = %d %s", events.Code, events.Body.String())
+		}
+	})
 }
 
 func TestCreateControlEventExpandsTeamDescendants(t *testing.T) {
@@ -214,12 +249,16 @@ func TestControlEventValidationAndAdminQueries(t *testing.T) {
 func TestTelemetryUploadAndSearch(t *testing.T) {
 	application, pool, adminToken, userToken := newRuntimeHTTPApplication(t)
 	handler := New(application).Handler()
-	payload := `{"events":[{"eventId":"telemetry-1","type":"skill.sync.completed","occurredAt":"2026-09-11T10:00:00Z","data":{"version":"2"}},{"eventId":"telemetry-2","type":"skill.sync.failed","occurredAt":"2026-09-11T10:01:00Z","result":"failure","data":{}}]}`
+	payload := fmt.Sprintf(`{"events":[{"eventId":"telemetry-1","type":"skill.sync.completed","occurredAt":"%s","data":{"version":"2"}},{"eventId":"telemetry-2","type":"skill.sync.failed","occurredAt":"%s","result":"failure","data":{}}]}`, telemetryRecentTime(), telemetryRecentTime())
 	// One multi-VALUES statement carries the whole batch (10 args per row).
 	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(
 		"telemetry-1", "deployment-a", "user-a", "session-user", "skill.sync.completed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 		"telemetry-2", "deployment-a", "user-a", "session-user", "skill.sync.failed", pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
 	).WillReturnResult(pgxmock.NewResult("INSERT", 2))
+	// Accepted ids are read back so an event_id owned by another deployment is
+	// reported instead of silently dropped.
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(
+		pgxmock.NewRows([]string{"event_id"}).AddRow("telemetry-1").AddRow("telemetry-2"))
 	upload := userRequest(handler, userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
 	if upload.Code != http.StatusOK || !strings.Contains(upload.Body.String(), `"accepted":["telemetry-1","telemetry-2"]`) {
 		t.Fatalf("telemetry upload = %d %s", upload.Code, upload.Body.String())
@@ -476,10 +515,89 @@ func TestTelemetryBatchRejectionsIncludeMessage(t *testing.T) {
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnError(errors.New("store unavailable"))
 	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch",
-		`{"events":[{"eventId":"e1","type":"t","occurredAt":"2026-10-01T00:00:00Z","result":"success"}]}`)
+		fmt.Sprintf(`{"events":[{"eventId":"e1","type":"t","occurredAt":"%s","result":"success"}]}`, telemetryRecentTime()))
 	if response.Code != http.StatusOK ||
 		!strings.Contains(response.Body.String(), `"code":"INTERNAL_ERROR"`) ||
 		!strings.Contains(response.Body.String(), `"message":"The telemetry batch could not be stored."`) {
 		t.Fatalf("telemetry rejection = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTelemetryUploadRejectsInvalidEvents(t *testing.T) {
+	application, _, _, userToken := newRuntimeHTTPApplication(t)
+	payload := fmt.Sprintf(`{"events":[
+		{"eventId":"","type":"t","occurredAt":"%s","result":"success"},
+		{"eventId":"e2","type":"","occurredAt":"%s","result":"success"},
+		{"eventId":"e3","type":"t","occurredAt":"%s","result":"bogus"},
+		{"eventId":"e4","type":"t","occurredAt":"%s","result":"success"}
+	]}`, telemetryRecentTime(), telemetryRecentTime(), telemetryRecentTime(), telemetryStaleTime())
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":[]`) {
+		t.Fatalf("invalid telemetry upload = %d %s", response.Code, response.Body.String())
+	}
+	for _, code := range []string{"INVALID_EVENT_ID", "INVALID_TYPE", "INVALID_RESULT", "INVALID_OCCURRED_AT"} {
+		if !strings.Contains(response.Body.String(), `"`+code+`"`) {
+			t.Fatalf("missing %s in %s", code, response.Body.String())
+		}
+	}
+}
+
+func TestTelemetryUploadReportsCrossDeploymentConflict(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 0))
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", fmt.Sprintf(`{"events":[{"eventId":"e1","type":"t","occurredAt":"%s","result":"success"}]}`, telemetryRecentTime()))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"EVENT_ID_CONFLICT"`) || !strings.Contains(response.Body.String(), `"accepted":[]`) {
+		t.Fatalf("conflicting telemetry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTelemetryUploadClampsFutureOccurrenceTime(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}).AddRow("e1"))
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", `{"events":[{"eventId":"e1","type":"t","occurredAt":"2999-01-01T00:00:00Z","result":"success"}]}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":["e1"]`) || strings.Contains(response.Body.String(), "INVALID_OCCURRED_AT") {
+		t.Fatalf("clamped telemetry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTelemetryUploadDeduplicatesRepeatedEventID(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	// The insert still carries both rows (ON CONFLICT skips the second).
+	args := make([]any, 20)
+	for i := range args {
+		args[i] = pgxmock.AnyArg()
+	}
+	pool.ExpectExec(`INSERT INTO telemetry_events`).WithArgs(args...).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	pool.ExpectQuery(`SELECT event_id FROM telemetry_events`).WithArgs("deployment-a", pgxmock.AnyArg()).WillReturnRows(pgxmock.NewRows([]string{"event_id"}).AddRow("dup"))
+	payload := fmt.Sprintf(`{"events":[{"eventId":"dup","type":"t","occurredAt":"%s","result":"success"},{"eventId":"dup","type":"t","occurredAt":"%s","result":"success"}]}`, telemetryRecentTime(), telemetryRecentTime())
+	response := userRequest(New(application).Handler(), userToken, http.MethodPost, "/aep/v1/user/events/batch", payload)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"accepted":["dup"]`) || !strings.Contains(response.Body.String(), `"rejected":[]`) {
+		t.Fatalf("duplicate telemetry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+// telemetryRecentTime returns an occurrence time inside the accepted window so
+// the telemetry fixtures do not expire as the calendar advances.
+func telemetryRecentTime() string {
+	return time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+}
+
+// telemetryStaleTime returns an occurrence time older than the accepted window.
+func telemetryStaleTime() string {
+	return time.Now().UTC().Add(-100 * 24 * time.Hour).Format(time.RFC3339)
+}
+
+func TestTelemetryEventProblemBoundsOccurrenceTime(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	if code, _, at := telemetryEventProblem("e1", "t", nil, now.Add(48*time.Hour), now); code != "" || !at.Equal(now) {
+		t.Fatalf("future occurrence = (%q, %s), want clamped to %s", code, at, now)
+	}
+	if code, _, _ := telemetryEventProblem("e1", "t", nil, now.Add(-100*24*time.Hour), now); code != "INVALID_OCCURRED_AT" {
+		t.Fatalf("stale occurrence = %q, want INVALID_OCCURRED_AT", code)
+	}
+	if code, _, _ := telemetryEventProblem("e1", "t", nil, time.Time{}, now); code != "INVALID_OCCURRED_AT" {
+		t.Fatalf("missing occurrence = %q, want INVALID_OCCURRED_AT", code)
 	}
 }

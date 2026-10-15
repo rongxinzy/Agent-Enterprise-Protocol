@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -19,70 +20,74 @@ const (
 )
 
 type Config struct {
-	Environment               string
-	LogFormat                 string
-	LogLevel                  string
-	EnableMockFederatedAuth   bool
-	Address                   string
-	HTTPReadHeaderTimeout     time.Duration
-	HTTPReadTimeout           time.Duration
-	HTTPWriteTimeout          time.Duration
-	HTTPIdleTimeout           time.Duration
-	HTTPShutdownTimeout       time.Duration
-	HTTPMaxHeaderBytes        int
-	TrustedProxyCIDRs         []netip.Prefix
-	LoginFailureLimit         int
-	LoginSourceFailureLimit   int
-	LoginFailureWindow        time.Duration
-	LoginBackoffBase          time.Duration
-	LoginBackoffMax           time.Duration
-	DatabaseURL               string
-	MinioEndpoint             string
-	MinioAccessKey            string
-	MinioSecretKey            string
-	MinioBucket               string
-	MinioSecure               bool
-	Issuer                    string
-	SigningKeyBase64          string
-	AccessTTL                 time.Duration
-	ModelAccessTTL            time.Duration
-	ModelGatewayBaseURL       string
-	AgentControlBaseURL       string
-	ModelHealthInterval       time.Duration
-	ModelHealthTimeout        time.Duration
-	ModelHealthWebhookURL     string
-	ModelFallbackIDs          []string
-	DeploymentID              string
-	DeploymentName            string
-	DataPlaneReconcilerToken  string
-	GatewayLicenseStatusToken string
-	GatewayPrometheusURL      string
-	GatewayPrometheusToken    string
-	GatewayLokiURL            string
-	GatewayLokiToken          string
-	GatewayQuotaURL           string
-	GatewayQuotaToken         string
-	GatewayMetricsDeployment  string
-	GatewayOrganizationLogs   bool
-	MaxResidentAgents         int
-	CredentialMasterKeyBase64 string
-	CredentialMasterKeyFile   string
-	LicenseTrustedKeys        map[string]string
-	LicenseTrustedKeysFile    string
-	LicenseFile               string
-	LicenseDeploymentID       string
-	LicenseCustomerID         string
-	RefreshTTL                time.Duration
-	RetentionCleanupInterval  time.Duration
-	OperationalRetention      time.Duration
-	TelemetryRetention        time.Duration
-	AuditRetention            time.Duration
-	RetentionCleanupBatchSize int
-	BootstrapDeploymentID     string
-	BootstrapDeploymentName   string
-	BootstrapAdminUsername    string
-	BootstrapAdminPassword    string
-	BootstrapAdminDisplayName string
+	Environment                 string
+	LogFormat                   string
+	LogLevel                    string
+	EnableMockFederatedAuth     bool
+	Address                     string
+	HTTPReadHeaderTimeout       time.Duration
+	HTTPReadTimeout             time.Duration
+	HTTPWriteTimeout            time.Duration
+	HTTPIdleTimeout             time.Duration
+	HTTPShutdownTimeout         time.Duration
+	HTTPMaxHeaderBytes          int
+	TrustedProxyCIDRs           []netip.Prefix
+	LoginFailureLimit           int
+	LoginSourceFailureLimit     int
+	LoginFailureWindow          time.Duration
+	LoginBackoffBase            time.Duration
+	LoginBackoffMax             time.Duration
+	DatabaseURL                 string
+	MinioEndpoint               string
+	MinioAccessKey              string
+	MinioSecretKey              string
+	MinioBucket                 string
+	MinioSecure                 bool
+	Issuer                      string
+	SigningKeyBase64            string
+	AccessTTL                   time.Duration
+	ModelAccessTTL              time.Duration
+	ModelGatewayBaseURL         string
+	AgentControlBaseURL         string
+	ModelHealthInterval         time.Duration
+	ModelHealthTimeout          time.Duration
+	ModelHealthWebhookURL       string
+	ModelFallbackIDs            []string
+	ComputeTiersFile            string
+	ComputeDefaultTier          string
+	ComputeIdleHibernateSeconds int
+	ComputeConcurrencyCap       int
+	DeploymentID                string
+	DeploymentName              string
+	DataPlaneReconcilerToken    string
+	GatewayLicenseStatusToken   string
+	GatewayPrometheusURL        string
+	GatewayPrometheusToken      string
+	GatewayLokiURL              string
+	GatewayLokiToken            string
+	GatewayQuotaURL             string
+	GatewayQuotaToken           string
+	GatewayMetricsDeployment    string
+	GatewayOrganizationLogs     bool
+	MaxResidentAgents           int
+	CredentialMasterKeyBase64   string
+	CredentialMasterKeyFile     string
+	LicenseTrustedKeys          map[string]string
+	LicenseTrustedKeysFile      string
+	LicenseFile                 string
+	LicenseDeploymentID         string
+	LicenseCustomerID           string
+	RefreshTTL                  time.Duration
+	RetentionCleanupInterval    time.Duration
+	OperationalRetention        time.Duration
+	TelemetryRetention          time.Duration
+	AuditRetention              time.Duration
+	RetentionCleanupBatchSize   int
+	BootstrapDeploymentID       string
+	BootstrapDeploymentName     string
+	BootstrapAdminUsername      string
+	BootstrapAdminPassword      string
+	BootstrapAdminDisplayName   string
 }
 
 func Load() (Config, error) {
@@ -157,7 +162,7 @@ func Load() (Config, error) {
 	if cfg.LicenseTrustedKeys, err = loadTrustedKeys(cfg.LicenseTrustedKeysFile); err != nil {
 		return Config{}, err
 	}
-	if cfg.EnableMockFederatedAuth, err = boolean("AEP_ENABLE_MOCK_FEDERATED_AUTH", environment != "production"); err != nil {
+	if cfg.EnableMockFederatedAuth, err = boolean("AEP_ENABLE_MOCK_FEDERATED_AUTH", false); err != nil {
 		return Config{}, err
 	}
 	if cfg.MinioSecure, err = boolean("AEP_MINIO_SECURE", false); err != nil {
@@ -211,6 +216,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ModelFallbackIDs, err = stringList("AEP_MODEL_FALLBACK_IDS", 8); err != nil {
+		return Config{}, err
+	}
+	cfg.ComputeTiersFile = strings.TrimSpace(os.Getenv("AEP_COMPUTE_TIERS_FILE"))
+	cfg.ComputeDefaultTier = strings.TrimSpace(os.Getenv("AEP_COMPUTE_DEFAULT_TIER"))
+	if cfg.ComputeIdleHibernateSeconds, err = optionalIntegerRange("AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", 60, 86400); err != nil {
+		return Config{}, err
+	}
+	if cfg.ComputeConcurrencyCap, err = optionalIntegerRange("AEP_COMPUTE_CONCURRENCY_CAP", 1, 10000); err != nil {
 		return Config{}, err
 	}
 	for _, item := range []struct {
@@ -280,6 +293,9 @@ func (cfg Config) Validate() error {
 			return err
 		}
 	}
+	if len(cfg.ComputeDefaultTier) > 200 {
+		return errors.New("AEP_COMPUTE_DEFAULT_TIER must be at most 200 characters")
+	}
 	if strings.TrimSpace(cfg.MinioEndpoint) == "" || strings.TrimSpace(cfg.MinioBucket) == "" {
 		return errors.New("AEP_MINIO_ENDPOINT and AEP_MINIO_BUCKET must not be empty")
 	}
@@ -316,7 +332,28 @@ func (cfg Config) Validate() error {
 			return errors.New("AEP_GATEWAY_LICENSE_STATUS_TOKEN or AEP_GATEWAY_LICENSE_STATUS_TOKEN_FILE is required in production")
 		}
 	}
+	// Mock federated authentication hands out a bootstrap administrator session
+	// for a literal authorization code, so it is a local development fixture: it
+	// stays off unless asked for, and it may only listen on loopback.
+	if cfg.EnableMockFederatedAuth && !loopbackAddress(cfg.Address) {
+		return errors.New("AEP_ENABLE_MOCK_FEDERATED_AUTH requires AEP_ADDRESS to bind a loopback address")
+	}
 	return nil
+}
+
+// loopbackAddress reports whether a listen address accepts only local
+// connections: "localhost:8080", "127.0.0.1:8080", "[::1]:8080". A wildcard or
+// empty host (":8080", "0.0.0.0:8080") listens on every interface.
+func loopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 func loadTrustedKeys(file string) (map[string]string, error) {
@@ -418,6 +455,22 @@ func nonNegativeInteger(key string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(current)
 	if err != nil || parsed < 0 {
 		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return parsed, nil
+}
+
+// optionalIntegerRange parses an optional integer env var: empty means unset
+// (reported as 0 so resolution falls back to a runtime override), and a set
+// value must stay inside [minimum, maximum]. Values are plain integer counts
+// (seconds for durations), matching the API wire shape.
+func optionalIntegerRange(key string, minimum, maximum int) (int, error) {
+	current := strings.TrimSpace(os.Getenv(key))
+	if current == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(current)
+	if err != nil || parsed < minimum || parsed > maximum {
+		return 0, fmt.Errorf("%s must be an integer between %d and %d", key, minimum, maximum)
 	}
 	return parsed, nil
 }

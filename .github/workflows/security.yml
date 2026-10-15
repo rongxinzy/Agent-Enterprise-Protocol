@@ -1,7 +1,7 @@
 name: AEP security baseline
 
 on:
-  pull_request:
+  workflow_call:
   push:
     branches: [main]
   schedule:
@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   dependency-audit:
+    # PRs run this audit at the unified entry's top level to retain its required name.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

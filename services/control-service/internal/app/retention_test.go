@@ -66,6 +66,44 @@ func TestCleanupRetentionSkipsWhenAnotherReplicaHoldsLock(t *testing.T) {
 	}
 }
 
+func TestCleanupRetentionRollsBackOnAdminAuditFailure(t *testing.T) {
+	application, pool, _ := newMockApplication(t)
+	application.Config.RetentionCleanupBatchSize = 100
+	application.Config.AuditRetention = 24 * time.Hour
+	now := time.Now().UTC()
+	cutoff := now.Add(-application.Config.AuditRetention)
+	pool.ExpectBegin()
+	pool.ExpectQuery(`SELECT pg_try_advisory_xact_lock`).WithArgs(retentionAdvisoryLockID).
+		WillReturnRows(pgxmock.NewRows([]string{"locked"}).AddRow(true))
+	expectRetentionDelete(pool, `DELETE FROM authentication_audit_events`, cutoff, 100, 1)
+	expectRetentionDelete(pool, `DELETE FROM credential_resolution_audit`, cutoff, 100, 2)
+	expectRetentionDelete(pool, `DELETE FROM license_audit_events`, cutoff, 100, 3)
+	pool.ExpectExec(`DELETE FROM admin_audit_events`).WithArgs(cutoff, 100).
+		WillReturnError(errors.New("audit cleanup unavailable"))
+	pool.ExpectRollback()
+	if _, err := application.CleanupRetention(t.Context(), now); err == nil || !strings.Contains(err.Error(), "delete expired administrative audit") {
+		t.Fatalf("CleanupRetention() error = %v", err)
+	}
+}
+
+func TestCleanupRetentionPreservesAuditWithZeroRetention(t *testing.T) {
+	application, pool, _ := newMockApplication(t)
+	application.Config.RetentionCleanupBatchSize = 100
+	application.Config.AuditRetention = 0
+	now := time.Now().UTC()
+	pool.ExpectBegin()
+	pool.ExpectQuery(`SELECT pg_try_advisory_xact_lock`).WithArgs(retentionAdvisoryLockID).
+		WillReturnRows(pgxmock.NewRows([]string{"locked"}).AddRow(true))
+	// Only expiry cleanup remains enabled; any audit DELETE is unexpected.
+	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
+		expectRetentionDelete(pool, `DELETE FROM `+table, now, 100, 0)
+	}
+	pool.ExpectCommit()
+	if result, err := application.CleanupRetention(t.Context(), now); err != nil || result.AdminAudit != 0 || !result.LockAcquired {
+		t.Fatalf("CleanupRetention() = %+v, %v", result, err)
+	}
+}
+
 func TestCleanupRetentionRollsBackOnDeleteFailure(t *testing.T) {
 	application, pool, _ := newMockApplication(t)
 	application.Config.RetentionCleanupBatchSize = 100

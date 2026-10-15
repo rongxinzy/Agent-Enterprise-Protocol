@@ -42,6 +42,11 @@ paths:
         - {$ref: '#/components/parameters/RequestId'}
         - name: afterCursor
           in: query
+          description: |
+            Delivery cursor to resume after: pass the `nextCursor` of the previous
+            page. This is not the watermark — the watermark reports progress, and
+            passing it would skip deliveries with a smaller cursor that are still
+            pending.
           schema: {type: [string, 'null']}
         - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -240,7 +245,12 @@ components:
           required: [pending, watermark]
           properties:
             pending: {type: boolean}
-            watermark: {type: string}
+            watermark:
+              type: string
+              description: >-
+                Largest cursor delivered to the session so far, or an empty
+                string when nothing has been delivered. Carries the same value
+                as `ControlEventPage.watermark`.
         nextHeartbeatAfterSeconds: {type: integer, minimum: 5, maximum: 3600}
     ControlEventPage:
       type: object
@@ -250,7 +260,14 @@ components:
           type: array
           items: {$ref: '#/components/schemas/ControlEventDelivery'}
         nextCursor: {type: [string, 'null']}
-        watermark: {type: string}
+        watermark:
+          type: string
+          description: >-
+            Largest cursor delivered to the session so far, or an empty string
+            when nothing has been delivered. Carries the same value as
+            `HeartbeatResponse.controlEvents.watermark`. Informational: page with
+            `nextCursor`, not with this value, which can be ahead of deliveries
+            that are still pending.
     ControlEventDelivery:
       type: object
       required: [deliveryId, eventId, cursor, type, scope, task, createdAt, expiresAt]

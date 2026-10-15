@@ -1146,6 +1146,12 @@ components:
         builtIn: {type: boolean}
         enabled: {type: boolean}
         memberCount: {type: integer, minimum: 0}
+        defaultRoleIds:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items: {type: string}
+          description: Roles inherited by direct members of this enabled team. Combined with explicit user roles; removed on leaving the team. Does not confer the user admin flag or inherit through parent teams.
         parentId: {type: [string, 'null'], description: Parent team. Omitted for root teams.}
         path: {type: string, description: 'Materialized team path, for example /hq/engineering.'}
         depth: {type: integer, minimum: 0, description: Distance from the team forest root.}
@@ -1163,6 +1169,7 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
+        defaultRoleIds: {type: array, maxItems: 64, uniqueItems: true, items: {type: string}, description: 'Default roles for direct members. Omitted or empty means no inherited roles. Delegated operators cannot grant built-in roles or permissions they do not hold.'}
         parentId: {type: [string, 'null'], maxLength: 100, description: 'Parent team. Immutable after creation; path and depth are fixed at creation, so cyclic hierarchies are impossible.'}
     UpdateTeamRequest:
       type: object
@@ -1172,6 +1179,7 @@ components:
         name: {type: string, minLength: 1, maxLength: 256}
         description: {type: string, maxLength: 1024}
         enabled: {type: boolean}
+        defaultRoleIds: {type: array, maxItems: 64, uniqueItems: true, items: {type: string}, description: 'Replaces default roles for all current and future direct members. Omit to preserve; an empty array clears. Disabled teams or roles confer no inherited permissions.'}
     ReplaceUserRBACRequest:
       type: object
       required: [roleIds, teamIds]

@@ -85,7 +85,11 @@ func TestIdentityMappingAdminRoutes(t *testing.T) {
 			WithArgs("deployment-a", "wecom", 1).
 			WillReturnRows(sqlmock.NewRows(identitySourceColumns()).AddRow("deployment-a", "wecom", "directory", "WeCom", nil, true, now, now))
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "identity_mappings"`).
+			WithArgs("deployment-a", "wecom", "user", "ext-1", 1).
+			WillReturnError(gorm.ErrRecordNotFound)
 		mock.ExpectExec(`.*"identity_mappings".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/identity-sources/wecom/mappings",
 			`{"externalSubjectType":"user","externalId":"ext-1","localSubjectId":"user-a"}`)
@@ -107,9 +111,14 @@ func TestIdentityMappingAdminRoutes(t *testing.T) {
 
 	t.Run("delete removes the mapping", func(t *testing.T) {
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "identity_mappings"`).
+			WithArgs("deployment-a", "wecom", "user", "ext-1", 1).
+			WillReturnRows(sqlmock.NewRows(identityMappingColumns()).
+				AddRow("deployment-a", "wecom", "user", "ext-1", "user-a", "active", now, nil))
 		mock.ExpectExec(`DELETE FROM "identity_mappings"`).
 			WithArgs("deployment-a", "wecom", "user", "ext-1").
 			WillReturnResult(sqlmock.NewResult(0, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete,
 			"/aep/v1/admin/identity-sources/wecom/mappings/user/ext-1", "")
@@ -119,8 +128,43 @@ func TestIdentityMappingAdminRoutes(t *testing.T) {
 	})
 }
 
-func TestDataScopeRuleAdminRoutes(t *testing.T) {
+func TestUpdateAgentProfileAuditsTitle(t *testing.T) {
 	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
+	handler := New(application).Handler()
+	now := time.Now().UTC()
+
+	profileRows := func(title string) *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"deployment_id", "user_id", "display_title", "description", "avatar_object_key", "home_team_id", "prompt_skill_id", "ephemeral", "expires_at", "created_at", "updated_at"}).
+			AddRow("deployment-a", "agent-1", title, "帮忙的", nil, "rd", nil, false, nil, now, now)
+	}
+	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
+		WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows("旧标题"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
+		WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows("旧标题"))
+	mock.ExpectExec(`.*"agent_profiles".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+	capture := &auditPayloadCapture{}
+	expectAuditInsertCapturing(mock, capture)
+	mock.ExpectCommit()
+
+	response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/agents/agent-1/profile", `{"displayTitle":"新标题"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("patch = %d %s", response.Code, response.Body.String())
+	}
+	payload := string(capture.raw)
+	if !strings.Contains(payload, `"before":{"description":"帮忙的","displayTitle":"旧标题","homeTeamId":"rd"}`) {
+		t.Fatalf("audit payload before-values = %s", payload)
+	}
+	if !strings.Contains(payload, `"after":{"description":"帮忙的","displayTitle":"新标题","homeTeamId":"rd"}`) {
+		t.Fatalf("audit payload after-values = %s", payload)
+	}
+	if strings.Contains(payload, "[redacted]") {
+		t.Fatalf("audit payload redacted a declared field = %s", payload)
+	}
+}
+
+func TestDataScopeRuleAdminRoutes(t *testing.T) {
+	application, mock, pool, adminToken, _ := newDirectoryHTTPApplication(t)
 	handler := New(application).Handler()
 
 	t.Run("create validates the payload", func(t *testing.T) {
@@ -131,7 +175,9 @@ func TestDataScopeRuleAdminRoutes(t *testing.T) {
 	})
 
 	t.Run("create persists the grant", func(t *testing.T) {
-		// The identifier is derived from the reason; probe before insert.
+		// The subject probe runs first; the identifier is then derived from the
+		// reason, so the store lookup precedes the insert.
+		expectSubjectExists(pool, "rd")
 		mock.ExpectQuery(`SELECT \* FROM "data_scope_rules" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 			WithArgs("deployment-a", "team-needs-reporting", 1).
 			WillReturnRows(sqlmock.NewRows(dataScopeColumns()))
@@ -167,8 +213,13 @@ func TestDataScopeRuleAdminRoutes(t *testing.T) {
 
 	t.Run("delete removes the rule", func(t *testing.T) {
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "data_scope_rules"`).
+			WithArgs("deployment-a", "rule-1", 1).
+			WillReturnRows(sqlmock.NewRows(dataScopeColumns()).
+				AddRow("deployment-a", "rule-1", "exception_grant", "team", "rd", "skill", "reporting", nil, nil, "team needs reporting", "admin", time.Now().UTC(), time.Now().UTC()))
 		mock.ExpectExec(`DELETE FROM "data_scope_rules"`).
 			WithArgs("deployment-a", "rule-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/data-scope-rules/rule-1", "")
 		if response.Code != http.StatusNoContent {
@@ -216,7 +267,10 @@ func TestUpdateAgentProfileRoute(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
 			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows())
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).
+			WithArgs("deployment-a", "agent-1", 1).WillReturnRows(profileRows())
 		mock.ExpectExec(`.*"agent_profiles".*`).WillReturnResult(sqlmock.NewResult(1, 1))
+		expectAuditInsert(mock)
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/agents/agent-1/profile", `{"displayTitle":"新标题"}`)
 		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "新标题") {

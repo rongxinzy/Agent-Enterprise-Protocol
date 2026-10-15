@@ -217,6 +217,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions~1{version}~1publish'
   /aep/v1/admin/skills/{skillId}/versions/{version}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1versions~1{version}'
+  /aep/v1/admin/skills/{skillId}/installations:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skills~1{skillId}~1installations'
   /aep/v1/admin/skill-assignments:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1skill-assignments'
   /aep/v1/admin/skill-assignments/{assignmentId}:
@@ -307,8 +309,13 @@ paths:
       description: >-
         Manual escape hatch that publishes an operator-authored desired state.
         Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived
-        from the model catalog, which is the single source of truth. Secret
-        references identify external Secret material and never contain values.
+        from the model catalog, which is the single source of truth. Every route
+        must still match the catalog on the two fields that decide credential
+        flow - endpoint and the credential bound to the model - so a route can
+        neither read an arbitrary Secret nor send a credential to an arbitrary
+        upstream; the remaining rendering fields (providerType, upstreamModel,
+        protocol, enabled) may be overridden. Secret references identify
+        external Secret material and never contain values.
       requestBody:
         required: true
         content:
@@ -366,6 +373,12 @@ paths:
               schema: {$ref: '#/components/schemas/DataPlaneStatus'}
   /aep/v1/admin/deployment/settings:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1deployment~1settings'
+  /aep/v1/admin/compute/tiers:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1tiers'
+  /aep/v1/admin/compute/assignments:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1assignments'
+  /aep/v1/admin/compute/assignments/{agentId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1assignments~1{agentId}'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

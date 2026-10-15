@@ -1,7 +1,8 @@
-name: AEP
+name: CI validation
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -13,8 +14,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  sdk-gate:
+  # Preserve the exact check name already required by main branch protection.
+  # A reusable workflow would publish security / dependency-audit instead.
+  dependency-audit:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +30,78 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.9
+          cache: true
       - run: npm ci
+      - name: Audit production dependencies and reachable Go code
+        run: npm run security:check
+
+  codeql:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  security:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  gate-tests:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/devops-gate-tests.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+
+  ci-results:
+    if: ${{ github.event_name == 'pull_request' && always() }}
+    needs: [release-gate, dependency-audit, codeql, security, gate-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - name: Summarize all final results without polling
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node -e "const gate = require('./.github/ci-results.cjs'); const config = require('./.github/devops-ci.json'); gate.verifyNeeds(JSON.parse(process.env.CI_NEEDS), config.orchestrator.needs);"
+
+  sdk-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e_plan: ${{ steps.e2e-plan.outputs.e2e_plan }}
+      compose: ${{ steps.e2e-plan.outputs.compose }}
+      kubernetes: ${{ steps.e2e-plan.outputs.kubernetes }}
+      backup: ${{ steps.e2e-plan.outputs.backup }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Test E2E selection and gate decisions
+        run: node --test .github/e2e-plan.test.cjs .github/devops-gate.test.cjs
+      - name: Select E2E scenarios from the complete PR diff
+        id: e2e-plan
+        env:
+          AEP_CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          AEP_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/e2e-plan.cjs
       - run: npm run openapi:lint
       - run: npm run openapi:build
       - name: Verify generated contract files
@@ -49,6 +128,17 @@ jobs:
           args: --timeout=5m
       - name: Format check (gofmt)
         run: test -z "$(gofmt -l .)" || { gofmt -l .; echo '::error::run gofmt -w on the files above'; exit 1; }
+      - name: Verify generated operator manifests
+        run: |
+          bash services/gateway-operator/generate.sh
+          git diff --exit-code -- services/gateway-operator/
+      - name: Install envtest binaries for the operator suite
+        run: |
+          curl -sfL --retry 3 --max-time 300 -o /tmp/envtest.tar.gz https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v1.37.0/envtest-v1.37.0-linux-amd64.tar.gz
+          echo "1d1c453633b72c161a5d5a886cde7ac850be1a2ac796a9e1d4ffacacc64868295bdd2d57aa66cd0c158f5ce510f5dfe3fbc61ac21bd3dcfb875bd70658aa663a  /tmp/envtest.tar.gz" | sha512sum --check
+          mkdir -p /tmp/envtest-assets
+          tar -xzf /tmp/envtest.tar.gz -C /tmp/envtest-assets
+          echo "KUBEBUILDER_ASSETS=/tmp/envtest-assets/controller-tools/envtest" >> "$GITHUB_ENV"
       - name: Coverage floor
         run: scripts/check-coverage.sh 80
       - run: go test -race ./...
@@ -69,7 +159,9 @@ jobs:
       - run: npm run test --workspace @aep/example-node-agent
 
   compose-e2e:
+    if: ${{ needs.sdk-gate.outputs.compose == 'true' }}
     needs:
+      - sdk-gate
       - control-service
       - example-agent
     runs-on: ubuntu-latest
@@ -87,10 +179,15 @@ jobs:
           cache: true
       - run: npm ci
       - run: npm run build
-      - run: npm run test:e2e
+      - name: Run selected Compose E2E scenarios
+        env:
+          AEP_E2E_PLAN: ${{ needs.sdk-gate.outputs.e2e_plan }}
+        run: node .github/run-selected-e2e.cjs
 
   data-plane-kubernetes:
+    if: ${{ needs.sdk-gate.outputs.kubernetes == 'true' }}
     needs:
+      - sdk-gate
       - control-service
       - example-agent
     runs-on: ubuntu-latest
@@ -115,7 +212,9 @@ jobs:
       - run: npm run test:e2e:m3-kubernetes
 
   backup-restore:
+    if: ${{ needs.sdk-gate.outputs.backup == 'true' }}
     needs:
+      - sdk-gate
       - control-service
       - example-agent
     runs-on: ubuntu-latest
@@ -135,6 +234,7 @@ jobs:
       - run: npm run test:e2e:backup-restore
 
   release-gate:
+    if: ${{ always() }}
     needs:
       - sdk-gate
       - control-service
@@ -142,9 +242,20 @@ jobs:
       - compose-e2e
       - data-plane-kubernetes
       - backup-restore
+      - coverage-ratchet
     runs-on: ubuntu-latest
     steps:
-      - run: echo "AEP 95% release gate passed."
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Fail on failed, cancelled or unexpectedly skipped checks
+        env:
+          AEP_CI_NEEDS: ${{ toJSON(needs) }}
+        run: node .github/e2e-status.cjs
 
   coverage-ratchet:
     if: github.event_name == 'pull_request'
@@ -157,6 +268,13 @@ jobs:
         with:
           go-version: "1.26.9"
           cache: true
+      - name: Install envtest binaries for the operator suite
+        run: |
+          curl -sfL --retry 3 --max-time 300 -o /tmp/envtest.tar.gz https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v1.37.0/envtest-v1.37.0-linux-amd64.tar.gz
+          echo "1d1c453633b72c161a5d5a886cde7ac850be1a2ac796a9e1d4ffacacc64868295bdd2d57aa66cd0c158f5ce510f5dfe3fbc61ac21bd3dcfb875bd70658aa663a  /tmp/envtest.tar.gz" | sha512sum --check
+          mkdir -p /tmp/envtest-assets
+          tar -xzf /tmp/envtest.tar.gz -C /tmp/envtest-assets
+          echo "KUBEBUILDER_ASSETS=/tmp/envtest-assets/controller-tools/envtest" >> "$GITHUB_ENV"
       - name: Compare head vs base
         run: |
           measure() {
