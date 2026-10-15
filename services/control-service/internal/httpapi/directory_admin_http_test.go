@@ -164,7 +164,7 @@ func TestUpdateAgentProfileAuditsTitle(t *testing.T) {
 }
 
 func TestDataScopeRuleAdminRoutes(t *testing.T) {
-	application, mock, pool, adminToken, _ := newDirectoryHTTPApplication(t)
+	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
 	handler := New(application).Handler()
 
 	t.Run("create validates the payload", func(t *testing.T) {
@@ -175,13 +175,14 @@ func TestDataScopeRuleAdminRoutes(t *testing.T) {
 	})
 
 	t.Run("create persists the grant", func(t *testing.T) {
-		// The subject probe runs first; the identifier is then derived from the
-		// reason, so the store lookup precedes the insert.
-		expectSubjectExists(pool, "rd")
+		// The identifier is derived before the write transaction opens, so its
+		// store lookup comes first; the subject guard then opens that transaction
+		// and takes the subject lock before the insert.
 		mock.ExpectQuery(`SELECT \* FROM "data_scope_rules" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
 			WithArgs("deployment-a", "team-needs-reporting", 1).
 			WillReturnRows(sqlmock.NewRows(dataScopeColumns()))
 		mock.ExpectBegin()
+		expectStoreSubjectGuard(mock, "team", "rd", true)
 		mock.ExpectExec(`.*"data_scope_rules".*`).WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/data-scope-rules",

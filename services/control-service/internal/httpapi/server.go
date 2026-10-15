@@ -18,6 +18,7 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/config"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 type contextKey string
@@ -354,36 +355,35 @@ func passwordChangeRouteAllowed(request *http.Request) bool {
 	return request.Method == http.MethodGet && request.URL.Path == "/aep/v1/user/me"
 }
 
-// requireSubject checks that a polymorphic assignment subject exists in this
-// deployment. Subject ids carry no foreign key, so without this check an
-// assignment could name a role or team that was just deleted - and because those
-// ids are derived from the name, a later subject reusing the identifier would
-// inherit the grant.
-func (s *Server) requireSubject(response http.ResponseWriter, request *http.Request, subjectType, subjectID string) bool {
-	var table string
-	switch subjectType {
-	case "user":
-		table = "users"
-	case "role":
-		table = "roles"
-	case "team":
-		table = "teams"
-	default:
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
+// requireSubjectType rejects a polymorphic subject type that no table backs. It
+// runs before a write transaction is opened; whether the subject exists is
+// decided inside that transaction by the subject guard, so the check can no
+// longer be interleaved with a concurrent deletion.
+func requireSubjectType(response http.ResponseWriter, request *http.Request, subjectType string) bool {
+	if _, ok := repository.SubjectTable(subjectType); ok {
+		return true
+	}
+	writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", "The assignment subject type is invalid.")
+	return false
+}
+
+// subjectGuardError answers the INVALID_SUBJECT contract for a failed subject
+// guard and reports whether it handled the response. Subject ids carry no
+// foreign key, so without this guard an assignment could name a role or team
+// that was just deleted - and because those ids are derived from the name, a
+// later subject reusing the identifier would inherit the grant.
+func subjectGuardError(response http.ResponseWriter, request *http.Request, subjectType, subjectID string, err error) bool {
+	if !errors.Is(err, repository.ErrSubjectNotFound) {
 		return false
 	}
-	var exists bool
-	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE deployment_id=$1 AND id=$2)`, claimsFrom(request).DeploymentID, subjectID).Scan(&exists)
-	if err != nil {
-		databaseFailure(response, request, err)
-		return false
-	}
-	if !exists {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", fmt.Sprintf("The assignment subject %s %q does not exist in this deployment.", subjectType, subjectID))
-		return false
-	}
+	writeProblem(response, request, http.StatusBadRequest, "INVALID_SUBJECT", fmt.Sprintf("The assignment subject %s %q does not exist in this deployment.", subjectType, subjectID))
 	return true
 }
+
+// errGrantResourceMissing marks a resource probe that failed inside a grant
+// write transaction, so the handler can answer 404 once that transaction has
+// rolled back. It never leaves the handler.
+var errGrantResourceMissing = errors.New("grant resource does not exist")
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
