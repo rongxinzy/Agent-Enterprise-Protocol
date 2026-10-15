@@ -33,6 +33,10 @@ func conditions(items *[]metav1.Condition, generation int64, accepted, applied b
 func (r *ModelRouteReconciler) appliedStatus(ctx context.Context, route *gateway.ModelRoute, accepted, applied bool, reason, message string, inventory []gateway.AppliedResource, hash string) (ctrl.Result, error) {
 	base := route.DeepCopy()
 	conditions(&route.Status.Conditions, route.Generation, accepted, applied, reason, message)
+	if applied {
+		r.Runtime.inheritDataPlane(ctx, route.Namespace, hash, route.Generation, &route.Status.Conditions)
+	}
+	preserveReadyTransition(&route.Status.Conditions, base.Status.Conditions)
 	route.Status.ObservedGeneration = route.Generation
 	route.Status.ObservedPublication = publicationReference(route)
 	route.Status.AppliedSnapshot = hash
@@ -128,6 +132,10 @@ func (r *ModelPolicyReconciler) reconcileApplied(ctx context.Context, policy *ga
 		applied, reason, message = true, "ResourcesApplied", "Native policy resources applied; data-plane readiness is unobserved"
 	}
 	conditions(&policy.Status.Conditions, policy.Generation, accepted, applied, reason, message)
+	if applied {
+		r.Runtime.inheritDataPlane(ctx, policy.Namespace, in.hash, policy.Generation, &policy.Status.Conditions)
+	}
+	preserveReadyTransition(&policy.Status.Conditions, base.Status.Conditions)
 	policy.Status.ObservedGeneration = policy.Generation
 	policy.Status.ObservedPublication = publicationReference(policy)
 	policy.Status.AppliedSnapshot = ""

@@ -26,7 +26,7 @@ type DeploymentConfigReconciler struct{ *Runtime }
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 func (r *DeploymentConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var deployment gateway.DeploymentConfig
 	if err := r.Get(ctx, req.NamespacedName, &deployment); err != nil {
@@ -58,6 +58,14 @@ func (r *DeploymentConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 func (r *DeploymentConfigReconciler) status(ctx context.Context, deployment *gateway.DeploymentConfig, accepted, applied bool, reason, message string, inventory []gateway.AppliedResource, hash string) (ctrl.Result, error) {
 	base := deployment.DeepCopy()
 	conditions(&deployment.Status.Conditions, deployment.Generation, accepted, applied, reason, message)
+	deployment.Status.DataPlane = nil
+	if applied && base.Status.ObservedGeneration == deployment.Generation && reflect.DeepEqual(base.Status.ObservedPublication, publicationReference(deployment)) && base.Status.DataPlane.Fresh(hash, time.Now()) && time.Since(base.Status.DataPlane.ObservedAt.Time) < driftInterval && r.DataPlane != nil {
+		deployment.Status.DataPlane = base.Status.DataPlane
+		inheritReady(&deployment.Status.Conditions, base.Status.Conditions, deployment.Generation)
+	} else if applied {
+		r.observeDataPlane(ctx, deployment, hash)
+	}
+	preserveReadyTransition(&deployment.Status.Conditions, base.Status.Conditions)
 	deployment.Status.ObservedGeneration = deployment.Generation
 	deployment.Status.ObservedPublication = publicationReference(deployment)
 	if applied {

@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	gateway "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/internal/dataplane"
 	projection "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/internal/render"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
@@ -43,6 +44,7 @@ type Runtime struct {
 	Reader                client.Reader
 	CredentialNamespace   string
 	NativeSecretNamespace string
+	DataPlane             *dataplane.Fleet
 }
 
 type snapshot struct {
@@ -50,6 +52,7 @@ type snapshot struct {
 	routes     []gateway.ModelRoute
 	resources  []gatewayrender.RenderedResource
 	hash       string
+	forbidden  []string
 }
 
 func (r *Runtime) secret(ctx context.Context, namespace string, ref *gateway.CredentialReference) (string, error) {
@@ -69,7 +72,7 @@ func (r *Runtime) secret(ctx context.Context, namespace string, ref *gateway.Cre
 
 func (r *Runtime) snapshot(ctx context.Context, key client.ObjectKey) (snapshot, error) {
 	var out snapshot
-	if err := r.Get(ctx, key, &out.deployment); err != nil {
+	if err := r.Reader.Get(ctx, key, &out.deployment); err != nil {
 		return out, errors.New("deployment configuration unavailable")
 	}
 	if !out.deployment.DeletionTimestamp.IsZero() {
@@ -77,10 +80,10 @@ func (r *Runtime) snapshot(ctx context.Context, key client.ObjectKey) (snapshot,
 	}
 	var routes gateway.ModelRouteList
 	var policies gateway.ModelPolicyList
-	if err := r.List(ctx, &routes, client.InNamespace(key.Namespace)); err != nil {
+	if err := r.Reader.List(ctx, &routes, client.InNamespace(key.Namespace)); err != nil {
 		return out, errors.New("route snapshot unavailable")
 	}
-	if err := r.List(ctx, &policies, client.InNamespace(key.Namespace)); err != nil {
+	if err := r.Reader.List(ctx, &policies, client.InNamespace(key.Namespace)); err != nil {
 		return out, errors.New("policy snapshot unavailable")
 	}
 	if err := consistentPublication(&out.deployment, routes.Items, policies.Items); err != nil {
@@ -94,6 +97,14 @@ func (r *Runtime) snapshot(ctx context.Context, key client.ObjectKey) (snapshot,
 	credentials := map[string]string{}
 	for _, route := range routes.Items {
 		byName[route.Name] = route
+
+		if !route.Spec.Enabled || !route.DeletionTimestamp.IsZero() {
+			name := gatewayrender.OpenAIResourceName(out.deployment.Spec.DeploymentID, route.Spec.ModelID)
+			if route.Spec.Protocol == "anthropic" {
+				name = gatewayrender.AnthropicResourceName(route.Spec.ModelID)
+			}
+			out.forbidden = append(out.forbidden, name)
+		}
 		if !route.DeletionTimestamp.IsZero() {
 			continue
 		}
@@ -117,6 +128,9 @@ func (r *Runtime) snapshot(ctx context.Context, key client.ObjectKey) (snapshot,
 	}
 	activePolicies := make([]gateway.ModelPolicy, 0)
 	for _, policy := range policies.Items {
+		if policy.Spec.Disabled && policy.Spec.NativeRule != nil {
+			out.forbidden = append(out.forbidden, "aep-limit-"+gatewayrender.ResourceSuffix(out.deployment.Spec.DeploymentID+"/"+policy.Spec.NativeRule.ID))
+		}
 		if policy.DeletionTimestamp.IsZero() {
 			activePolicies = append(activePolicies, policy)
 		}

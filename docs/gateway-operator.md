@@ -161,9 +161,70 @@ or convert quota scopes into resource assignments.
 
 Roll out the additive generated CRDs and operator before relying on the reader.
 Old status or absent evidence stays Unknown. No additional Secret RBAC is
-needed. Accepted/Applied describe validation/writes only; Ready remains Unknown
-(`DataPlaneNotObserved`) until independent Higress/Envoy effectiveness evidence
-and the Kind acceptance stage are complete. Default deployments stay unchanged.
+needed. Accepted/Applied describe validation/writes only. Independent observation
+is opt-in as described below; default deployments keep Ready Unknown
+(`DataPlaneNotObserved`).
+
+### Independent Envoy observation (opt-in)
+
+Install the additive generated CRDs first. After reviewing
+`services/gateway-operator/config/observation/permissions.yaml`, apply its
+namespace Role/RoleBinding and set `AEP_GATEWAY_OBSERVATION_DEPLOYMENT=higress-gateway`
+on the operator. The named Deployment and Service must be in `higress-system`.
+Rename both the setting and the named RBAC grants when using another name.
+This package is deliberately separate from the default installation.
+
+The operator uses client-go's standard Kubernetes port-forward transport to
+read `/config_dump` from each serving gateway pod's loopback admin port 15000.
+It never uses exec or opens a public admin listener. **Port-forward RBAC is
+not restricted to read-only HTTP operations or port 15000.** Its holder can
+reach other ports in pods in that namespace; grant it only to the dedicated
+operator account after maintainer review. The implementation issues only GET,
+disables redirects/proxies, limits responses to 16 MiB and bounds transport
+and reconcile time. Dump bodies and resolved configuration exist only in
+memory; neither status nor errors include them.
+
+Observation requires a stable Deployment, matching ReplicaSet ownership,
+all desired/updated/ready/available replicas, Ready pods and complete Service
+EndpointSlice coverage. Foreign, draining, missing or changing endpoints
+invalidate evidence. The fleet is read before and after collecting each
+pod's dump; any inventory change discards the observation.
+
+The supported topology is the Higress HTTP gateway Service port 80 targeting
+port 80. The observer follows active Listeners through RDS or Higress Scoped
+RDS (local-port/host key with the `80,*` scope), then checks wildcard virtual
+hosts, both Prefix ingress routes, trusted model-header matches, upstream
+cluster, host/path rewriting and injected headers. Official Envoy protobufs
+normalize cluster, TLS and route fields. It compares exact ECDS plugin rules,
+route matches, fail-open behavior and the pinned OCI artifact's loaded Wasm
+filename digest. Warming resources, fallback RBAC filters and detached cache
+entries cannot produce Ready. Disabled model/native-rule tombstones must have
+no remaining routes, clusters or plugin entries. Unsupported topology stays
+Unknown; this implementation is not a generic Envoy configuration verifier.
+
+`status.dataPlane` stores only the snapshot digest, observation time, gateway
+Deployment UID and covered pod UIDs. Rendering inputs are read directly from
+the API before and after observation; changes to inputs, credentials or
+publication markers discard the evidence. Child Ready conditions inherit only
+matching fresh aggregate evidence. Control Service additionally requires exact
+publication/spec/generation and matching Applied digests for every resource.
+Evidence expires after 90 seconds and repeated success refreshes its own
+timestamp, independently of condition transition times.
+
+Ready means the selected configuration was observed loaded in the serving
+fleet, not that an upstream provider is healthy or that every request succeeds.
+It is point-in-time evidence with bounded freshness, not an atomic xDS update
+or instantaneous revocation guarantee. Disabling the observer or revoking its
+optional RBAC makes Ready Unknown and does not stop configuration publication.
+
+For an explicitly selected isolated local cluster, a read-only integration
+check is available (it is skipped in ordinary unit-test runs):
+
+```bash
+AEP_DATAPLANE_KUBECONFIG=<isolated-kind-kubeconfig> go test \
+  ./services/gateway-operator/internal/controller \
+  -run '^TestLocalKindLoadedConfiguration$' -count=1 -v
+```
 
 ## Deployment package and isolated acceptance
 
