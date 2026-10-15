@@ -63,6 +63,9 @@ type IdentityMapping struct {
 
 func (IdentityMapping) TableName() string { return "identity_mappings" }
 
+// DataScopeRule is one access-control rule. CreatedBy is a pointer because
+// deleting the author's user anonymizes the rule (users(id) ON DELETE SET
+// NULL) rather than removing a policy the deployment still evaluates.
 type DataScopeRule struct {
 	DeploymentID string     `gorm:"column:deployment_id;primaryKey"`
 	ID           string     `gorm:"column:id;primaryKey"`
@@ -74,7 +77,7 @@ type DataScopeRule struct {
 	StartsAt     *time.Time `gorm:"column:starts_at"`
 	ExpiresAt    *time.Time `gorm:"column:expires_at"`
 	Reason       string     `gorm:"column:reason;not null"`
-	CreatedBy    string     `gorm:"column:created_by;not null"`
+	CreatedBy    *string    `gorm:"column:created_by"`
 	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 }

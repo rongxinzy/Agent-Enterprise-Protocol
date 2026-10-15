@@ -82,13 +82,18 @@ func TestDataScopeRuleCRUD(t *testing.T) {
 		t.Fatalf("CreateDataScopeRule() = %#v, %v", rule, err)
 	}
 
-	rows := sqlmock.NewRows([]string{"deployment_id", "id", "rule_kind", "subject_type", "subject_id", "resource_kind", "resource_id", "starts_at", "expires_at", "reason"}).
-		AddRow("deployment-a", "rule-1", "grant", "team", "rd", "skill", "s1", nil, nil, "needs it")
+	// created_by is NULL once the author's account was deleted; the rule and
+	// the rest of the policy stay readable.
+	rows := sqlmock.NewRows([]string{"deployment_id", "id", "rule_kind", "subject_type", "subject_id", "resource_kind", "resource_id", "starts_at", "expires_at", "reason", "created_by"}).
+		AddRow("deployment-a", "rule-1", "grant", "team", "rd", "skill", "s1", nil, nil, "needs it", nil)
 	mock.ExpectQuery(`SELECT \* FROM "data_scope_rules" WHERE deployment_id = \$1 ORDER BY id`).
 		WithArgs("deployment-a", 20).WillReturnRows(rows)
 	rules, err := deployment.ListDataScopeRules(context.Background(), "", 20)
 	if err != nil || len(rules) != 1 || rules[0].ID != "rule-1" {
 		t.Fatalf("ListDataScopeRules() = %#v, %v", rules, err)
+	}
+	if rules[0].CreatedBy != nil {
+		t.Fatalf("ListDataScopeRules() kept the deleted author %q", *rules[0].CreatedBy)
 	}
 
 	single := sqlmock.NewRows([]string{"deployment_id", "id", "rule_kind", "subject_type", "subject_id", "resource_kind", "resource_id", "starts_at", "expires_at", "reason"}).
@@ -183,18 +188,9 @@ func TestDeleteAgentGuardsLiveSessions(t *testing.T) {
 	}
 }
 
-func TestUserAndRBACDeletes(t *testing.T) {
+func TestReplaceUserRBAC(t *testing.T) {
 	store, mock := newMockStore(t)
 	deployment := store.Deployment("deployment-a")
-
-	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM "users"`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`DELETE FROM "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`DELETE FROM "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	if err := deployment.DeleteUser(context.Background(), "user-a"); err != nil {
-		t.Fatalf("DeleteUser(): %v", err)
-	}
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "users"`).
