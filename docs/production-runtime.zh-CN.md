@@ -90,8 +90,14 @@ token，核对 CR 后继续。临时失败按 client-go 原生退避并持久化
 历史模型保留禁用墓碑（含从未成功投递的旧快照），本阶段不 GC，不允许其他 spec 写者
 或删除墓碑，否则失去晚到创建防护。墓碑容量和后续安全回收须纳入容量规划。
 
-projected 仅确认 AEP CR 投递，Accepted／Applied／Ready 仍为 Unknown；本阶段没有
-operator 观测读取和独立 Ready 检测。仅用于隔离验收，生产切换还需完整数据面验证。
+projected 仅确认 AEP CR 投递；最新 projected 任务可只读回查 operator 的 Accepted／
+Applied。须先升级生成 CRD 与 operator，使 status 带准确的 observedPublication，
+并核对发布标识、spec、generation 与聚合／路由应用摘要。旧版本、混合或不可用证据
+保持 Unknown，新 queued 任务也使旧证据失效。读取不领取任务、不改变 phase、不读
+Secret、不写 K8s，沿用 relay 既有 get／list 权限。观测不额外持久化；Ready 始终为
+Unknown（DataPlaneNotObserved），不代表 Higress 已加载。仅用于隔离验收，生产切换
+仍需独立数据面验证。回滚旧 operator 后证据安全退回 Unknown；保留新增 CRD 字段，
+不要借回滚删除 status schema、墓碑或发布序号。
 
 新增 `data_plane_publication_snapshots`、`data_plane_publications` 和
 `data_plane_publication_outbox` 表纳入 PostgreSQL 备份。迁移只新增表，旧二进制仍可

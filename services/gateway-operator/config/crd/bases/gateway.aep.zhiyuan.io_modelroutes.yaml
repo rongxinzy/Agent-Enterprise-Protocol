@@ -172,6 +172,11 @@ spec:
                   - namespace
                   type: object
                 type: array
+              appliedSnapshot:
+                description: |-
+                  AppliedSnapshot must match the deployment aggregate for Applied evidence.
+                  It is an opaque render digest, not an effectiveness observation.
+                type: string
               conditions:
                 description: Conditions report validation, Kubernetes writes and data-plane
                   observation.
@@ -239,6 +244,30 @@ spec:
                   reconciled.
                 format: int64
                 type: integer
+              observedPublication:
+                description: ObservedPublication binds the conditions to the processed
+                  relay markers.
+                properties:
+                  contentHash:
+                    pattern: ^[a-f0-9]{64}$
+                    type: string
+                  operationId:
+                    pattern: ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$
+                    type: string
+                  revision:
+                    maxLength: 200
+                    minLength: 1
+                    type: string
+                  sequence:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                required:
+                - contentHash
+                - operationId
+                - revision
+                - sequence
+                type: object
             type: object
         type: object
     served: true

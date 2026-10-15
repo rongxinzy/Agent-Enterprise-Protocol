@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -171,6 +172,55 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 	if len(route.Status.AppliedResources) != 2 || meta.IsStatusConditionTrue(route.Status.Conditions, gateway.ConditionReady) {
 		t.Fatal("route boundary/readiness")
 	}
+	// Metadata-only republishes keep generation. The real watch must process
+	// each publication tuple, and stale status writes must conflict rather than
+	// attaching old conditions to a newly stamped operation.
+	routeGeneration, deploymentGeneration := route.Generation, deployment.Generation
+	for _, sequence := range []string{"42", "43"} {
+		for _, obj := range []client.Object{route, deployment} {
+			var stale, before client.Object
+			if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+				if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+					return err
+				}
+				stale = obj.DeepCopyObject().(client.Object)
+				before = stale.DeepCopyObject().(client.Object)
+				a := testPublicationMarkers()
+				a[gateway.PublicationSequence] = sequence
+				obj.SetAnnotations(a)
+				return c.Update(ctx, obj)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			switch value := stale.(type) {
+			case *gateway.ModelRoute:
+				value.Status.ObservedPublication = publicationReference(obj)
+			case *gateway.DeploymentConfig:
+				value.Status.ObservedPublication = publicationReference(obj)
+			}
+			if err := c.Status().Patch(ctx, stale, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); !apierrors.IsConflict(err) {
+				t.Fatalf("stale publication status write = %v", err)
+			}
+		}
+		wait(func() bool {
+			if c.Get(ctx, client.ObjectKeyFromObject(route), route) != nil || c.Get(ctx, client.ObjectKeyFromObject(deployment), deployment) != nil {
+				return false
+			}
+			return route.Status.ObservedPublication != nil && deployment.Status.ObservedPublication != nil &&
+				*route.Status.ObservedPublication == *publicationReference(route) && *deployment.Status.ObservedPublication == *publicationReference(deployment) &&
+				route.Status.AppliedSnapshot != "" && route.Status.AppliedSnapshot == deployment.Status.AppliedSnapshot &&
+				meta.IsStatusConditionTrue(route.Status.Conditions, gateway.ConditionApplied) && meta.IsStatusConditionTrue(deployment.Status.Conditions, gateway.ConditionApplied)
+		})
+		if route.Generation != routeGeneration || deployment.Generation != deploymentGeneration {
+			t.Fatal("annotations unexpectedly changed generation")
+		}
+	}
+	if err := c.Patch(ctx, route, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"gateway.aep.zhiyuan.io/publication-sequence":"invalid"}}}`))); err != nil {
+		t.Fatal(err)
+	}
+	wait(func() bool {
+		return c.Get(ctx, client.ObjectKeyFromObject(route), route) == nil && route.Status.ObservedPublication == nil
+	})
 	get := func(kind, name string) *unstructured.Unstructured {
 		t.Helper()
 		obj := &unstructured.Unstructured{}

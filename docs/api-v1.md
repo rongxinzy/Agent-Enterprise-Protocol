@@ -755,8 +755,8 @@ The Control Service implements durable queueing and operation queries behind
 return `503 DATA_PLANE_PUBLICATIONS_DISABLED`. A separate
 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED=true` opt-in runs the in-cluster relay
 for the configured deployment in `aep-system`. Without it requests stay queued.
-The relay projects and verifies AEP CRs; **operator observations are not read**,
-so conditions remain Unknown even when phase is `projected`.
+The relay projects and verifies AEP CRs. The latest projected operation can
+expose matching operator Accepted/Applied evidence; Ready remains Unknown.
 Opt in only during isolated acceptance and reviewed operator handover.
 Existing clients keep using synchronous `POST /publish`
 (`200 DataPlaneDesiredState`); there is no automatic fallback between paths.
@@ -832,6 +832,19 @@ or the legacy `ready` flag cannot establish Ready. Delivery can be projected
 while validation fails, or Applied is True while Ready remains Unknown.
 Conditions evolve independently of delivery phase. This stage does not add
 a Ready detector or claim an end-to-end verified chain.
+
+For the latest projected operation with the relay enabled, GET and POST replay
+read operator evidence without claiming work or changing phases. Each CR must
+match the immutable snapshot (including disabled tombstones), ownership,
+publication sequence/operation/revision/hash and observed generation. Applied
+also requires matching aggregate/route application digests. An annotation-only
+republish does not increment generation: operators must record the exact
+`status.observedPublication`, with optimistic status-write fencing. Install the
+updated CRDs and operator before relying on these observations; older status
+remains Unknown. A newer queued operation invalidates old evidence. Missing,
+mixed or unavailable observations remain Unknown with sanitized reasons; Ready
+always remains Unknown (`DataPlaneNotObserved`). Evidence is read on demand,
+not stored as an application or billing history.
 
 See the [publication OpenAPI source](../openapi/aep-v1-data-plane-publications.openapi.yaml)
 and [SDK usage](../packages/aep-sdk-node/README.md#asynchronous-route-publication).

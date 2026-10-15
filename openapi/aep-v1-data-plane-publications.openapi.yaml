@@ -1,5 +1,5 @@
 # Additive operator publication path. Queue and relay are separate opt-ins;
-# revision-specific observations follow separately. Legacy publish is unchanged.
+# revision-specific observations are read-only. Legacy publish is unchanged.
 paths:
   /publications:
     post:
@@ -28,8 +28,10 @@ paths:
         An independently enabled AEP_GATEWAY_PUBLICATION_RELAY_ENABLED worker
         projects snapshots to AEP CRs. Without it operations remain queued.
         Removed routes retain disabled CR tombstones to fence delayed writes.
-        Operator observations are not read yet, so conditions remain Unknown
-        even after phase projected. Do not fall back automatically
+        For the latest projected operation, read-only operator observations
+        can establish Accepted/Applied after exact publication, generation,
+        spec and application-digest checks. Ready remains Unknown until
+        independent data-plane observation is implemented. Do not fall back automatically
         to synchronous publish when this endpoint is unavailable.
       parameters:
         - name: Idempotency-Key
@@ -85,8 +87,12 @@ paths:
         Operator observations must match the publication's immutable revision;
         missing or stale evidence is Unknown, never inferred from a successful
         write or from the legacy reconciliation ready flag.
-        The current relay stage returns Unknown conditions and requires the
-        same explicit opt-in as POST; disabled deployments return 503.
+        Only the latest projected operation can expose live Accepted/Applied
+        evidence when the relay is enabled. Old operator status, unavailable
+        observation dependencies and superseded evidence remain Unknown.
+        Reads do not claim work, write CRs or mutate operation phases.
+        Ready remains Unknown (DataPlaneNotObserved). Requires the same
+        explicit opt-in as POST; disabled deployments return 503.
       parameters:
         - name: operationId
           in: path
@@ -187,7 +193,7 @@ components:
           type: [string, 'null']
           maxLength: 200
         reason:
-          description: Stable machine-readable reason, such as NotObserved or ReadinessNotImplemented. Never a downstream error dump.
+          description: Stable machine-readable reason, such as NotObserved, RevisionNotObserved, OperatorConfirmed, OperatorRejected, ObservationUnavailable, PublicationSuperseded or DataPlaneNotObserved. Never a downstream error dump.
           type: string
           pattern: '^[A-Za-z][A-Za-z0-9_]{0,99}$'
         lastTransitionTime: {type: string, format: date-time}

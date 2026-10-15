@@ -65,25 +65,9 @@ WHERE deployment_id=? AND operation_id=?`, s.deploymentID, latest.OperationID).E
 			return err
 		}
 		item := &PublicationDelivery{DataPlanePublication: latest, ClaimToken: token}
-		var snapshot struct{ Payload json.RawMessage }
-		if err := tx.db.Raw(`SELECT payload FROM data_plane_publication_snapshots WHERE deployment_id=? AND revision=?`, s.deploymentID, latest.Revision).Scan(&snapshot).Error; err != nil {
+		if err := tx.publicationInputs(ctx, item); err != nil {
 			return err
 		}
-		item.Payload = snapshot.Payload
-		var history struct{ HistoricalRoutes json.RawMessage }
-		// Keep older valid definitions even if a newer snapshot was invalid:
-		// otherwise deletion could omit a tombstone for an already created CR.
-		// PostgreSQL deduplicates immutable definitions; no mutable catalog reads
-		// or credential resolution happen here.
-		if err := tx.db.Raw(`SELECT COALESCE(jsonb_agg(route ORDER BY sequence,route->>'modelId'),'[]'::jsonb) AS historical_routes FROM (
- SELECT DISTINCT ON (route) route,p.sequence
- FROM data_plane_publications p JOIN data_plane_publication_snapshots s USING (deployment_id,revision,content_hash)
- CROSS JOIN LATERAL jsonb_array_elements(s.payload->'routes') AS route
- WHERE p.deployment_id=? AND p.sequence<=? ORDER BY route,p.sequence DESC
-) history`, s.deploymentID, latest.Sequence).Scan(&history).Error; err != nil {
-			return err
-		}
-		item.HistoricalRoutes = history.HistoricalRoutes
 		item.Phase = "projecting"
 		delivery = item
 		return nil
@@ -92,6 +76,50 @@ WHERE deployment_id=? AND operation_id=?`, s.deploymentID, latest.OperationID).E
 		return nil, err
 	}
 	return delivery, nil
+}
+
+// ReadDataPlanePublicationInputs reads the same immutable inputs as delivery,
+// without acquiring a claim, changing the catalog, or resolving credentials.
+func (s *DeploymentStore) ReadDataPlanePublicationInputs(ctx context.Context, value DataPlanePublication) (PublicationDelivery, error) {
+	if value.DeploymentID != s.deploymentID {
+		return PublicationDelivery{}, ErrNotFound
+	}
+	item := PublicationDelivery{DataPlanePublication: value}
+	err := s.publicationInputs(ctx, &item)
+	return item, err
+}
+
+func (s *DeploymentStore) publicationInputs(ctx context.Context, item *PublicationDelivery) error {
+	var snapshot struct{ Payload json.RawMessage }
+	if err := s.db.WithContext(ctx).Raw(`SELECT payload FROM data_plane_publication_snapshots WHERE deployment_id=? AND revision=? AND content_hash=?`, s.deploymentID, item.Revision, item.ContentHash).Scan(&snapshot).Error; err != nil {
+		return err
+	}
+	if len(snapshot.Payload) == 0 {
+		return ErrNotFound
+	}
+	item.Payload = snapshot.Payload
+	var history struct{ HistoricalRoutes json.RawMessage }
+	// Keep every older distinct definition, including the valid definition
+	// preceding an invalid revision, so removals cannot omit an active route.
+	err := s.db.WithContext(ctx).Raw(`SELECT COALESCE(jsonb_agg(route ORDER BY sequence,route->>'modelId'),'[]'::jsonb) AS historical_routes FROM (
+ SELECT DISTINCT ON (route) route,p.sequence
+ FROM data_plane_publications p JOIN data_plane_publication_snapshots s USING (deployment_id,revision,content_hash)
+ CROSS JOIN LATERAL jsonb_array_elements(s.payload->'routes') AS route
+ WHERE p.deployment_id=? AND p.sequence<=? ORDER BY route,p.sequence DESC
+) history`, s.deploymentID, item.Sequence).Scan(&history).Error
+	item.HistoricalRoutes = history.HistoricalRoutes
+	return err
+}
+
+// IsLatestDataPlanePublication is checked after CR reads. A newer intent,
+// including one still queued, invalidates live evidence for the old operation.
+func (s *DeploymentStore) IsLatestDataPlanePublication(ctx context.Context, value DataPlanePublication) (bool, error) {
+	var latest bool
+	err := s.db.WithContext(ctx).Raw(`SELECT EXISTS (SELECT 1 FROM data_plane_publications p
+ WHERE p.deployment_id=? AND p.operation_id=? AND p.sequence=? AND p.phase='projected'
+ AND NOT EXISTS (SELECT 1 FROM data_plane_publications newer
+ WHERE newer.deployment_id=p.deployment_id AND newer.sequence>p.sequence))`, s.deploymentID, value.OperationID, value.Sequence).Scan(&latest).Error
+	return latest, err
 }
 
 // FinishDataPlanePublication atomically acknowledges only the unexpired owner

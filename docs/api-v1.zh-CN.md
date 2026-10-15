@@ -695,8 +695,8 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 管控服务已实现事务入队和 operation 查询，以 `AEP_GATEWAY_PUBLICATIONS_ENABLED`
 显式开启，默认 `false`；关闭时返回 `503 DATA_PLANE_PUBLICATIONS_DISABLED`。
 另以 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED=true` 显式开启集群内 relay，仅投递当前
-配置部署到 `aep-system`；不开启时任务保持 queued。**尚无 operator 观测读取器**，
-即使 phase 为 projected，conditions 仍全部 Unknown。仅用于隔离验收和经审核的
+配置部署到 `aep-system`；不开启时任务保持 queued。最新 projected 任务可回读匹配的
+operator Accepted／Applied 证据，Ready 仍为 Unknown。仅用于隔离验收和经审核的
 operator 移交。现有客户端继续使用同步 `POST /publish`
 （`200 DataPlaneDesiredState`），两条路径之间不自动回退。relay 故障恢复、operator
 独占写及完整链路生效验收完成后，才能切换生产客户端。
@@ -749,6 +749,15 @@ relay 不会替用户虚构供应商地址。
 不足以判定 Ready。投递 projected 后仍可能校验失败，Applied 为 True 时 Ready 也
 可以为 Unknown；conditions 独立于投递阶段演进。本阶段不实现 Ready 检测，也不宣称
 完整链路已验证。
+
+relay 开启后，GET 与 POST 重放会为最新的 projected 任务只读回查 operator 证据，
+不领取任务、不修改 phase。CR 必须匹配不可变快照（含禁用墓碑）、归属、发布序号／
+operation／revision／hash、observed generation；Applied 还须核对聚合与路由的应用摘要。
+仅更新 annotations 的重发不会改变 generation，因此 operator 必须记录准确的
+`status.observedPublication`，并通过乐观锁拒绝旧状态回写。依赖这些观测前须先安装
+新版 CRD 与 operator；旧版 status 保持 Unknown。新任务即使尚在 queued 也使旧证据失效。
+缺失、混合或不可用的观测均返回 Unknown 与脱敏原因；Ready 始终为 Unknown
+（`DataPlaneNotObserved`）。证据按查询读取，不持久化为应用历史或计费账本。
 
 参见 [发布 OpenAPI 源文件](../openapi/aep-v1-data-plane-publications.openapi.yaml)
 与 [SDK 用法](../packages/aep-sdk-node/README.zh-CN.md#异步路由发布)。

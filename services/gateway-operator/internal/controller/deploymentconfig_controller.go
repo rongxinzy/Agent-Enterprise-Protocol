@@ -59,12 +59,13 @@ func (r *DeploymentConfigReconciler) status(ctx context.Context, deployment *gat
 	base := deployment.DeepCopy()
 	conditions(&deployment.Status.Conditions, deployment.Generation, accepted, applied, reason, message)
 	deployment.Status.ObservedGeneration = deployment.Generation
+	deployment.Status.ObservedPublication = publicationReference(deployment)
 	if applied {
 		deployment.Status.AppliedResources = inventory
 		deployment.Status.AppliedSnapshot = hash
 	}
 	if !reflect.DeepEqual(base.Status, deployment.Status) {
-		if err := r.Status().Patch(ctx, deployment, client.MergeFrom(base)); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.Status().Patch(ctx, deployment, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
 	}

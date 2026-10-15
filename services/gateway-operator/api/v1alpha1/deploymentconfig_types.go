@@ -47,6 +47,9 @@ type DeploymentConfigSpec struct {
 }
 
 type DeploymentConfigStatus struct {
+	// ObservedPublication binds the conditions to the processed relay markers.
+	// +optional
+	ObservedPublication *PublicationReference `json:"observedPublication,omitempty"`
 	// AppliedSnapshot changes when any render input or referenced credential changes.
 	// It is an opaque digest, never a data-plane readiness proof.
 	// +optional

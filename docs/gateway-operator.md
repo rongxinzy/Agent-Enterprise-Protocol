@@ -37,9 +37,11 @@ Use `KUBEBUILDER_ASSETS` with the pinned envtest assets for real admission,
 watch and status tests. Existing Kind/Higress acceptance remains required
 before production cutover; envtest does not run Envoy or native plugins.
 
-The public `/aep/v1` API remains unchanged in this stage. Transactional config
-outbox, explicit async API/SDK evolution, bounded cache consistency and DB
-reference validation are required before routing Console writes to CRs.
+The legacy synchronous `/aep/v1` API remains unchanged. The additive async
+API/SDK, transactional outbox and opt-in relay are documented in the
+[publication contract](api-v1.md#asynchronous-operator-publication-queue-stage).
+Bounded consistency, DB reference validation and full cutover acceptance remain
+required before routing Console writes to CRs.
 Direct CR writes are an administrator-only local acceptance/break-glass path,
 not a new unauthenticated product configuration entry point.
 
@@ -75,3 +77,30 @@ until repaired, while route resources are withdrawn.
 This stage does not adopt legacy reconciler resources or switch deployments.
 Reviewed ownership handover, narrow RBAC revocation, outbox, DB-reference
 validation and data-plane observation remain cutover prerequisites.
+
+## Publication evidence
+
+The opt-in publication relay stamps the immutable operation tuple in CR
+annotations. Annotation-only republishes do not change generation. ModelRoute
+and DeploymentConfig therefore copy the validated sequence, operationId,
+revision and contentHash into `status.observedPublication` after handling the
+input. Status patches use resourceVersion optimistic locking: a reconcile
+started before a metadata/spec update cannot acknowledge the newer publication.
+An incomplete marker clears the reference rather than reusing prior evidence.
+
+ModelRoute also records the aggregate render digest in `status.appliedSnapshot`
+after successful resource application. Control Service performs read-only,
+bounded evidence reads for the latest projected operation. It verifies the
+captured route specs/tombstones, all publication markers and ownership,
+observed generations and matching aggregate/route digests. The aggregate is
+read before and after the atomic route List; concurrent changes invalidate the
+observation. A final deployment-scoped DB read rejects evidence superseded by
+newer queued intent. Reads never acquire claims, mutate phases, resolve
+credentials or write Kubernetes resources. Evidence is not a durable history
+and is current only as of the observation; future changes can invalidate it.
+
+Roll out the additive generated CRDs and operator before relying on the reader.
+Old status or absent evidence stays Unknown. No additional Secret RBAC is
+needed. Accepted/Applied describe validation/writes only; Ready remains Unknown
+(`DataPlaneNotObserved`) until independent Higress/Envoy effectiveness evidence
+and the Kind acceptance stage are complete. Default deployments stay unchanged.

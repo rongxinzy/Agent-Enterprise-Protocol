@@ -24,11 +24,11 @@ import (
 )
 
 const (
-	ownerLabel       = "gateway.aep.zhiyuan.io/publication-deployment"
-	sequenceKey      = "gateway.aep.zhiyuan.io/publication-sequence"
-	operationKey     = "gateway.aep.zhiyuan.io/publication-operation-id"
-	hashKey          = "gateway.aep.zhiyuan.io/publication-content-hash"
-	revisionKey      = "gateway.aep.zhiyuan.io/publication-revision"
+	ownerLabel       = gateway.PublicationDeploymentLabel
+	sequenceKey      = gateway.PublicationSequence
+	operationKey     = gateway.PublicationOperationID
+	hashKey          = gateway.PublicationContentHash
+	revisionKey      = gateway.PublicationRevision
 	auditResourceKey = "gateway.aep.zhiyuan.io/audit-resource-id"
 )
 
@@ -129,21 +129,19 @@ func routeSpec(route gatewayrender.Route) (gateway.ModelRouteSpec, error) {
 	return value, nil
 }
 
-// Project verifies the immutable payload before any writes. Removed models
-// receive disabled CR tombstones at the new sequence; retaining their UID/RV
-// prevents an old in-flight Create from resurrecting them. Never delete these
-// guards or allow another spec writer while this relay is active.
-func (p *Projector) Project(ctx context.Context, item repository.PublicationDelivery) error {
+// desiredRoutes is shared by delivery and evidence validation. Neither path
+// reconstructs intent from the mutable catalog or reads credentials.
+func desiredRoutes(item repository.PublicationDelivery) (map[string]gateway.ModelRouteSpec, error) {
 	var current snapshot
 	var history []gatewayrender.Route
 	if item.Sequence < 1 || json.Unmarshal(item.Payload, &current) != nil || json.Unmarshal(item.HistoricalRoutes, &history) != nil || current.Revision != item.Revision {
-		return ErrSnapshot
+		return nil, ErrSnapshot
 	}
 	// The established content hash is SHA256 of canonical {revision,routes}.
 	canonical, _ := json.Marshal(current)
 	digest := sha256.Sum256(canonical)
 	if hex.EncodeToString(digest[:]) != item.ContentHash {
-		return ErrSnapshot
+		return nil, ErrSnapshot
 	}
 	desired := map[string]gateway.ModelRouteSpec{}
 	for _, route := range history {
@@ -157,14 +155,24 @@ func (p *Projector) Project(ctx context.Context, item repository.PublicationDeli
 	seen := map[string]bool{}
 	for _, route := range current.Routes {
 		if seen[route.ModelID] {
-			return ErrSnapshot
+			return nil, ErrSnapshot
 		}
 		seen[route.ModelID] = true
 		value, err := routeSpec(route)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		desired[route.ModelID] = value
+	}
+	return desired, nil
+}
+
+// Project retains disabled tombstones to fence old creates, then reads back
+// all written specs and markers. This is delivery evidence, never readiness.
+func (p *Projector) Project(ctx context.Context, item repository.PublicationDelivery) error {
+	desired, err := desiredRoutes(item)
+	if err != nil {
+		return err
 	}
 	var deployment gateway.DeploymentConfig
 	key := client.ObjectKey{Namespace: p.Namespace, Name: "deployment"}
