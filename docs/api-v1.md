@@ -861,6 +861,12 @@ username; passwords and unknown fields remain redacted. This read-only endpoint
 does not expose credential values. Records follow `AEP_AUDIT_RETENTION`, as
 described in the [production runtime guide](production-runtime.md).
 
+Creating an account — and each account a bulk import creates — writes its audit
+row in the same transaction as the account and its role/team bindings. An
+account whose audit row cannot be written is not created: a single create fails
+with `INTERNAL_ERROR`, and an import reports that row in `errors` and keeps the
+rows that were audited.
+
 ## 11. Errors and Retry
 
 ```json
