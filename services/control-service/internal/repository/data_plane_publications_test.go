@@ -95,11 +95,12 @@ func TestPublicationQueueAtomicFailures(t *testing.T) {
 			query("operation", `INSERT INTO "data_plane_publications"`, sqlmock.NewRows([]string{"sequence", "created_at", "updated_at", "idempotency_expires_at"}).AddRow(1, now, now, now.Add(24*time.Hour)))
 			exec("audit", `INSERT INTO admin_audit_events`)
 			exec("outbox", `INSERT INTO "data_plane_publication_outbox"`)
-			if fail == "commit" {
+			switch fail {
+			case "commit":
 				mock.ExpectCommit().WillReturnError(failure)
-			} else if fail == "" {
+			case "":
 				mock.ExpectCommit()
-			} else {
+			default:
 				mock.ExpectRollback()
 			}
 			value, err := store.Deployment("deployment-a").QueueDataPlanePublication(context.Background(), strings.Repeat("c", 64), strings.Repeat("d", 64), "actor", func(models []Model) (PublicationSnapshot, error) {
