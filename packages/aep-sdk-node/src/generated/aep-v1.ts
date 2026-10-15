@@ -2875,8 +2875,9 @@ export interface components {
             resourceId?: string | null;
             /** @enum {string} */
             result: "success" | "failure";
+            /** @description Stable problem code for a failure row (e.g. INVALID_MODEL or ACCESS_DENIED); null for a success. */
             reason?: string | null;
-            /** @description Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted. */
+            /** @description Masked before/after snapshots or fallback request fields. Null when no payload was recorded. A failure row instead carries the request identifier and the response status next to the masked attempted body, e.g. {"requestId":"0198...","status":400,"request":{...}}. Unknown keys are redacted. */
             changes?: {
                 [key: string]: unknown;
             } | null;
