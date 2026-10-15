@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -195,4 +196,66 @@ func TestGatewayReferenceLifecycleWithPostgres(t *testing.T) {
 			t.Fatal("recreated role inherited its predecessor's rule")
 		}
 	}
+
+	t.Run("recovery retains selected intent and fences deleted references", func(t *testing.T) {
+		recoveryReplay := func(source, key, request string) (DataPlanePublication, error) {
+			return store.ReplayDataPlanePublication(ctx, source, invalidationDigest([]byte(key)), invalidationDigest([]byte(request)), "")
+		}
+		exec(`INSERT INTO gateway_limits(deployment_id,id,version,configuration) VALUES('reference-test','recovery-unpublished',1,'{"kind":"requests","scopeType":"global","maximum":999,"interval":"day","enabled":true}')`)
+		exec(`UPDATE models SET endpoint='http://unpublished.invalid/v1' WHERE deployment_id='reference-test'`)
+		var wg sync.WaitGroup
+		results := make(chan DataPlanePublication, 6)
+		failures := make(chan error, 6)
+		for range 6 {
+			wg.Go(func() {
+				value, err := recoveryReplay(newSelection.OperationID, "recovery-key", "recovery-request")
+				if err != nil {
+					failures <- err
+				} else {
+					results <- value
+				}
+			})
+		}
+		wg.Wait()
+		close(results)
+		close(failures)
+		for err := range failures {
+			t.Fatal(err)
+		}
+		var recovery DataPlanePublication
+		for value := range results {
+			if recovery.OperationID != "" && recovery.OperationID != value.OperationID {
+				t.Fatal("concurrent retries queued distinct operations")
+			}
+			recovery = value
+		}
+		if recovery.Sequence <= newSelection.Sequence || recovery.OperationID == newSelection.OperationID || recovery.ContentHash != newSelection.ContentHash || recovery.Revision != newSelection.Revision {
+			t.Fatalf("recovery identity = %+v", recovery)
+		}
+		input, err := store.ReadDataPlanePublicationInputs(ctx, recovery)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(input.Payload), "recovery-unpublished") || strings.Contains(string(input.Payload), "unpublished.invalid") {
+			t.Fatal("recovery selected drafts")
+		}
+		exec(`DELETE FROM models WHERE deployment_id='reference-test' AND id='kept'`)
+		if _, err := recoveryReplay(recovery.OperationID, "pending-key", "pending-request"); !errors.Is(err, ErrPublicationReferencesChanged) {
+			t.Fatalf("pending withdrawal replay = %v", err)
+		}
+		if _, err := recoveryReplay(newSelection.OperationID, "old-key", "old-request"); !errors.Is(err, ErrPublicationNotLatest) {
+			t.Fatalf("superseded source replay = %v", err)
+		}
+		again, err := recoveryReplay(newSelection.OperationID, "recovery-key", "recovery-request")
+		if err != nil || again.OperationID != recovery.OperationID {
+			t.Fatal("idempotent recovery did not precede mutable guards")
+		}
+		if err := store.QueueReferenceInvalidations(ctx); err != nil {
+			t.Fatal(err)
+		}
+		latest, err := store.LatestDataPlanePublication(ctx)
+		if err != nil || latest.Sequence <= recovery.Sequence {
+			t.Fatal("withdrawal did not supersede recovery")
+		}
+	})
 }
