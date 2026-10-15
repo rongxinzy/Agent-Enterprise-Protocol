@@ -412,14 +412,14 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 func TestUserSkillFailureBoundaries(t *testing.T) {
 	t.Run("manifest query", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnError(errors.New("manifest unavailable"))
+		pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").WillReturnError(errors.New("manifest unavailable"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 
 	t.Run("manifest scan", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+		pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").
 			WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("writer"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -499,7 +499,7 @@ func TestUserSkillManifestReadCompleteness(t *testing.T) {
 
 	t.Run("terminating error before the first row", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+		pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").
 			WillReturnRows(pgxmock.NewRows(columns).CloseError(errors.New("manifest read interrupted")))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -507,7 +507,7 @@ func TestUserSkillManifestReadCompleteness(t *testing.T) {
 
 	t.Run("terminating error after a row was read", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+		pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").
 			WillReturnRows(pgxmock.NewRows(columns).AddRow("writer", "Writer", "2.0.0", "abc123", int64(24)).CloseError(errors.New("manifest read interrupted")))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -515,7 +515,7 @@ func TestUserSkillManifestReadCompleteness(t *testing.T) {
 
 	t.Run("a genuinely empty manifest stays successful", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+		pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").
 			WillReturnRows(pgxmock.NewRows(columns))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		if response.Code != http.StatusOK || response.Header().Get("ETag") == "" || !strings.Contains(response.Body.String(), `"skills":[]`) {
