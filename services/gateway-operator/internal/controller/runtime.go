@@ -34,6 +34,8 @@ const (
 	driftInterval      = 30 * time.Second
 )
 
+var errPublicationPending = errors.New("publication inputs are incomplete or inconsistent")
+
 // Runtime performs bounded, uncached Secret reads and SSA without forced
 // takeover. The reader is the Manager's APIReader, not a Secret informer cache.
 type Runtime struct {
@@ -80,6 +82,9 @@ func (r *Runtime) snapshot(ctx context.Context, key client.ObjectKey) (snapshot,
 	}
 	if err := r.List(ctx, &policies, client.InNamespace(key.Namespace)); err != nil {
 		return out, errors.New("policy snapshot unavailable")
+	}
+	if err := consistentPublication(&out.deployment, routes.Items, policies.Items); err != nil {
+		return out, err
 	}
 	sort.Slice(routes.Items, func(i, j int) bool { return routes.Items[i].Name < routes.Items[j].Name })
 	sort.Slice(policies.Items, func(i, j int) bool { return policies.Items[i].Name < policies.Items[j].Name })

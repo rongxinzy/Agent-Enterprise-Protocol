@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -188,6 +190,8 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 				a := testPublicationMarkers()
 				a[gateway.PublicationSequence] = sequence
 				obj.SetAnnotations(a)
+				sum := sha256.Sum256([]byte("test"))
+				obj.SetLabels(map[string]string{gateway.PublicationDeploymentLabel: hex.EncodeToString(sum[:16])})
 				return c.Update(ctx, obj)
 			}); err != nil {
 				t.Fatal(err)
@@ -221,6 +225,23 @@ func TestAppliedControllersWithEnvtest(t *testing.T) {
 	wait(func() bool {
 		return c.Get(ctx, client.ObjectKeyFromObject(route), route) == nil && route.Status.ObservedPublication == nil
 	})
+	// Incomplete published inputs withdraw routing. Restore explicit direct-admin
+	// mode for the independent mutation/credential lifecycle checks below.
+	waitRoute(false)
+	for _, obj := range []client.Object{route, deployment} {
+		if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+				return err
+			}
+			obj.SetAnnotations(nil)
+			obj.SetLabels(nil)
+			return c.Update(ctx, obj)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitDeployment(true)
+	waitRoute(true)
 	get := func(kind, name string) *unstructured.Unstructured {
 		t.Helper()
 		obj := &unstructured.Unstructured{}
