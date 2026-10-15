@@ -253,7 +253,8 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusRequestEntityTooLarge, "PACKAGE_TOO_LARGE", "The Skill package exceeds 32 MiB.")
 		return
 	}
-	if err := validateSkillPackage(archive); err != nil {
+	archive, err = normalizeSkillPackage(archive)
+	if err != nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
 		return
 	}
