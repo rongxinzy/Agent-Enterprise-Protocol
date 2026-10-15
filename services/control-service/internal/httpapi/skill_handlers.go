@@ -253,7 +253,8 @@ func (s *Server) uploadSkillVersion(response http.ResponseWriter, request *http.
 		writeProblem(response, request, http.StatusRequestEntityTooLarge, "PACKAGE_TOO_LARGE", "The Skill package exceeds 32 MiB.")
 		return
 	}
-	if err := validateSkillPackage(archive); err != nil {
+	archive, err = normalizeSkillPackage(archive)
+	if err != nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
 		return
 	}
@@ -805,9 +806,22 @@ func (s *Server) reportSkillSyncResult(response http.ResponseWriter, request *ht
 		// clear refusal for anything still built against the old guide.
 		ManifestRevision *string `json:"manifestRevision"`
 		Status           string  `json:"status"`
-		Items            []struct {
+		// The contract declares timestamps on the report. They are kept in the
+		// stored payload and drive no behaviour.
+		StartedAt   string `json:"startedAt,omitempty"`
+		CompletedAt string `json:"completedAt,omitempty"`
+		Items       []struct {
 			SkillID string `json:"skillId"`
-			Status  string `json:"status"`
+			// `version` and `action` are advisory per the contract, and
+			// `errorCode`/`message` carry why a Skill failed. Decoding is
+			// strict, so every field the contract declares has to be named
+			// here, or a report that follows the contract is refused with a
+			// 400 - taking the Skills that did sync down with it.
+			Version   string `json:"version,omitempty"`
+			Action    string `json:"action,omitempty"`
+			Status    string `json:"status"`
+			ErrorCode string `json:"errorCode,omitempty"`
+			Message   string `json:"message,omitempty"`
 		} `json:"items"`
 	}
 	if !decodeJSON(response, request, &input) {
