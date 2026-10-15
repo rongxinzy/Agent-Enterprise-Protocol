@@ -99,6 +99,16 @@ func skillVersionColumns() []string {
 	return []string{"skill_id", "version", "object_key", "sha256", "size_bytes", "published", "created_at", "published_at"}
 }
 
+// skillManifestQueryPattern and skillPackageQueryPattern match the queries the
+// two handlers run with the effectiveness rules spelled out. The manifest and
+// the download must answer the same question - Skill enabled, version
+// published, grant live and its subject resolvable - so a query that loses one
+// of those rules stops matching here and the mock refuses to answer instead of
+// quietly serving a package the manifest would not list.
+const skillManifestQueryPattern = `WITH effective AS \( SELECT DISTINCT sk\.id AS skill_id,.*SELECT skill_id,name,version,sha256,size_bytes FROM latest ORDER BY skill_id`
+
+const skillPackageQueryPattern = `WITH effective AS \( SELECT DISTINCT sk\.id AS skill_id,.*sk\.enabled=true.*sv\.published=true.*sa\.deployment_id=\$1.*\(sa\.expires_at IS NULL OR sa\.expires_at>now\(\)\).*sa\.subject_type='user' AND sa\.subject_id=\$2.*sa\.subject_type='role'.*r\.enabled=true.*sa\.subject_type='team'.*t\.enabled=true.*\) SELECT object_key FROM effective WHERE skill_id=\$3 AND version=\$4 LIMIT 1`
+
 func expectSkillAdminAudit(pool pgxmock.PgxPoolIface, action, skillID string) {
 	pool.ExpectExec(`INSERT INTO admin_audit_events`).
 		WithArgs("deployment-a", "admin-user", action, "skill", nullableString(skillID), nil, pgxmock.AnyArg()).
@@ -389,14 +399,14 @@ func TestUserSkillManifestDownloadAndSync(t *testing.T) {
 	manifestRows := func() *pgxmock.Rows {
 		return pgxmock.NewRows([]string{"id", "name", "version", "sha256", "size_bytes"}).AddRow("writer", "Writer", "2.0.0", "abc123", int64(24))
 	}
-	pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
+	pool.ExpectQuery(skillManifestQueryPattern).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
 	manifest := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 	etag := manifest.Header().Get("ETag")
 	if manifest.Code != http.StatusOK || etag == "" || !strings.Contains(manifest.Body.String(), `"id":"writer"`) || !strings.Contains(manifest.Body.String(), `"sha256":"abc123"`) {
 		t.Fatalf("Skill manifest = %d %s, ETag = %q", manifest.Code, manifest.Body.String(), etag)
 	}
 
-	pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
+	pool.ExpectQuery(skillManifestQueryPattern).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
 	request := httptest.NewRequest(http.MethodGet, "/aep/v1/user/skills/manifest", nil)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	request.Header.Set("Authorization", "Bearer "+userToken)
@@ -407,14 +417,14 @@ func TestUserSkillManifestDownloadAndSync(t *testing.T) {
 		t.Fatalf("conditional Skill manifest = %d %s", notModified.Code, notModified.Body.String())
 	}
 
-	pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "writer", "2.0.0").
+	pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "2.0.0").
 		WillReturnRows(pgxmock.NewRows([]string{"object_key"}).AddRow("skills/writer/2.0.0/package.zip"))
 	download := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/skills/writer/versions/2.0.0/package", "")
 	if download.Code != http.StatusOK || download.Header().Get("Content-Type") != "application/zip" || download.Header().Get("Cache-Control") != "private, no-store" || download.Header().Get("Content-Disposition") != `attachment; filename="writer-2.0.0.zip"` || download.Body.String() != "PK\x03\x04authorized-package" {
 		t.Fatalf("download Skill package = %d %q, disposition = %q", download.Code, download.Body.String(), download.Header().Get("Content-Disposition"))
 	}
 
-	pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "missing", "1.0.0").WillReturnError(pgx.ErrNoRows)
+	pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "missing", "1.0.0").WillReturnError(pgx.ErrNoRows)
 	denied := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/skills/missing/versions/1.0.0/package", "")
 	if denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), `"code":"SKILL_NOT_ASSIGNED"`) {
 		t.Fatalf("unassigned Skill package = %d %s", denied.Code, denied.Body.String())
@@ -427,5 +437,106 @@ func TestUserSkillManifestDownloadAndSync(t *testing.T) {
 	synced := userRequest(handler, userToken, http.MethodPost, "/aep/v1/user/skills/sync-results", `{"revision":"revision-2","status":"completed","items":[{"skillId":"zeta","status":"unchanged"},{"skillId":"writer","status":"installed"},{"skillId":"failed","status":"failed"}]}`)
 	if synced.Code != http.StatusAccepted {
 		t.Fatalf("Skill sync result = %d %s", synced.Code, synced.Body.String())
+	}
+}
+
+// A package is only downloadable while its Skill is effective. The grant alone
+// was once enough: a disabled Skill stayed on nobody's manifest but still
+// served its package. The effectiveness rules the manifest already applied are
+// pinned through skillPackageQueryPattern, so a download query that drops one
+// of them stops matching and the mock refuses to answer.
+func TestUserSkillPackageDownloadRequiresEffectiveSkill(t *testing.T) {
+	const (
+		path          = "/aep/v1/user/skills/writer/versions/2.0.0/package"
+		objectKeyPath = "skills/writer/2.0.0/package.zip"
+	)
+	t.Run("disabled Skill with a live grant", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		application.Blobs = &memorySkillBlobStore{objects: map[string][]byte{objectKeyPath: []byte("PK\x03\x04disabled-skill-package")}}
+		// skills.enabled=false leaves the grant and its expiry in place, so the
+		// shared effectiveness query matches nothing: the object key never
+		// reaches the handler.
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "2.0.0").WillReturnError(pgx.ErrNoRows)
+		response := userRequest(New(application).Handler(), userToken, http.MethodGet, path, "")
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"SKILL_NOT_ASSIGNED"`) {
+			t.Fatalf("disabled Skill package = %d %s", response.Code, response.Body.String())
+		}
+		// The refusal is the ordinary "not assigned" one: it must not disclose
+		// why the Skill is ineffective.
+		if body := response.Body.String(); strings.Contains(body, "enabled") || strings.Contains(body, "disabled") {
+			t.Fatalf("disabled Skill refusal discloses state: %s", body)
+		}
+	})
+
+	t.Run("re-enabled Skill", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		application.Blobs = &memorySkillBlobStore{objects: map[string][]byte{objectKeyPath: []byte("PK\x03\x04re-enabled-package")}}
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "2.0.0").
+			WillReturnRows(pgxmock.NewRows([]string{"object_key"}).AddRow(objectKeyPath))
+		response := userRequest(New(application).Handler(), userToken, http.MethodGet, path, "")
+		if response.Code != http.StatusOK || response.Body.String() != "PK\x03\x04re-enabled-package" || response.Header().Get("Content-Type") != "application/zip" {
+			t.Fatalf("re-enabled Skill package = %d %q", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("expired grant", func(t *testing.T) {
+		application, pool, _, userToken := newRuntimeHTTPApplication(t)
+		application.Blobs = &memorySkillBlobStore{objects: map[string][]byte{objectKeyPath: []byte("PK\x03\x04expired-grant-package")}}
+		// The expiry rule the download already had is untouched, and it stays in
+		// the shared fragment: an expired grant keeps matching nothing.
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "2.0.0").WillReturnError(pgx.ErrNoRows)
+		response := userRequest(New(application).Handler(), userToken, http.MethodGet, path, "")
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"SKILL_NOT_ASSIGNED"`) {
+			t.Fatalf("expired grant package = %d %s", response.Code, response.Body.String())
+		}
+	})
+}
+
+// The manifest and the package download must answer the same effectiveness
+// question, so both are built from skillEffectivenessQuery and neither may
+// re-state one of its rules - a second copy is how the download came to ignore
+// `sk.enabled` while the manifest enforced it.
+func TestSkillQueriesShareEffectivenessRules(t *testing.T) {
+	queries := map[string]string{"manifest": skillManifestQuery, "package download": skillPackageQuery}
+	tails := make(map[string]string, len(queries))
+	for name, query := range queries {
+		if !strings.HasPrefix(query, skillEffectivenessQuery) || strings.Count(query, skillEffectivenessQuery) != 1 {
+			t.Fatalf("%s query is not the shared effectiveness query plus its own tail: %s", name, query)
+		}
+		tails[name] = strings.TrimPrefix(query, skillEffectivenessQuery)
+	}
+
+	rules := []string{
+		"sk.enabled=true",
+		"sv.published=true",
+		"sa.deployment_id=$1",
+		"(sa.expires_at IS NULL OR sa.expires_at>now())",
+		"sa.subject_type='user' AND sa.subject_id=$2",
+		"sa.subject_type='role'",
+		"sa.subject_type='team'",
+		"r.enabled=true",
+		"t.enabled=true",
+	}
+	for _, rule := range rules {
+		if !strings.Contains(skillEffectivenessQuery, rule) {
+			t.Fatalf("the shared effectiveness query lost the rule %q", rule)
+		}
+		for name, tail := range tails {
+			if strings.Contains(tail, rule) {
+				t.Fatalf("%s query re-states the rule %q outside the shared fragment", name, rule)
+			}
+		}
+	}
+
+	// Neither tail may reach back into the tables the shared fragment queries:
+	// an extra join there is the other way a second, divergent rule reappears.
+	for name, tail := range tails {
+		if strings.Contains(tail, "skill_versions sv") || strings.Contains(tail, "skill_assignments sa") {
+			t.Fatalf("%s query re-joins the Skill tables outside the shared fragment: %s", name, tail)
+		}
+	}
+	// The download resolves one version of the effective set.
+	if !strings.Contains(tails["package download"], "FROM effective WHERE skill_id=$3 AND version=$4") {
+		t.Fatalf("package download no longer resolves a version of the effective set: %s", tails["package download"])
 	}
 }

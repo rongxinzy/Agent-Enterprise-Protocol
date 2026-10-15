@@ -207,6 +207,9 @@ once, at upload time, instead of failing at every install.
 
 - Unassigning a Skill removes it from that subject's desired manifest.
 - Withdrawing a version prevents future downloads of that version.
+- Disabling a Skill removes it from every manifest, and a Skill that is not
+  effective for the caller cannot be downloaded: enablement, publication state
+  and grant expiry are rechecked on every package download.
 - Deleting a Skill removes it from future manifests.
 - Previously delivered unmanaged copies cannot be guaranteed to disappear.
 
