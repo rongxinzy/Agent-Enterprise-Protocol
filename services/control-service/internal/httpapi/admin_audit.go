@@ -159,6 +159,15 @@ var auditSafeKeys = map[string]struct{}{
 	"displaytitle":           {},
 	"reasoningcompatibility": {},
 	"skillid":                {},
+	// A failed operation is audited with the row shape
+	// {"requestId","status","request"}. Keeping requestId readable ties the
+	// retained evidence back to the request that produced it, and keeping
+	// request readable preserves the body that was rejected. "request" is
+	// recursed like any other allowlisted value, so unknown keys inside it are
+	// still withheld and an endpoint nested in it is still sanitized; only the
+	// envelope key is trusted, not its contents.
+	"requestid": {},
+	"request":   {},
 }
 
 // auditChanges documents a mutation's before/after state, masked by the
