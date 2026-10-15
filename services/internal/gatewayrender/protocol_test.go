@@ -1,4 +1,4 @@
-package reconciler
+package gatewayrender
 
 import (
 	"strings"
@@ -10,22 +10,22 @@ func TestStrategyForDispatchesByProtocol(t *testing.T) {
 	cases := []struct {
 		name   string
 		route  Route
-		bucket renderBucket
+		bucket Bucket
 	}{
-		{"anthropic", Route{Protocol: "anthropic", ModelID: "a"}, bucketAnthropic},
-		{"openai explicit", Route{Protocol: "openai-compatible", ProviderType: "openai", ModelID: "b"}, bucketOpenAI},
-		{"openai default provider", Route{Protocol: "openai-compatible", ModelID: "c"}, bucketOpenAI},
-		{"empty protocol keeps historical openai default", Route{ModelID: "d"}, bucketOpenAI},
-		{"deepseek shares the openai shape", Route{Protocol: "openai-compatible", ProviderType: "deepseek", ModelID: "e"}, bucketOpenAI},
+		{"anthropic", Route{Protocol: "anthropic", ModelID: "a"}, BucketAnthropic},
+		{"openai explicit", Route{Protocol: "openai-compatible", ProviderType: "openai", ModelID: "b"}, BucketOpenAI},
+		{"openai default provider", Route{Protocol: "openai-compatible", ModelID: "c"}, BucketOpenAI},
+		{"empty protocol keeps historical openai default", Route{ModelID: "d"}, BucketOpenAI},
+		{"deepseek shares the openai shape", Route{Protocol: "openai-compatible", ProviderType: "deepseek", ModelID: "e"}, BucketOpenAI},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			strategy, err := strategyFor(test.route)
+			strategy, err := StrategyFor(test.route)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strategy.bucket() != test.bucket {
-				t.Fatalf("bucket = %v", strategy.bucket())
+			if strategy.Bucket() != test.bucket {
+				t.Fatalf("bucket = %v", strategy.Bucket())
 			}
 		})
 	}
@@ -35,7 +35,7 @@ func TestStrategyForDispatchesByProtocol(t *testing.T) {
 		"unknown provider":        {Protocol: "openai-compatible", ProviderType: "gemini", ModelID: "m"},
 	} {
 		t.Run("rejects "+name, func(t *testing.T) {
-			if _, err := strategyFor(route); err == nil {
+			if _, err := StrategyFor(route); err == nil {
 				t.Fatal("invalid combination was accepted")
 			}
 		})
@@ -44,7 +44,7 @@ func TestStrategyForDispatchesByProtocol(t *testing.T) {
 
 func TestOpenAIEndpointSemantics(t *testing.T) {
 	t.Parallel()
-	strategy, err := strategyFor(Route{Protocol: "openai-compatible"})
+	strategy, err := StrategyFor(Route{Protocol: "openai-compatible"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestOpenAIEndpointSemantics(t *testing.T) {
 
 func TestAnthropicEndpointSemantics(t *testing.T) {
 	t.Parallel()
-	strategy, err := strategyFor(Route{Protocol: "anthropic"})
+	strategy, err := StrategyFor(Route{Protocol: "anthropic"})
 	if err != nil {
 		t.Fatal(err)
 	}

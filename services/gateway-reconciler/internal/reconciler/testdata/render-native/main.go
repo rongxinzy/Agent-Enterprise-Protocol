@@ -9,6 +9,7 @@ import (
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-reconciler/internal/reconciler"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
 func main() {
@@ -20,12 +21,13 @@ func main() {
 		panic(err)
 	}
 	publication := gatewaypolicy.Publication{Items: input.Items, Revision: gatewaypolicy.Revision(input.Items)}
-	config := reconciler.NativeGatewayConfig{Enabled: true, RedisService: "redis.dns", RedisPort: 6379}
-	resources, err := reconciler.RenderGatewayLimits(input.Desired, publication, config, "")
+	config := gatewayrender.NativeGatewayConfig{Enabled: true, RedisService: "redis.dns", RedisPort: 6379}
+	renderInput := gatewayrender.Input{Deployment: input.Desired.TenantID(), Revision: input.Desired.Revision, Routes: input.Desired.Routes}
+	resources, err := gatewayrender.RenderGatewayLimits(renderInput, publication, config, "")
 	if err != nil {
 		panic(err)
 	}
-	quota, err := reconciler.RenderGatewayQuota(input.Desired, config, "", "disposable-native-e2e-admin")
+	quota, err := gatewayrender.RenderGatewayQuota(renderInput, config, "", "disposable-native-e2e-admin")
 	if err != nil {
 		panic(err)
 	}
