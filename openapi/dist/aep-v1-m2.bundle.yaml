@@ -2954,6 +2954,105 @@ paths:
                 $ref: '#/components/schemas/DataPlaneDesiredState'
         '400':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/data-plane/publications:
+    post:
+      tags:
+        - Admin Data Plane
+      operationId: createDataPlanePublication
+      description: 'Requires data_plane.write. Captures the catalog-derived route snapshot using the same route derivation rules as the synchronous publish API. Atomically commits the immutable snapshot, operation, audit event and outbox intent before returning 202. This is durable queue acceptance, not CR validation, resource application or data-plane readiness. This endpoint publishes routes only; it does not publish gateway limits or change role assignments. Deployment scope comes from the session. Authenticate and authorize every request before looking up its key. A deployment-scoped Idempotency-Key binds to the normalized request and its first captured snapshot. Replays return the same operation with its current status, even if the catalog has changed; they neither derive a new snapshot nor enqueue another intent. A different request under that key returns 409 IDEMPOTENCY_KEY_CONFLICT. The server retains the binding and operation at least until idempotencyExpiresAt (at least 24 hours after creation). A key reused after expiry may create new work. Transient delivery failures retry with backoff; a delayed older intent must never overwrite a newer publication for the same deployment. Contract/SDK stage only: do not assume service availability or fall back automatically to synchronous publish when this endpoint is unavailable.'
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Caller-generated opaque token; reuse unchanged for retries of this request. Never use a secret.
+          schema:
+            type: string
+            pattern: ^[A-Za-z0-9._:-]{1,128}$
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataPlanePublicationRequest'
+      responses:
+        '202':
+          description: Durably queued publication, or current operation for an idempotent replay (including terminal phases).
+          headers:
+            Location:
+              required: true
+              description: Relative operation URL under /aep/v1/admin/data-plane/publications/.
+              schema:
+                type: string
+                format: uri-reference
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataPlanePublication'
+        '400':
+          description: Malformed JSON or missing/invalid Idempotency-Key (INVALID_IDEMPOTENCY_KEY).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem-2'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          description: IDEMPOTENCY_KEY_CONFLICT; the key is already bound to a different normalized request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem-2'
+        '422':
+          description: INVALID_DATA_PLANE_STATE; invalid revision or catalog-derived snapshot. No operation or outbox intent is committed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem-2'
+        '503':
+          $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/data-plane/publications/{operationId}:
+    get:
+      tags:
+        - Admin Data Plane
+      operationId: getDataPlanePublication
+      description: Requires data_plane.write, matching the existing data-plane management surface. Returns only an operation belonging to the session's deployment. Unknown, expired and cross-deployment IDs all return 404 RESOURCE_NOT_FOUND. Operator observations must match the publication's immutable revision; missing or stale evidence is Unknown, never inferred from a successful write or from the legacy reconciliation ready flag. Contract/SDK stage only; the query handler follows with the outbox stage.
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current delivery phase and revision-specific observations.
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataPlanePublication'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '503':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/data-plane/status:
     get:
       tags:
@@ -3549,6 +3648,112 @@ components:
             contentHash:
               type: string
               pattern: ^[a-f0-9]{64}$
+    DataPlanePublicationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        revision:
+          description: Optional human-readable revision. Trim surrounding whitespace; reject an empty result. Omission selects a server-assigned revision. An explicit revision already bound to different route content is invalid (422); revision labels are not ordering tokens. Idempotency comparison uses the normalized body, not the current catalog.
+          type: string
+          minLength: 1
+          maxLength: 200
+    DataPlanePublication:
+      type: object
+      additionalProperties: false
+      required:
+        - operationId
+        - deploymentId
+        - revision
+        - contentHash
+        - phase
+        - createdAt
+        - updatedAt
+        - idempotencyExpiresAt
+        - conditions
+        - errorCode
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        deploymentId:
+          type: string
+          minLength: 1
+        revision:
+          description: Immutable identity of the captured snapshot, never rebound to different content.
+          type: string
+          minLength: 1
+          maxLength: 200
+        contentHash:
+          description: SHA-256 of the normalized revision and routes, using the existing desired-state hash definition. Contains no credential values.
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        phase:
+          description: 'Delivery lifecycle only: queued -> projecting -> projected, failed or superseded. Transient failures remain queued/projecting and retry; failed means an unrecoverable projection error. Superseded means replaced by newer intent; it must not subsequently write older configuration. Projected means all AEP CR writes/deletions for this snapshot were verified, not that operator application or readiness succeeded. Projected may later become superseded; failed and superseded are terminal. Conditions evolve independently of phase.'
+          type: string
+          enum:
+            - queued
+            - projecting
+            - projected
+            - failed
+            - superseded
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        idempotencyExpiresAt:
+          description: Earliest time at which the server may evict the key binding and operation; at least 24 hours after createdAt. Replays do not extend this bound.
+          type: string
+          format: date-time
+        conditions:
+          description: Exactly one each of Accepted, Applied and Ready. All start Unknown. Accepted is operator semantic validation; Applied is rendered Kubernetes resources written; Ready requires independent evidence that the intended configuration is loaded in the data plane, with the relevant route and replica coverage. SSA success, an HTTP probe alone, or legacy ready status is insufficient. Missing/mismatched observations remain Unknown. No raw CRs, credentials or provider responses are returned.
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/DataPlanePublicationCondition'
+        errorCode:
+          description: Sanitized stable projection error code; null unless phase is failed. Operator rejection is represented by conditions instead.
+          type:
+            - string
+            - 'null'
+          maxLength: 100
+    DataPlanePublicationCondition:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - status
+        - observedRevision
+        - reason
+        - lastTransitionTime
+      properties:
+        type:
+          type: string
+          enum:
+            - Accepted
+            - Applied
+            - Ready
+        status:
+          type: string
+          enum:
+            - 'True'
+            - 'False'
+            - Unknown
+        observedRevision:
+          description: The enclosing publication revision for a matching observation; null when no matching evidence exists (status must then be Unknown).
+          type:
+            - string
+            - 'null'
+          maxLength: 200
+        reason:
+          description: Stable machine-readable reason, such as NotObserved or ReadinessNotImplemented. Never a downstream error dump.
+          type: string
+          pattern: ^[A-Za-z][A-Za-z0-9_]{0,99}$
+        lastTransitionTime:
+          type: string
+          format: date-time
     DataPlaneStatus:
       type: object
       required:

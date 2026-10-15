@@ -694,6 +694,53 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 `aep-credentials`），该 Secret 由部署侧 Secret 系统负责供给。命名空间由服务端解析，
 客户端发送的 `credentialRef.namespace` 会被忽略。
 
+#### Operator 异步发布（契约／SDK 阶段）
+
+以下是 outbox／operator 迁移的新增契约；**本阶段尚未实现管控服务 handler 与事务
+outbox**。现有客户端继续使用同步 `POST /publish`（`200 DataPlaneDesiredState`），
+两条路径之间不自动回退。后续服务实现及 operator 独占写部署通过验收后，才能启用新路径。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/admin/data-plane/publications` | 将目录派生路由快照持久入队，返回 `202 DataPlanePublication` 与 `Location` |
+| GET | `/admin/data-plane/publications/{operationId}` | 查询投递进度及对应版本的 operator conditions |
+
+两者均沿用数据平面管理的 `data_plane.write` 权限，部署范围取自认证会话。不存在、
+已清理或属于其他部署的 operation 统一返回 `404 RESOURCE_NOT_FOUND`。响应使用
+`Cache-Control: no-store`，不暴露原始 CR 或凭证明文。本接口**仅发布路由**，不发布
+限流配额、不修改模型授权；模型访问授权与配额消耗主体是不同概念。
+
+必须携带 `Idempotency-Key`（1–128 个 ASCII 字母、数字或 `._:-`），请求体为 `{}` 或
+`{"revision":"release-1"}`。不得用秘密作为幂等键。revision 去掉首尾空白后比较，
+显式空值或已绑定其他路由内容的 revision 返回 `422 INVALID_DATA_PLANE_STATE`；
+版本标签不代表顺序。JSON 损坏或幂等键缺失／非法返回 `400`，非法键的错误码为
+`INVALID_IDEMPOTENCY_KEY`。校验失败不得提交 operation／outbox 意图。
+
+首次 `202` 仅表示一致的目录快照、operation、审计事件与 outbox 意图已在同一个 DB
+事务中提交，不代表 CR 或 Higress 已接受配置。调用方应在发送前保存自生成的幂等键。
+同部署、同键、同归一化请求重试，经重新认证授权后返回原 operation 的当前状态（包括
+终态），不重新读取目录派生快照、不重复入队。请求不同则返回
+`409 IDEMPOTENCY_KEY_CONFLICT`。绑定与 operation 至少保留到 `idempotencyExpiresAt`
+（不早于创建后 24 小时），重放不延长该期限；过期键可能产生新任务，不应盲目重试。
+响应不确定时，在期限内用原键与原请求重试；已拿到 operationId 后查询该 operation。
+
+`phase` 仅表示投递生命周期：`queued` → `projecting` → `projected`、`failed` 或
+`superseded`。临时投递错误退避重试；`failed` 表示不可恢复的投影错误，携带脱敏
+`errorCode`。`projected` 表示 relay 已核对该快照的 CR 写入与删除。新发布可以取代
+旧发布（包括已 projected 的发布）；旧 worker 即使延迟恢复，也不得覆盖新意图。
+`failed`、`superseded` 是终态。崩溃恢复、顺序与 fencing 需在后续 outbox 实现阶段验证。
+
+响应始终含各一条 `Accepted`、`Applied`、`Ready`，初始均为 `Unknown`。Accepted
+表示 operator 语义校验通过；Applied 表示渲染后的 K8s 资源写入；Ready 需要独立证据
+证明对应版本已被数据面加载，并覆盖相关路由与副本。每条观测带 `observedRevision`；
+没有对应版本证据时为 `null`／`Unknown`。SSA 成功、单次探测成功或旧 `ready` 字段均
+不足以判定 Ready。投递 projected 后仍可能校验失败，Applied 为 True 时 Ready 也
+可以为 Unknown；conditions 独立于投递阶段演进。本阶段不实现 Ready 检测，也不宣称
+完整链路已验证。
+
+参见 [发布 OpenAPI 源文件](../openapi/aep-v1-data-plane-publications.openapi.yaml)
+与 [SDK 用法](../packages/aep-sdk-node/README.zh-CN.md#异步路由发布)。
+
 ### 部署设置
 
 | 方法 | 路径 | 用途 |

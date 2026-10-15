@@ -755,6 +755,70 @@ reference the conventional Secret `aep-credential-<credentialId>` (key
 Secret system provisions. The namespace is resolved server-side, so a
 `credentialRef.namespace` sent by a client is ignored.
 
+#### Asynchronous operator publication (contract/SDK stage)
+
+These additive endpoints are specified for the outbox/operator migration;
+the Control Service handlers and transactional outbox are **not implemented
+in this stage**. Existing clients keep using synchronous `POST /publish`
+(`200 DataPlaneDesiredState`); there is no automatic fallback between paths.
+Do not enable the new path until its service implementation and exclusive
+operator writer deployment have passed acceptance.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/admin/data-plane/publications` | Durably queue a catalog-derived route snapshot; return `202 DataPlanePublication` and `Location` |
+| GET | `/admin/data-plane/publications/{operationId}` | Read delivery progress and version-specific operator conditions |
+
+Both require `data_plane.write`, the same permission as existing data-plane
+management, and derive deployment scope from the authenticated session. A
+missing, expired or other deployment's operation returns `404 RESOURCE_NOT_FOUND`.
+Responses use `Cache-Control: no-store`; no raw CRs or resolved credentials
+are exposed. This operation publishes **routes only**, not gateway limits or
+model access assignments. Model access remains separate from quota scope.
+
+Send a required `Idempotency-Key` header (1–128 ASCII letters, digits or
+`._:-`) and a JSON body `{}` or `{"revision":"release-1"}`. Never use a secret
+as the key. Surrounding revision whitespace is trimmed; an explicitly empty
+revision or a revision already bound to different route content is rejected
+with `422 INVALID_DATA_PLANE_STATE`. Labels are not sequence numbers.
+Malformed JSON or an invalid/missing key returns `400`; invalid keys use
+`INVALID_IDEMPOTENCY_KEY`. Failed validation commits no operation/outbox intent.
+
+A first `202` means the consistent catalog snapshot, operation, audit event
+and outbox intent committed in one DB transaction. It does not mean a CR or
+Higress accepted the configuration. Save the caller-generated key before
+sending. An authorized replay of the same deployment/key and normalized body
+returns the original operation's current status, including terminal phases,
+without reading a new catalog snapshot or re-enqueueing it. A different body
+returns `409 IDEMPOTENCY_KEY_CONFLICT`. The binding and operation are retained
+at least until `idempotencyExpiresAt`, which is at least 24 hours after
+`createdAt`; replays do not extend it. Do not blindly retry an expired key: it
+may create new work. After an uncertain response, retry the same key/body
+within that window; once an operation ID is known, query it.
+
+`phase` describes delivery only: `queued` → `projecting` → `projected`,
+`failed` or `superseded`. Transient delivery failures back off and retry;
+`failed` is an unrecoverable projection error with a sanitized `errorCode`.
+`projected` means the relay verified the snapshot's CR writes and deletions.
+A newer deployment publication can supersede an older one, including a
+projected one; an older delayed worker must never overwrite newer intent.
+`failed` and `superseded` are terminal. The relay's crash recovery, ordering
+and fencing must be tested in the outbox implementation stage.
+
+The response always includes exactly one each of `Accepted`, `Applied` and
+`Ready`, initially `Unknown`. Accepted is operator semantic validation;
+Applied is rendered Kubernetes resources written; Ready needs independent
+evidence that the intended revision is loaded in the data plane, with route
+and relevant replica coverage. Each observation carries `observedRevision`;
+missing/stale evidence has `null` and `Unknown`. A successful SSA, probe alone
+or the legacy `ready` flag cannot establish Ready. Delivery can be projected
+while validation fails, or Applied is True while Ready remains Unknown.
+Conditions evolve independently of delivery phase. This stage does not add
+a Ready detector or claim an end-to-end verified chain.
+
+See the [publication OpenAPI source](../openapi/aep-v1-data-plane-publications.openapi.yaml)
+and [SDK usage](../packages/aep-sdk-node/README.md#asynchronous-route-publication).
+
 ### Deployment settings
 
 | Method | Path | Purpose |
