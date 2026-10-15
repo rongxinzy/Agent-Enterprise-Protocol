@@ -3061,6 +3061,65 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '503':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/data-plane/publications/{operationId}/replay:
+    post:
+      tags:
+        - Admin Data Plane
+      operationId: replayDataPlanePublication
+      description: Requires data_plane.write and publications enabled. Re-enqueues only the latest selected immutable intent, including its selected policies, under a new operation ID and monotonically increasing sequence. It does not capture current catalog or policy drafts and does not change role assignments. This is recovery replay, not rollback to an older intent. Authenticate and authorize before lookup. Unknown or cross-deployment source IDs return 404 RESOURCE_NOT_FOUND; a superseded source returns 409 PUBLICATION_NOT_LATEST. Pending reference invalidations return 409 PUBLICATION_REFERENCES_CHANGED; let the relay withdraw deleted references before replaying the resulting latest intent. A deployment-scoped Idempotency-Key binds to this source operation and the empty request object. Repeating that key returns the same new operation even after a newer intent is selected; it never queues more work. A key bound to any different publication request returns 409 IDEMPOTENCY_KEY_CONFLICT. Retention is at least 24 hours. Returning 202 confirms durable outbox acceptance only, never readiness. Kubernetes ownership/sequence fences still apply; replay does not override a CR newer than the restored database or take over foreign resources. A newer-CR/older-DB disaster requires reviewed joint recovery.
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: ^[A-Za-z0-9._:-]{1,128}$
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              maxProperties: 0
+      responses:
+        '202':
+          description: Durably queued recovery operation, or the operation previously created for this key.
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+                format: uri-reference
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataPlanePublication'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '401':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
+        '404':
+          $ref: '#/components/responses/Problem-2'
+        '409':
+          $ref: '#/components/responses/Problem-2'
+        '503':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/data-plane/status:
     get:
       tags:
