@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,5 +140,34 @@ func TestListAdminAudit(t *testing.T) {
 		!strings.Contains(response.Body.String(), `"resourceType":"model"`) ||
 		!strings.Contains(response.Body.String(), `"nextCursor":null`) {
 		t.Fatalf("admin audit = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMaskAuditPayloadKeepsUsername(t *testing.T) {
+	masked := maskAuditPayload([]byte(`{"username":"new-user","password":"hunter2"}`))
+	record, ok := masked.(map[string]any)
+	if !ok {
+		t.Fatalf("masked payload = %#v", masked)
+	}
+	if record["username"] != "new-user" || record["password"] != "[redacted]" {
+		t.Fatalf("masked payload = %#v", record)
+	}
+}
+
+func TestListAdminAuditAllowsMissingPayload(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	pool.ExpectQuery(`SELECT cursor,actor_user_id,action,resource_type,resource_id,result,reason,payload,created_at FROM admin_audit_events`).
+		WithArgs("deployment-a", 51).
+		WillReturnRows(pgxmock.NewRows([]string{"cursor", "actor_user_id", "action", "resource_type", "resource_id", "result", "reason", "payload", "created_at"}).
+			AddRow(int64(3), nil, "delete", "user", "deleted-user", "success", nil, nil, time.Now().UTC()))
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/audit/operations", "")
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK || len(page.Items) != 1 {
+		t.Fatalf("missing payload = %d %s, error = %v", response.Code, response.Body.String(), err)
+	}
+	if changes, exists := page.Items[0]["changes"]; !exists || changes != nil {
+		t.Fatalf("changes must be explicit null, got %v", page.Items[0])
 	}
 }

@@ -1,6 +1,7 @@
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {startServiceContainer} from './runtime-service.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const composeFile = path.join(root, 'deploy', 'compose', 'compose.yaml');
@@ -163,7 +164,8 @@ async function verifyDependencyFailure(service) {
   await waitForStatus('/readyz', 503);
   const live = await fetch(baseUrl + '/livez');
   assert(live.status === 200, 'liveness failed while ' + service + ' was unavailable');
-  await compose('start', service);
+  const id = await startServiceContainer(service, {composeOutput, commandOutput});
+  console.log(`Restored runtime dependency ${service}: ${id}`);
   await waitForStatus('/readyz', 200);
 }
 
@@ -173,7 +175,7 @@ async function verifyGracefulShutdown() {
     'inspect', '--format', '{{.State.ExitCode}}', project + '-control-service-1',
   ]);
   assert(exitCode === '0', 'control-service did not exit cleanly on SIGTERM: ' + exitCode);
-  await compose('start', 'control-service');
+  await startServiceContainer('control-service', {composeOutput, commandOutput});
   await waitForStatus('/readyz', 200);
 }
 

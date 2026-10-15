@@ -42,6 +42,7 @@ var auditSafeKeys = map[string]struct{}{
 	"defaultroleids":         {},
 	"teamids":                {},
 	"userids":                {},
+	"username":               {},
 	"modelid":                {},
 	"modelids":               {},
 	"resourcetype":           {},
