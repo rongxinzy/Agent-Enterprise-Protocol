@@ -182,14 +182,26 @@ Skills or unrelated user files.
 
 ### 8.3 Package Format
 
-A Skill package is a ZIP archive containing `SKILL.md` at its root. It may
-also contain scripts, references, and assets. Paths MUST be relative and MUST
-NOT escape the extraction directory. The manifest digest is calculated over
-the exact ZIP bytes served by the asset service.
+A stored Skill package is a ZIP archive containing `SKILL.md` at its root,
+alongside any scripts, references, and assets. Paths MUST be relative and MUST
+NOT escape the extraction directory.
+
+The uploaded archive MAY place `SKILL.md` at any depth - real-world exports
+frequently nest it, for example `skill-creator/skill-creator/SKILL.md` next to
+its `agents/`, `references/`, and `scripts/` directories. The control service
+takes the directory holding the shallowest `SKILL.md` as the Skill root and
+lifts that directory to the archive root before storage, so stored packages
+always have `SKILL.md` at their root and every Agent - including third-party
+ones - installs them unchanged. Entries outside the Skill root are not retained,
+and only the chosen `SKILL.md` survives: a deeper duplicate is dropped too. If
+several `SKILL.md` files sit at the same shallowest depth the package is
+ambiguous and the upload is refused, naming the paths. The manifest digest is
+calculated over the exact ZIP bytes served by the asset service, that is, over
+the normalized bytes as stored.
 
 The control service refuses an upload that is not a ZIP archive or that has no
-`SKILL.md` at its root: a package that every Agent would refuse is refused once,
-at upload time, instead of failing at every install.
+`SKILL.md` at any depth: a package that every Agent would refuse is refused
+once, at upload time, instead of failing at every install.
 
 ### 8.4 Removal Semantics
 
