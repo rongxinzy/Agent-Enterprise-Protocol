@@ -6,3 +6,16 @@ metadata:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
+---
+# Credential Secrets referenced by gateway routes are provisioned here rather than
+# in higress-system, so the reconciler never needs read access to Higress' own
+# Secrets. Provision one Secret per referenced Credential (aep-credential-<id>,
+# key api-key) through the deployment Secret system.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aep-credentials
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

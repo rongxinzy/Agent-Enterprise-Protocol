@@ -70,7 +70,7 @@ const kubeServer = createServer(async (request, response) => {
     return;
   }
   if (request.method === 'GET') {
-    const match = /^\/api\/v1\/namespaces\/higress-system\/secrets\/([^/]+)$/.exec(target.pathname);
+    const match = /^\/api\/v1\/namespaces\/aep-credentials\/secrets\/([^/]+)$/.exec(target.pathname);
     assert(match, `unexpected Kubernetes GET path ${target.pathname}`);
     assert(request.headers.authorization === 'Bearer m3-kubernetes-service-account', 'Kubernetes bearer token was missing on the Secret read');
     const data = kubeSecrets.get(match[1]);
