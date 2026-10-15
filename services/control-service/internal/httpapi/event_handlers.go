@@ -51,10 +51,16 @@ func (s *Server) heartbeat(response http.ResponseWriter, request *http.Request) 
 	s.heartbeatUserSession(response, request, claims.SessionID, input.LastControlEventCursor)
 }
 
+// controlEventWatermarkSubquery yields the largest cursor ever delivered to the
+// session as text, or NULL when nothing has been delivered. The heartbeat and
+// the control-event list both report this value as `watermark`, so they must
+// share one expression and cannot drift apart.
+const controlEventWatermarkSubquery = `(SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`
+
 func (s *Server) heartbeatUserSession(response http.ResponseWriter, request *http.Request, sessionID string, _ *string) {
 	var pending bool
 	var watermark *string
-	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), (SELECT max(cursor)::text FROM session_control_deliveries WHERE session_id=$1)`, sessionID).Scan(&pending, &watermark)
+	err := s.app.Database().QueryRow(request.Context(), `SELECT EXISTS(SELECT 1 FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now()), `+controlEventWatermarkSubquery, sessionID).Scan(&pending, &watermark)
 	if err != nil {
 		databaseFailure(response, request, err)
 		return
@@ -93,6 +99,11 @@ func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, requ
 		databaseFailure(response, request, err)
 		return
 	}
+	var watermark *string
+	if err := s.app.Database().QueryRow(request.Context(), `SELECT `+controlEventWatermarkSubquery, sessionID).Scan(&watermark); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	rows, err := s.app.Database().Query(request.Context(), `SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type,e.scope_id,e.resource_type,e.resource_id,e.resource_revision,e.task_type,e.created_at,e.expires_at FROM session_control_deliveries d JOIN control_events e ON e.event_id=d.event_id WHERE d.session_id=$1 AND d.state='pending' AND e.state='active' AND e.expires_at>now() AND d.cursor>$2 ORDER BY d.cursor LIMIT $3`, sessionID, after, limit(request))
 	if err != nil {
 		databaseFailure(response, request, err)
@@ -122,7 +133,7 @@ func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, requ
 		value := strconv.FormatInt(cursor, 10)
 		next = &value
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": next, "watermark": stringValue(watermark)})
 }
 
 func (s *Server) acknowledgeControlEvent(response http.ResponseWriter, request *http.Request) {
