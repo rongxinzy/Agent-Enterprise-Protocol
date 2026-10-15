@@ -277,7 +277,6 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("create begin", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
-		expectSubjectExists(pool, "user-a")
 		pool.ExpectBegin().WillReturnError(errors.New("begin unavailable"))
 		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skill-assignments", `{"skillId":"writer","subject":{"type":"user","id":"user-a"}}`)
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -285,8 +284,8 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("create insert", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
-		expectSubjectExists(pool, "user-a")
 		pool.ExpectBegin()
+		expectSubjectGuard(pool, "user", "user-a", true)
 		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "user", "user-a", pgxmock.AnyArg()).WillReturnError(errors.New("insert unavailable"))
 		pool.ExpectRollback()
 		response := adminRequest(New(application).Handler(), token, http.MethodPost, "/aep/v1/admin/skill-assignments", `{"skillId":"writer","subject":{"type":"user","id":"user-a"}}`)
@@ -295,8 +294,8 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("create event", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
-		expectSubjectExists(pool, "member")
 		pool.ExpectBegin()
+		expectSubjectGuard(pool, "role", "member", true)
 		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -309,8 +308,8 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("create supersede event", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
-		expectSubjectExists(pool, "member")
 		pool.ExpectBegin()
+		expectSubjectGuard(pool, "role", "member", true)
 		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -326,8 +325,8 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("create delivery event", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
-		expectSubjectExists(pool, "member")
 		pool.ExpectBegin()
+		expectSubjectGuard(pool, "role", "member", true)
 		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "role", "member", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		pool.ExpectExec(`INSERT INTO control_events`).WithArgs(
 			pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
@@ -346,8 +345,8 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 
 	t.Run("create commit", func(t *testing.T) {
 		application, _, pool, token := newUserHTTPApplication(t)
-		expectSubjectExists(pool, "engineering")
 		pool.ExpectBegin()
+		expectSubjectGuard(pool, "team", "engineering", true)
 		pool.ExpectExec(`INSERT INTO skill_assignments`).WithArgs(pgxmock.AnyArg(), "deployment-a", "writer", "team", "engineering", pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 		expectSkillAssignmentEvent(pool)
 		pool.ExpectCommit().WillReturnError(errors.New("commit unavailable"))
@@ -412,14 +411,14 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 func TestUserSkillFailureBoundaries(t *testing.T) {
 	t.Run("manifest query", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnError(errors.New("manifest unavailable"))
+		pool.ExpectQuery(skillManifestQueryPattern).WithArgs("deployment-a", "user-a").WillReturnError(errors.New("manifest unavailable"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 
 	t.Run("manifest scan", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+		pool.ExpectQuery(skillManifestQueryPattern).WithArgs("deployment-a", "user-a").
 			WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("writer"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -427,7 +426,7 @@ func TestUserSkillFailureBoundaries(t *testing.T) {
 
 	t.Run("download query", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "writer", "1.0.0").WillReturnError(errors.New("download unavailable"))
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "1.0.0").WillReturnError(errors.New("download unavailable"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/writer/versions/1.0.0/package", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
@@ -435,7 +434,7 @@ func TestUserSkillFailureBoundaries(t *testing.T) {
 	t.Run("download blob", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
 		application.Blobs = &memorySkillBlobStore{objects: make(map[string][]byte), getErr: errors.New("blob unavailable")}
-		pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "writer", "1.0.0").
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "1.0.0").
 			WillReturnRows(pgxmock.NewRows([]string{"object_key"}).AddRow("skills/writer/1.0.0/package.zip"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/writer/versions/1.0.0/package", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")

@@ -257,7 +257,7 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 ### `GET /user/skills/{skillId}/versions/{version}/package`
 
-返回 `application/zip`。服务端再次检查授权，客户端在解压前校验清单中的 SHA-256。
+返回 `application/zip`。服务端再次检查与清单一致的生效条件——授权、授权到期、Skill 启用与版本发布——因此清单中不存在的 Skill 也无法下载。客户端在解压前校验清单中的 SHA-256。
 
 ### `POST /user/skills/sync-results`
 
@@ -270,13 +270,13 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
     {"skillId": "xlsx", "status": "installed"}
   ]
 }
-服务端读取的是 `revision`、`status`，以及每个条目的 `skillId` 与 `status`
-（`installed`、`updated`、`unchanged` 视为已安装；`removed` 及其它取值视为未安装）。
-`startedAt`、`completedAt`、`version`、`action`、`errorCode`、`message` 会被接受并保留在
-存储的 payload 中，但不影响服务端行为。上报里若写的是 `manifestRevision` 而不是
-`revision`，会被 `400` 拒绝。
-
 ```
+
+服务端读取报告的 `revision`、`status` 与 `items`，以及每个条目的 `skillId` 与 `status`
+（`installed`、`updated`、`unchanged` 视为已安装；`removed` 及其它取值视为未安装）。
+报告级 `startedAt`、`completedAt`，以及条目级 `version`、`action`、`errorCode`、`message`
+会被接受并保留在存储的 payload 中，但不影响服务端行为。上文未列出的字段会被 `400` 拒绝；
+上报里若写的是 `manifestRevision` 而不是 `revision`，同样会被 `400` 拒绝。
 
 ## 6. 遥测事件上传
 

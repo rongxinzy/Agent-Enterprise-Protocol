@@ -69,8 +69,10 @@ go run ./cmd/aepctl --password change-this-admin-password user create --user age
 go run ./cmd/aepctl --password change-this-admin-password user list
 ```
 
-创建一个根目录含 `SKILL.md` 的 ZIP，然后把命令返回的用户 ID、授权 ID 用于
-后续操作：
+创建一个根目录含 `SKILL.md` 的 ZIP。`SKILL.md` 也可以位于任意深度（例如
+`skill-creator/skill-creator/SKILL.md` 及其同级的 `agents/` 目录）：控制面会以最浅的那个
+`SKILL.md` 所在目录作为技能根，并在存储前把它上移到归档根。然后把命令返回的用户 ID、
+授权 ID 用于后续操作：
 
 ```bash
 go run ./cmd/aepctl --password change-this-admin-password skill create --skill-id review --name Review --description "Managed review Skill"

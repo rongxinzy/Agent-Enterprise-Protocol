@@ -75,8 +75,12 @@ go run ./cmd/aepctl --password change-this-admin-password user create --user age
 go run ./cmd/aepctl --password change-this-admin-password user list
 ```
 
-Create a ZIP whose root contains `SKILL.md`, then use the returned user ID and
-assignment ID in the following commands:
+Create a ZIP whose root contains `SKILL.md`. `SKILL.md` may instead sit at any
+depth (for example `skill-creator/skill-creator/SKILL.md` with its sibling
+`agents/` directory): the control service takes the shallowest `SKILL.md`'s
+directory as the Skill root and lifts it to the archive root before it stores the
+package. Then use the returned user ID and assignment ID in the following
+commands:
 
 ```bash
 go run ./cmd/aepctl --password change-this-admin-password skill create --skill-id review --name Review --description "Managed review Skill"

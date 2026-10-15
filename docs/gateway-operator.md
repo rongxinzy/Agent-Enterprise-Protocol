@@ -66,6 +66,13 @@ API operations use a bounded reconciliation context.
 
 SSA uses `aep-operator` without forced takeover. Existing objects must carry
 the CR's owner UID label; unowned or foreign objects cause a conflict.
+First creation uses Kubernetes Create so a foreign object appearing after
+the not-found read cannot be adopted. Subsequent SSA writes carry the verified
+resourceVersion; an owner without a UID cannot write any rendered resource.
+Client-go's `csaupgrade.UpgradeManagedFieldsPatch` promotes only the operator's
+initial Update fields to Apply, retaining other managers and guarding the patch
+with resourceVersion. It is idempotent after a crash between creation and SSA;
+no forced field takeover or handwritten managedFields conversion is used.
 Cleanup queries live labels and uses UID/resourceVersion delete preconditions.
 An apply/status crash or forged status inventory cannot authorize deletion
 of another writer's objects. No cross-namespace OwnerReferences are used.
@@ -104,3 +111,74 @@ Old status or absent evidence stays Unknown. No additional Secret RBAC is
 needed. Accepted/Applied describe validation/writes only; Ready remains Unknown
 (`DataPlaneNotObserved`) until independent Higress/Envoy effectiveness evidence
 and the Kind acceptance stage are complete. Default deployments stay unchanged.
+
+## Deployment package and isolated acceptance
+
+`services/gateway-operator/config/default` is a Kustomize package for a fresh
+operator environment. Install Higress core 2.2.4 in `higress-system` first.
+The package installs the gateway CRDs, `aep-system` and `aep-credentials`, a
+two-replica Manager, and namespace-scoped RoleBindings. It labels the AEP
+namespaces with the restricted Pod Security standard; review existing
+workloads before applying it to an existing namespace. It does not install
+Higress, Redis or credentials, or modify the production baseline.
+
+Build/apply from the root module using ko, with an approved non-root static
+base image and deployment context:
+
+```bash
+export KO_DOCKER_REPO=<approved-registry>
+ko apply -k services/gateway-operator/config/default
+```
+
+`make -C services/gateway-operator deploy` runs generation before the same
+command. The deployment uses UID/GID 65532, a read-only root filesystem,
+dropped capabilities, RuntimeDefault seccomp, probes and resource bounds.
+No Dockerfile or provider credentials are embedded in the image.
+
+The generated ClusterRole is permission inventory only: this package does
+not bind it. Its Roles grant CR/status/finalizer updates in `aep-system`,
+creation plus get/update of the named leader Lease, rendered-resource writes
+only in `higress-system`, provider Secret reads/watches only in
+`aep-credentials`, and get of the named native Secret `aep-native-gateway`
+only. Kubernetes cannot restrict the name of a create operation; Lease create
+is therefore namespace-scoped. Secret list/watch permission permits reading
+all values in the credential namespace even though the implementation watches
+metadata only; keep unrelated Secrets out of that namespace.
+
+This package does **not** revoke old reconciler permissions, transfer object
+ownership, or migrate DB configuration. Do not run it alongside a legacy
+writer in an existing gateway. A reviewed cutover must stop the legacy writer,
+revoke its Higress write grants and transfer/validate existing resources before
+enabling the new operator. It must also provision the authenticated authorizer
+path; an externally reachable gateway must not trust caller-supplied identity
+headers. Direct fixture requests below are only for isolated acceptance.
+
+The standalone, manually invoked test creates a dedicated Kind cluster and
+installs real Higress/Envoy, Redis, mock providers and two operator replicas:
+
+```bash
+npm run test:e2e:gateway-operator
+```
+
+It builds the operator with pinned ko v0.18.0. `KIND`, `HELM` and
+`AEP_OPERATOR_IMAGE` can select local tooling or a prebuilt operator image;
+the default Kind node is pinned by digest and Higress core is pinned to 2.2.4.
+`AEP_HIGRESS_CORE_CHART` can select an offline copy of that chart. Image export
+selects linux/amd64 explicitly to avoid Docker's partially cached multiarch
+indexes. `AEP_OPERATOR_E2E_REPORT` writes the successful check inventory.
+This command is not yet wired into CI; existing CI/envtest and legacy Kind
+tests remain in place and do not imply that this new acceptance ran.
+
+The cluster name must start with `aep-operator-`. Existing clusters require
+explicit `AEP_OPERATOR_E2E_REUSE=true`; reuse rejects a legacy reconciler.
+New clusters and private temporary fixtures are removed on completion unless
+`AEP_OPERATOR_E2E_KEEP=true`; reused clusters are preserved. Do not point the
+test at a customer or preview cluster. Only disposable mock keys are used.
+
+Acceptance checks cover namespace RBAC, OpenAI credential/model adaptation,
+Anthropic streaming, native Redis limits for user × model, policy removal,
+Lease leader replacement, final-route aggregate cleanup and deployment
+finalizers preserving foreign objects. Requests cross actual Pod/Service
+networking. They bypass AEP authentication with fixture headers and do not
+test the public API, outbox, DB references, Prometheus, or production cutover.
+Successful probes do not automatically update the CR's `Ready` condition.

@@ -275,8 +275,10 @@ The response is complete. Managed Skills absent from it are removed.
 
 ### `GET /user/skills/{skillId}/versions/{version}/package`
 
-Returns `application/zip`. The server rechecks assignment, and the client
-verifies the manifest SHA-256 before extraction.
+Returns `application/zip`. The server rechecks the same effectiveness rules as
+the manifest - assignment, grant expiry, Skill enablement and version
+publication - so a Skill the client does not see in its manifest cannot be
+downloaded. The client verifies the manifest SHA-256 before extraction.
 
 ### `POST /user/skills/sync-results`
 
@@ -289,14 +291,15 @@ verifies the manifest SHA-256 before extraction.
     {"skillId": "xlsx", "status": "installed"}
   ]
 }
-The server reads `revision`, `status`, and each item's `skillId` and `status`
-(`installed`, `updated` and `unchanged` count as installed; `removed` and any
-other value count as not installed). `startedAt`, `completedAt`, `version`,
-`action`, `errorCode` and `message` are accepted and kept in the stored payload
-but do not drive server behaviour. A report that carries `manifestRevision`
-instead of `revision` is refused with `400`.
-
 ```
+
+The server reads the report's `revision`, `status` and `items`, and each item's
+`skillId` and `status` (`installed`, `updated` and `unchanged` count as
+installed; `removed` and any other value count as not installed). The report's
+`startedAt` and `completedAt`, and each item's `version`, `action`, `errorCode`
+and `message`, are accepted and kept in the stored payload but drive no server
+behaviour. Any field not listed above is refused with `400`, and a report that
+carries `manifestRevision` instead of `revision` is refused with `400` too.
 
 ## 6. Telemetry Event Upload
 
