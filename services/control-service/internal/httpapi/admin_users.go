@@ -330,8 +330,10 @@ func (s *Server) getUser(response http.ResponseWriter, request *http.Request) {
 	writeJSON(response, http.StatusOK, publicUser(user))
 }
 
-// deleteUser removes a platform user and their bindings, revoking all
-// active sessions first. The bootstrap admin cannot be deleted.
+// deleteUser removes a platform user and their bindings. The user's sessions
+// are revoked inside the same transaction as the removal (see
+// repository.DeleteUser), so a failed deletion can never leave the account
+// alive but signed out everywhere. The bootstrap admin cannot be deleted.
 func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request) {
 	claims := claimsFrom(request)
 	userID := chi.URLParam(request, "userId")
@@ -347,10 +349,6 @@ func (s *Server) deleteUser(response http.ResponseWriter, request *http.Request)
 	}
 	if user.Username == "admin" {
 		writeProblem(response, request, http.StatusForbidden, "FORBIDDEN", "The bootstrap admin user cannot be deleted.")
-		return
-	}
-	if err := s.app.RevokeUserSessionSet(request.Context(), userID); err != nil {
-		databaseFailure(response, request, err)
 		return
 	}
 	var removed repository.UserRecord

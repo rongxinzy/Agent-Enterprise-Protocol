@@ -1,16 +1,16 @@
-// The gateway operator pilot: a watch-only controller-runtime manager for the
-// ModelRoute and ModelPolicy CRDs. It validates shallowly and writes the
-// Accepted condition on its own CRs — no Higress writes, no external calls,
-// no credential reads.
+// The kubebuilder gateway operator applies CR configuration to Higress.
 package main
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -37,7 +37,7 @@ func main() {
 		ctrl.Log.Error(err, "unable to wire controllers")
 		os.Exit(1)
 	}
-	ctrl.Log.Info("starting gateway operator (watch-only pilot)")
+	ctrl.Log.Info("starting gateway operator")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		ctrl.Log.Error(err, "manager exited")
 		os.Exit(1)
@@ -47,10 +47,15 @@ func main() {
 // wireManager registers the controllers and health checks; split out so the
 // wiring is testable without a live cluster.
 func wireManager(mgr ctrl.Manager) error {
-	if err := (&controller.ModelRouteReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+	runtime := &controller.Runtime{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(),
+		CredentialNamespace: "aep-credentials", NativeSecretNamespace: "higress-system"}
+	if err := (&controller.ModelRouteReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Runtime: runtime}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&controller.ModelPolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.ModelPolicyReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), Runtime: runtime}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&controller.DeploymentConfigReconciler{Runtime: runtime}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -63,12 +68,13 @@ func wireManager(mgr ctrl.Manager) error {
 }
 
 // managerOptions builds the controller-runtime manager options: leader
-// election on by default (the pilot writes status on its own CRs and duplicate
-// replicas must not double-write conditions), with a clean handoff on
+// election on by default so only one replica applies resources, with a clean handoff on
 // shutdown instead of holding the lease to expiry.
 func managerOptions() ctrl.Options {
 	return ctrl.Options{
 		Scheme: scheme,
+		Cache: cache.Options{DefaultNamespaces: map[string]cache.Config{"aep-system": {}},
+			ByObject: map[client.Object]cache.ByObject{&corev1.Secret{}: {Namespaces: map[string]cache.Config{"aep-credentials": {}}}}},
 		Metrics: metricsserver.Options{
 			BindAddress: ":8092",
 		},
