@@ -388,14 +388,14 @@ func TestUserSkillManifestDownloadAndSync(t *testing.T) {
 	manifestRows := func() *pgxmock.Rows {
 		return pgxmock.NewRows([]string{"id", "name", "version", "sha256", "size_bytes"}).AddRow("writer", "Writer", "2.0.0", "abc123", int64(24))
 	}
-	pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
+	pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
 	manifest := userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 	etag := manifest.Header().Get("ETag")
 	if manifest.Code != http.StatusOK || etag == "" || !strings.Contains(manifest.Body.String(), `"id":"writer"`) || !strings.Contains(manifest.Body.String(), `"sha256":"abc123"`) {
 		t.Fatalf("Skill manifest = %d %s, ETag = %q", manifest.Code, manifest.Body.String(), etag)
 	}
 
-	pool.ExpectQuery(`WITH (authorized|effective) AS`).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
+	pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnRows(manifestRows())
 	request := httptest.NewRequest(http.MethodGet, "/aep/v1/user/skills/manifest", nil)
 	request.Header.Set("X-AEP-Protocol-Version", supportedProtocolVersion)
 	request.Header.Set("Authorization", "Bearer "+userToken)
