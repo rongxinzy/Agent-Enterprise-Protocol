@@ -3,6 +3,7 @@ kind: ServiceAccount
 metadata:
   name: aep-gateway-operator
   namespace: aep-system
+automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -20,16 +21,22 @@ spec:
         app: aep-gateway-operator
     spec:
       serviceAccountName: aep-gateway-operator
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: manager
           image: ko://github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/cmd
+          volumeMounts:
+            - name: api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
           ports:
             - name: health
               containerPort: 8093
@@ -55,3 +62,20 @@ spec:
             httpGet:
               path: /healthz
               port: health
+          startupProbe:
+            httpGet: {path: /healthz, port: health}
+            failureThreshold: 30
+            periodSeconds: 2
+      volumes:
+        - name: api-access
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken: {path: token, expirationSeconds: 3600}
+              - configMap:
+                  name: kube-root-ca.crt
+                  items: [{key: ca.crt, path: ca.crt}]
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef: {fieldPath: metadata.namespace}

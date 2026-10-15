@@ -1,0 +1,7 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: aep-gateway-operator, namespace: aep-system}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: aep-gateway-operator}

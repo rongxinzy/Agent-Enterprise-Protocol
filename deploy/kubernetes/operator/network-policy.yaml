@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: aep-gateway-operator, namespace: aep-system}
+spec:
+  podSelector:
+    matchLabels: {app: aep-gateway-operator}
+  policyTypes: [Ingress, Egress]
+  # Metrics are internal; delivery overlay narrows this to its monitoring namespace.
+  ingress:
+    - from: [{namespaceSelector: {}}]
+      ports: [{protocol: TCP, port: 8092}]
+  egress:
+    - to: [{namespaceSelector: {}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    # API endpoint/port and DNAT enforcement depend on the CNI. Delivery overlays
+    # must narrow this to the actual API server addresses and ports.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 443}]

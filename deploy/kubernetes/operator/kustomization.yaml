@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Opt-in target state, NOT a one-command live handover. Follow the runbook first.
+resources:
+  - ../production
+  - ../publication-relay
+  - ../credential-publisher
+  - ../../../services/gateway-operator/config/crd
+  - ../../../services/gateway-operator/config/runtime
+  - deployment-config.yaml
+  - external-secrets.yaml
+  - network-policy.yaml
+  - disruption-budget.yaml
+patches:
+  - path: retire-legacy.yaml
+  - path: control.yaml
+  - path: publisher.yaml
+  # Never run ESO and the credential publisher against the same provider Secret.
+  - target: {group: external-secrets.io, version: v1, kind: ExternalSecret, name: aep-credential-example}
+    patch: |-
+      $patch: delete
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata: {name: aep-credential-example, namespace: aep-credentials}

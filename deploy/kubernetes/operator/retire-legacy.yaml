@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: aep-gateway-reconciler, namespace: aep-system}
+spec:
+  replicas: 0
+---
+# Empty existing bindings explicitly: omitting them from rendered output would
+# leave live permissions in place on ordinary kubectl apply.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: aep-gateway-reconciler, namespace: higress-system}
+subjects: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: aep-gateway-reconciler-leader, namespace: aep-system}
+subjects: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: aep-gateway-credentials, namespace: aep-credentials}
+subjects: []

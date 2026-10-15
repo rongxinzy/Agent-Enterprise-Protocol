@@ -93,7 +93,7 @@ Control Service 启动集群内 relay，把当前 `AEP_DEPLOYMENT_ID` 的意图�
 先安装新增 ModelPolicy schema、operator 与 relay 的窄 RBAC，再启用组合发布。
 限额主体仅限定计数范围，不授予用户、团队或角色模型访问权限。
 
-RBAC 见未纳入默认 kustomization 的 [显式授权清单](../deploy/kubernetes/production/publication-relay-rbac.yaml)。
+RBAC 见未纳入默认 kustomization 的 [显式授权清单](../deploy/kubernetes/publication-relay/rbac.yaml)。
 部署前必须安装匹配 CRD、配置 singleton/native gateway、确认旧 reconciler 停写并完成
 operator 独占写移交，网络策略须允许 Control Service 到 API Server。不要直接用于已有
 无归属 CR 的命名空间：relay 会拒绝接管。默认配置、Console 与现有期望状态路径不变。

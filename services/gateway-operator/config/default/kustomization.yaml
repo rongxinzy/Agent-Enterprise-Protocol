@@ -3,5 +3,4 @@ kind: Kustomization
 resources:
   - ../crd
   - namespaces.yaml
-  - manager.yaml
-  - permissions.yaml
+  - ../runtime
