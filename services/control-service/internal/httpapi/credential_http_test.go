@@ -43,7 +43,6 @@ func credentialRuntimeColumns() []string {
 
 func TestAdminCredentialLifecycle(t *testing.T) {
 	application, mock, adminToken := newStoreBackedHTTPApplication(t)
-	pool := attachRuntimeDatabase(t, application)
 	handler := New(application).Handler()
 	now := time.Now().UTC()
 
@@ -101,11 +100,12 @@ func TestAdminCredentialLifecycle(t *testing.T) {
 		t.Fatalf("list Credential assignments = %d %s", assignments.Code, assignments.Body.String())
 	}
 
-	// The existence probe precedes the credential lookup and the insert.
-	expectSubjectExists(pool, "operator")
+	// The guard opens the assignment write: subject lock, subject probe, then the
+	// credential lookup and the insert, all inside one transaction.
+	mock.ExpectBegin()
+	expectStoreSubjectGuard(mock, "role", "operator", true)
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "credentials" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "credential-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "credential_assignments"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	assigned := adminRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/credential-assignments", `{"credentialId":"credential-a","subject":{"type":"role","id":"operator"}}`)
