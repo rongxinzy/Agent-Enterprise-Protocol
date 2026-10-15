@@ -154,3 +154,21 @@ func TestAcknowledgeLookupFailureIsServerError(t *testing.T) {
 		t.Fatalf("ack lookup failure = %d %s", response.Code, response.Body.String())
 	}
 }
+
+// The control-event list drives reconciliation and its nextCursor tells the
+// agent where to resume. Serving a page whose iteration ended with an error
+// would let the agent advance past deliveries it never received, so the same
+// completeness check the Skill manifest needs applies here.
+func TestListControlEventsMapsTerminatingReadError(t *testing.T) {
+	application, pool, _, userToken := newRuntimeHTTPApplication(t)
+	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").
+		WillReturnRows(pgxmock.NewRows([]string{"watermark"}).AddRow(ptrString("42")))
+	pool.ExpectQuery(`SELECT d.delivery_id,e.event_id,d.cursor,e.type,e.scope_type`).WithArgs("session-user", int64(0), int32(50)).
+		WillReturnRows(pgxmock.NewRows([]string{"delivery_id", "event_id", "cursor", "type", "scope_type", "scope_id", "resource_type", "resource_id", "resource_revision", "task_type", "created_at", "expires_at"}).
+			CloseError(errors.New("delivery read interrupted")))
+	response := userRequest(New(application).Handler(), userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=0&limit=50", "")
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), `"code":"INTERNAL_ERROR"`) {
+		t.Fatalf("terminating delivery read = %d %s", response.Code, response.Body.String())
+	}
+}

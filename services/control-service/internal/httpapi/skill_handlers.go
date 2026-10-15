@@ -765,6 +765,16 @@ func (s *Server) skillManifest(response http.ResponseWriter, request *http.Reque
 		}
 		items = append(items, map[string]any{"id": id, "name": name, "version": version, "enabled": true, "package": map[string]any{"url": "/aep/v1/user/skills/" + id + "/versions/" + version + "/package", "sha256": sha, "size": size}})
 	}
+	// The manifest is desired state: the client removes every managed Skill it
+	// does not find here. A read that ended in an error (connection reset,
+	// timeout, server-side termination) leaves a prefix of the rows, and
+	// Next() returning false says nothing about whether the read completed, so
+	// publishing that prefix would tell the client to uninstall Skills it is
+	// still authorized for. Only a complete read may produce a revision.
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	encoded, _ := json.Marshal(items)
 	digest := sha256.Sum256(encoded)
 	revision := hex.EncodeToString(digest[:16])
