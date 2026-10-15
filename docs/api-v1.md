@@ -275,8 +275,10 @@ The response is complete. Managed Skills absent from it are removed.
 
 ### `GET /user/skills/{skillId}/versions/{version}/package`
 
-Returns `application/zip`. The server rechecks assignment, and the client
-verifies the manifest SHA-256 before extraction.
+Returns `application/zip`. The server rechecks the same effectiveness rules as
+the manifest - assignment, grant expiry, Skill enablement and version
+publication - so a Skill the client does not see in its manifest cannot be
+downloaded. The client verifies the manifest SHA-256 before extraction.
 
 ### `POST /user/skills/sync-results`
 
