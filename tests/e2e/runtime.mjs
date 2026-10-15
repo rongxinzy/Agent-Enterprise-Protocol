@@ -175,7 +175,7 @@ async function verifyGracefulShutdown() {
     'inspect', '--format', '{{.State.ExitCode}}', project + '-control-service-1',
   ]);
   assert(exitCode === '0', 'control-service did not exit cleanly on SIGTERM: ' + exitCode);
-  await compose('start', 'control-service');
+  await startServiceContainer('control-service', {composeOutput, commandOutput});
   await waitForStatus('/readyz', 200);
 }
 

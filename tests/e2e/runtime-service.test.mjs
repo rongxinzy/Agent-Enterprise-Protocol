@@ -4,30 +4,32 @@ import {startServiceContainer} from './runtime-service.mjs';
 
 const id = 'a'.repeat(64);
 
-test('restores the stopped dependency selected from the current Compose project', async () => {
-  let running = false;
-  const started = [];
-  const result = await startServiceContainer('postgres', {
-    async composeOutput(...args) {
-      assert.deepEqual(args, ['ps', '--all', '--quiet', 'postgres']);
-      return `${id}\r\n`;
-    },
-    async commandOutput(executable, args) {
-      assert.equal(executable, 'docker');
-      assert.equal(args.at(-1), id);
-      if (args[0] === 'start') {
-        started.push(args[1]);
-        running = true;
-        return id;
-      }
-      assert.deepEqual(args, ['inspect', '--format', '{{.State.Running}}', id]);
-      return String(running);
-    },
+for (const service of ['postgres', 'rustfs', 'control-service']) {
+  test(`restores the stopped ${service} selected from the current Compose project`, async () => {
+    let running = false;
+    const started = [];
+    const result = await startServiceContainer(service, {
+      async composeOutput(...args) {
+        assert.deepEqual(args, ['ps', '--all', '--quiet', service]);
+        return `${id}\r\n`;
+      },
+      async commandOutput(executable, args) {
+        assert.equal(executable, 'docker');
+        assert.equal(args.at(-1), id);
+        if (args[0] === 'start') {
+          started.push(args[1]);
+          running = true;
+          return id;
+        }
+        assert.deepEqual(args, ['inspect', '--format', '{{.State.Running}}', id]);
+        return String(running);
+      },
+    });
+    assert.equal(result, id);
+    assert.equal(running, true);
+    assert.deepEqual(started, [id]);
   });
-  assert.equal(result, id);
-  assert.equal(running, true);
-  assert.deepEqual(started, [id]);
-});
+}
 
 test('a successful start command with a still-stopped container fails recovery', async () => {
   await assert.rejects(startServiceContainer('postgres', {
