@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/jackc/pgx/v5/pgtype"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
 )
 
@@ -169,5 +171,180 @@ func TestListAdminAuditAllowsMissingPayload(t *testing.T) {
 	}
 	if changes, exists := page.Items[0]["changes"]; !exists || changes != nil {
 		t.Fatalf("changes must be explicit null, got %v", page.Items[0])
+	}
+}
+
+// endpointAuditCase is one URL shape a model endpoint can take, paired with
+// the form the audit trail must contain for it.
+type endpointAuditCase struct {
+	name     string
+	endpoint string
+	audited  string
+}
+
+func endpointAuditCases() []endpointAuditCase {
+	return []endpointAuditCase{
+		{"query", "https://model.example.test/v1?api_key=DISPOSABLE_QUERY", "https://model.example.test/v1"},
+		{"userinfo", "https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1", "https://model.example.test/v1"},
+		{"fragment", "https://model.example.test/v1#DISPOSABLE_FRAGMENT", "https://model.example.test/v1"},
+		{"no credentials", "https://model.example.test/v1", "https://model.example.test/v1"},
+	}
+}
+
+// pgxAuditPayloadCapture records the JSON payload argument of an audit INSERT
+// issued through the runtime pool. pgxmock matches arguments through
+// Match(any), while the sqlmock helper next door matches through
+// Match(driver.Value), so the two cannot share one type.
+type pgxAuditPayloadCapture struct{ raw []byte }
+
+func (capture *pgxAuditPayloadCapture) Match(value any) bool {
+	raw, ok := value.([]byte)
+	if !ok {
+		return false
+	}
+	capture.raw = raw
+	return true
+}
+
+func assertAuditedEndpoint(t *testing.T, payload string, testCase endpointAuditCase) {
+	t.Helper()
+	if strings.Contains(payload, "DISPOSABLE") {
+		t.Fatalf("%s: audit payload retained endpoint credentials: %s", testCase.name, payload)
+	}
+	if !strings.Contains(payload, testCase.audited) {
+		t.Fatalf("%s: audit payload lost the endpoint location: %s", testCase.name, payload)
+	}
+}
+
+func modelRuntimeRowWithEndpoint(id, endpoint string) *pgxmock.Rows {
+	now := time.Now().UTC()
+	return pgxmock.NewRows(modelRuntimeColumns()).AddRow(
+		id, "Audit Model", "gateway", "openai-compatible", endpoint, "model", nil, nil,
+		[]string{"text"}, []byte(`{}`), nil, false, true, "unknown", nil, nil, nil, now, now,
+	)
+}
+
+func TestRedactAuditURLCredentialParts(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"query", "https://model.example.test/v1?api_key=DISPOSABLE_QUERY", "https://model.example.test/v1"},
+		{"userinfo password", "https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1", "https://model.example.test/v1"},
+		{"userinfo username", "https://audit-user@model.example.test/v1", "https://model.example.test/v1"},
+		{"fragment", "https://model.example.test/v1#DISPOSABLE_FRAGMENT", "https://model.example.test/v1"},
+		{"no credentials", "https://model.example.test/v1", "https://model.example.test/v1"},
+		{"port and path kept", "https://model.example.test:8443/v1/chat?token=DISPOSABLE_QUERY", "https://model.example.test:8443/v1/chat"},
+		{"unparseable URL withheld", "https://model.example.test/%zz?api_key=DISPOSABLE_QUERY", auditRedactedValue},
+		{"bare host:port kept", "gateway.internal:8080", "gateway.internal:8080"},
+	}
+	for _, testCase := range cases {
+		if got := redactAuditURL(testCase.raw); got != testCase.want {
+			t.Errorf("%s: redactAuditURL(%q) = %q, want %q", testCase.name, testCase.raw, got, testCase.want)
+		}
+	}
+}
+
+func TestMaskAuditPayloadRedactsEndpointCredentials(t *testing.T) {
+	for _, testCase := range endpointAuditCases() {
+		masked := maskAuditPayload([]byte(`{"endpoint":"` + testCase.endpoint + `"}`))
+		record, ok := masked.(map[string]any)
+		if !ok {
+			t.Fatalf("%s: masked payload = %#v", testCase.name, masked)
+		}
+		if record["endpoint"] != testCase.audited {
+			t.Fatalf("%s: captured endpoint = %v, want %s", testCase.name, record["endpoint"], testCase.audited)
+		}
+	}
+}
+
+func TestAuditModelSnapshotRedactsEndpointCredentials(t *testing.T) {
+	for _, testCase := range endpointAuditCases() {
+		model := modelRecord{Endpoint: pgtype.Text{String: testCase.endpoint, Valid: true}}
+		encoded, err := json.Marshal(auditModelSnapshot(model))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAuditedEndpoint(t, string(encoded), testCase)
+	}
+}
+
+func TestCreateModelAuditRedactsEndpointCredentials(t *testing.T) {
+	for _, testCase := range endpointAuditCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			application, mock, adminToken := newStoreBackedHTTPApplication(t)
+			pool := attachRuntimeDatabase(t, application)
+			mock.ExpectQuery(`SELECT count\(\*\) FROM "models"`).
+				WithArgs("deployment-a", "audit-model").
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			pool.ExpectBegin()
+			pool.ExpectQuery(`INSERT INTO models`).
+				WithArgs(
+					pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+					pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(),
+				).
+				WillReturnRows(modelRuntimeRowWithEndpoint("audit-model", testCase.endpoint))
+			pool.ExpectCommit()
+			capture := &pgxAuditPayloadCapture{}
+			pool.ExpectExec(`INSERT INTO admin_audit_events`).
+				WithArgs("deployment-a", "admin-user", "create", "model", nil, nil, capture).
+				WillReturnResult(pgxmock.NewResult("INSERT", 1))
+			response := adminRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/models",
+				`{"displayName":"Audit Model","sourceType":"gateway","protocol":"openai-compatible","endpoint":"`+testCase.endpoint+`","upstreamModel":"model","capabilities":["text"],"isDefault":false,"enabled":true}`)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("create model = %d %s", response.Code, response.Body.String())
+			}
+			assertAuditedEndpoint(t, string(capture.raw), testCase)
+		})
+	}
+}
+
+func TestUpdateModelAuditRedactsEndpointCredentials(t *testing.T) {
+	for _, testCase := range endpointAuditCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			application, _, adminToken := newStoreBackedHTTPApplication(t)
+			pool := attachRuntimeDatabase(t, application)
+			pool.ExpectBegin()
+			pool.ExpectQuery(`FROM models WHERE deployment_id=\$1 AND id=\$2`).
+				WithArgs("deployment-a", "audit-model").
+				WillReturnRows(modelRuntimeRowWithEndpoint("audit-model", "https://legacy.example.test/v1"))
+			pool.ExpectQuery(`UPDATE models SET`).
+				WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+				WillReturnRows(modelRuntimeRowWithEndpoint("audit-model", testCase.endpoint))
+			capture := &pgxAuditPayloadCapture{}
+			pool.ExpectExec(`INSERT INTO admin_audit_events`).
+				WithArgs("deployment-a", "admin-user", "update", "model", "audit-model", "success", nil, capture).
+				WillReturnResult(pgxmock.NewResult("INSERT", 1))
+			pool.ExpectCommit()
+			response := adminRequest(New(application).Handler(), adminToken, http.MethodPatch, "/aep/v1/admin/models/audit-model",
+				`{"endpoint":"`+testCase.endpoint+`"}`)
+			if response.Code != http.StatusOK {
+				t.Fatalf("update model = %d %s", response.Code, response.Body.String())
+			}
+			assertAuditedEndpoint(t, string(capture.raw), testCase)
+		})
+	}
+}
+
+func TestListAdminAuditRedactsStoredEndpointCredentials(t *testing.T) {
+	application, pool, adminToken, _ := newRuntimeHTTPApplication(t)
+	stored := `{"endpoint":"https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1?api_key=DISPOSABLE_QUERY#DISPOSABLE_FRAGMENT",` +
+		`"changes":{"before":{"endpoint":"https://audit-user:DISPOSABLE_PASSWORD@model.example.test/v1"},` +
+		`"after":{"endpoint":"https://model.example.test/v1?api_key=DISPOSABLE_QUERY"}}}`
+	pool.ExpectQuery(`SELECT cursor,actor_user_id,action,resource_type,resource_id,result,reason,payload,created_at FROM admin_audit_events`).
+		WithArgs("deployment-a", 51).
+		WillReturnRows(pgxmock.NewRows([]string{"cursor", "actor_user_id", "action", "resource_type", "resource_id", "result", "reason", "payload", "created_at"}).
+			AddRow(int64(9), "admin-user", "update", "model", "audit-model", "success", nil, []byte(stored), time.Now().UTC()))
+	response := userRequest(New(application).Handler(), adminToken, http.MethodGet, "/aep/v1/admin/audit/operations", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("audit read = %d %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "DISPOSABLE") {
+		t.Fatalf("audit reader received stored endpoint credentials: %s", body)
+	}
+	if !strings.Contains(body, `"endpoint":"https://model.example.test/v1"`) {
+		t.Fatalf("audit reader lost the endpoint location: %s", body)
 	}
 }

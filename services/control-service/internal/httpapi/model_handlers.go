@@ -506,7 +506,7 @@ func auditModelSnapshot(model modelRecord) map[string]any {
 		"capabilities": []string(model.Capabilities),
 	}
 	if model.Endpoint.Valid {
-		snapshot["endpoint"] = stripURLQuery(model.Endpoint.String)
+		snapshot["endpoint"] = redactAuditURL(model.Endpoint.String)
 	}
 	if model.UpstreamModel.Valid {
 		snapshot["upstreamModel"] = model.UpstreamModel.String

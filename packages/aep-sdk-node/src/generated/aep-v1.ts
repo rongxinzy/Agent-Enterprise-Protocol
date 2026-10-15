@@ -1038,7 +1038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. A URL field keeps only its scheme, host, port and path — its query, fragment and userinfo are removed both when the record is written and when it is read back. Read-only, cursor paginated, and always scoped to the caller's deployment. */
         get: operations["listAdminAudit"];
         put?: never;
         post?: never;
