@@ -65,6 +65,8 @@ import type {
   DataPlaneDesiredState,
   DataPlaneDesiredStateWrite,
   DataPlanePublishRequest,
+  DataPlanePublicationRequest,
+  DataPlanePublication,
   DataPlaneStatus,
   DeploymentSettings,
   DeploymentSettingsUpdate,
@@ -900,6 +902,25 @@ export class AepClient {
 
   getDataPlaneStatus(): Promise<DataPlaneStatus> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/status'});
+  }
+
+  /** Requires the async publication service. Save/reuse the key across retries; 202 is not Ready. */
+  createDataPlanePublication(idempotencyKey: string, input: DataPlanePublicationRequest = {}): Promise<DataPlanePublication> {
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length < 1 || idempotencyKey.length > 128
+      || /[^A-Za-z0-9._:-]/.test(idempotencyKey)) {
+      throw new TypeError('Idempotency-Key must contain 1-128 ASCII letters, digits or ._:-');
+    }
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/data-plane/publications',
+      headers: {'Idempotency-Key': idempotencyKey},
+      body: asJson({...input}),
+      retry: true,
+    });
+  }
+
+  getDataPlanePublication(operationId: string): Promise<DataPlanePublication> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-plane/publications/${segment(operationId)}`});
   }
 
   getDeploymentSettings(): Promise<DeploymentSettings> {

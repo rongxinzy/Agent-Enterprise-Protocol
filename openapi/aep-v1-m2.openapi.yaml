@@ -361,6 +361,10 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
         '400': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+  /aep/v1/admin/data-plane/publications:
+    $ref: './aep-v1-data-plane-publications.openapi.yaml#/paths/~1publications'
+  /aep/v1/admin/data-plane/publications/{operationId}:
+    $ref: './aep-v1-data-plane-publications.openapi.yaml#/paths/~1publications~1{operationId}'
   /aep/v1/admin/data-plane/status:
     get:
       tags: [Admin Data Plane]
@@ -510,6 +514,12 @@ components:
             deploymentId: {type: string}
             publishedAt: {type: string, format: date-time}
             contentHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+    DataPlanePublicationRequest:
+      $ref: './aep-v1-data-plane-publications.openapi.yaml#/components/schemas/DataPlanePublicationRequest'
+    DataPlanePublication:
+      $ref: './aep-v1-data-plane-publications.openapi.yaml#/components/schemas/DataPlanePublication'
+    DataPlanePublicationCondition:
+      $ref: './aep-v1-data-plane-publications.openapi.yaml#/components/schemas/DataPlanePublicationCondition'
     DataPlaneStatus:
       type: object
       required: [state, observedRevision, contentHash]
