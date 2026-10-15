@@ -26,6 +26,7 @@ func TestCleanupRetentionDeletesBoundedExpiredData(t *testing.T) {
 	expectRetentionDelete(pool, `DELETE FROM authentication_audit_events`, now.Add(-application.Config.AuditRetention), 100, 1)
 	expectRetentionDelete(pool, `DELETE FROM credential_resolution_audit`, now.Add(-application.Config.AuditRetention), 100, 2)
 	expectRetentionDelete(pool, `DELETE FROM license_audit_events`, now.Add(-application.Config.AuditRetention), 100, 3)
+	expectRetentionDelete(pool, `DELETE FROM admin_audit_events`, now.Add(-application.Config.AuditRetention), 100, 12)
 	expectRetentionDelete(pool, `DELETE FROM telemetry_events`, now.Add(-application.Config.TelemetryRetention), 100, 4)
 	expectRetentionDelete(pool, `DELETE FROM skill_sync_results`, now.Add(-application.Config.TelemetryRetention), 100, 5)
 	expectRetentionDelete(pool, `DELETE FROM session_control_deliveries`, now.Add(-application.Config.OperationalRetention), 100, 6)
@@ -45,7 +46,7 @@ func TestCleanupRetentionDeletesBoundedExpiredData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.LockAcquired || result.Total() != 55 || result.Sessions != 9 || result.LoginRateLimits != 10 {
+	if !result.LockAcquired || result.Total() != 67 || result.Sessions != 9 || result.LoginRateLimits != 10 || result.AdminAudit != 12 {
 		t.Fatalf("unexpected retention result: %#v", result)
 	}
 }
@@ -62,6 +63,44 @@ func TestCleanupRetentionSkipsWhenAnotherReplicaHoldsLock(t *testing.T) {
 	result, err := application.CleanupRetention(context.Background(), time.Now())
 	if err != nil || result.LockAcquired || result.Total() != 0 {
 		t.Fatalf("CleanupRetention() = %#v, %v", result, err)
+	}
+}
+
+func TestCleanupRetentionRollsBackOnAdminAuditFailure(t *testing.T) {
+	application, pool, _ := newMockApplication(t)
+	application.Config.RetentionCleanupBatchSize = 100
+	application.Config.AuditRetention = 24 * time.Hour
+	now := time.Now().UTC()
+	cutoff := now.Add(-application.Config.AuditRetention)
+	pool.ExpectBegin()
+	pool.ExpectQuery(`SELECT pg_try_advisory_xact_lock`).WithArgs(retentionAdvisoryLockID).
+		WillReturnRows(pgxmock.NewRows([]string{"locked"}).AddRow(true))
+	expectRetentionDelete(pool, `DELETE FROM authentication_audit_events`, cutoff, 100, 1)
+	expectRetentionDelete(pool, `DELETE FROM credential_resolution_audit`, cutoff, 100, 2)
+	expectRetentionDelete(pool, `DELETE FROM license_audit_events`, cutoff, 100, 3)
+	pool.ExpectExec(`DELETE FROM admin_audit_events`).WithArgs(cutoff, 100).
+		WillReturnError(errors.New("audit cleanup unavailable"))
+	pool.ExpectRollback()
+	if _, err := application.CleanupRetention(t.Context(), now); err == nil || !strings.Contains(err.Error(), "delete expired administrative audit") {
+		t.Fatalf("CleanupRetention() error = %v", err)
+	}
+}
+
+func TestCleanupRetentionPreservesAuditWithZeroRetention(t *testing.T) {
+	application, pool, _ := newMockApplication(t)
+	application.Config.RetentionCleanupBatchSize = 100
+	application.Config.AuditRetention = 0
+	now := time.Now().UTC()
+	pool.ExpectBegin()
+	pool.ExpectQuery(`SELECT pg_try_advisory_xact_lock`).WithArgs(retentionAdvisoryLockID).
+		WillReturnRows(pgxmock.NewRows([]string{"locked"}).AddRow(true))
+	// Only expiry cleanup remains enabled; any audit DELETE is unexpected.
+	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
+		expectRetentionDelete(pool, `DELETE FROM `+table, now, 100, 0)
+	}
+	pool.ExpectCommit()
+	if result, err := application.CleanupRetention(t.Context(), now); err != nil || result.AdminAudit != 0 || !result.LockAcquired {
+		t.Fatalf("CleanupRetention() = %+v, %v", result, err)
 	}
 }
 

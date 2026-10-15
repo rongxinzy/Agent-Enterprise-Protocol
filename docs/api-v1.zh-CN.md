@@ -687,7 +687,8 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 
 期望状态只引用外部 Secret 名称和键，不包含模型服务商凭证明文。目录派生路由在模型绑定
 Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key`，命名空间
-`higress-system`），该 Secret 由部署侧 Secret 系统负责供给。
+`aep-credentials`），该 Secret 由部署侧 Secret 系统负责供给。命名空间由服务端解析，
+客户端发送的 `credentialRef.namespace` 会被忽略。
 
 ### 部署设置
 
@@ -770,6 +771,18 @@ OpenAI 兼容模型网关地址。请求体 `{"modelGatewayBaseUrl": "https://ga
 
 `GET /admin/events` 支持 `cursor`、`limit`、`userId`、`sessionId`、`type`、
 `resourceType`、`resourceId`、`result`、`occurredAfter` 和 `occurredBefore`。
+
+### 管理操作审计
+
+`GET /admin/audit/operations` 要求 `audit.read` 权限，只返回调用者部署内的记录，
+按 cursor 倒序排列。支持 `cursor`、`limit`、`action`、`resourceType`、
+`resourceId`、`actorUserId`、`createdAfter` 和 `createdBefore`；时间筛选使用
+RFC 3339。响应包含 `items` 和可空的 `nextCursor`。
+
+每条记录包含操作人、动作、资源、结果、时间和 `changes`：脱敏的变更前后快照或
+兜底捕获的请求字段；没有载荷时为 `null`。创建账号的载荷保留用户名，密码与未知
+字段继续打码。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
+配置说明见[生产运行基线](production-runtime.zh-CN.md)。
 
 ## 11. 错误与重试
 

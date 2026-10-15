@@ -1900,6 +1900,52 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '403':
           $ref: '#/components/responses/Problem-2'
+  /aep/v1/admin/audit/operations:
+    get:
+      tags:
+        - Admin Audit
+      operationId: listAdminAudit
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit-2'
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: actorUserId
+          in: query
+          schema:
+            type: string
+        - name: createdAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: createdBefore
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Administrative audit result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuditPage'
+        '400':
+          $ref: '#/components/responses/Problem-2'
+        '403':
+          $ref: '#/components/responses/Problem-2'
   /aep/v1/admin/credentials:
     get:
       tags:
@@ -2892,7 +2938,7 @@ paths:
       tags:
         - Admin Data Plane
       operationId: publishDataPlaneRoutes
-      description: Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in higress-system; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one.
+      description: Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in the dedicated aep-credentials namespace; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one.
       requestBody:
         required: false
         content:
@@ -3420,6 +3466,10 @@ components:
             - string
             - 'null'
           maxLength: 253
+          description: |
+            Accepted for compatibility with earlier clients and ignored: the reconciler
+            reads every route credential from the dedicated credential namespace, so a
+            route cannot choose where it reads from.
     DataPlaneRoute:
       type: object
       required:
@@ -6283,6 +6333,61 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AuthenticationAuditRecord'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+    AdminAuditRecord:
+      type: object
+      required:
+        - cursor
+        - action
+        - resourceType
+        - result
+        - createdAt
+      properties:
+        cursor:
+          type: string
+        actorUserId:
+          type:
+            - string
+            - 'null'
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type:
+            - string
+            - 'null'
+        result:
+          type: string
+          enum:
+            - success
+            - failure
+        reason:
+          type:
+            - string
+            - 'null'
+        changes:
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+          description: Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted.
+        createdAt:
+          type: string
+          format: date-time
+    AdminAuditPage:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditRecord'
         nextCursor:
           type:
             - string

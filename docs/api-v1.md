@@ -744,7 +744,9 @@ must never be sent to the service.
 Desired state refers to external Secret names and keys only; it never includes
 provider secret values. Catalog-derived routes for Credential-bound models
 reference the conventional Secret `aep-credential-<credentialId>` (key
-`api-key`) in `higress-system`, which the deployment Secret system provisions.
+`api-key`) in the dedicated `aep-credentials` namespace, which the deployment
+Secret system provisions. The namespace is resolved server-side, so a
+`credentialRef.namespace` sent by a client is ignored.
 
 ### Deployment settings
 
@@ -843,6 +845,21 @@ deliveries as `superseded`.
 
 `GET /admin/events` supports `cursor`, `limit`, `userId`, `sessionId`, `type`,
 `resourceType`, `resourceId`, `result`, `occurredAfter`, and `occurredBefore`.
+
+### Administrative audit
+
+`GET /admin/audit/operations` requires `audit.read` and returns only records in
+the caller's deployment, ordered by descending cursor. It accepts `cursor`,
+`limit`, `action`, `resourceType`, `resourceId`, `actorUserId`, `createdAfter`,
+and `createdBefore`; time filters use RFC 3339. The response contains `items`
+and a nullable `nextCursor`.
+
+Each record includes the actor, action, resource, result, timestamp, and
+`changes`: masked before/after snapshots or a fallback request payload, or
+`null` when no payload was recorded. Account-creation payloads retain the
+username; passwords and unknown fields remain redacted. This read-only endpoint
+does not expose credential values. Records follow `AEP_AUDIT_RETENTION`, as
+described in the [production runtime guide](production-runtime.md).
 
 ## 11. Errors and Retry
 
