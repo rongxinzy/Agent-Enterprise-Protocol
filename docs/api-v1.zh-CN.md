@@ -257,7 +257,7 @@ Agent 在系统浏览器打开 `authorizationUrl`，回调时校验 `state`。�
 
 ### `GET /user/skills/{skillId}/versions/{version}/package`
 
-返回 `application/zip`。服务端再次检查授权，客户端在解压前校验清单中的 SHA-256。
+返回 `application/zip`。服务端再次检查与清单一致的生效条件——授权、授权到期、Skill 启用与版本发布——因此清单中不存在的 Skill 也无法下载。客户端在解压前校验清单中的 SHA-256。
 
 ### `POST /user/skills/sync-results`
 
