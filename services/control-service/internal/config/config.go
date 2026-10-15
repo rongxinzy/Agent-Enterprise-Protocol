@@ -70,6 +70,8 @@ type Config struct {
 	GatewayMetricsDeployment    string
 	GatewayOrganizationLogs     bool
 	GatewayPublicationsEnabled  bool
+	GatewayRelayEnabled         bool
+	GatewayRelayNamespace       string
 	MaxResidentAgents           int
 	CredentialMasterKeyBase64   string
 	CredentialMasterKeyFile     string
@@ -145,6 +147,7 @@ func Load() (Config, error) {
 		ModelHealthWebhookURL:     strings.TrimSpace(os.Getenv("AEP_MODEL_HEALTH_WEBHOOK")),
 		AgentControlBaseURL:       os.Getenv("AEP_AGENT_CONTROL_BASE_URL"),
 		DeploymentID:              value("AEP_DEPLOYMENT_ID", value("AEP_BOOTSTRAP_ENTERPRISE_ID", "demo")),
+		GatewayRelayNamespace:     value("AEP_GATEWAY_PUBLICATION_NAMESPACE", "aep-system"),
 		DeploymentName:            value("AEP_DEPLOYMENT_NAME", value("AEP_BOOTSTRAP_ENTERPRISE_NAME", "Demo Deployment")),
 		DataPlaneReconcilerToken:  dataPlaneToken,
 		GatewayLicenseStatusToken: gatewayLicenseToken,
@@ -249,6 +252,9 @@ func Load() (Config, error) {
 	if cfg.GatewayPublicationsEnabled, err = boolean("AEP_GATEWAY_PUBLICATIONS_ENABLED", false); err != nil {
 		return Config{}, err
 	}
+	if cfg.GatewayRelayEnabled, err = boolean("AEP_GATEWAY_PUBLICATION_RELAY_ENABLED", false); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -256,6 +262,9 @@ func Load() (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if cfg.GatewayRelayEnabled && (!cfg.GatewayPublicationsEnabled || cfg.GatewayRelayNamespace != "aep-system") {
+		return errors.New("publication relay requires publications enabled and the operator namespace aep-system")
+	}
 	for key, raw := range map[string]string{"AEP_GATEWAY_PROMETHEUS_URL": cfg.GatewayPrometheusURL, "AEP_GATEWAY_LOKI_URL": cfg.GatewayLokiURL, "AEP_GATEWAY_QUOTA_URL": cfg.GatewayQuotaURL} {
 		if raw == "" {
 			continue

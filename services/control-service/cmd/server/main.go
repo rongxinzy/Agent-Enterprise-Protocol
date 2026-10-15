@@ -88,6 +88,14 @@ func runWithDependencies(dependencies serverDependencies) error {
 		return fmt.Errorf("initialize: %w", err)
 	}
 	defer application.Close()
+	relayContext, stopRelay := context.WithCancel(ctx)
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		if application.PublicationRelay != nil {
+			application.PublicationRelay.Run(relayContext)
+		}
+	}()
 	retentionContext, stopRetention := context.WithCancel(ctx)
 	retentionDone := make(chan struct{})
 	go func() {
@@ -130,6 +138,7 @@ func runWithDependencies(dependencies serverDependencies) error {
 		}
 	}
 	stopRetention()
+	stopRelay()
 	stopHealth()
 	shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
@@ -142,5 +151,6 @@ func runWithDependencies(dependencies serverDependencies) error {
 	}
 	<-retentionDone
 	<-healthDone
+	<-relayDone
 	return serveErr
 }

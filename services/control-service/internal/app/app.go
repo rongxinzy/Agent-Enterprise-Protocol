@@ -24,6 +24,7 @@ import (
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 	database "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/license"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/publicationrelay"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
@@ -97,18 +98,19 @@ func (c pooledBootstrapConnection) Close(ctx context.Context) error {
 }
 
 type App struct {
-	Config          config.Config
-	Pool            *pgxpool.Pool
-	SQLDB           *sql.DB
-	Store           *repository.Store
-	Blobs           blob.Store
-	Tokens          *auth.Service
-	Credentials     *credential.Sealer
-	LicenseVerifier *license.Verifier
-	License         *license.Verified
-	runtimeDB       RuntimeDatabase
-	accessSessions  AccessSessionValidator
-	licenseMu       sync.RWMutex
+	Config           config.Config
+	Pool             *pgxpool.Pool
+	SQLDB            *sql.DB
+	Store            *repository.Store
+	Blobs            blob.Store
+	Tokens           *auth.Service
+	Credentials      *credential.Sealer
+	LicenseVerifier  *license.Verifier
+	License          *license.Verified
+	PublicationRelay *publicationrelay.Worker
+	runtimeDB        RuntimeDatabase
+	accessSessions   AccessSessionValidator
+	licenseMu        sync.RWMutex
 }
 
 func (a *App) database() RuntimeDatabase {
@@ -295,6 +297,14 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 			pool.Close()
 			return nil, err
 		}
+	}
+	if cfg.GatewayRelayEnabled {
+		kube, err := publicationrelay.InClusterClient()
+		if err != nil {
+			application.Close()
+			return nil, err
+		}
+		application.PublicationRelay = publicationrelay.New(application.Store.Deployment(cfg.DeploymentID), &publicationrelay.Projector{Client: kube, Namespace: cfg.GatewayRelayNamespace})
 	}
 	return application, nil
 }

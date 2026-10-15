@@ -694,8 +694,10 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 
 管控服务已实现事务入队和 operation 查询，以 `AEP_GATEWAY_PUBLICATIONS_ENABLED`
 显式开启，默认 `false`；关闭时返回 `503 DATA_PLANE_PUBLICATIONS_DISABLED`。
-**本阶段没有 relay 和 operator 观测读取器**，开启后任务保持 `queued`，conditions
-均为 Unknown，仅用于隔离环境的入队验收。现有客户端继续使用同步 `POST /publish`
+另以 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED=true` 显式开启集群内 relay，仅投递当前
+配置部署到 `aep-system`；不开启时任务保持 queued。**尚无 operator 观测读取器**，
+即使 phase 为 projected，conditions 仍全部 Unknown。仅用于隔离验收和经审核的
+operator 移交。现有客户端继续使用同步 `POST /publish`
 （`200 DataPlaneDesiredState`），两条路径之间不自动回退。relay 故障恢复、operator
 独占写及完整链路生效验收完成后，才能切换生产客户端。
 
@@ -726,11 +728,19 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 入队阶段不自动清理 operation 和快照；`idempotencyExpiresAt` 是最短留存边界，
 不是删除时间。现有留存清理器不删除待投递 outbox；幂等键仅保存 SHA-256 摘要，不存原文。
 
+relay 使用有期限的 claim、带 token 的确认、原生退避以及每个 CR 的递增序号／
+resourceVersion 护栏。新完整快照取代尚未完成的旧意图。移除的模型以禁用 ModelRoute
+墓碑 CR 撤销路由并拦截晚到的旧创建，本阶段不物理删除。不要删除这些护栏或混用其他
+spec 写入者。projected 表示已核对 CR（含禁用墓碑）写入，不表示 Higress 生效。
+多个 CR 逐个收敛，不是原子快照切换，operator 可能观察到投递中的中间配置。
+ModelRoute 不支持相对上游地址，此类任务失败为 `INVALID_OPERATOR_SNAPSHOT`，
+relay 不会替用户虚构供应商地址。
+
 `phase` 仅表示投递生命周期：`queued` → `projecting` → `projected`、`failed` 或
 `superseded`。临时投递错误退避重试；`failed` 表示不可恢复的投影错误，携带脱敏
-`errorCode`。`projected` 表示 relay 已核对该快照的 CR 写入与删除。新发布可以取代
+`errorCode`。`projected` 表示 relay 已核对该快照的 CR 写入（含移除模型的禁用墓碑）。新发布可以取代
 旧发布（包括已 projected 的发布）；旧 worker 即使延迟恢复，也不得覆盖新意图。
-`failed`、`superseded` 是终态。崩溃恢复、顺序与 fencing 需在后续 outbox 实现阶段验证。
+`failed`、`superseded` 是终态。崩溃恢复、顺序与 fencing 已由 PostgreSQL 与 API Server 验收测试覆盖。
 
 响应始终含各一条 `Accepted`、`Applied`、`Ready`，初始均为 `Unknown`。Accepted
 表示 operator 语义校验通过；Applied 表示渲染后的 K8s 资源写入；Ready 需要独立证据
