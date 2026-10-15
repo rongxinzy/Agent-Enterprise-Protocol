@@ -517,7 +517,7 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
-Every user must have at least one role and one team when created or imported. Passwords must contain 6 to 1024 characters. Temporary passwords must not start or end with whitespace: create and reset reject it (`PASSWORD_POLICY_VIOLATION`), while import trims it because imported rows come from exports and spreadsheets. When create or import omits the temporary password (or import trims it to empty), the server assigns the default `123456`. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
+Every user must have at least one role and one team when created or imported. Passwords must contain 6 to 1024 characters. Temporary passwords must not start or end with whitespace: create and reset reject it (`PASSWORD_POLICY_VIOLATION`), while import trims it because imported rows come from exports and spreadsheets. An import that rejects every row is a failure, not an empty success: it answers `422 USER_IMPORT_REJECTED` with the per-row reasons attached to the problem document, because a batch that created no account did not apply. A batch that created at least one account stays `200` and reports `created` and `rejected` counts. When create or import omits the temporary password (or import trims it to empty), the server assigns the default `123456`. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
 
 ### RBAC and sessions
 
@@ -935,6 +935,14 @@ back, so an inline credential never reaches the trail or a reader. This
 read-only endpoint does not expose credential values. Records follow
 `AEP_AUDIT_RETENTION`, as described in the [production runtime
 guide](production-runtime.md).
+
+Creating an account — and each account a bulk import creates — writes its audit
+row in the same transaction as the account and its role/team bindings. An
+account whose audit row cannot be written is not created: a single create fails
+with `INTERNAL_ERROR`, and an import reports that row in `errors` and keeps the
+rows that were audited. An import that ends up creating no account answers
+`422 USER_IMPORT_REJECTED` and writes no success audit row, so the trail never
+records an import that changed nothing.
 
 Write attempts that were refused or failed are recorded too, with
 `result: failure` and the stable problem code in `reason`. Coverage is every
