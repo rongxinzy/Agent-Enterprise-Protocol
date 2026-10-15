@@ -57,7 +57,7 @@ func (publicationOutbox) TableName() string { return "data_plane_publication_out
 // Derivation reads the catalog once, through this transaction, only after the
 // replay lookup. No Kubernetes/network calls are allowed in derive.
 func (s *DeploymentStore) QueueDataPlanePublication(ctx context.Context, keyHash, requestHash, actorID string, derive func([]Model) (PublicationSnapshot, error)) (DataPlanePublication, error) {
-	return s.queuePublication(ctx, keyHash, requestHash, actorID, func(tx *DeploymentStore, models []Model) (PublicationSnapshot, error) {
+	return s.queuePublication(ctx, keyHash, requestHash, actorID, false, func(tx *DeploymentStore, models []Model) (PublicationSnapshot, error) {
 		return derive(models)
 	})
 }
@@ -66,14 +66,9 @@ func (s *DeploymentStore) QueueDataPlanePublication(ctx context.Context, keyHash
 // the same deployment lock. Route-only publications inherit the latest intent,
 // including queued work, rather than racing delivery or silently dropping it.
 func (s *DeploymentStore) QueueGatewayPublication(ctx context.Context, keyHash, requestHash, actorID string, includeLimits bool, derive func([]Model, *[]gatewaypolicy.Limit) (PublicationSnapshot, error)) (DataPlanePublication, error) {
-	return s.queuePublication(ctx, keyHash, requestHash, actorID, func(tx *DeploymentStore, models []Model) (PublicationSnapshot, error) {
+	return s.queuePublication(ctx, keyHash, requestHash, actorID, true, func(tx *DeploymentStore, models []Model) (PublicationSnapshot, error) {
 		var limits *[]gatewaypolicy.Limit
 		if includeLimits {
-			// The existing rule writer uses this lock. Keep lock ordering fixed:
-			// publication first, native rules second; no network in this transaction.
-			if err := tx.db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?,101))`, s.deploymentID).Error; err != nil {
-				return PublicationSnapshot{}, err
-			}
 			items, err := tx.GatewayLimits(ctx, true)
 			if err != nil {
 				return PublicationSnapshot{}, err
@@ -98,7 +93,7 @@ func (s *DeploymentStore) QueueGatewayPublication(ctx context.Context, keyHash, 
 	})
 }
 
-func (s *DeploymentStore) queuePublication(ctx context.Context, keyHash, requestHash, actorID string, derive func(*DeploymentStore, []Model) (PublicationSnapshot, error)) (DataPlanePublication, error) {
+func (s *DeploymentStore) queuePublication(ctx context.Context, keyHash, requestHash, actorID string, lockNative bool, derive func(*DeploymentStore, []Model) (PublicationSnapshot, error)) (DataPlanePublication, error) {
 	var result DataPlanePublication
 	err := s.transaction(ctx, func(tx *DeploymentStore) error {
 		if err := tx.db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, "aep:publication:"+s.deploymentID).Error; err != nil {
@@ -114,6 +109,13 @@ func (s *DeploymentStore) queuePublication(ctx context.Context, keyHash, request
 		if !errors.Is(err, ErrNotFound) {
 			return err
 		}
+		// Serialize catalog capture with rule writes and reference deletion;
+		// the order is publication lock, then native lock, before any reads.
+		if lockNative {
+			if err := tx.db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?,101))`, s.deploymentID).Error; err != nil {
+				return err
+			}
+		}
 		models, err := tx.ListModels(ctx)
 		if err != nil {
 			return err
@@ -122,6 +124,21 @@ func (s *DeploymentStore) queuePublication(ctx context.Context, keyHash, request
 		if err != nil {
 			return err
 		}
+		result, err = tx.insertPublication(ctx, keyHash, requestHash, actorID, snapshot)
+		return err
+	})
+	if err != nil {
+		return DataPlanePublication{}, err
+	}
+	return result, nil
+}
+
+// insertPublication joins the caller's transaction and publication lock. Both
+// explicit publication and reference invalidation use the same durable outbox.
+func (s *DeploymentStore) insertPublication(ctx context.Context, keyHash, requestHash, actorID string, snapshot PublicationSnapshot) (DataPlanePublication, error) {
+	var result DataPlanePublication
+	err := func() error {
+		tx := s
 		snapshot.DeploymentID = s.deploymentID
 		if err := tx.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&snapshot).Error; err != nil {
 			return err
@@ -148,7 +165,7 @@ func (s *DeploymentStore) queuePublication(ctx context.Context, keyHash, request
 			return err
 		}
 		return tx.db.Create(&publicationOutbox{DeploymentID: s.deploymentID, OperationID: result.OperationID}).Error
-	})
+	}()
 	if err != nil {
 		return DataPlanePublication{}, err
 	}

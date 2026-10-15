@@ -9,12 +9,13 @@ import (
 )
 
 type GatewayLimit struct {
-	DeploymentID  string `gorm:"primaryKey"`
-	ID            string `gorm:"primaryKey"`
-	Version       int64
-	Configuration json.RawMessage `gorm:"type:jsonb"`
-	Deleted       bool
-	UpdatedAt     time.Time
+	DeploymentID         string `gorm:"primaryKey"`
+	ID                   string `gorm:"primaryKey"`
+	Version              int64
+	Configuration        json.RawMessage `gorm:"type:jsonb"`
+	Deleted              bool
+	ReferenceInvalidated bool
+	UpdatedAt            time.Time
 }
 
 func (s *DeploymentStore) GatewayLimits(ctx context.Context, includeDeleted bool) ([]gatewaypolicy.Limit, error) {

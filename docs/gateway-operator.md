@@ -103,6 +103,32 @@ validation and data-plane observation remain cutover prerequisites.
 
 ## Publication evidence
 
+### DB reference lifecycle
+
+Migration 048 atomically retires native limit rules when their user, team,
+role or model is deleted. The database trigger uses the native writer's lock,
+retains a disabled/versioned tombstone and records a coalescing invalidation
+signal in the same transaction. Rollback removes both effects. Rule IDs stay
+retired when a name-derived subject ID is reused. Existing orphaned references
+are fenced by the migration backfill; review its write/lock cost before rollout.
+
+When the opt-in relay is running, it consumes this signal before claiming
+publication work. It copies only the latest selected immutable intent, disables
+removed model routes and invalidated rules, and commits the new snapshot,
+system-attributed audit and ordinary publication outbox together with the
+signal acknowledgement. It never publishes unrelated drafts. Model removals
+also retain the last selected sequence so deleting/recreating a model before
+the worker wakes cannot reopen its predecessor's route. A later explicit
+administrator publication can select the replacement model. Old idempotent
+requests still replay their original operation; sequence fencing prevents
+them from overwriting the newer withdrawal.
+
+This is asynchronous removal, not immediate data-plane revocation. Existing
+session/role authorization remains responsible for access revocation. It adds
+no user/team model grants. A stopped relay retains pending signals and resumes
+them after restart. Environments using the legacy publisher still require
+explicit publication; they must not claim automatic Operator withdrawal.
+
 The opt-in publication relay stamps the immutable operation tuple in CR
 annotations. Annotation-only republishes do not change generation. ModelRoute
 and DeploymentConfig therefore copy the validated sequence, operationId,

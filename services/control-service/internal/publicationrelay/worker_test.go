@@ -34,6 +34,39 @@ func (s *workerStore) FinishDataPlanePublication(_ context.Context, op, token, p
 
 type projectionFunc func(context.Context, repository.PublicationDelivery) error
 
+type invalidatingStore struct {
+	*workerStore
+	invalidated bool
+	err         error
+}
+
+func (s *invalidatingStore) QueueReferenceInvalidations(ctx context.Context) error {
+	s.invalidated = true
+	if _, ok := ctx.Deadline(); !ok {
+		panic("unbounded invalidation")
+	}
+	return s.err
+}
+func (s *invalidatingStore) ClaimDataPlanePublication(ctx context.Context) (*repository.PublicationDelivery, error) {
+	if !s.invalidated {
+		panic("claimed before reference invalidation")
+	}
+	return s.workerStore.ClaimDataPlanePublication(ctx)
+}
+
+func TestWorkerProcessesReferenceWithdrawalBeforeClaim(t *testing.T) {
+	for _, failure := range []error{nil, errors.New("database unavailable")} {
+		s := &invalidatingStore{workerStore: &workerStore{}, err: failure}
+		w := New(s, projectionFunc(func(context.Context, repository.PublicationDelivery) error {
+			t.Fatal("unexpected projection")
+			return nil
+		}))
+		if err := w.Step(t.Context()); !errors.Is(err, failure) || !s.invalidated {
+			t.Fatalf("invalidation error=%v", err)
+		}
+	}
+}
+
 func (f projectionFunc) Project(ctx context.Context, item repository.PublicationDelivery) error {
 	return f(ctx, item)
 }

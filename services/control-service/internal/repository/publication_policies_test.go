@@ -15,35 +15,35 @@ func TestGatewayPublicationCapturesDraftOrLatestIntent(t *testing.T) {
 			mock.ExpectBegin()
 			mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectQuery(`SELECT \* FROM "data_plane_publications"`).WillReturnRows(sqlmock.NewRows([]string{"operation_id"}))
-			mock.ExpectQuery(`SELECT \* FROM "models"`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 			failure := errors.New("stop before commit")
 			draft := len(stage) > 4 && stage[:5] == "draft"
-			if draft {
-				lock := mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a")
-				if stage == "draft-lock-error" {
-					lock.WillReturnError(failure)
-				} else {
-					lock.WillReturnResult(sqlmock.NewResult(0, 1))
+			lock := mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a")
+			if stage == "draft-lock-error" {
+				lock.WillReturnError(failure)
+			} else {
+				lock.WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectQuery(`SELECT \* FROM "models"`).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+				if draft {
 					query := mock.ExpectQuery(`SELECT \* FROM "gateway_limits"`).WithArgs("deployment-a")
 					if stage == "draft-read-error" {
 						query.WillReturnError(failure)
 					} else {
 						query.WillReturnRows(sqlmock.NewRows([]string{"id", "version", "configuration", "deleted"}).AddRow("shared", 3, []byte(`{"kind":"requests","scopeType":"global","maximum":7,"interval":"minute","enabled":true}`), stage == "draft-deleted"))
 					}
-				}
-			} else {
-				query := mock.ExpectQuery(`SELECT s.payload FROM data_plane_publications`).WithArgs("deployment-a")
-				if stage == "inherit-read-error" {
-					query.WillReturnError(failure)
 				} else {
-					rows := sqlmock.NewRows([]string{"payload"})
-					if stage == "inherit" {
-						rows.AddRow([]byte(`{"gatewayLimits":[{"id":"shared","version":2,"configuration":{"maximum":5}}]}`))
+					query := mock.ExpectQuery(`SELECT s.payload FROM data_plane_publications`).WithArgs("deployment-a")
+					if stage == "inherit-read-error" {
+						query.WillReturnError(failure)
+					} else {
+						rows := sqlmock.NewRows([]string{"payload"})
+						if stage == "inherit" {
+							rows.AddRow([]byte(`{"gatewayLimits":[{"id":"shared","version":2,"configuration":{"maximum":5}}]}`))
+						}
+						if stage == "inherit-invalid" {
+							rows.AddRow([]byte(`{"gatewayLimits":`))
+						}
+						query.WillReturnRows(rows)
 					}
-					if stage == "inherit-invalid" {
-						rows.AddRow([]byte(`{"gatewayLimits":`))
-					}
-					query.WillReturnRows(rows)
 				}
 			}
 			mock.ExpectRollback()

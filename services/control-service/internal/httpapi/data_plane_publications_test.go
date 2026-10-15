@@ -281,6 +281,7 @@ func TestPublicationCreateAndErrorMapping(t *testing.T) {
 				status = 503
 			default:
 				lookup.WillReturnRows(sqlmock.NewRows([]string{"operation_id"}))
+				mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("deployment-a").WillReturnResult(sqlmock.NewResult(0, 1))
 				rows := catalogModelRows(now)
 				if outcome == "invalid" {
 					rows = sqlmock.NewRows(modelHTTPColumns())

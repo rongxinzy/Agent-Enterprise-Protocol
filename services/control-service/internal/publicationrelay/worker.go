@@ -62,6 +62,12 @@ func (w *Worker) Run(ctx context.Context) {
 
 func (w *Worker) Step(ctx context.Context) error {
 	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	if invalidations, ok := w.Store.(interface{ QueueReferenceInvalidations(context.Context) error }); ok {
+		if err := invalidations.QueueReferenceInvalidations(claimCtx); err != nil {
+			cancel()
+			return err
+		}
+	}
 	item, err := w.Store.ClaimDataPlanePublication(claimCtx)
 	cancel()
 	if err != nil || item == nil {
