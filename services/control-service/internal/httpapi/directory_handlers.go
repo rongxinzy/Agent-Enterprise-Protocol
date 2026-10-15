@@ -215,7 +215,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 				SubjectType: "user", SubjectID: record.ID,
 				ResourceKind: "team", ResourceID: team,
 				Reason:    "ephemeral snapshot from " + input.ScopeFrom,
-				CreatedBy: claimsFrom(request).Subject,
+				CreatedBy: new(claimsFrom(request).Subject),
 			}
 			if _, err := store.CreateDataScopeRule(request.Context(), rule); err != nil {
 				databaseFailure(response, request, err)
@@ -228,7 +228,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 				SubjectType: "user", SubjectID: record.ID,
 				ResourceKind: "team", ResourceID: team,
 				Reason:    "ephemeral snapshot deny from " + input.ScopeFrom,
-				CreatedBy: claimsFrom(request).Subject,
+				CreatedBy: new(claimsFrom(request).Subject),
 			}
 			if _, err := store.CreateDataScopeRule(request.Context(), rule); err != nil {
 				databaseFailure(response, request, err)
@@ -657,7 +657,7 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 	rule := repository.DataScopeRule{
 		ID: identifier, RuleKind: input.RuleKind, SubjectType: input.SubjectType, SubjectID: strings.TrimSpace(input.SubjectID),
 		ResourceKind: input.ResourceKind, ResourceID: strings.TrimSpace(input.ResourceID),
-		StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: claimsFrom(request).Subject,
+		StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: new(claimsFrom(request).Subject),
 	}
 	created, err := s.app.Store.Deployment(tenant).CreateDataScopeRule(request.Context(), rule)
 	if err != nil {
