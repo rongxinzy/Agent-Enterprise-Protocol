@@ -56,14 +56,27 @@ spec:
                 properties:
                   intervalSeconds:
                     description: IntervalSeconds is the window length in seconds.
+                    enum:
+                    - 1
+                    - 60
+                    - 3600
+                    - 86400
                     format: int64
-                    minimum: 1
                     type: integer
                   maximum:
-                    description: Maximum is the number of requests allowed per interval.
+                    description: Maximum is consumption in Unit per interval.
                     format: int64
+                    maximum: 1000000000000
                     minimum: 1
                     type: integer
+                  unit:
+                    default: requests
+                    description: Unit is explicit; existing request quotas never silently
+                      become tokens.
+                    enum:
+                    - requests
+                    - tokens
+                    type: string
                 required:
                 - intervalSeconds
                 - maximum
@@ -75,12 +88,17 @@ spec:
                   properties:
                     intervalSeconds:
                       description: IntervalSeconds is the window length in seconds.
+                      enum:
+                      - 1
+                      - 60
+                      - 3600
+                      - 86400
                       format: int64
-                      minimum: 1
                       type: integer
                     maximum:
                       description: Maximum is the number of requests allowed per interval.
                       format: int64
+                      maximum: 1000000000000
                       minimum: 1
                       type: integer
                   required:
@@ -89,10 +107,33 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
+              subject:
+                description: |-
+                  Subject defaults to the target model. User/team/role subjects are intersected
+                  with that model, preserving AEP's composite membership header semantics.
+                properties:
+                  id:
+                    maxLength: 256
+                    minLength: 1
+                    type: string
+                  type:
+                    enum:
+                    - model
+                    - user
+                    - team
+                    - role
+                    type: string
+                required:
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: user/team/role subjects require an id; model subjects must
+                    omit it
+                  rule: 'self.type == ''model'' ? !has(self.id) : has(self.id)'
               targetRef:
                 description: |-
                   PolicyTargetReference selects the ModelRoute a ModelPolicy applies to. Only
-                  ModelRoute targets exist at the pilot stage.
+                  ModelRoute targets are currently supported.
                 properties:
                   kind:
                     description: Kind is the target resource kind; only ModelRoute
@@ -118,8 +159,8 @@ spec:
             properties:
               conditions:
                 description: |-
-                  Conditions report the reconciliation state; the pilot stage writes only
-                  the Accepted condition.
+                  Conditions report semantic acceptance, aggregate application and
+                  independent data-plane readiness.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

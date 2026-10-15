@@ -1,7 +1,6 @@
-// Package controller holds the gateway operator's watch-only pilot
-// controllers. They validate shallowly and write the Accepted condition on
-// their own CRs; they write nothing else — no Higress resources, no external
-// calls, no credential reads (pilot stage of the hybrid architecture).
+// Package controller reconciles gateway CRs into owned Higress resources.
+// The production Manager always supplies Runtime; the nil Runtime seam
+// preserves the isolated validation/status tests.
 package controller
 
 import (
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -16,22 +16,26 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
 )
 
-// ModelRouteReconciler watches ModelRoute objects and records shallow
-// validation in the Accepted condition. It never touches Higress resources.
+// ModelRouteReconciler validates ModelRoutes and applies route-owned resources
+// after the matching deployment aggregate is installed.
 type ModelRouteReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Runtime *Runtime
 }
 
 // +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelroutes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelroutes/status,verbs=get;update;patch
 
 func (r *ModelRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	logger := log.FromContext(ctx)
 	var route gatewayv1alpha1.ModelRoute
 	if err := r.Get(ctx, req.NamespacedName, &route); err != nil {
@@ -39,6 +43,9 @@ func (r *ModelRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+	if r.Runtime != nil {
+		return r.reconcileApplied(ctx, &route)
 	}
 	if err := validateModelRoute(&route); err != nil {
 		logger.Info("ModelRoute rejected", "reason", err.Error())
@@ -95,6 +102,17 @@ func validateModelRoute(route *gatewayv1alpha1.ModelRoute) error {
 func (r *ModelRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gatewayv1alpha1.ModelRoute{}).
+		Watches(&gatewayv1alpha1.DeploymentConfig{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+			var routes gatewayv1alpha1.ModelRouteList
+			if r.List(ctx, &routes, client.InNamespace(obj.GetNamespace())) != nil {
+				return nil
+			}
+			requests := make([]ctrl.Request, 0, len(routes.Items))
+			for i := range routes.Items {
+				requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&routes.Items[i])})
+			}
+			return requests
+		})).
 		Named("modelroute").
 		Complete(r)
 }

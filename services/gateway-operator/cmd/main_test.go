@@ -1,6 +1,7 @@
 package main
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"net/http"
 	"testing"
 
@@ -49,6 +50,8 @@ func TestWireManagerRegistersControllersAndHealth(t *testing.T) {
 		mapper := meta.NewDefaultRESTMapper(nil)
 		mapper.Add(gatewayv1alpha1.GroupVersion.WithKind("ModelRoute"), meta.RESTScopeNamespace)
 		mapper.Add(gatewayv1alpha1.GroupVersion.WithKind("ModelPolicy"), meta.RESTScopeNamespace)
+		mapper.Add(gatewayv1alpha1.GroupVersion.WithKind("DeploymentConfig"), meta.RESTScopeNamespace)
+		mapper.Add(corev1.SchemeGroupVersion.WithKind("Secret"), meta.RESTScopeNamespace)
 		return mapper, nil
 	}
 	mgr, err := ctrl.NewManager(&rest.Config{Host: "localhost:59090"}, options)
