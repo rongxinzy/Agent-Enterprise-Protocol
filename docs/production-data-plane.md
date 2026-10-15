@@ -2,6 +2,13 @@
 
 `deploy/kubernetes/production` is the production deployment baseline for the AEP control service, gateway authorizer, and gateway reconciler. It targets a Kubernetes cluster running the Higress Helm chart. `higress-standalone` is restricted to local Compose and CI fixtures.
 
+For provider keys entered through Admin Console, the optional [direct credential
+publisher](credential-publisher.md) can supply the conventional gateway Secrets
+from AEP's sealed database without an external secret backend. It has its own
+deployment and identity; it does not change this baseline's bootstrap Secret
+provisioning. Choose one provider Secret owner rather than running ESO and the
+publisher against the same target.
+
 ## Prerequisites
 
 - Kubernetes with the restricted Pod Security Standard enforced for `aep-system`.
