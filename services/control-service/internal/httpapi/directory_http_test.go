@@ -240,19 +240,21 @@ func TestDeleteAgentGuards(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Missing profile → 404.
+	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).WithArgs("deployment-a", "ghost", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id"}))
+	mock.ExpectRollback()
 	missing := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/agents/ghost", "")
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing agent delete = %d %s", missing.Code, missing.Body.String())
 	}
 
 	// Existing profile with live sessions → 409 AGENT_HAS_SESSIONS.
+	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT \* FROM "agent_profiles"`).WithArgs("deployment-a", "agent-a", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "user_id", "display_title", "description",
 			"avatar_object_key", "home_team_id", "prompt_skill_id", "ephemeral", "expires_at", "created_at", "updated_at"}).
 			AddRow("deployment-a", "agent-a", "Assistant", "", nil, "eng", nil, true, now.Add(time.Hour), now, now))
-	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT count\(\*\) FROM user_sessions`).WithArgs("deployment-a", "agent-a").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectRollback()
