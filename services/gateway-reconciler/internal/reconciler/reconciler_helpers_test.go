@@ -1,11 +1,53 @@
 package reconciler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
+
+func TestFetchCredentialsPinnedNamespace(t *testing.T) {
+	t.Run("nil fetcher", func(t *testing.T) {
+		worker := &Reconciler{}
+		got, err := worker.fetchCredentials(t.Context(), DesiredState{})
+		if got != nil || err != nil {
+			t.Fatalf("fetchCredentials() = %v, %v; want nil, nil", got, err)
+		}
+	})
+
+	for _, name := range []string{"", "higress-system", "other-namespace"} {
+		t.Run("stored namespace "+name, func(t *testing.T) {
+			var namespace *string
+			if name != "" {
+				namespace = new(name)
+			}
+			ref := &gatewayrender.SecretReference{Name: "aep-credential-c1", Key: "api-key", Namespace: namespace}
+			calls := 0
+			worker := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, got gatewayrender.SecretReference) (string, error) {
+				calls++
+				if got.Namespace == nil || *got.Namespace != CredentialSecretNamespace || got.Name != ref.Name || got.Key != ref.Key {
+					t.Fatalf("reference = %+v, want pinned namespace and original name/key", got)
+				}
+				return "value", nil
+			}}}
+			got, err := worker.fetchCredentials(t.Context(), DesiredState{Routes: []gatewayrender.Route{
+				{Enabled: true, CredentialRef: ref},
+				{Enabled: true, CredentialRef: ref},
+				{Enabled: false, CredentialRef: &gatewayrender.SecretReference{Name: "disabled", Key: "api-key"}},
+			}})
+			if err != nil || got["aep-credential-c1/api-key"] != "value" || calls != 1 {
+				t.Fatalf("credentials = %v, error = %v, calls = %d", got, err, calls)
+			}
+			if ref.Namespace != namespace {
+				t.Fatal("fetch mutated the desired-state reference and its canonical hash")
+			}
+		})
+	}
+}
 
 func TestWriteAtomic(t *testing.T) {
 	root := t.TempDir()

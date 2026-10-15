@@ -342,7 +342,8 @@ paths:
         per-model path prefix (clients use the gateway base URL plus the
         sanitized model ID as the path prefix). Routes for
         models bound to a Credential refer to the conventional Secret
-        aep-credential-{credentialId} key api-key in higress-system; Secret
+        aep-credential-{credentialId} key api-key in the dedicated
+        aep-credentials namespace; Secret
         values are provisioned by the deployment Secret system and are never
         accepted or returned by this API. When the derived state is unchanged
         the publish is a no-op and the stored revision and content hash are
@@ -456,7 +457,13 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 253}
         key: {type: string, minLength: 1, maxLength: 253}
-        namespace: {type: [string, 'null'], maxLength: 253}
+        namespace:
+          type: [string, 'null']
+          maxLength: 253
+          description: |
+            Accepted for compatibility with earlier clients and ignored: the reconciler
+            reads every route credential from the dedicated credential namespace, so a
+            route cannot choose where it reads from.
     DataPlaneRoute:
       type: object
       required: [modelId, enabled, endpoint, upstreamModel, protocol]

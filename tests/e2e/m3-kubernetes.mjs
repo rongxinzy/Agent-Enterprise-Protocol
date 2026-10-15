@@ -47,6 +47,7 @@ try {
   await command(kind, ['create', 'cluster', '--name', cluster, '--wait', '120s']);
   await command('kubectl', ['--context', context, 'create', 'namespace', 'higress-system']);
   await command('kubectl', ['--context', context, 'create', 'namespace', 'aep-system']);
+  await command('kubectl', ['--context', context, 'create', 'namespace', 'aep-credentials']);
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'deploy/kubernetes/production/gateway-reconciler-rbac.yaml')]);
   const serviceAccount = 'system:serviceaccount:aep-system:aep-gateway-reconciler';
   for (const [verb, resource, expected] of [['create', 'leases', 'yes'], ['get', 'leases/gateway-reconciler-leader', 'yes'], ['update', 'leases/gateway-reconciler-leader', 'yes'], ['get', 'leases/unrelated', 'no'], ['update', 'leases/unrelated', 'no'], ['list', 'leases', 'no'], ['delete', 'leases/gateway-reconciler-leader', 'no']]) {
@@ -59,10 +60,27 @@ try {
     });
     assert(result === expected, `production RBAC ${verb} ${resource}: expected ${expected}, got ${result}`);
   }
+  for (const [verb, resource, namespace, expected] of [
+    ['get', 'secrets/provider-secrets', 'aep-credentials', 'yes'],
+    ['get', 'secrets/any-credential-secret', 'aep-credentials', 'yes'],
+    ['list', 'secrets', 'aep-credentials', 'no'],
+    // The point of the dedicated namespace: Higress' own Secrets are unreachable.
+    ['get', 'secrets/higress-console', 'higress-system', 'no'],
+    ['list', 'secrets', 'higress-system', 'no'],
+  ]) {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn('kubectl', ['--context', context, 'auth', 'can-i', verb, resource, '-n', namespace, '--as', serviceAccount], {cwd: root, stdio: ['ignore', 'pipe', 'pipe'], shell: false});
+      let answer = '';
+      child.stdout.on('data', value => answer += value);
+      child.on('error', reject);
+      child.on('exit', code => code === 0 || code === 1 ? resolve(answer.trim()) : reject(new Error('authorization check failed')));
+    });
+    assert(result === expected, `production RBAC ${verb} ${resource} -n ${namespace}: expected ${expected}, got ${result}`);
+  }
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-wasmplugin-crd.yaml')]);
   await command('kubectl', ['--context', context, 'apply', '-f', path.join(root, 'tests', 'e2e', 'fixtures', 'higress-envoyfilter-crd.yaml')]);
   await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'service', 'clusterip', 'aep-model-gateway', '--tcp=80:8080']);
-  await command('kubectl', ['--context', context, '-n', 'higress-system', 'create', 'secret', 'generic', 'provider-secrets', `--from-literal=api-key=${providerSecretValue}`]);
+  await command('kubectl', ['--context', context, '-n', 'aep-credentials', 'create', 'secret', 'generic', 'provider-secrets', `--from-literal=api-key=${providerSecretValue}`]);
   await listen(control, controlPort);
   proxy = spawn('kubectl', ['--context', context, 'proxy', '--port', String(proxyPort), '--accept-hosts=.*'], {cwd: root, stdio: 'ignore', shell: false});
   await waitFor(async () => assert((await fetch(`${kubeUrl}/version`)).ok, 'kubectl proxy is not ready'));
