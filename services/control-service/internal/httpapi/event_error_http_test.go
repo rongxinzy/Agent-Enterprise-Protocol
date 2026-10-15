@@ -48,6 +48,13 @@ func TestHeartbeatAndEventListingMapDatabaseFailures(t *testing.T) {
 	if list.Code != http.StatusInternalServerError {
 		t.Fatalf("event expiry failure = %d %s", list.Code, list.Body.String())
 	}
+
+	pool.ExpectExec(`UPDATE session_control_deliveries d SET state='expired'`).WithArgs("session-user").WillReturnResult(pgxmock.NewResult("UPDATE", 0))
+	pool.ExpectQuery(`SELECT \(SELECT max\(cursor\)::text FROM session_control_deliveries WHERE session_id=\$1\)`).WithArgs("session-user").WillReturnError(errors.New("watermark unavailable"))
+	list = userRequest(handler, userToken, http.MethodGet, "/aep/v1/user/control-events?afterCursor=0", "")
+	if list.Code != http.StatusInternalServerError {
+		t.Fatalf("event watermark failure = %d %s", list.Code, list.Body.String())
+	}
 }
 
 func TestAcknowledgeDeliveryStateBoundaries(t *testing.T) {
