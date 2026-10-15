@@ -191,14 +191,35 @@ func auditCreation(after map[string]any) map[string]any {
 	return masked
 }
 
-// stripURLQuery drops a URL's query and fragment before it is audited: an
-// endpoint may carry an inline credential in its query string.
-func stripURLQuery(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || (parsed.RawQuery == "" && parsed.Fragment == "") {
+// auditRedactedValue replaces a value the audit trail withholds.
+const auditRedactedValue = "[redacted]"
+
+// auditURLKeys names the allowlisted fields whose value is a URL that can carry
+// an inline credential. Every one of them is redacted by redactAuditURL, which
+// is the single implementation shared by the write path (maskAuditValue), the
+// mutation snapshots and the read path.
+var auditURLKeys = map[string]struct{}{
+	"endpoint": {},
+}
+
+// redactAuditURL keeps the part of a URL that locates the endpoint — scheme,
+// host, port and path — and drops the parts that can carry an inline
+// credential: userinfo, query and fragment. A URL-shaped value that cannot be
+// parsed is withheld entirely, because an unparsed URL's structure is unknown
+// and the original text must not reach the audit trail.
+func redactAuditURL(raw string) string {
+	if !strings.Contains(raw, "//") && !strings.ContainsAny(raw, "?#@") {
+		// No URL syntax that could hide a credential (a bare host:port, for
+		// example); net/url rejects such a value as a path containing a colon,
+		// and dropping it would lose the only locating information there is.
 		return raw
 	}
-	parsed.RawQuery, parsed.Fragment = "", ""
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return auditRedactedValue
+	}
+	parsed.User = nil
+	parsed.RawQuery, parsed.ForceQuery, parsed.Fragment = "", false, ""
 	return parsed.String()
 }
 
@@ -410,8 +431,18 @@ func maskAuditValue(value any) any {
 	case map[string]any:
 		masked := make(map[string]any, len(typed))
 		for key, item := range typed {
-			if _, safe := auditSafeKeys[strings.ToLower(key)]; !safe {
-				masked[key] = "[redacted]"
+			lowercase := strings.ToLower(key)
+			// A URL field is redacted rather than echoed, and rather than
+			// withheld: the endpoint's host and path are what an auditor needs
+			// to identify the target.
+			if _, urlField := auditURLKeys[lowercase]; urlField {
+				if text, ok := item.(string); ok {
+					masked[key] = redactAuditURL(text)
+					continue
+				}
+			}
+			if _, safe := auditSafeKeys[lowercase]; !safe {
+				masked[key] = auditRedactedValue
 				continue
 			}
 			masked[key] = maskAuditValue(item)
@@ -626,7 +657,12 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 			break
 		}
 		var changes any
-		_ = json.Unmarshal(payload, &changes)
+		if err := json.Unmarshal(payload, &changes); err == nil {
+			// Rows written before endpoint redaction existed still hold the
+			// original URL, so the same masking runs on the way out: a reader
+			// must not receive a credential that reached the table earlier.
+			changes = maskAuditValue(changes)
+		}
 		items = append(items, map[string]any{
 			"cursor":       strconv.FormatInt(cursor, 10),
 			"actorUserId":  nullablePGText(actorUserID),

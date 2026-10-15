@@ -665,6 +665,10 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 
 管理端使用的 `credentialId` 不得出现在 Agent 模型目录中。
 
+`endpoint` 不得内联凭据：URL 中带 userinfo 会以 400 `INVALID_MODEL` 拒绝，
+密钥应通过 `credentialId` 引用。endpoint 在审计中的记录方式见
+[管理操作审计](#管理操作审计)。
+
 ### License
 
 | 方法 | 路径 | 用途 |
@@ -828,7 +832,9 @@ RFC 3339。响应包含 `items` 和可空的 `nextCursor`。
 
 每条记录包含操作人、动作、资源、结果、时间和 `changes`：脱敏的变更前后快照或
 兜底捕获的请求字段；没有载荷时为 `null`。创建账号的载荷保留用户名，密码与未知
-字段继续打码。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
+字段继续打码。URL 字段（模型 `endpoint`）只保留 scheme、host、port 和 path：
+query、fragment 与 userinfo 在写入和读取时都会去掉，内联凭据不会进入审计表，
+也不会回显给读取方。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
 配置说明见[生产运行基线](production-runtime.zh-CN.md)。
 
 创建账号——以及批量导入创建的每一个账号——的审计行与账号本身、角色/团队绑定

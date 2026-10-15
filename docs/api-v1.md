@@ -723,6 +723,10 @@ Read responses never return `value`. Rotation accepts a new `value`.
 
 Administrative `credentialId` MUST NOT appear in the Agent model catalog.
 
+An `endpoint` MUST NOT embed credentials: a URL carrying userinfo is rejected
+with 400 `INVALID_MODEL`, and secrets belong in `credentialId`. See
+[Administrative audit](#administrative-audit) for how an endpoint is recorded.
+
 ### Licenses
 
 | Method | Path | Purpose |
@@ -924,9 +928,13 @@ and a nullable `nextCursor`.
 Each record includes the actor, action, resource, result, timestamp, and
 `changes`: masked before/after snapshots or a fallback request payload, or
 `null` when no payload was recorded. Account-creation payloads retain the
-username; passwords and unknown fields remain redacted. This read-only endpoint
-does not expose credential values. Records follow `AEP_AUDIT_RETENTION`, as
-described in the [production runtime guide](production-runtime.md).
+username; passwords and unknown fields remain redacted. A URL field — a model
+`endpoint` — keeps only its scheme, host, port, and path: the query, fragment,
+and userinfo are removed both when the record is written and when it is read
+back, so an inline credential never reaches the trail or a reader. This
+read-only endpoint does not expose credential values. Records follow
+`AEP_AUDIT_RETENTION`, as described in the [production runtime
+guide](production-runtime.md).
 
 Creating an account — and each account a bulk import creates — writes its audit
 row in the same transaction as the account and its role/team bindings. An
