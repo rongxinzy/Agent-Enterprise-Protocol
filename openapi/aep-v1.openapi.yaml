@@ -641,7 +641,7 @@ paths:
     get:
       tags: [Admin Audit]
       operationId: listAdminAudit
-      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied.
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. A URL field keeps only its scheme, host, port and path — its query, fragment and userinfo are removed both when the record is written and when it is read back. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied.
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
         - {$ref: '#/components/parameters/Limit'}
@@ -1300,7 +1300,7 @@ components:
           description: Wire protocol the gateway serves for this model. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as an EnvoyFilter passthrough under a per-model path prefix.
           type: string
           enum: [openai-compatible, anthropic]
-        endpoint: {type: string, format: uri}
+        endpoint: {type: string, format: uri, description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'}
         upstreamModel: {type: string}
         localModelRef: {type: string}
         credentialId: {type: [string, 'null']}
@@ -1315,7 +1315,7 @@ components:
       minProperties: 1
       properties:
         displayName: {type: string}
-        endpoint: {type: string, format: uri}
+        endpoint: {type: string, format: uri, description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'}
         upstreamModel: {type: string}
         localModelRef: {type: string}
         credentialId: {type: [string, 'null']}

@@ -1038,7 +1038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied. */
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. A URL field keeps only its scheme, host, port and path — its query, fragment and userinfo are removed both when the record is written and when it is read back. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied. */
         get: operations["listAdminAudit"];
         put?: never;
         post?: never;
@@ -2975,7 +2975,10 @@ export interface components {
              * @enum {string}
              */
             protocol: "openai-compatible" | "anthropic";
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.
+             */
             endpoint?: string;
             upstreamModel?: string;
             localModelRef?: string;
@@ -2988,7 +2991,10 @@ export interface components {
         };
         AdminModelPatch: {
             displayName?: string;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.
+             */
             endpoint?: string;
             upstreamModel?: string;
             localModelRef?: string;

@@ -220,6 +220,15 @@ func absoluteHTTPURL(raw string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
+// endpointEmbedsCredentials reports whether an endpoint puts credentials in the
+// URL itself (https://user:password@host). A model references secrets through
+// credentialId, and the endpoint travels into the audit trail, so an inline
+// credential is rejected instead of stored.
+func endpointEmbedsCredentials(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && parsed.User != nil
+}
+
 // validAnthropicModelState re-checks the invariants against the post-update
 // row so PATCHes cannot strand an anthropic model in an unrenderable state
 // (protocol itself is immutable, endpoint and reasoningCompatibility are not).
@@ -296,6 +305,10 @@ func (s *Server) createModel(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "The model descriptor is invalid or incomplete.")
 		return
 	}
+	if input.Endpoint != nil && endpointEmbedsCredentials(*input.Endpoint) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "The endpoint must not embed credentials; reference them with credentialId instead.")
+		return
+	}
 	capabilities := normalizeCapabilities(*input.Capabilities)
 	tenant := claimsFrom(request).DeploymentID
 	identifier, err := s.generateIdentifier(request.Context(), tenant, "model", input.DisplayName)
@@ -370,6 +383,10 @@ func (s *Server) updateModel(response http.ResponseWriter, request *http.Request
 	}
 	if !input.hasChanges() || input.DisplayName != nil && strings.TrimSpace(*input.DisplayName) == "" || input.ContextWindow != nil && *input.ContextWindow <= 0 || input.ReasoningCompatibility.Set && !validReasoningCompatibility(input.ReasoningCompatibility.Value) {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "At least one valid model field is required.")
+		return
+	}
+	if input.Endpoint != nil && endpointEmbedsCredentials(*input.Endpoint) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_MODEL", "The endpoint must not embed credentials; reference them with credentialId instead.")
 		return
 	}
 	claims := claimsFrom(request)
@@ -506,7 +523,7 @@ func auditModelSnapshot(model modelRecord) map[string]any {
 		"capabilities": []string(model.Capabilities),
 	}
 	if model.Endpoint.Valid {
-		snapshot["endpoint"] = stripURLQuery(model.Endpoint.String)
+		snapshot["endpoint"] = redactAuditURL(model.Endpoint.String)
 	}
 	if model.UpstreamModel.Valid {
 		snapshot["upstreamModel"] = model.UpstreamModel.String
