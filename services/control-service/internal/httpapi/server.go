@@ -205,6 +205,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Get("/aep/v1/admin/skill-assignments", s.listSkillAssignments)
 			admin.Post("/aep/v1/admin/skill-assignments", s.createSkillAssignment)
 			admin.Delete("/aep/v1/admin/skill-assignments/{assignmentId}", s.deleteSkillAssignment)
+			admin.Patch("/aep/v1/admin/skill-assignments/{assignmentId}", s.updateSkillAssignment)
 			admin.Get("/aep/v1/admin/control-events", s.listAdminControlEvents)
 			admin.Post("/aep/v1/admin/control-events", s.createControlEvent)
 			admin.Get("/aep/v1/admin/control-events/{eventId}", s.getAdminControlEvent)

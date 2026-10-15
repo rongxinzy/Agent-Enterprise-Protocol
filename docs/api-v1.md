@@ -667,6 +667,7 @@ Error codes:
 | DELETE | `/admin/skills/{skillId}/versions/{version}` | Withdraw a version |
 | GET, POST | `/admin/skill-assignments` | List or create assignments |
 | DELETE | `/admin/skill-assignments/{assignmentId}` | Remove an assignment |
+| PATCH | `/admin/skill-assignments/{assignmentId}` | Change when an assignment ends (`expiresAt` RFC3339, or `null` for perpetual) |
 
 Skill IDs are portable identifiers of at most 64 characters. Version
 identifiers are at most 128 characters. Both must start and end with a letter

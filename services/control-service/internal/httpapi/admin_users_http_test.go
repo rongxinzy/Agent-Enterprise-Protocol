@@ -129,12 +129,17 @@ func TestAdminUserUpdateDisableAndResetPassword(t *testing.T) {
 
 	now := time.Now().UTC()
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", nil, "hash", "active", false, false, "human", now, now))
+	mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("member"))
+	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("engineering"))
 	mock.ExpectExec(`UPDATE "users" SET`).WithArgs("Disabled Alice", "disabled", sqlmock.AnyArg(), "deployment-a", "user-a").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).WithArgs("deployment-a", "user-a", 1).
 		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Disabled Alice", nil, "hash", "disabled", false, false, "human", now, now))
 	mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("member"))
 	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("engineering"))
+	mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
 	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	updated := userRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/users/user-a", `{"displayName":"Disabled Alice","status":"disabled"}`)
@@ -144,6 +149,7 @@ func TestAdminUserUpdateDisableAndResetPassword(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "users" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).WithArgs("user-a").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
@@ -172,6 +178,7 @@ func TestAdminSelfPasswordResetCannotRequireChange(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "users" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	pool.ExpectExec(`UPDATE user_session_tokens SET revoked_at=now\(\)`).WithArgs("admin-user").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	pool.ExpectExec(`UPDATE user_sessions SET revoked_at=now\(\)`).WithArgs("admin-user").WillReturnResult(pgxmock.NewResult("UPDATE", 1))
@@ -185,6 +192,13 @@ func TestAdminUserRBACReplacement(t *testing.T) {
 	application, mock, _, adminToken := newUserHTTPApplication(t)
 	handler := New(application).Handler()
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "user-a", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("user-a", "deployment-a", "alice", "Alice", nil, "hash", "active", false, false, "human", time.Now().UTC(), time.Now().UTC()))
+	mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).WithArgs("deployment-a", "user-a").
+		WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("viewer"))
+	mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).WithArgs("deployment-a", "user-a").
+		WillReturnRows(sqlmock.NewRows([]string{"team_id"}).AddRow("support"))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "users"`).WithArgs("deployment-a", "user-a").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "roles"`).WithArgs("deployment-a", "member").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "teams"`).WithArgs("deployment-a", "engineering").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -192,6 +206,7 @@ func TestAdminUserRBACReplacement(t *testing.T) {
 	mock.ExpectExec(`DELETE FROM "user_team_bindings"`).WithArgs("deployment-a", "user-a").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(1, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	response := userRequest(handler, adminToken, http.MethodPut, "/aep/v1/admin/users/user-a/rbac", `{"roleIds":["member"],"teamIds":["engineering"]}`)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"userId":"user-a"`) {
@@ -298,9 +313,14 @@ func TestDeleteUserRoutes(t *testing.T) {
 		pool.ExpectExec(`UPDATE user_sessions`).
 			WithArgs("u1").WillReturnResult(pgconn.NewCommandTag("UPDATE 0"))
 		mock.ExpectBegin()
+		mock.ExpectQuery(`SELECT \* FROM "users" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+			WithArgs("deployment-a", "u1", 1).WillReturnRows(userRows("bob"))
+		mock.ExpectQuery(`SELECT "role_id" FROM "user_role_bindings"`).WithArgs("deployment-a", "u1").WillReturnRows(sqlmock.NewRows([]string{"role_id"}))
+		mock.ExpectQuery(`SELECT "team_id" FROM "user_team_bindings"`).WithArgs("deployment-a", "u1").WillReturnRows(sqlmock.NewRows([]string{"team_id"}))
 		mock.ExpectExec(`DELETE FROM "users"`).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(`DELETE FROM "user_role_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec(`DELETE FROM "user_team_bindings"`).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
 		response := userRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/users/u1", "")
 		if response.Code != http.StatusNoContent {
