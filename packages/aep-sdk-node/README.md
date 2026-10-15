@@ -36,3 +36,25 @@ if (state.status === 'recoverable') await client.restoreSession();
 ```
 
 See the repository's desktop session integration guide for the Electron `safeStorage` adapter and renderer IPC boundary.
+
+## Asynchronous route publication
+
+Contract/SDK stage only: the new Control Service endpoints and transactional
+outbox must be implemented and deployed before using these methods. Existing
+`publishDataPlaneRoutes()` retains its synchronous `200` contract. The SDK
+does not fall back to it or automatically poll for readiness.
+
+```ts
+// Save this key before sending; reuse it and the same body for retries.
+const publication = await client.createDataPlanePublication(publicationKey, {});
+const current = await client.getDataPlanePublication(publication.operationId);
+// projected is CR delivery only. Ready may still be Unknown.
+const ready = current.conditions.find(condition => condition.type === 'Ready');
+```
+
+Both methods require a management session with `data_plane.write`. POST uses
+bounded retries with the same validated `Idempotency-Key` and body; never
+generate a fresh key for each retry or reuse one after `idempotencyExpiresAt`.
+Persist the returned operation ID and query it after an uncertain outcome
+when known. A `409 IDEMPOTENCY_KEY_CONFLICT` is an `AepProblem`, not a retry
+signal. See [API semantics](../../docs/api-v1.md#asynchronous-operator-publication-contractsdk-stage).
