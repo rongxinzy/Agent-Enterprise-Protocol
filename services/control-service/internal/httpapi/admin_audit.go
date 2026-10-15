@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +25,74 @@ import (
 // auditPayloadLimit bounds how much of a mutating request body is retained in
 // the audit trail; a runaway payload must not become an audit row.
 const auditPayloadLimit = 64 << 10
+
+// auditFailureWindow collapses an identical repeated failing administrative
+// write into a single row: a client stuck retrying a denied or rejected call
+// must not turn one policy decision into unbounded audit traffic. Distinct
+// attempts (another actor, target, error code or body) are always recorded, and
+// the first occurrence of any attempt is never suppressed.
+const auditFailureWindow = 30 * time.Second
+
+// auditFailureKeys bounds the limiter's memory. Past it the limiter stops
+// caching new fingerprints rather than evicting live ones, so a burst can slow
+// the limiter down but can never make the trail drop an attempt.
+const auditFailureKeys = 4096
+
+// auditFailureLimiter is a process-local window limiter. It is intentionally
+// not shared state: replicas each admit their own share of a repeat, which
+// bounds the row rate per process without coordinating through the database the
+// limiter is protecting.
+type auditFailureLimiter struct {
+	mu      sync.Mutex
+	window  time.Duration
+	maxKeys int
+	seen    map[string]time.Time
+}
+
+func newAuditFailureLimiter(window time.Duration) *auditFailureLimiter {
+	return &auditFailureLimiter{window: window, maxKeys: auditFailureKeys, seen: make(map[string]time.Time)}
+}
+
+// allow reports whether this attempt may be written, and remembers it.
+func (limiter *auditFailureLimiter) allow(fingerprint string, now time.Time) bool {
+	if limiter == nil || limiter.window <= 0 {
+		return true
+	}
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	if last, seen := limiter.seen[fingerprint]; seen && now.Sub(last) < limiter.window {
+		return false
+	}
+	if len(limiter.seen) >= limiter.maxKeys {
+		for candidate, at := range limiter.seen {
+			if now.Sub(at) >= limiter.window {
+				delete(limiter.seen, candidate)
+			}
+		}
+		if len(limiter.seen) >= limiter.maxKeys {
+			// Every entry is still live. Record the attempt and skip caching,
+			// so saturated memory degrades the limiter, never the evidence.
+			return true
+		}
+	}
+	limiter.seen[fingerprint] = now
+	return true
+}
+
+// auditFailureFingerprint identifies one attempt: the same actor repeating the
+// same operation with the same body and the same error is one decision, while a
+// different body is a different attempt worth its own row. The request
+// identifier is deliberately absent: every attempt carries a fresh one, so
+// including it would defeat the throttle entirely.
+func auditFailureFingerprint(deploymentID, actor, action, resourceType, resourceID, code string, attempt []byte) string {
+	digest := sha256.New()
+	for _, part := range []string{deploymentID, actor, action, resourceType, resourceID, code} {
+		_, _ = digest.Write([]byte(part))
+		_, _ = digest.Write([]byte{0})
+	}
+	_, _ = digest.Write(attempt)
+	return hex.EncodeToString(digest.Sum(nil))
+}
 
 // auditSafeKeys is a fail-closed allowlist: only these request fields keep
 // their value, and every other key is redacted. A denylist would leak any
@@ -183,11 +254,44 @@ func markAdminAuditRecorded(request *http.Request) {
 	}
 }
 
-// auditAdminWrites records every successful administrative write that its
-// handler did not record itself. It is deliberately best-effort: an audit
-// failure never turns a completed operation into an error response, but it is
-// logged so the gap is visible. Handlers that write the audit in their own
-// transaction take precedence.
+// auditProblem carries the stable problem code a request was rejected with to
+// the audit middleware, so a failure row names the reason without buffering the
+// response body. Only the first code wins: it is the one the client was told.
+type auditProblem struct{ code string }
+
+const auditProblemKey contextKey = "aep-audit-problem"
+
+// noteAuditProblem records the problem code a response reports. It is a no-op
+// unless an administrator-write audit is capturing this request.
+func noteAuditProblem(request *http.Request, code string) {
+	problem, ok := request.Context().Value(auditProblemKey).(*auditProblem)
+	if !ok || problem.code != "" {
+		return
+	}
+	problem.code = code
+}
+
+// requestIDFrom returns the request identifier stamped on every response, which
+// correlates an audit row with the request log and the client-visible problem.
+func requestIDFrom(request *http.Request) string {
+	if id, ok := request.Context().Value(contextKey("request-id")).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// auditAdminWrites records administrative writes: the successes a handler did
+// not record itself, and the write attempts that were rejected or failed. It is
+// deliberately best-effort: an audit failure never turns a completed operation
+// into an error response (and never upgrades a 400 into a 500), but it is logged
+// so the gap is visible. Handlers that write the audit in their own transaction
+// take precedence and are not duplicated here.
+//
+// Scope: authenticated, non-read requests that reach the administrative surface.
+// Requests refused before authentication (no token, invalid token, a session
+// that is not bound to a user, a temporary password that must be changed first)
+// carry no authenticated actor and so cannot be attributed here; those belong to
+// the authentication audit. Reads (GET/HEAD/OPTIONS) are not audited.
 func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
@@ -208,14 +312,18 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 		}
 		recorder := &auditStatusWriter{ResponseWriter: response, status: http.StatusOK}
 		recorded := &auditRecorded{}
-		next.ServeHTTP(recorder, request.WithContext(context.WithValue(request.Context(), auditRecordedKey, recorded)))
+		problem := &auditProblem{}
+		ctx := context.WithValue(request.Context(), auditRecordedKey, recorded)
+		ctx = context.WithValue(ctx, auditProblemKey, problem)
+		next.ServeHTTP(recorder, request.WithContext(ctx))
 		if recorded.done {
 			return
 		}
-		if recorder.status < 200 || recorder.status >= 300 {
+		if s.app.Database() == nil {
 			return
 		}
-		if s.app.Database() == nil {
+		if recorder.status < 200 || recorder.status >= 300 {
+			s.recordAdminAuditFailure(request, recorder.status, problem.code, payload)
 			return
 		}
 		claims := claimsFrom(request)
@@ -232,6 +340,51 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 			slog.Error("administrative audit failed", "error", err, "action", action, "resource", resourceType)
 		}
 	})
+}
+
+// recordAdminAuditFailure persists one rejected or failed administrative write
+// attempt: who tried, against what, the stable error code, the request
+// identifier, and the masked body that was attempted. The payload keeps the
+// wrapped shape documented for failure rows so an attempted field can never be
+// confused with the audit metadata around it.
+func (s *Server) recordAdminAuditFailure(request *http.Request, status int, code string, attempted any) {
+	claims := claimsFrom(request)
+	if claims.DeploymentID == "" {
+		// Nothing to attribute the attempt to: the row would be invisible to
+		// every deployment-scoped audit query anyway.
+		return
+	}
+	action, resourceType, resourceID := adminAuditTarget(request.Method, request.URL.Path)
+	if code == "" {
+		code = fmt.Sprintf("HTTP_%d", status)
+	}
+	var attempt []byte
+	if attempted != nil {
+		if raw, err := json.Marshal(attempted); err == nil {
+			attempt = raw
+		}
+	}
+	fingerprint := auditFailureFingerprint(claims.DeploymentID, claims.Subject, action, resourceType, resourceID, code, attempt)
+	if !s.auditFailures.allow(fingerprint, time.Now()) {
+		slog.Warn("administrative failure audit suppressed as a repeat",
+			"action", action, "resource", resourceType, "code", code, "actor", claims.Subject,
+			"request_id", requestIDFrom(request))
+		return
+	}
+	entry := map[string]any{"requestId": requestIDFrom(request), "status": status}
+	if attempted != nil {
+		entry["request"] = attempted
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		slog.Error("administrative failure audit payload was not encodable", "error", err, "action", action, "resource", resourceType)
+		return
+	}
+	if _, err := s.app.Database().Exec(request.Context(),
+		`INSERT INTO admin_audit_events (deployment_id,actor_user_id,action,resource_type,resource_id,result,reason,payload) VALUES ($1,$2,$3,$4,$5,'failure',$6,$7)`,
+		claims.DeploymentID, nullableString(claims.Subject), action, resourceType, nullableString(resourceID), code, encoded); err != nil {
+		slog.Error("administrative failure audit failed", "error", err, "action", action, "resource", resourceType)
+	}
 }
 
 func nullableString(value string) any {

@@ -6582,12 +6582,13 @@ components:
           type:
             - string
             - 'null'
+          description: Stable problem code for a failure row (e.g. INVALID_MODEL or ACCESS_DENIED); null for a success.
         changes:
           type:
             - object
             - 'null'
           additionalProperties: true
-          description: Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted.
+          description: Masked before/after snapshots or fallback request fields. Null when no payload was recorded. A failure row instead carries the request identifier and the response status next to the masked attempted body, e.g. {"requestId":"0198...","status":400,"request":{...}}. Unknown keys are redacted.
         createdAt:
           type: string
           format: date-time

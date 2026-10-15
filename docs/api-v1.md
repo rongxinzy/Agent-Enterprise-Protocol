@@ -936,6 +936,26 @@ rows that were audited. An import that ends up creating no account answers
 `422 USER_IMPORT_REJECTED` and writes no success audit row, so the trail never
 records an import that changed nothing.
 
+Write attempts that were refused or failed are recorded too, with
+`result: failure` and the stable problem code in `reason`. Coverage is every
+authenticated non-read request (POST, PUT, PATCH, DELETE) that reaches the
+administrative surface, including a request refused by the permission check:
+the audit wraps that check, so a denial is captured with the acting user and the
+attempted target. Requests refused before authentication (no bearer token,
+invalid or revoked token, a temporary password that must be changed first) carry
+no authenticated actor and stay the authentication audit's concern; reads are not
+audited. The middleware stays best-effort: an audit write that fails is logged
+and never changes the response the caller already received.
+
+A failure record's `changes` document carries the request identifier and status
+next to the masked attempted body, for example
+`{"requestId":"0198...","status":400,"request":{"displayName":"..."}}`. The
+masking rules are the same as for a successful write. Two rules keep this
+bounded: a handler that committed its own audit row inside the transaction is
+never duplicated by the fallback, and an identical repeated failure (same actor,
+target, error code and masked body) is written once per 30 seconds per replica,
+while a different attempt is always recorded.
+
 ## 11. Errors and Retry
 
 ```json
