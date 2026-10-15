@@ -81,17 +81,109 @@ func TestAdminUserListAndCreate(t *testing.T) {
 	}
 }
 
+// TestAdminUserImportReportsPartialResults pins the partial-import boundary: a
+// batch that created something is still 200 and reports both counts, exactly
+// one audit row commits per created row, and the collection-level fallback adds
+// nothing -- no extra row, and no row at all for the rejected rows.
 func TestAdminUserImportReportsPartialResults(t *testing.T) {
-	application, mock, _, adminToken := newUserHTTPApplication(t)
-	handler := New(application).Handler()
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	// The fallback writes through the runtime database. Nothing may consume
+	// this expectation: the created row already carries its own audit row.
+	pool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	application.SetRuntimeDatabase(pool)
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	// One account, one audit row, one commit: the queued pair is what the
+	// created row must consume, and an unexpected second audit insert would
+	// fail the row instead of answering 200.
 	expectUserCreateCommit(mock)
 	body := `{"deploymentId":"deployment-a","users":[` +
 		`{"externalRowId":"row-1","username":"alice","displayName":"Alice","temporaryPassword":"long-temporary-password","roleIds":["member"],"teamIds":["engineering"]},` +
 		`{"externalRowId":"row-2","username":"missing-membership","displayName":"Invalid","temporaryPassword":"long-temporary-password","roleIds":[],"teamIds":[]},` +
 		`{"externalRowId":"row-3","username":"weak-password","displayName":"Weak","temporaryPassword":"short","roleIds":["member"],"teamIds":["engineering"]}]}`
-	response := userRequest(handler, adminToken, http.MethodPost, "/aep/v1/admin/users/import", body)
+	response := userRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/users/import", body)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"created":1`) || !strings.Contains(response.Body.String(), `"rejected":2`) || !strings.Contains(response.Body.String(), `"PASSWORD_POLICY_VIOLATION"`) || !strings.Contains(response.Body.String(), `"USER_RBAC_REQUIRED"`) {
 		t.Fatalf("import users = %d %s", response.Code, response.Body.String())
+	}
+	if err := pool.ExpectationsWereMet(); err == nil {
+		t.Fatal("a partial import wrote a collection-level audit row next to the per-account rows")
+	}
+}
+
+// TestAdminUserImportRejectsBatchThatCreatedNothing covers the all-rejected
+// batch: it is a failure, not an empty success, and because it created no
+// account there is no success audit row -- neither from the rows themselves nor
+// from the collection-level fallback.
+func TestAdminUserImportRejectsBatchThatCreatedNothing(t *testing.T) {
+	application, _, adminToken := newStoreBackedHTTPApplication(t)
+	pool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	application.SetRuntimeDatabase(pool)
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	body := `{"deploymentId":"deployment-a","users":[` +
+		`{"externalRowId":"row-1","username":"missing-membership","displayName":"Invalid","temporaryPassword":"long-temporary-password","roleIds":[],"teamIds":[]},` +
+		`{"externalRowId":"row-2","username":"weak-password","displayName":"Weak","temporaryPassword":"short","roleIds":["member"],"teamIds":["engineering"]}]}`
+	response := userRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/users/import", body)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("fully rejected import = %d %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Content-Type") != "application/problem+json" {
+		t.Fatalf("fully rejected import content type = %q", response.Header().Get("Content-Type"))
+	}
+	// The rejected rows keep their reasons, and the counts stay available so a
+	// caller can tell an all-rejected batch from a partial one.
+	for _, expected := range []string{`"code":"USER_IMPORT_REJECTED"`, `"created":0`, `"rejected":2`, `"row-1"`, `"row-2"`, `"USER_RBAC_REQUIRED"`, `"PASSWORD_POLICY_VIOLATION"`} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("fully rejected import body is missing %s: %s", expected, response.Body.String())
+		}
+	}
+	if err := pool.ExpectationsWereMet(); err == nil {
+		t.Fatal("a batch that created no account was audited as a success")
+	}
+}
+
+// TestAdminUserImportRejectsBatchWhoseRowsCannotBeAudited covers the other way
+// a batch creates nothing: every row's account transaction rolled back because
+// its audit row could not be written. The caller still gets the failure, and
+// the rollback leaves no audit row behind.
+func TestAdminUserImportRejectsBatchWhoseRowsCannotBeAudited(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	pool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	application.SetRuntimeDatabase(pool)
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).
+		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	for range 2 {
+		expectUserCreateRows(mock)
+		mock.ExpectExec(`INSERT INTO admin_audit_events`).WillReturnError(errors.New("audit sink unavailable"))
+		mock.ExpectRollback()
+	}
+	body := `{"deploymentId":"deployment-a","users":[` +
+		`{"externalRowId":"row-1","username":"alice","displayName":"Alice","temporaryPassword":"long-temporary-password","roleIds":["member"],"teamIds":["engineering"]},` +
+		`{"externalRowId":"row-2","username":"bob","displayName":"Bob","temporaryPassword":"long-temporary-password","roleIds":["admin"],"teamIds":["engineering"]}]}`
+	response := userRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/users/import", body)
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"USER_IMPORT_REJECTED"`) || !strings.Contains(response.Body.String(), `"created":0`) || !strings.Contains(response.Body.String(), `"rejected":2`) || !strings.Contains(response.Body.String(), `"USER_IMPORT_FAILED"`) {
+		t.Fatalf("import whose rows cannot be audited = %d %s", response.Code, response.Body.String())
+	}
+	if err := pool.ExpectationsWereMet(); err == nil {
+		t.Fatal("a batch whose every row rolled back was audited as a success")
 	}
 }
 

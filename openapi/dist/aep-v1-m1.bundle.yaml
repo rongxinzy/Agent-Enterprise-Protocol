@@ -482,7 +482,7 @@ paths:
       tags:
         - Admin Users
       operationId: importPlatformUsers
-      description: Imports at most 1000 administrator-provisioned accounts.
+      description: Imports at most 1000 administrator-provisioned accounts. Every created account is audited in the same transaction that creates it. A batch that creates at least one account answers 200 with the created and rejected counts; a batch whose every row is rejected answers 422 USER_IMPORT_REJECTED with the same counts and the per-row reasons attached to the problem document, because an import that created no account did not apply.
       security:
         - aepBearerAuth: []
       requestBody:
@@ -502,6 +502,14 @@ paths:
           $ref: '#/components/responses/Problem'
         '403':
           $ref: '#/components/responses/Problem'
+        '422':
+          description: 'No row could be created: the problem document carries the import result counts and the rejected rows as extension members.'
+          content:
+            application/problem+json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Problem'
+                  - $ref: '#/components/schemas/ImportPlatformUsersResponse'
   /aep/v1/admin/users/{userId}:
     get:
       tags:

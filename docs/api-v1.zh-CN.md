@@ -481,7 +481,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符。临时密码的前后空白：创建或重置时拒绝（`PASSWORD_POLICY_VIOLATION`）；导入时则去除（trim），因为导入行来自导出文件和电子表格。创建或导入未提供临时密码（或导入 trim 后为空）时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符。临时密码的前后空白：创建或重置时拒绝（`PASSWORD_POLICY_VIOLATION`）；导入时则去除（trim），因为导入行来自导出文件和电子表格。整批行都被拒绝的导入是失败而不是空成功：服务端返回 `422 USER_IMPORT_REJECTED`，并把逐行原因附在 problem 文档里，因为一个账号都没创建的批次并没有生效；只要创建了至少一个账号，仍是 `200` 并返回 `created`/`rejected` 计数。创建或导入未提供临时密码（或导入 trim 后为空）时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
 
 ### RBAC 与会话
 
@@ -786,7 +786,9 @@ RFC 3339。响应包含 `items` 和可空的 `nextCursor`。
 
 创建账号——以及批量导入创建的每一个账号——的审计行与账号本身、角色/团队绑定
 在同一事务提交。审计行写不进去的账号不会被创建：单条创建返回
-`INTERNAL_ERROR`，批量导入把该行记入 `errors` 并保留已审计通过的行。
+`INTERNAL_ERROR`，批量导入把该行记入 `errors` 并保留已审计通过的行。一个账号都没创建的
+导入返回 `422 USER_IMPORT_REJECTED`，且不写任何 success 审计行，审计记录里不会出现
+没有实际生效的导入。
 
 ## 11. 错误与重试
 

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -161,11 +162,23 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 		}
 		created++
 	}
+	// A batch that created nothing did not do what its caller asked. Reporting
+	// 200 for it let a fully rejected import read as applied, so the whole
+	// batch is refused as one unprocessable request and the per-row reasons
+	// ride along as problem extensions.
+	if created == 0 {
+		// Nothing was created, so there is no success to audit: marking the
+		// request as recorded keeps the collection-level fallback from writing
+		// a row about an import that changed nothing.
+		markAdminAuditRecorded(request)
+		writeProblemWithExtensions(response, request, http.StatusUnprocessableEntity, "USER_IMPORT_REJECTED",
+			fmt.Sprintf("None of the %d users could be created.", len(errorsResult)),
+			map[string]any{"created": created, "rejected": len(errorsResult), "errors": errorsResult})
+		return
+	}
 	// Every account this request created already carries its own audit row, so
 	// the collection-level fallback would only duplicate the report.
-	if created > 0 {
-		markAdminAuditRecorded(request)
-	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, map[string]any{"created": created, "rejected": len(errorsResult), "errors": errorsResult})
 }
 
