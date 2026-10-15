@@ -1,5 +1,5 @@
-# Additive contract for the operator publication path. Server/outbox support
-# follows in a separate stage; the legacy synchronous publish is unchanged.
+# Additive operator publication path. Queue/query support is opt-in; relay and
+# revision-specific observations follow separately. Legacy publish is unchanged.
 paths:
   /publications:
     post:
@@ -23,8 +23,11 @@ paths:
         24 hours after creation). A key reused after expiry may create new work.
         Transient delivery failures retry with backoff; a delayed older intent
         must never overwrite a newer publication for the same deployment.
-        Contract/SDK stage only: do not assume service availability or fall back
-        automatically to synchronous publish when this endpoint is unavailable.
+        Queue/query support requires AEP_GATEWAY_PUBLICATIONS_ENABLED=true;
+        disabled deployments return 503 DATA_PLANE_PUBLICATIONS_DISABLED.
+        The current queue stage has no relay or observation reader: operations
+        remain queued with Unknown conditions. Do not fall back automatically
+        to synchronous publish when this endpoint is unavailable.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -79,7 +82,8 @@ paths:
         Operator observations must match the publication's immutable revision;
         missing or stale evidence is Unknown, never inferred from a successful
         write or from the legacy reconciliation ready flag.
-        Contract/SDK stage only; the query handler follows with the outbox stage.
+        The current queue stage returns Unknown conditions and requires the
+        same explicit opt-in as POST; disabled deployments return 503.
       parameters:
         - name: operationId
           in: path

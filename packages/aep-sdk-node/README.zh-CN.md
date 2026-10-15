@@ -39,7 +39,9 @@ Electron `safeStorage` 适配器和 Renderer IPC 边界详见仓库中的桌面�
 
 ## 异步路由发布
 
-当前仅完成契约／SDK 阶段；管控服务新接口与事务 outbox 实现并部署后才能使用。
+管控服务已实现入队／查询，以 `AEP_GATEWAY_PUBLICATIONS_ENABLED=true` 显式开启，
+默认关闭。relay 和 operator 观测读取器尚未实现，任务保持 queued／Unknown；
+完整链路验收前仅用于隔离环境的入队验证。
 现有 `publishDataPlaneRoutes()` 保留同步 `200` 契约。SDK 不自动回退至旧接口，
 也不自动轮询直到 Ready。
 
@@ -55,4 +57,4 @@ const ready = current.conditions.find(condition => condition.type === 'Ready');
 `Idempotency-Key` 与请求体；不要为每次重试生成新键，也不要在
 `idempotencyExpiresAt` 后复用旧键。保存返回的 operationId，响应不确定且已知
 operationId 时查询原任务。`409 IDEMPOTENCY_KEY_CONFLICT` 通过 `AepProblem`
-返回，不是重试信号。参见 [API 语义](../../docs/api-v1.zh-CN.md#operator-异步发布契约sdk-阶段)。
+返回，不是重试信号。参见 [API 语义](../../docs/api-v1.zh-CN.md#operator-异步发布入队阶段)。

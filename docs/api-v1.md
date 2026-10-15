@@ -748,14 +748,17 @@ reference the conventional Secret `aep-credential-<credentialId>` (key
 Secret system provisions. The namespace is resolved server-side, so a
 `credentialRef.namespace` sent by a client is ignored.
 
-#### Asynchronous operator publication (contract/SDK stage)
+#### Asynchronous operator publication (queue stage)
 
-These additive endpoints are specified for the outbox/operator migration;
-the Control Service handlers and transactional outbox are **not implemented
-in this stage**. Existing clients keep using synchronous `POST /publish`
+The Control Service implements durable queueing and operation queries behind
+`AEP_GATEWAY_PUBLICATIONS_ENABLED` (default `false`); disabled deployments
+return `503 DATA_PLANE_PUBLICATIONS_DISABLED`. This stage **does not implement
+the relay or operator observation reader**: enabled requests remain `queued`
+with Unknown conditions. Opt in only for isolated queue-stage acceptance.
+Existing clients keep using synchronous `POST /publish`
 (`200 DataPlaneDesiredState`); there is no automatic fallback between paths.
-Do not enable the new path until its service implementation and exclusive
-operator writer deployment have passed acceptance.
+Do not switch production clients until relay recovery, operator exclusive
+writing and end-to-end effectiveness have passed acceptance.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -788,6 +791,11 @@ at least until `idempotencyExpiresAt`, which is at least 24 hours after
 `createdAt`; replays do not extend it. Do not blindly retry an expired key: it
 may create new work. After an uncertain response, retry the same key/body
 within that window; once an operation ID is known, query it.
+
+The queue stage retains operations and snapshots without automatic GC;
+`idempotencyExpiresAt` is a minimum retention bound, not a deletion deadline.
+Pending outbox entries are never removed by the existing retention cleaner.
+Raw idempotency keys are not stored; only their SHA-256 hashes are persisted.
 
 `phase` describes delivery only: `queued` → `projecting` → `projected`,
 `failed` or `superseded`. Transient delivery failures back off and retry;

@@ -690,11 +690,14 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 `aep-credentials`），该 Secret 由部署侧 Secret 系统负责供给。命名空间由服务端解析，
 客户端发送的 `credentialRef.namespace` 会被忽略。
 
-#### Operator 异步发布（契约／SDK 阶段）
+#### Operator 异步发布（入队阶段）
 
-以下是 outbox／operator 迁移的新增契约；**本阶段尚未实现管控服务 handler 与事务
-outbox**。现有客户端继续使用同步 `POST /publish`（`200 DataPlaneDesiredState`），
-两条路径之间不自动回退。后续服务实现及 operator 独占写部署通过验收后，才能启用新路径。
+管控服务已实现事务入队和 operation 查询，以 `AEP_GATEWAY_PUBLICATIONS_ENABLED`
+显式开启，默认 `false`；关闭时返回 `503 DATA_PLANE_PUBLICATIONS_DISABLED`。
+**本阶段没有 relay 和 operator 观测读取器**，开启后任务保持 `queued`，conditions
+均为 Unknown，仅用于隔离环境的入队验收。现有客户端继续使用同步 `POST /publish`
+（`200 DataPlaneDesiredState`），两条路径之间不自动回退。relay 故障恢复、operator
+独占写及完整链路生效验收完成后，才能切换生产客户端。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -719,6 +722,9 @@ outbox**。现有客户端继续使用同步 `POST /publish`（`200 DataPlaneDes
 `409 IDEMPOTENCY_KEY_CONFLICT`。绑定与 operation 至少保留到 `idempotencyExpiresAt`
 （不早于创建后 24 小时），重放不延长该期限；过期键可能产生新任务，不应盲目重试。
 响应不确定时，在期限内用原键与原请求重试；已拿到 operationId 后查询该 operation。
+
+入队阶段不自动清理 operation 和快照；`idempotencyExpiresAt` 是最短留存边界，
+不是删除时间。现有留存清理器不删除待投递 outbox；幂等键仅保存 SHA-256 摘要，不存原文。
 
 `phase` 仅表示投递生命周期：`queued` → `projecting` → `projected`、`failed` 或
 `superseded`。临时投递错误退避重试；`failed` 表示不可恢复的投影错误，携带脱敏

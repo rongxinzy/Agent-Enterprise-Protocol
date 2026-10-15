@@ -26,6 +26,7 @@ var environmentKeys = []string{
 	"AEP_RETENTION_CLEANUP_INTERVAL", "AEP_OPERATIONAL_RETENTION", "AEP_TELEMETRY_RETENTION", "AEP_AUDIT_RETENTION", "AEP_RETENTION_CLEANUP_BATCH_SIZE",
 	"AEP_TRUSTED_PROXY_CIDRS",
 	"AEP_COMPUTE_TIERS_FILE", "AEP_COMPUTE_DEFAULT_TIER", "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "AEP_COMPUTE_CONCURRENCY_CAP",
+	"AEP_GATEWAY_PUBLICATIONS_ENABLED",
 }
 
 func TestLoadDevelopmentDefaults(t *testing.T) {
@@ -49,6 +50,23 @@ func TestLoadUsesExplicitDeploymentIdentity(t *testing.T) {
 	}
 	if cfg.DeploymentID != "deployment-42" || cfg.DeploymentName != "Zhiyuan deployment" {
 		t.Fatalf("deployment configuration = %q/%q", cfg.DeploymentID, cfg.DeploymentName)
+	}
+}
+
+func TestLoadGatewayPublicationOptIn(t *testing.T) {
+	clearEnvironment(t)
+	cfg, err := Load()
+	if err != nil || cfg.GatewayPublicationsEnabled {
+		t.Fatalf("default publication config = %t, %v", cfg.GatewayPublicationsEnabled, err)
+	}
+	t.Setenv("AEP_GATEWAY_PUBLICATIONS_ENABLED", "true")
+	cfg, err = Load()
+	if err != nil || !cfg.GatewayPublicationsEnabled {
+		t.Fatalf("enabled publication config = %t, %v", cfg.GatewayPublicationsEnabled, err)
+	}
+	t.Setenv("AEP_GATEWAY_PUBLICATIONS_ENABLED", "not-a-bool")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid publication flag accepted")
 	}
 }
 
