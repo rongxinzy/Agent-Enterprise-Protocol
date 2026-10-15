@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -67,6 +68,28 @@ func TestGuardSubjectPropagatesStatementFailures(t *testing.T) {
 			t.Fatalf("GuardSubject() error = %v", err)
 		}
 	})
+}
+
+// A delete that cannot take the subject lock must fail before it touches any
+// grant: running the cleanup on a transaction that does not hold the lock is
+// exactly the interleaving the lock exists to prevent.
+func TestDeleteSubjectStopsWhenTheSubjectLockFails(t *testing.T) {
+	store, mock := newMockStore(t)
+	now := time.Now().UTC()
+	mock.ExpectQuery(`SELECT \* FROM "roles" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "member", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "name", "description", "built_in", "enabled", "created_at", "updated_at"}).
+			AddRow("deployment-a", "member", "Member", "", false, true, now, now))
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(hashtextextended\(\$1, 0\)\)`).
+		WithArgs("deployment-a:role:member").WillReturnError(errors.New("lock unavailable"))
+	mock.ExpectRollback()
+	// No grant-cleanup expectation is queued, so the guard failure has to be the
+	// error that surfaces.
+	err := store.Deployment("deployment-a").DeleteRole(context.Background(), "member")
+	if err == nil || !strings.Contains(err.Error(), "lock unavailable") {
+		t.Fatalf("DeleteRole() error = %v", err)
+	}
 }
 
 // A subject type no table backs must fail before any statement runs, so a
