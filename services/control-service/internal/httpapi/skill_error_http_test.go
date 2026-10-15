@@ -487,3 +487,39 @@ func TestUserSkillFailureBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// A manifest response is desired state: the client is expected to remove any
+// managed Skill it does not find in it. So the handler must only publish the
+// manifest once the read completed. pgxmock's CloseError models a query that
+// returned a result set but whose iteration terminated with an error, which is
+// exactly the failure a connection reset mid-stream produces. Next() returning
+// false is not on its own proof that the read succeeded.
+func TestUserSkillManifestReadCompleteness(t *testing.T) {
+	columns := []string{"id", "name", "version", "sha256", "size_bytes"}
+
+	t.Run("terminating error before the first row", func(t *testing.T) {
+		application, pool, _, token := newRuntimeHTTPApplication(t)
+		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+			WillReturnRows(pgxmock.NewRows(columns).CloseError(errors.New("manifest read interrupted")))
+		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
+		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
+	})
+
+	t.Run("terminating error after a row was read", func(t *testing.T) {
+		application, pool, _, token := newRuntimeHTTPApplication(t)
+		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+			WillReturnRows(pgxmock.NewRows(columns).AddRow("writer", "Writer", "2.0.0", "abc123", int64(24)).CloseError(errors.New("manifest read interrupted")))
+		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
+		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
+	})
+
+	t.Run("a genuinely empty manifest stays successful", func(t *testing.T) {
+		application, pool, _, token := newRuntimeHTTPApplication(t)
+		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+			WillReturnRows(pgxmock.NewRows(columns))
+		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
+		if response.Code != http.StatusOK || response.Header().Get("ETag") == "" || !strings.Contains(response.Body.String(), `"skills":[]`) {
+			t.Fatalf("empty Skill manifest = %d %s, ETag = %q", response.Code, response.Body.String(), response.Header().Get("ETag"))
+		}
+	})
+}

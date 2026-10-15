@@ -133,6 +133,14 @@ func (s *Server) listUserSessionControlEvents(response http.ResponseWriter, requ
 		value := strconv.FormatInt(cursor, 10)
 		next = &value
 	}
+	// The page is a delivery log the agent resumes from: nextCursor advances
+	// past every row of this page, so a page whose iteration ended in an error
+	// must not be served as if it were complete, or the agent would never see
+	// the deliveries that were cut off.
+	if err := rows.Err(); err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
 	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": next, "watermark": stringValue(watermark)})
 }
 
