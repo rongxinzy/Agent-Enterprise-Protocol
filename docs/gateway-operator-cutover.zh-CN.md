@@ -85,3 +85,32 @@ finalizer（仅在对应清理职责已人工完成后），再预置无发布�
 
 运行时兼容代码保留给未迁移部署。生产全部迁移和回滚窗口关闭后，才能单独删除旧 runtime/入口；
 本阶段保留兼容不表示新部署仍运行旧 writer。
+
+## 本地恢复验收入口
+
+`tests/e2e/gateway-publication-recovery.mjs` 仅用于既有的、可重置的专用 Kind fixture，
+不是生产恢复脚本，也不自动接入 CI。需要 Node 24、kubectl、已构建的 aepctl，
+以及包含最新控制服务/relay/双副本 Operator/独立 publisher/真实 Higress 与 PostgreSQL 的测试栈。
+fixture 使用 `aep-system/operator-local-control-env`（仅内存读取）、`demo` deployment，
+控制服务/Operator/publisher 名称分别为 control-service、aep-gateway-operator、aep-credential-publisher，
+PostgreSQL 在 aep-infra 中。原模型路由必须全停用，环境必须 development/test，且无旧 reconciler。
+固定本机 28284 端口必须空闲；脚本会短暂停止测试控制服务和 publisher，并重启 Operator。
+
+在 AEP 仓库根目录构建 CLI，并通过环境显式指定 kubeconfig、context、CLI 绝对路径：
+
+```bash
+go build -o /absolute/test-tools/aepctl ./cmd/aepctl
+export AEP_RECOVERY_ACCEPT_LOCAL_RESET=true
+export AEP_RECOVERY_KUBECONFIG=/absolute/test-tools/kubeconfig
+export AEP_RECOVERY_CONTEXT=kind-aep-operator-local
+export AEP_RECOVERY_CLI=/absolute/test-tools/aepctl
+export AEP_RECOVERY_REPORT=/absolute/test-tools/recovery-report.json
+node tests/e2e/gateway-publication-recovery.mjs
+```
+
+检查 CLI 幂等/恢复、高 sequence 阻断、实际 PostgreSQL 备份恢复至临时库、恢复一致原库、
+受管 CR 删除保护与履行清理职责后的丢失重建、双副本重启和暂停 relay 的入口隔离。
+备份只经内存/管道进入临时库，不保存 DB/Secret 内容到报告；报告只包含检查结果。
+正常及失败退出都尝试恢复原模板和 publisher，删除临时数据库/Secret；进程被外部强杀时
+仍须人工核查这些清理项。现有端口转发绑定旧 Pod 时需重新建立，但不得切换到其他环境。
+该入口使用已停用路由测试恢复，不调用真实云模型，也不替代 200/429/配额消耗场景或生产交付验收。
