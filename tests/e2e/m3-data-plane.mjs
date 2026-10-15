@@ -157,10 +157,18 @@ try {
 
   const credentialD = await useCredential(admin, 'Provider D key', 'provider-d', 'provider-secret-value-d');
   const providerDModel = await admin.updateModel(chatModel.id, {endpoint: '/v1/chat', upstreamModel: 'provider-d', credentialId: credentialD.id});
+  // With the credential fetcher configured, a Secret read failure is a
+  // synchronization failure in its own right: the status reports
+  // CREDENTIAL_UNAVAILABLE with no resource count, and the route is never
+  // rendered or applied - there is no token-less fallback that reports ready.
+  const beforeCredentialFailure = snapshot();
   kubeAvailable = false;
   await admin.putDataPlaneDesiredState({revision: 'rev-4', routes: [routeFor(providerDModel)]});
-  await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'KUBERNETES_APPLY_FAILED');
+  await waitForStatus(admin, status => status.state === 'error' && status.errorCode === 'CREDENTIAL_UNAVAILABLE' && status.resourceCount === 0);
+  assert(snapshot() === beforeCredentialFailure, 'a credential failure still rendered or applied resources');
   await waitForHealth('/readyz', 503);
+  // Restoring the Secret store lets the same revision converge: the failure is
+  // transient, not a poisoned desired state.
   kubeAvailable = true;
   await waitForReady(admin, 'rev-4');
   await waitForHealth('/readyz', 200);

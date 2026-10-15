@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-reconciler/internal/reconciler"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
 func main() {
@@ -152,7 +153,7 @@ func loadConfig() (serverConfig, error) {
 			return serverConfig{}, err
 		}
 		if applier, ok := workerConfig.Applier.(*reconciler.KubernetesApplier); ok {
-			workerConfig.CredentialFetcher = func(ctx context.Context, ref reconciler.SecretReference) (string, error) {
+			workerConfig.CredentialFetcher = func(ctx context.Context, ref gatewayrender.SecretReference) (string, error) {
 				// Route references carry the pinned credential namespace; an
 				// operator-configured reference leaves it unset and ReadSecret
 				// falls back to its default namespace.

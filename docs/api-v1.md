@@ -384,6 +384,12 @@ Reading this response does not consume an event. Until receipt is
 acknowledged, the server may return the delivery again. The Agent deduplicates
 by `deliveryId` and `eventId`.
 
+`watermark` is the largest `cursor` delivered to the session so far, or `""`
+when nothing has been delivered; it matches the heartbeat
+`controlEvents.watermark`. It is informational: page with `nextCursor`
+(`afterCursor` takes the last returned delivery's `cursor`), because the
+watermark can be ahead of deliveries that are still pending.
+
 ### `POST /user/control-events/{deliveryId}/acknowledge`
 
 The Agent calls this endpoint only after committing the event to its durable

@@ -2,94 +2,50 @@ package reconciler
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
-func TestFetchCredentials(t *testing.T) {
-	reference := &SecretReference{Name: "provider-secrets", Key: "model-a"}
-
-	t.Run("nil fetcher yields no values", func(t *testing.T) {
-		reconciler := &Reconciler{}
-		if got := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{{Enabled: true, CredentialRef: reference}}}); got != nil {
-			t.Fatalf("fetchCredentials() = %#v, want nil", got)
+func TestFetchCredentialsPinnedNamespace(t *testing.T) {
+	t.Run("nil fetcher", func(t *testing.T) {
+		worker := &Reconciler{}
+		got, err := worker.fetchCredentials(t.Context(), DesiredState{})
+		if got != nil || err != nil {
+			t.Fatalf("fetchCredentials() = %v, %v; want nil, nil", got, err)
 		}
 	})
 
-	t.Run("route references are read from the dedicated credential namespace", func(t *testing.T) {
-		var namespaces []string
-		reconciler := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, ref SecretReference) (string, error) {
-			if ref.Namespace == nil {
-				namespaces = append(namespaces, "")
-			} else {
-				namespaces = append(namespaces, *ref.Namespace)
+	for _, name := range []string{"", "higress-system", "other-namespace"} {
+		t.Run("stored namespace "+name, func(t *testing.T) {
+			var namespace *string
+			if name != "" {
+				namespace = new(name)
 			}
-			return "value", nil
-		}}}
-		// The stored desired state claims another namespace; the fetch must
-		// ignore it and stay in the dedicated credential namespace.
-		storedNamespace := "higress-system"
-		stored := &SecretReference{Name: "aep-credential-c1", Key: "api-key", Namespace: &storedNamespace}
-		reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{{ModelID: "a", Enabled: true, CredentialRef: stored}}})
-		if len(namespaces) != 1 || namespaces[0] != CredentialSecretNamespace {
-			t.Fatalf("credential namespaces = %v, want [%s]", namespaces, CredentialSecretNamespace)
-		}
-	})
-
-	t.Run("disabled routes and duplicates are skipped, failures tolerated", func(t *testing.T) {
-		calls := 0
-		reconciler := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, ref SecretReference) (string, error) {
-			calls++
-			if ref.Key == "broken" {
-				return "", errors.New("secret unavailable")
+			ref := &gatewayrender.SecretReference{Name: "aep-credential-c1", Key: "api-key", Namespace: namespace}
+			calls := 0
+			worker := &Reconciler{config: Config{CredentialFetcher: func(_ context.Context, got gatewayrender.SecretReference) (string, error) {
+				calls++
+				if got.Namespace == nil || *got.Namespace != CredentialSecretNamespace || got.Name != ref.Name || got.Key != ref.Key {
+					t.Fatalf("reference = %+v, want pinned namespace and original name/key", got)
+				}
+				return "value", nil
+			}}}
+			got, err := worker.fetchCredentials(t.Context(), DesiredState{Routes: []gatewayrender.Route{
+				{Enabled: true, CredentialRef: ref},
+				{Enabled: true, CredentialRef: ref},
+				{Enabled: false, CredentialRef: &gatewayrender.SecretReference{Name: "disabled", Key: "api-key"}},
+			}})
+			if err != nil || got["aep-credential-c1/api-key"] != "value" || calls != 1 {
+				t.Fatalf("credentials = %v, error = %v, calls = %d", got, err, calls)
 			}
-			return "value-" + ref.Key, nil
-		}}}
-		got := reconciler.fetchCredentials(context.Background(), DesiredState{Routes: []Route{
-			{ModelID: "off", Enabled: false, CredentialRef: reference},
-			{ModelID: "a", Enabled: true, CredentialRef: reference},
-			{ModelID: "a-again", Enabled: true, CredentialRef: reference}, // same ref: deduped
-			{ModelID: "broken", Enabled: true, CredentialRef: &SecretReference{Name: "provider-secrets", Key: "broken"}},
-			{ModelID: "tokenless", Enabled: true}, // no ref
-		}})
-		if len(got) != 1 || got["provider-secrets/model-a"] != "value-model-a" {
-			t.Fatalf("fetchCredentials() = %#v", got)
-		}
-		if calls != 2 {
-			t.Fatalf("fetcher called %d times, want 2 (dedup + one failure)", calls)
-		}
-	})
-}
-
-func TestIngressPath(t *testing.T) {
-	cases := []struct{ endpoint, want string }{
-		{"/v1", "/v1"}, // bare path: verbatim
-		{"http://gateway.internal:8080/v1", "/v1"}, // absolute URL: path only
-		{"https://host.example", "/v1"},            // URL without path: default
-		{"http://host/openai", "/openai"},          // non-/v1 path carries over
-	}
-	for _, tc := range cases {
-		if got := ingressPath(tc.endpoint); got != tc.want {
-			t.Errorf("ingressPath(%q) = %q, want %q", tc.endpoint, got, tc.want)
-		}
-	}
-}
-
-func TestUpstreamURL(t *testing.T) {
-	if got, ok := upstreamURL("http://provider.internal:9000/v1"); !ok || got != "http://provider.internal:9000/v1" {
-		t.Fatalf("absolute = %q, %v", got, ok)
-	}
-	if got, ok := upstreamURL("https://host.example/base/"); !ok || got != "https://host.example/base" {
-		t.Fatalf("trailing slash = %q, %v", got, ok)
-	}
-	if _, ok := upstreamURL("/relative-only"); ok {
-		t.Fatal("a bare path is not an upstream URL")
-	}
-	if _, ok := upstreamURL("ftp://host/path"); ok {
-		t.Fatal("non-http schemes are not upstream URLs")
+			if ref.Namespace != namespace {
+				t.Fatal("fetch mutated the desired-state reference and its canonical hash")
+			}
+		})
 	}
 }
 
