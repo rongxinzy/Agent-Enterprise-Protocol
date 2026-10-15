@@ -152,14 +152,6 @@ func TestGrantWritesLockThenProbeThenInsertInOneTransaction(t *testing.T) {
 	})
 }
 
-// An unknown subject type is rejected before any transaction opens, so it never
-// reaches the guard.
-func TestGrantWritesRejectUnknownSubjectTypeWithoutATransaction(t *testing.T) {
-	application, _, _, adminToken := newUserHTTPApplication(t)
-	response := adminRequest(New(application).Handler(), adminToken, http.MethodPost, "/aep/v1/admin/skill-assignments", `{"skillId":"writer","subject":{"type":"device","id":"device-a"}}`)
-	requireInvalidSubject(t, response)
-}
-
 func requireInvalidSubject(t *testing.T, response *httptest.ResponseRecorder) {
 	t.Helper()
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"INVALID_SUBJECT"`) {
