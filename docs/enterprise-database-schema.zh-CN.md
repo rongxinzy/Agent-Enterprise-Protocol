@@ -237,6 +237,11 @@ Skill ZIP 存在对象存储中，版本表只保存对象键、SHA-256 和大�
 
 `subject_id` 是多态主体 ID。数据库限制主体类型，服务层校验主体存在、属于当前部署且已启用。
 
+该存在性校验与授权的写入在**同一事务内**完成，并且**先取该主体的事务级 advisory lock**
+（`pg_advisory_xact_lock(hashtextextended('<deployment>:<subjectType>:<subjectID>', 0))`）；
+角色/团队删除（清理该主体全部多态授权并删除主体）也必须先取同一把锁。否则「校验为存在」与
+「插入授权」之间可被一次主体删除穿过：授权会残留，并被之后复用同一 ID 的新主体继承。
+
 ## 管控事件与状态
 
 ### `control_events`

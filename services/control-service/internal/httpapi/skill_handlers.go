@@ -550,7 +550,7 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 	if !requireSkillIdentifier(response, request, input.SkillID) {
 		return
 	}
-	if !s.requireSubject(response, request, input.Subject.Type, input.Subject.ID) {
+	if !requireSubjectType(response, request, input.Subject.Type) {
 		return
 	}
 	id := uuid.NewString()
@@ -561,6 +561,17 @@ func (s *Server) createSkillAssignment(response http.ResponseWriter, request *ht
 		return
 	}
 	defer func() { _ = tx.Rollback(request.Context()) }()
+	// Take the subject lock and probe the subject inside this transaction,
+	// before the insert. A deletion holding the same lock either ran before the
+	// probe or waits for this transaction, so the grant cannot outlive the
+	// subject it names.
+	if err := repository.GuardSubjectTx(request.Context(), tx, claims.DeploymentID, input.Subject.Type, input.Subject.ID); err != nil {
+		if subjectGuardError(response, request, input.Subject.Type, input.Subject.ID, err) {
+			return
+		}
+		databaseFailure(response, request, err)
+		return
+	}
 	_, err = tx.Exec(request.Context(), `INSERT INTO skill_assignments (id,deployment_id,skill_id,subject_type,subject_id,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`, id, claims.DeploymentID, input.SkillID, input.Subject.Type, input.Subject.ID, input.ExpiresAt)
 	if err != nil {
 		if isUniqueViolation(err) {
