@@ -412,14 +412,14 @@ func TestAdminSkillAssignmentFailureBoundaries(t *testing.T) {
 func TestUserSkillFailureBoundaries(t *testing.T) {
 	t.Run("manifest query", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").WillReturnError(errors.New("manifest unavailable"))
+		pool.ExpectQuery(skillManifestQueryPattern).WithArgs("deployment-a", "user-a").WillReturnError(errors.New("manifest unavailable"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
 
 	t.Run("manifest scan", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`WITH authorized AS`).WithArgs("deployment-a", "user-a").
+		pool.ExpectQuery(skillManifestQueryPattern).WithArgs("deployment-a", "user-a").
 			WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("writer"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/manifest", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
@@ -427,7 +427,7 @@ func TestUserSkillFailureBoundaries(t *testing.T) {
 
 	t.Run("download query", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
-		pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "writer", "1.0.0").WillReturnError(errors.New("download unavailable"))
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "1.0.0").WillReturnError(errors.New("download unavailable"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/writer/versions/1.0.0/package", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
 	})
@@ -435,7 +435,7 @@ func TestUserSkillFailureBoundaries(t *testing.T) {
 	t.Run("download blob", func(t *testing.T) {
 		application, pool, _, token := newRuntimeHTTPApplication(t)
 		application.Blobs = &memorySkillBlobStore{objects: make(map[string][]byte), getErr: errors.New("blob unavailable")}
-		pool.ExpectQuery(`SELECT sv\.object_key`).WithArgs("deployment-a", "user-a", "writer", "1.0.0").
+		pool.ExpectQuery(skillPackageQueryPattern).WithArgs("deployment-a", "user-a", "writer", "1.0.0").
 			WillReturnRows(pgxmock.NewRows([]string{"object_key"}).AddRow("skills/writer/1.0.0/package.zip"))
 		response := userRequest(New(application).Handler(), token, http.MethodGet, "/aep/v1/user/skills/writer/versions/1.0.0/package", "")
 		requireSkillProblem(t, response.Code, response.Body.String(), http.StatusInternalServerError, "INTERNAL_ERROR")
