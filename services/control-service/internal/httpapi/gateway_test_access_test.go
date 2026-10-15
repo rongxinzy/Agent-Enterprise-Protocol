@@ -21,12 +21,13 @@ func TestGatewayTestAccessSingleModel(t *testing.T) {
 		t.Run(protocol, func(t *testing.T) {
 			a, mock, token := newStoreBackedHTTPApplication(t)
 			pool := attachRuntimeDatabase(t, a)
-			now := time.Now().UTC()
+			started := time.Now().UTC().Truncate(time.Second)
 			a.Config.ModelGatewayBaseURL = "http://127.0.0.1:8090/v1"
 			mock.ExpectQuery(`SELECT \* FROM "models"`).WithArgs("deployment-a", "model-a", 1).WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "source_type", "protocol", "enabled"}).AddRow("deployment-a", "model-a", "gateway", protocol, true))
 			pool.ExpectQuery(`SELECT DISTINCT m.id`).WithArgs("deployment-a", "admin-user").WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow("model-a").AddRow("other-model"))
 			pool.ExpectQuery(`SELECT model_gateway_base_url`).WithArgs("deployment-a").WillReturnError(pgx.ErrNoRows)
 			got := adminRequest(New(a).Handler(), token, http.MethodPost, "/aep/v1/admin/model-gateway/models/model-a/test-access", "")
+			finished := time.Now().UTC().Truncate(time.Second)
 			if got.Code != 200 || got.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal(got.Code, got.Body.String())
 			}
@@ -40,8 +41,14 @@ func TestGatewayTestAccessSingleModel(t *testing.T) {
 				t.Fatal(err)
 			}
 			claims, err := a.Tokens.ParseModel(access.ModelAccessToken)
-			if err != nil || claims.Admin || claims.TokenUse != "model" || claims.SessionID != "session-admin" || claims.DeploymentID != "deployment-a" || len(claims.ModelScopes) != 1 || claims.ModelScopes[0] != "model-a" || !claims.ExpiresAt.Equal(access.ExpiresAt) || access.ExpiresAt.After(now.Add(2*time.Minute)) {
+			if err != nil || claims.Admin || claims.TokenUse != "model" || claims.SessionID != "session-admin" || claims.DeploymentID != "deployment-a" || len(claims.ModelScopes) != 1 || claims.ModelScopes[0] != "model-a" || !claims.ExpiresAt.Equal(access.ExpiresAt) {
 				t.Fatal("test scope/lifetime")
+			}
+			// JWT timestamps have second precision. Signing can cross a second
+			// boundary during the request; assert the signed lifetime and bound
+			// issuance by both ends of the request instead of its start alone.
+			if claims.IssuedAt == nil || claims.IssuedAt.Before(started) || claims.IssuedAt.After(finished) || claims.ExpiresAt.Sub(claims.IssuedAt.Time) != 2*time.Minute {
+				t.Fatal("test token must be issued during this request for exactly two minutes")
 			}
 			if protocol == "anthropic" && (access.BaseURL != "http://127.0.0.1:8090/model-a" || access.Path != "/v1/messages") {
 				t.Fatal(access.BaseURL, access.Path)
