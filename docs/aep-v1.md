@@ -192,8 +192,9 @@ its `agents/`, `references/`, and `scripts/` directories. The control service
 takes the directory holding the shallowest `SKILL.md` as the Skill root and
 lifts that directory to the archive root before storage, so stored packages
 always have `SKILL.md` at their root and every Agent - including third-party
-ones - installs them unchanged. Entries outside the Skill root are not retained.
-If several `SKILL.md` files sit at the same shallowest depth the package is
+ones - installs them unchanged. Entries outside the Skill root are not retained,
+and only the chosen `SKILL.md` survives: a deeper duplicate is dropped too. If
+several `SKILL.md` files sit at the same shallowest depth the package is
 ambiguous and the upload is refused, naming the paths. The manifest digest is
 calculated over the exact ZIP bytes served by the asset service, that is, over
 the normalized bytes as stored.
