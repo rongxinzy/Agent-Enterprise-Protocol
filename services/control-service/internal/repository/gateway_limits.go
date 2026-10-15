@@ -32,6 +32,9 @@ func (s *DeploymentStore) GatewayLimits(ctx context.Context, includeDeleted bool
 		if err := json.Unmarshal(record.Configuration, &cfg); err != nil {
 			return nil, err
 		}
+		if record.Deleted {
+			cfg.Enabled = false
+		}
 		items = append(items, gatewaypolicy.Limit{ID: record.ID, Version: record.Version, Configuration: cfg, UpdatedAt: record.UpdatedAt})
 	}
 	return items, nil

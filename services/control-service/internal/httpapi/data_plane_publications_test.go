@@ -132,6 +132,8 @@ func TestPublicationRejectsInvalidRequestsWithoutDatabaseWrites(t *testing.T) {
 		code      string
 	}{
 		{`{}`, "", 400, "INVALID_IDEMPOTENCY_KEY"}, {`{}`, "key with space", 400, "INVALID_IDEMPOTENCY_KEY"}, {`{}`, strings.Repeat("a", 129), 400, "INVALID_IDEMPOTENCY_KEY"},
+		{`{"includeGatewayLimits":null}`, "valid", 400, "INVALID_REQUEST"},
+		{`{"includeGatewayLimits":"true"}`, "valid", 400, "INVALID_REQUEST"},
 		{"", "valid", 400, "INVALID_REQUEST"}, {`null`, "valid", 400, "INVALID_REQUEST"}, {`[]`, "valid", 400, "INVALID_REQUEST"}, {`{`, "valid", 400, "INVALID_REQUEST"},
 		{`{} {}`, "valid", 400, "INVALID_REQUEST"}, {`{"revision":"one","revision":"two"}`, "valid", 400, "INVALID_REQUEST"},
 		{`{"revision":null}`, "valid", 422, "INVALID_DATA_PLANE_STATE"}, {`{"revision":12}`, "valid", 422, "INVALID_DATA_PLANE_STATE"},
@@ -288,6 +290,7 @@ func TestPublicationCreateAndErrorMapping(t *testing.T) {
 					status = 422
 				}
 				catalogModelsQuery(mock, rows)
+				mock.ExpectQuery(`SELECT s.payload FROM data_plane_publications`).WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows([]string{"payload"}))
 				if outcome == "created" {
 					mock.ExpectExec(`INSERT INTO "data_plane_publication_snapshots"`).WillReturnResult(sqlmock.NewResult(0, 1))
 					mock.ExpectQuery(`SELECT "content_hash"`).WillReturnRows(sqlmock.NewRows([]string{"content_hash"}).AddRow(dataPlaneHash(mustPublicationState(t))))

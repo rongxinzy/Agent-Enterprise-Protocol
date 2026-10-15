@@ -90,6 +90,23 @@ func (o *Observer) Observe(ctx context.Context, item repository.PublicationDeliv
 		}
 		objects = append(objects, observedObject{route, route.Status.ObservedPublication, route.Status.ObservedGeneration, route.Status.Conditions, route.Status.AppliedSnapshot})
 	}
+	policies, err := desiredPolicies(item)
+	if err != nil {
+		return nil, err
+	}
+	if policies != nil {
+		var live gateway.ModelPolicyList
+		if err := o.Reader.List(ctx, &live, client.InNamespace(o.Namespace)); err != nil {
+			return nil, err
+		}
+		if verifyPolicies(&live, policies, item) != nil {
+			return unknown, nil
+		}
+		for i := range live.Items {
+			policy := &live.Items[i]
+			objects = append(objects, observedObject{policy, policy.Status.ObservedPublication, policy.Status.ObservedGeneration, policy.Status.Conditions, policy.Status.AppliedSnapshot})
+		}
+	}
 	// Bracket the atomic route List with direct aggregate reads. Status/spec
 	// changes during the observation invalidate this response instead of mixing
 	// evidence from different aggregate snapshots.

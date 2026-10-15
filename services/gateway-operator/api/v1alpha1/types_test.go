@@ -59,12 +59,18 @@ func TestDeepCopyRoundtrip(t *testing.T) {
 			TargetRef:  PolicyTargetReference{Kind: "ModelRoute", Name: "route-a"},
 			RateLimits: []RateLimit{{Maximum: 100, IntervalSeconds: 60}},
 			Quota:      &Quota{Maximum: 1000, IntervalSeconds: 3600},
+			NativeRule: &NativePolicyRule{ID: "rule", Version: 1},
 		},
-		Status: ModelPolicyStatus{ObservedGeneration: 2},
+		Status: ModelPolicyStatus{ObservedGeneration: 2, ObservedPublication: &PublicationReference{Sequence: 42}},
 	}
 	policyCopy := policy.DeepCopy()
 	policyCopy.Spec.RateLimits[0].Maximum = 5
 	policyCopy.Spec.Quota.Maximum = 5
+	policyCopy.Spec.NativeRule.Version = 2
+	policyCopy.Status.ObservedPublication.Sequence = 43
+	if policy.Spec.NativeRule.Version != 1 || policy.Status.ObservedPublication.Sequence != 42 {
+		t.Fatal("policy reference deep copy aliased")
+	}
 	if policy.Spec.RateLimits[0].Maximum != 100 || policy.Spec.Quota.Maximum != 1000 {
 		t.Fatalf("policy deep copy is not deep: %#v", policy.Spec)
 	}
