@@ -1,5 +1,17 @@
 # AEP 生产运行基线
 
+## 网关单写者切换约束
+
+`AEP_GATEWAY_OPERATOR_MODE=true` 将旧发布／内部 reconciler 通道关闭，并将配置读取
+切向已选不可变发布与匹配的 Operator 证据。开启 relay 也自动启用此隔离。暂停 relay 时
+必须保留显式模式标志，不能因暂停 worker 重新开放旧 writer。模式关闭只用于旧部署兼容。
+
+此标志不是 Kubernetes 写权限隔离的替代物。交接必须冻结管理写入，停止所有旧 reconciler
+副本并撤销其资源写入 RBAC，确认无旧 writer 后，再启动具有独占资源权限的 Operator。
+Control Service 所有副本必须使用相同模式；禁止新旧模式混合滚动运行。回滚需先冻结并停止
+新 writer，恢复经核对的已选意图和旧 RBAC 后才能重启旧链路，不能仅修改环境变量。
+不得直接重新发布草稿或强制接管不属于 AEP 的 Kubernetes 对象。
+
 该基线使 AEP control-service 与 gateway-authorizer 能够由生产编排平台可靠运行，但不会把本地 Compose 或 `higress-standalone` 包装成生产拓扑。生产环境仍需使用外部托管 PostgreSQL、S3 兼容 RustFS、Higress Helm 部署、TLS 入口、Secret 管理、监控、备份，以及符合企业可用性目标的基础设施。
 
 ## 配置门禁

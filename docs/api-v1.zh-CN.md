@@ -696,9 +696,21 @@ Credential 时引用约定 Secret `aep-credential-<credentialId>`（键 `api-key
 显式开启，默认 `false`；关闭时返回 `503 DATA_PLANE_PUBLICATIONS_DISABLED`。
 另以 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED=true` 显式开启集群内 relay，仅投递当前
 配置部署到 `aep-system`；不开启时任务保持 queued。最新 projected 任务可回读匹配的
-operator Accepted／Applied 证据，Ready 仍为 Unknown。仅用于隔离验收和经审核的
-operator 移交。现有客户端继续使用同步 `POST /publish`
-（`200 DataPlaneDesiredState`），两条路径之间不自动回退。relay 故障恢复、operator
+operator Accepted／Applied 证据，Ready 必须具有新鲜、覆盖全部稳定服务副本的独立
+Envoy 配置证据，否则保持 Unknown。仅用于隔离验收和经审核的 operator 移交。
+旧部署继续使用同步 `POST /publish`（`200 DataPlaneDesiredState`）。开启 relay 即进入
+Operator 模式；显式 `AEP_GATEWAY_OPERATOR_MODE=true` 可在暂停 relay 时继续保持隔离与
+只读观测，两种方式均要求开启 publications 且命名空间为 `aep-system`。认证授权后，
+旧路由 PUT／publish、限额 publish／status、四个内部 reconciler 读写入口统一返回
+`503 LEGACY_GATEWAY_PUBLICATION_DISABLED`。草稿 CRUD 与运行时 quota API 保留。
+两条路径之间不自动回退。
+
+Operator 模式下，原 desired-state／status GET 读取最新选中的不可变发布意图，包含
+queued／failed 意图；目录比较使用此快照，只接纳版本匹配的 Operator 证据。
+Applied 对应 applying，只有新鲜独立 Envoy 证据才对应 ready；证据缺失或过期保持
+pending，绝不回退旧状态表。`contentHash` 标识含路由与所选限额的完整发布。
+客户端必须比较两次 GET 的 hash，不一致则重新读取两者；单次读取中发布变化返回
+503。响应使用 `no-store`。relay 故障恢复、operator
 独占写及完整链路生效验收完成后，才能切换生产客户端。
 
 | 方法 | 路径 | 用途 |

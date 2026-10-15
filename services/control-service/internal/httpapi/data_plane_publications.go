@@ -57,7 +57,7 @@ func publicationJSON(value repository.DataPlanePublication) publicationView {
 
 func (s *Server) observedPublication(ctx context.Context, value repository.DataPlanePublication) publicationView {
 	view := publicationJSON(value)
-	if !s.app.Config.GatewayRelayEnabled || s.app.PublicationObserver == nil || value.Phase != "projected" {
+	if !s.app.Config.UsesGatewayOperator() || s.app.PublicationObserver == nil || value.Phase != "projected" {
 		return view
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

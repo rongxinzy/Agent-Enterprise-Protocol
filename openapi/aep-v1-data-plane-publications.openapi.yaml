@@ -1,5 +1,5 @@
 # Additive operator publication path. Queue and relay are separate opt-ins;
-# revision-specific observations are read-only. Legacy publish is unchanged.
+# revision-specific observations are read-only. Operator mode fences legacy writes.
 paths:
   /publications:
     post:
@@ -34,8 +34,9 @@ paths:
         Removed routes retain disabled CR tombstones to fence delayed writes.
         For the latest projected operation, read-only operator observations
         can establish Accepted/Applied after exact publication, generation,
-        spec and application-digest checks. Ready remains Unknown until
-        independent data-plane observation is implemented. Do not fall back automatically
+        spec and application-digest checks. Ready requires fresh independent
+        evidence that the complete stable serving Envoy fleet loaded that
+        snapshot; otherwise it remains Unknown. Do not fall back automatically
         to synchronous publish when this endpoint is unavailable.
       parameters:
         - name: Idempotency-Key
@@ -95,7 +96,8 @@ paths:
         evidence when the relay is enabled. Old operator status, unavailable
         observation dependencies and superseded evidence remain Unknown.
         Reads do not claim work, write CRs or mutate operation phases.
-        Ready remains Unknown (DataPlaneNotObserved). Requires the same
+        Ready requires fresh independent full-fleet Envoy observation of the
+        matching snapshot; otherwise it remains Unknown. Requires the same
         explicit opt-in as POST; disabled deployments return 503.
       parameters:
         - name: operationId

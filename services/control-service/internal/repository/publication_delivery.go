@@ -21,6 +21,14 @@ type PublicationDelivery struct {
 	HistoricalRoutes json.RawMessage
 }
 
+// LatestDataPlanePublication selects intent, including queued/failed operations;
+// it must never fall back to an older successfully projected revision.
+func (s *DeploymentStore) LatestDataPlanePublication(ctx context.Context) (DataPlanePublication, error) {
+	var value DataPlanePublication
+	err := s.db.WithContext(ctx).Where("deployment_id = ?", s.deploymentID).Order("sequence DESC").Take(&value).Error
+	return value, err
+}
+
 func (s *DeploymentStore) ClaimDataPlanePublication(ctx context.Context) (*PublicationDelivery, error) {
 	var delivery *PublicationDelivery
 	err := s.transaction(ctx, func(tx *DeploymentStore) error {

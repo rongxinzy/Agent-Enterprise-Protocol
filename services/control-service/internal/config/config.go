@@ -71,6 +71,7 @@ type Config struct {
 	GatewayOrganizationLogs     bool
 	GatewayPublicationsEnabled  bool
 	GatewayRelayEnabled         bool
+	GatewayOperatorMode         bool
 	GatewayRelayNamespace       string
 	MaxResidentAgents           int
 	CredentialMasterKeyBase64   string
@@ -255,6 +256,9 @@ func Load() (Config, error) {
 	if cfg.GatewayRelayEnabled, err = boolean("AEP_GATEWAY_PUBLICATION_RELAY_ENABLED", false); err != nil {
 		return Config{}, err
 	}
+	if cfg.GatewayOperatorMode, err = boolean("AEP_GATEWAY_OPERATOR_MODE", false); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -262,7 +266,7 @@ func Load() (Config, error) {
 }
 
 func (cfg Config) Validate() error {
-	if cfg.GatewayRelayEnabled && (!cfg.GatewayPublicationsEnabled || cfg.GatewayRelayNamespace != "aep-system") {
+	if cfg.UsesGatewayOperator() && (!cfg.GatewayPublicationsEnabled || cfg.GatewayRelayNamespace != "aep-system") {
 		return errors.New("publication relay requires publications enabled and the operator namespace aep-system")
 	}
 	for key, raw := range map[string]string{"AEP_GATEWAY_PROMETHEUS_URL": cfg.GatewayPrometheusURL, "AEP_GATEWAY_LOKI_URL": cfg.GatewayLokiURL, "AEP_GATEWAY_QUOTA_URL": cfg.GatewayQuotaURL} {
@@ -352,6 +356,12 @@ func (cfg Config) Validate() error {
 		return errors.New("AEP_ENABLE_MOCK_FEDERATED_AUTH requires AEP_ADDRESS to bind a loopback address")
 	}
 	return nil
+}
+
+// UsesGatewayOperator fences legacy writers even while relay delivery is paused.
+// Enabling the relay always implies this fence, including older deployments.
+func (cfg Config) UsesGatewayOperator() bool {
+	return cfg.GatewayOperatorMode || cfg.GatewayRelayEnabled
 }
 
 // loopbackAddress reports whether a listen address accepts only local

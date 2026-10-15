@@ -191,6 +191,9 @@ func (s *Server) deleteGatewayLimit(response http.ResponseWriter, request *http.
 }
 
 func (s *Server) publishGatewayLimits(response http.ResponseWriter, request *http.Request) {
+	if !s.legacyGatewayEnabled(response, request) {
+		return
+	}
 	tenant := claimsFrom(request).DeploymentID
 	tx, err := s.app.Database().Begin(request.Context())
 	if err != nil {
@@ -260,6 +263,9 @@ func (s *Server) internalGatewayLimits(response http.ResponseWriter, request *ht
 }
 
 func (s *Server) gatewayLimitStatus(response http.ResponseWriter, request *http.Request) {
+	if !s.legacyGatewayEnabled(response, request) {
+		return
+	}
 	var state, revision string
 	var observed *string
 	err := s.app.Database().QueryRow(request.Context(), `SELECT state,revision,observed_revision FROM gateway_limit_publications WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&state, &revision, &observed)

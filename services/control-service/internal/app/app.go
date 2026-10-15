@@ -303,13 +303,15 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 	}
-	if cfg.GatewayRelayEnabled {
+	if cfg.UsesGatewayOperator() {
 		kube, err := publicationrelay.InClusterClient()
 		if err != nil {
 			application.Close()
 			return nil, err
 		}
-		application.PublicationRelay = publicationrelay.New(application.Store.Deployment(cfg.DeploymentID), &publicationrelay.Projector{Client: kube, Namespace: cfg.GatewayRelayNamespace})
+		if cfg.GatewayRelayEnabled {
+			application.PublicationRelay = publicationrelay.New(application.Store.Deployment(cfg.DeploymentID), &publicationrelay.Projector{Client: kube, Namespace: cfg.GatewayRelayNamespace})
+		}
 		application.PublicationObserver = &publicationrelay.Observer{Reader: kube, Namespace: cfg.GatewayRelayNamespace}
 	}
 	return application, nil

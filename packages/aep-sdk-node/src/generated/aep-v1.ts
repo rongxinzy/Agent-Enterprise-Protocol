@@ -1349,7 +1349,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** publish Gateway Limits */
+        /**
+         * publish Gateway Limits
+         * @description Legacy synchronous publication. Operator mode returns 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous data-plane publications with includeGatewayLimits.
+         */
         post: operations["publishGatewayLimits"];
         delete?: never;
         options?: never;
@@ -1364,7 +1367,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** get Gateway Limits Status */
+        /**
+         * get Gateway Limits Status
+         * @description Legacy status. Operator mode returns 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; read revision-specific data-plane publication conditions instead.
+         */
         get: operations["getGatewayLimitsStatus"];
         put?: never;
         post?: never;
@@ -1449,11 +1455,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the tenant-scoped model gateway state intended for reconciliation. Secret values are never returned. */
+        /** @description Returns the deployment-scoped gateway intent without Secret values. In operator mode (AEP_GATEWAY_OPERATOR_MODE or the publication relay enabled), reads the latest selected immutable publication, including queued or failed intent, never unpublished drafts or legacy tables. contentHash identifies the full publication, including selected limits. Concurrent intent changes or unavailable dependencies return 503; retry both desired-state and status and compare their contentHash. */
         get: operations["getDataPlaneDesiredState"];
         /**
          * @deprecated
-         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values.
+         * @description Manual escape hatch that publishes an operator-authored desired state. Deprecated: prefer publishDataPlaneRoutes so gateway routes are derived from the model catalog, which is the single source of truth. Every route must still match the catalog on the two fields that decide credential flow - endpoint and the credential bound to the model - so a route can neither read an arbitrary Secret nor send a credential to an arbitrary upstream; the remaining rendering fields (providerType, upstreamModel, protocol, enabled) may be overridden. Secret references identify external Secret material and never contain values. Operator mode rejects this legacy writer with 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous publications.
          */
         put: operations["putDataPlaneDesiredState"];
         post?: never;
@@ -1472,7 +1478,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in the dedicated aep-credentials namespace; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. */
+        /** @description Derives gateway routes from the model catalog (enabled gateway models with an OpenAI-compatible or Anthropic protocol and a complete endpoint and upstream model) and atomically replaces the tenant's desired state. OpenAI-compatible models derive the ai-proxy openai provider route; Anthropic models derive an EnvoyFilter passthrough route under a per-model path prefix (clients use the gateway base URL plus the sanitized model ID as the path prefix). Routes for models bound to a Credential refer to the conventional Secret aep-credential-{credentialId} key api-key in the dedicated aep-credentials namespace; Secret values are provisioned by the deployment Secret system and are never accepted or returned by this API. When the derived state is unchanged the publish is a no-op and the stored revision and content hash are returned; otherwise the server assigns a content-addressed catalog-prefixed revision unless the request carries an explicit one. Operator mode rejects this legacy writer with 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous publications. */
         post: operations["publishDataPlaneRoutes"];
         delete?: never;
         options?: never;
@@ -1489,7 +1495,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Requires data_plane.write. Captures the catalog-derived route snapshot using the same route derivation rules as the synchronous publish API. Atomically commits the immutable snapshot, operation, audit event and outbox intent before returning 202. This is durable queue acceptance, not CR validation, resource application or data-plane readiness. With includeGatewayLimits=true it also captures the draft gateway limits in the same transaction under the existing data_plane.write permission. Omission/false preserves the most recently published policy snapshot, including when that operation has not yet been delivered. It never resets policies or implicitly publishes draft limits. This endpoint does not change role assignments. Deployment scope comes from the session. Authenticate and authorize every request before looking up its key. A deployment-scoped Idempotency-Key binds to the normalized request and its first captured snapshot. Replays return the same operation with its current status, even if the catalog has changed; they neither derive a new snapshot nor enqueue another intent. A different request under that key returns 409 IDEMPOTENCY_KEY_CONFLICT. The server retains the binding and operation at least until idempotencyExpiresAt (at least 24 hours after creation). A key reused after expiry may create new work. Transient delivery failures retry with backoff; a delayed older intent must never overwrite a newer publication for the same deployment. Queue/query support requires AEP_GATEWAY_PUBLICATIONS_ENABLED=true; disabled deployments return 503 DATA_PLANE_PUBLICATIONS_DISABLED. An independently enabled AEP_GATEWAY_PUBLICATION_RELAY_ENABLED worker projects snapshots to AEP CRs. Without it operations remain queued. Removed routes retain disabled CR tombstones to fence delayed writes. For the latest projected operation, read-only operator observations can establish Accepted/Applied after exact publication, generation, spec and application-digest checks. Ready remains Unknown until independent data-plane observation is implemented. Do not fall back automatically to synchronous publish when this endpoint is unavailable. */
+        /** @description Requires data_plane.write. Captures the catalog-derived route snapshot using the same route derivation rules as the synchronous publish API. Atomically commits the immutable snapshot, operation, audit event and outbox intent before returning 202. This is durable queue acceptance, not CR validation, resource application or data-plane readiness. With includeGatewayLimits=true it also captures the draft gateway limits in the same transaction under the existing data_plane.write permission. Omission/false preserves the most recently published policy snapshot, including when that operation has not yet been delivered. It never resets policies or implicitly publishes draft limits. This endpoint does not change role assignments. Deployment scope comes from the session. Authenticate and authorize every request before looking up its key. A deployment-scoped Idempotency-Key binds to the normalized request and its first captured snapshot. Replays return the same operation with its current status, even if the catalog has changed; they neither derive a new snapshot nor enqueue another intent. A different request under that key returns 409 IDEMPOTENCY_KEY_CONFLICT. The server retains the binding and operation at least until idempotencyExpiresAt (at least 24 hours after creation). A key reused after expiry may create new work. Transient delivery failures retry with backoff; a delayed older intent must never overwrite a newer publication for the same deployment. Queue/query support requires AEP_GATEWAY_PUBLICATIONS_ENABLED=true; disabled deployments return 503 DATA_PLANE_PUBLICATIONS_DISABLED. An independently enabled AEP_GATEWAY_PUBLICATION_RELAY_ENABLED worker projects snapshots to AEP CRs. Without it operations remain queued. Removed routes retain disabled CR tombstones to fence delayed writes. For the latest projected operation, read-only operator observations can establish Accepted/Applied after exact publication, generation, spec and application-digest checks. Ready requires fresh independent evidence that the complete stable serving Envoy fleet loaded that snapshot; otherwise it remains Unknown. Do not fall back automatically to synchronous publish when this endpoint is unavailable. */
         post: operations["createDataPlanePublication"];
         delete?: never;
         options?: never;
@@ -1504,7 +1510,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Requires data_plane.write, matching the existing data-plane management surface. Returns only an operation belonging to the session's deployment. Unknown, expired and cross-deployment IDs all return 404 RESOURCE_NOT_FOUND. Operator observations must match the publication's immutable revision; missing or stale evidence is Unknown, never inferred from a successful write or from the legacy reconciliation ready flag. Only the latest projected operation can expose live Accepted/Applied evidence when the relay is enabled. Old operator status, unavailable observation dependencies and superseded evidence remain Unknown. Reads do not claim work, write CRs or mutate operation phases. Ready remains Unknown (DataPlaneNotObserved). Requires the same explicit opt-in as POST; disabled deployments return 503. */
+        /** @description Requires data_plane.write, matching the existing data-plane management surface. Returns only an operation belonging to the session's deployment. Unknown, expired and cross-deployment IDs all return 404 RESOURCE_NOT_FOUND. Operator observations must match the publication's immutable revision; missing or stale evidence is Unknown, never inferred from a successful write or from the legacy reconciliation ready flag. Only the latest projected operation can expose live Accepted/Applied evidence when the relay is enabled. Old operator status, unavailable observation dependencies and superseded evidence remain Unknown. Reads do not claim work, write CRs or mutate operation phases. Ready requires fresh independent full-fleet Envoy observation of the matching snapshot; otherwise it remains Unknown. Requires the same explicit opt-in as POST; disabled deployments return 503. */
         get: operations["getDataPlanePublication"];
         put?: never;
         post?: never;
@@ -1521,7 +1527,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the latest observed gateway reconciliation state and the drift between the catalog-publishable route set and the current desired routes. */
+        /** @description Returns gateway observations and catalog drift. In operator mode it compares catalog routes against the latest selected publication and exposes only matching, current operator evidence. Applied maps to applying; ready requires fresh independent full-fleet Envoy evidence. Missing or stale observations remain pending, never legacy ready. contentHash identifies the selected full publication. Separate GET responses must have matching hashes; otherwise retry both reads. A concurrent publication or unavailable snapshot/catalog returns 503. */
         get: operations["getDataPlaneStatus"];
         put?: never;
         post?: never;
@@ -6245,6 +6251,7 @@ export interface operations {
                     "application/json": components["schemas"]["DataPlaneDesiredState"];
                 };
             };
+            503: components["responses"]["Problem-2"];
         };
     };
     putDataPlaneDesiredState: {
@@ -6271,6 +6278,7 @@ export interface operations {
             };
             400: components["responses"]["Problem-2"];
             409: components["responses"]["Problem-2"];
+            503: components["responses"]["Problem-2"];
         };
     };
     publishDataPlaneRoutes: {
@@ -6296,6 +6304,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem-2"];
+            503: components["responses"]["Problem-2"];
         };
     };
     createDataPlanePublication: {
@@ -6403,6 +6412,7 @@ export interface operations {
                     "application/json": components["schemas"]["DataPlaneStatus"];
                 };
             };
+            503: components["responses"]["Problem-2"];
         };
     };
     getDeploymentSettings: {

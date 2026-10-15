@@ -759,10 +759,26 @@ return `503 DATA_PLANE_PUBLICATIONS_DISABLED`. A separate
 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED=true` opt-in runs the in-cluster relay
 for the configured deployment in `aep-system`. Without it requests stay queued.
 The relay projects and verifies AEP CRs. The latest projected operation can
-expose matching operator Accepted/Applied evidence; Ready remains Unknown.
+expose matching operator Accepted/Applied evidence; Ready requires fresh
+independent full-fleet Envoy configuration evidence and otherwise stays Unknown.
 Opt in only during isolated acceptance and reviewed operator handover.
-Existing clients keep using synchronous `POST /publish`
-(`200 DataPlaneDesiredState`); there is no automatic fallback between paths.
+Legacy deployments keep synchronous `POST /publish` (`200 DataPlaneDesiredState`).
+The relay implies operator mode; `AEP_GATEWAY_OPERATOR_MODE=true` keeps the
+fence and read-only observer active when relay delivery is paused. Both require
+publications enabled and namespace `aep-system`. Operator mode rejects legacy
+route PUT/publish, limits publish/status and all four internal reconciler
+read/write endpoints with `503 LEGACY_GATEWAY_PUBLICATION_DISABLED`, after
+authentication/authorization. Draft CRUD and runtime quota APIs stay available.
+There is no automatic fallback between paths.
+
+In operator mode existing desired-state/status GETs read the latest selected
+immutable publication, including queued/failed intent. Status compares the
+catalog against that intent and uses matching operator observations. Applied
+means `applying`; only fresh independent Envoy evidence means `ready`. Missing
+or stale evidence stays pending. Reads never fall back to legacy tables.
+`contentHash` identifies the full publication (routes and selected limits).
+Clients must compare the two GET hashes and retry both reads on mismatch;
+a publication change during a read returns 503. Responses are `no-store`.
 Do not switch production clients until relay recovery, operator exclusive
 writing and end-to-end effectiveness have passed acceptance.
 

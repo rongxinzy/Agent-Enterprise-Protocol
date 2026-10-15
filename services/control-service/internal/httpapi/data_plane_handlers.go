@@ -114,6 +114,10 @@ func dataPlaneHash(state dataPlaneDesiredStateWrite) string {
 }
 
 func (s *Server) getDataPlaneDesiredState(response http.ResponseWriter, request *http.Request) {
+	if s.app.Config.UsesGatewayOperator() {
+		s.getOperatorDesiredState(response, request)
+		return
+	}
 	var state dataPlaneDesiredStateWrite
 	var enterpriseID, revision, contentHash string
 	var publishedAt time.Time
@@ -131,6 +135,9 @@ func (s *Server) getDataPlaneDesiredState(response http.ResponseWriter, request 
 }
 
 func (s *Server) putDataPlaneDesiredState(response http.ResponseWriter, request *http.Request) {
+	if !s.legacyGatewayEnabled(response, request) {
+		return
+	}
 	var input dataPlaneDesiredStateWrite
 	if !decodeJSON(response, request, &input) {
 		return
@@ -196,6 +203,10 @@ RETURNING published_at`, tenant, normalized.Revision, normalized.Routes, hash).S
 }
 
 func (s *Server) getDataPlaneStatus(response http.ResponseWriter, request *http.Request) {
+	if s.app.Config.UsesGatewayOperator() {
+		s.getOperatorDataPlaneStatus(response, request)
+		return
+	}
 	var status dataPlaneStatus
 	err := s.app.Database().QueryRow(request.Context(), `SELECT state,observed_revision,content_hash,last_applied_at,error_code,message,resource_count FROM data_plane_statuses WHERE deployment_id=$1`, claimsFrom(request).DeploymentID).Scan(&status.State, &status.ObservedRevision, &status.ContentHash, &status.LastAppliedAt, &status.ErrorCode, &status.Message, &status.ResourceCount)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {

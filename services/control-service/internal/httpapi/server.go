@@ -562,6 +562,9 @@ func (s *Server) internalDataPlane(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		claims := &auth.Claims{DeploymentID: deploymentID}
+		if !s.legacyGatewayEnabled(response, request) {
+			return
+		}
 		next(response, request.WithContext(context.WithValue(request.Context(), claimsContextKey, claims)))
 	}
 }

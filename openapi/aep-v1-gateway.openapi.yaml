@@ -545,6 +545,7 @@
       "tags":
         - "Admin Model Gateway"
       "operationId": "publishGatewayLimits"
+      "description": "Legacy synchronous publication. Operator mode returns 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous data-plane publications with includeGatewayLimits."
       "summary": "publish Gateway Limits"
       "responses":
         "200":
@@ -572,6 +573,7 @@
       "tags":
         - "Admin Model Gateway"
       "operationId": "getGatewayLimitsStatus"
+      "description": "Legacy status. Operator mode returns 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; read revision-specific data-plane publication conditions instead."
       "summary": "get Gateway Limits Status"
       "responses":
         "200":
