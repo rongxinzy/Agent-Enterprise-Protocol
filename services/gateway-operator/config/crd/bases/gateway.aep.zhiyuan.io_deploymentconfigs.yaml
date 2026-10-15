@@ -147,6 +147,11 @@ spec:
                   - namespace
                   type: object
                 type: array
+              appliedSnapshot:
+                description: |-
+                  AppliedSnapshot changes when any render input or referenced credential changes.
+                  It is an opaque digest, never a data-plane readiness proof.
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

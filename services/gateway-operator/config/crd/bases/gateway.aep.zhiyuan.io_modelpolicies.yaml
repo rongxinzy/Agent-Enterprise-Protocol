@@ -133,7 +133,7 @@ spec:
               targetRef:
                 description: |-
                   PolicyTargetReference selects the ModelRoute a ModelPolicy applies to. Only
-                  ModelRoute targets exist at the pilot stage.
+                  ModelRoute targets are currently supported.
                 properties:
                   kind:
                     description: Kind is the target resource kind; only ModelRoute
@@ -159,8 +159,8 @@ spec:
             properties:
               conditions:
                 description: |-
-                  Conditions report the reconciliation state; the pilot stage writes only
-                  the Accepted condition.
+                  Conditions report semantic acceptance, aggregate application and
+                  independent data-plane readiness.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
