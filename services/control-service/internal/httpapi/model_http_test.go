@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,7 +10,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"gorm.io/gorm"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 )
@@ -42,6 +45,31 @@ func attachRuntimeDatabase(t *testing.T, application *app.App) pgxmock.PgxPoolIf
 		pool.Close()
 	})
 	return pool
+}
+
+func expectAuditTx(pool pgxmock.PgxPoolIface) {
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
+}
+
+func modelAssignmentRow(id, modelID, subjectType, subjectID string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "deployment_id", "model_id", "subject_type", "subject_id", "expires_at", "created_at"}).
+		AddRow(id, "deployment-a", modelID, subjectType, subjectID, nil, time.Now().UTC())
+}
+
+func modelRuntimeRow(id, displayName, credentialID string) *pgxmock.Rows {
+	now := time.Now().UTC()
+	return pgxmock.NewRows(modelRuntimeColumns()).AddRow(
+		id, displayName, "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, credentialID,
+		[]string{"text"}, []byte(`{}`), int64(32768), false, true, "unknown", nil, nil, nil, now, now,
+	)
+}
+
+func modelHTTPRow() *sqlmock.Rows {
+	now := time.Now().UTC()
+	return sqlmock.NewRows(modelHTTPColumns()).AddRow(
+		"deployment-a", "enterprise-chat", "Enterprise Chat", "gateway", "openai-compatible", "http://gateway/v1", "deepseek-chat", nil, "credential-a",
+		`{text}`, []byte(`{}`), 32768, false, true, "unknown", nil, nil, nil, now, now,
+	)
 }
 
 func TestAdminModelLifecycle(t *testing.T) {
@@ -94,6 +122,9 @@ func TestAdminModelLifecycle(t *testing.T) {
 	}
 
 	pool.ExpectBegin()
+	pool.ExpectQuery(`FROM models WHERE deployment_id=\$1 AND id=\$2`).
+		WithArgs("deployment-a", "enterprise-chat").
+		WillReturnRows(modelRuntimeRow("enterprise-chat", "Enterprise Chat", "credential-a"))
 	pool.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM credentials`).WithArgs("deployment-a", "credential-b").
 		WillReturnRows(pgxmock.NewRows([]string{"exists"}).AddRow(true))
 	pool.ExpectExec(`UPDATE models SET is_default=false`).WithArgs("deployment-a", "enterprise-chat").
@@ -107,6 +138,7 @@ func TestAdminModelLifecycle(t *testing.T) {
 			"enterprise-chat", "Enterprise Chat 2", "gateway", "openai-compatible", "http://gateway/v2", "deepseek-reasoner", nil, "credential-b",
 			[]string{"reasoning", "streaming", "text"}, reasoning, int64(65536), true, true, "healthy", now, now, nil, now, now,
 		))
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectCommit()
 	updated := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/enterprise-chat", `{
 		"displayName":"Enterprise Chat 2","endpoint":"http://gateway/v2","upstreamModel":"deepseek-reasoner",
@@ -138,8 +170,12 @@ func TestAdminModelLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "assignment-a", 1).
+		WillReturnRows(modelAssignmentRow("assignment-a", "enterprise-chat", "team", "engineering"))
 	mock.ExpectExec(`DELETE FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "assignment-a").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	revoked := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/model-assignments/assignment-a", "")
 	if revoked.Code != http.StatusNoContent {
@@ -147,12 +183,53 @@ func TestAdminModelLifecycle(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "enterprise-chat", 1).
+		WillReturnRows(modelHTTPRow())
 	mock.ExpectExec(`DELETE FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
 		WithArgs("deployment-a", "enterprise-chat").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectAuditInsert(mock)
 	mock.ExpectCommit()
 	deleted := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/enterprise-chat", "")
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete model = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestAuditModelSnapshotIncludesReasoningCompatibility(t *testing.T) {
+	before := modelRecord{
+		DisplayName: "Chat", Protocol: "openai-compatible", Enabled: true,
+		ReasoningCompatibility: json.RawMessage(`{"thinkingFormat":"deepseek"}`),
+	}
+	after := modelRecord{
+		DisplayName: "Chat", Protocol: "openai-compatible", Enabled: true,
+		ReasoningCompatibility: json.RawMessage(`{"thinkingFormat":"deepseek","supportsReasoningEffort":true}`),
+	}
+	encoded, err := json.Marshal(auditModelChanges(before, after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := string(encoded)
+	if strings.Contains(payload, "[redacted]") {
+		t.Fatalf("snapshot redacted a declared field = %s", payload)
+	}
+	if !strings.Contains(payload, `"thinkingFormat":"deepseek"`) || !strings.Contains(payload, `"supportsReasoningEffort":true`) {
+		t.Fatalf("snapshot lost reasoning compatibility = %s", payload)
+	}
+}
+
+func TestAuditModelSnapshotStripsEndpointQuery(t *testing.T) {
+	record := modelRecord{DisplayName: "Chat", Endpoint: pgtype.Text{String: "https://gateway/v1?api_key=secret", Valid: true}}
+	encoded, err := json.Marshal(auditModelChanges(record, record))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := string(encoded)
+	if strings.Contains(payload, "secret") || strings.Contains(payload, "api_key") {
+		t.Fatalf("snapshot kept the endpoint query = %s", payload)
+	}
+	if !strings.Contains(payload, `"endpoint":"https://gateway/v1"`) {
+		t.Fatalf("snapshot lost the endpoint = %s", payload)
 	}
 }
 
@@ -190,6 +267,9 @@ func TestAdminModelAnthropicPatchGuard(t *testing.T) {
 	// comes back anthropic, so the post-update guard must reject and roll
 	// back even though the patch payload itself is well-formed.
 	pool.ExpectBegin()
+	pool.ExpectQuery(`FROM models WHERE deployment_id=\$1 AND id=\$2`).
+		WithArgs("deployment-a", "bench-anthropic").
+		WillReturnRows(modelRuntimeRow("bench-anthropic", "Bench", "credential-bigmodel"))
 	pool.ExpectQuery(`UPDATE models SET`).
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
@@ -204,6 +284,9 @@ func TestAdminModelAnthropicPatchGuard(t *testing.T) {
 
 	// A relative endpoint patched onto an anthropic model is equally stranded.
 	pool.ExpectBegin()
+	pool.ExpectQuery(`FROM models WHERE deployment_id=\$1 AND id=\$2`).
+		WithArgs("deployment-a", "bench-anthropic").
+		WillReturnRows(modelRuntimeRow("bench-anthropic", "Bench", "credential-bigmodel"))
 	pool.ExpectQuery(`UPDATE models SET`).
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
@@ -218,12 +301,16 @@ func TestAdminModelAnthropicPatchGuard(t *testing.T) {
 
 	// The same endpoint on an openai-compatible model stays out of the guard.
 	pool.ExpectBegin()
+	pool.ExpectQuery(`FROM models WHERE deployment_id=\$1 AND id=\$2`).
+		WithArgs("deployment-a", "chat-a").
+		WillReturnRows(modelRuntimeRow("chat-a", "Chat", "credential-a"))
 	pool.ExpectQuery(`UPDATE models SET`).
 		WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).
 		WillReturnRows(pgxmock.NewRows(modelRuntimeColumns()).AddRow(
 			"chat-a", "Chat", "gateway", "openai-compatible", "/v1", "deepseek-chat", nil, nil,
 			[]string{"text"}, nil, nil, false, true, "unknown", nil, nil, nil, now, now,
 		))
+	pool.ExpectExec(`INSERT INTO admin_audit_events`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	pool.ExpectCommit()
 	allowed := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/chat-a", `{"endpoint":"/v1"}`)
 	if allowed.Code != http.StatusOK {
@@ -266,6 +353,8 @@ func TestAdminModelErrorMappings(t *testing.T) {
 	}
 
 	pool.ExpectBegin()
+	pool.ExpectQuery(`FROM models WHERE deployment_id=\$1 AND id=\$2`).
+		WithArgs("deployment-a", "missing").WillReturnError(pgx.ErrNoRows)
 	pool.ExpectQuery(`UPDATE models SET`).WithArgs(pgxmock.AnyArg(), pgxmock.AnyArg(), pgxmock.AnyArg()).WillReturnError(pgx.ErrNoRows)
 	pool.ExpectRollback()
 	missingModel := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/models/missing", `{"enabled":false}`)
@@ -294,18 +383,18 @@ func TestAdminModelErrorMappings(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM "models" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "missing").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT \* FROM "models" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "missing", 1).WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectRollback()
 	deleteMissing := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/models/missing", "")
 	if deleteMissing.Code != http.StatusNotFound || !strings.Contains(deleteMissing.Body.String(), `"code":"RESOURCE_NOT_FOUND"`) {
 		t.Fatalf("delete missing model = %d %s", deleteMissing.Code, deleteMissing.Body.String())
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`DELETE FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2`).
-		WithArgs("deployment-a", "missing").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT \* FROM "model_assignments" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "missing", 1).WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectRollback()
 	deleteMissingAssignment := adminRequest(handler, adminToken, http.MethodDelete, "/aep/v1/admin/model-assignments/missing", "")
 	if deleteMissingAssignment.Code != http.StatusNotFound || !strings.Contains(deleteMissingAssignment.Body.String(), `"code":"RESOURCE_NOT_FOUND"`) {
 		t.Fatalf("delete missing model assignment = %d %s", deleteMissingAssignment.Code, deleteMissingAssignment.Body.String())
