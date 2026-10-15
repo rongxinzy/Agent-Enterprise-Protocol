@@ -327,8 +327,12 @@ func TestTeamCreationAndDeletion(t *testing.T) {
 
 // expectSubjectGrantCleanup queues the polymorphic grant deletions that must
 // accompany a role or team delete: those columns have no foreign key, so nothing
-// else would remove them.
+// else would remove them. The subject lock is queued first, because the delete
+// has to take the same lock a grant creation takes before that creation probes
+// the subject.
 func expectSubjectGrantCleanup(mock sqlmock.Sqlmock, subjectType, id string) {
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(hashtextextended\(\$1, 0\)\)`).
+		WithArgs(SubjectLockKey("deployment-a", subjectType, id)).WillReturnResult(sqlmock.NewResult(0, 1))
 	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
 		mock.ExpectExec(`DELETE FROM "`+table+`" WHERE deployment_id = \$1 AND subject_type = \$2 AND subject_id = \$3`).
 			WithArgs("deployment-a", subjectType, id).WillReturnResult(sqlmock.NewResult(0, 1))

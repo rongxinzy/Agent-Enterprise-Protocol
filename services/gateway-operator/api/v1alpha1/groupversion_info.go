@@ -18,7 +18,7 @@ var (
 )
 
 func addKnownTypes(scheme *runtime.Scheme) error {
-	scheme.AddKnownTypes(GroupVersion, &ModelRoute{}, &ModelRouteList{}, &ModelPolicy{}, &ModelPolicyList{})
+	scheme.AddKnownTypes(GroupVersion, &ModelRoute{}, &ModelRouteList{}, &ModelPolicy{}, &ModelPolicyList{}, &DeploymentConfig{}, &DeploymentConfigList{})
 	metav1.AddToGroupVersion(scheme, GroupVersion)
 	return nil
 }

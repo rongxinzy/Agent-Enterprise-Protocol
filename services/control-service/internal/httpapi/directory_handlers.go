@@ -215,7 +215,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 				SubjectType: "user", SubjectID: record.ID,
 				ResourceKind: "team", ResourceID: team,
 				Reason:    "ephemeral snapshot from " + input.ScopeFrom,
-				CreatedBy: claimsFrom(request).Subject,
+				CreatedBy: new(claimsFrom(request).Subject),
 			}
 			if _, err := store.CreateDataScopeRule(request.Context(), rule); err != nil {
 				databaseFailure(response, request, err)
@@ -228,7 +228,7 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 				SubjectType: "user", SubjectID: record.ID,
 				ResourceKind: "team", ResourceID: team,
 				Reason:    "ephemeral snapshot deny from " + input.ScopeFrom,
-				CreatedBy: claimsFrom(request).Subject,
+				CreatedBy: new(claimsFrom(request).Subject),
 			}
 			if _, err := store.CreateDataScopeRule(request.Context(), rule); err != nil {
 				databaseFailure(response, request, err)
@@ -641,9 +641,6 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_DATA_SCOPE_RULE", "The rule kind, subject, and resource are invalid.")
 		return
 	}
-	if !s.requireSubject(response, request, input.SubjectType, strings.TrimSpace(input.SubjectID)) {
-		return
-	}
 	tenant := claimsFrom(request).DeploymentID
 	name := strings.TrimSpace(input.Reason)
 	if name == "" {
@@ -657,10 +654,24 @@ func (s *Server) createDataScopeRule(response http.ResponseWriter, request *http
 	rule := repository.DataScopeRule{
 		ID: identifier, RuleKind: input.RuleKind, SubjectType: input.SubjectType, SubjectID: strings.TrimSpace(input.SubjectID),
 		ResourceKind: input.ResourceKind, ResourceID: strings.TrimSpace(input.ResourceID),
-		StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: claimsFrom(request).Subject,
+		StartsAt: input.StartsAt, ExpiresAt: input.ExpiresAt, Reason: input.Reason, CreatedBy: new(claimsFrom(request).Subject),
 	}
-	created, err := s.app.Store.Deployment(tenant).CreateDataScopeRule(request.Context(), rule)
+	var created repository.DataScopeRule
+	// The subject guard and the insert share one transaction: the guard takes the
+	// subject lock before it probes the subject and holds it until the commit, so
+	// a concurrent role or team deletion cannot slip in between.
+	err = s.app.Store.Deployment(tenant).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		if err := tx.GuardSubject(request.Context(), rule.SubjectType, rule.SubjectID); err != nil {
+			return err
+		}
+		inserted, err := tx.CreateDataScopeRule(request.Context(), rule)
+		created = inserted
+		return err
+	})
 	if err != nil {
+		if subjectGuardError(response, request, rule.SubjectType, rule.SubjectID, err) {
+			return
+		}
 		if isUniqueViolation(err) {
 			writeProblem(response, request, http.StatusConflict, "DATA_SCOPE_RULE_EXISTS", "The data scope rule already exists.")
 			return

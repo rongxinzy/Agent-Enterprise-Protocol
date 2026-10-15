@@ -36,3 +36,23 @@ if (state.status === 'recoverable') await client.restoreSession();
 ```
 
 Electron `safeStorage` 适配器和 Renderer IPC 边界详见仓库中的桌面会话接入文档。
+
+## 异步路由发布
+
+当前仅完成契约／SDK 阶段；管控服务新接口与事务 outbox 实现并部署后才能使用。
+现有 `publishDataPlaneRoutes()` 保留同步 `200` 契约。SDK 不自动回退至旧接口，
+也不自动轮询直到 Ready。
+
+```ts
+// 发送前保存此键；重试必须复用原键与原请求体。
+const publication = await client.createDataPlanePublication(publicationKey, {});
+const current = await client.getDataPlanePublication(publication.operationId);
+// projected 仅代表 CR 投递完成，Ready 仍可能为 Unknown。
+const ready = current.conditions.find(condition => condition.type === 'Ready');
+```
+
+两者均需持有 `data_plane.write` 的管理会话。POST 在有界重试中保持同一个合法
+`Idempotency-Key` 与请求体；不要为每次重试生成新键，也不要在
+`idempotencyExpiresAt` 后复用旧键。保存返回的 operationId，响应不确定且已知
+operationId 时查询原任务。`409 IDEMPOTENCY_KEY_CONFLICT` 通过 `AepProblem`
+返回，不是重试信号。参见 [API 语义](../../docs/api-v1.zh-CN.md#operator-异步发布契约sdk-阶段)。

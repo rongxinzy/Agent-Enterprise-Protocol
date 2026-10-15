@@ -199,7 +199,7 @@ Skill ZIP 存在对象存储中，版本表只保存对象键、SHA-256 和大�
 | `id` | `text` | PK |
 | `deployment_id` | `text` | NN, FK |
 | `credential_id` | `text` | NN |
-| `user_id` | `text` | NN, FK -> `users.id` |
+| `user_id` | `text` | 可空；FK -> `users.id` ON DELETE SET NULL（删除用户时匿名化，审计行保留） |
 | `session_id` | `text` | 可空，FK -> `user_sessions` ON DELETE SET NULL |
 | `purpose` | `text` | NN |
 | `outcome` | `text` | NN, CK `resolved`/`denied` |
@@ -237,6 +237,11 @@ Skill ZIP 存在对象存储中，版本表只保存对象键、SHA-256 和大�
 
 `subject_id` 是多态主体 ID。数据库限制主体类型，服务层校验主体存在、属于当前部署且已启用。
 
+该存在性校验与授权的写入在**同一事务内**完成，并且**先取该主体的事务级 advisory lock**
+（`pg_advisory_xact_lock(hashtextextended('<deployment>:<subjectType>:<subjectID>', 0))`）；
+角色/团队删除（清理该主体全部多态授权并删除主体）也必须先取同一把锁。否则「校验为存在」与
+「插入授权」之间可被一次主体删除穿过：授权会残留，并被之后复用同一 ID 的新主体继承。
+
 ## 管控事件与状态
 
 ### `control_events`
@@ -255,7 +260,7 @@ Skill ZIP 存在对象存储中，版本表只保存对象键、SHA-256 和大�
 | `supersedes_key` | `text` | 可空 |
 | `state` | `text` | NN, DF `active` |
 | `expires_at` | `timestamptz` | NN |
-| `created_by` | `text` | NN, FK -> `users.id` |
+| `created_by` | `text` | 可空；FK -> `users.id` ON DELETE SET NULL（删除用户时匿名化，事件保留） |
 | `created_at` | `timestamptz` | NN, DF `now()` |
 
 ### `session_control_deliveries`
@@ -284,8 +289,8 @@ UQ：`(event_id, session_id)`。
 
 | 表 | 主键 | 主要字段/约束 |
 | --- | --- | --- |
-| `telemetry_events` | `event_id` | `deployment_id`；`user_id`；`session_id` 可空且删除会话时置空；`type`；可空资源/结果字段；`payload jsonb` DF `{}`；`occurred_at`；`received_at` |
-| `skill_sync_results` | `id` | `deployment_id`；`user_id`；`session_id` 可空且删除会话时置空；`revision`；`status`；`installed_skill_ids text[]`；`payload jsonb`；`created_at` |
+| `telemetry_events` | `event_id` | `deployment_id`；`user_id` 可空且删除用户时置空；`session_id` 可空且删除会话时置空；`type`；可空资源/结果字段；`payload jsonb` DF `{}`；`occurred_at`；`received_at` |
+| `skill_sync_results` | `id` | `deployment_id`；`user_id` 可空且删除用户时置空；`session_id` 可空且删除会话时置空；`revision`；`status`；`installed_skill_ids text[]`；`payload jsonb`；`created_at` |
 
 `telemetry_events.event_id` 提供重复上报去重语义。
 

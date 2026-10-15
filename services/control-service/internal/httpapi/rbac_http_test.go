@@ -88,8 +88,12 @@ func expectTeamRecord(mock sqlmock.Sqlmock, id, name, description string, enable
 }
 
 // A role or team delete must take its polymorphic grants with it: those columns
-// carry no foreign key, so nothing else would remove them.
+// carry no foreign key, so nothing else would remove them. The delete also takes
+// the subject lock a grant creation takes, and takes it first, so the cleanup
+// cannot be interleaved with an insert that already saw the subject as existing.
 func expectSubjectGrantCleanup(mock sqlmock.Sqlmock, subjectType, id string) {
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock\(hashtextextended\(\$1, 0\)\)`).
+		WithArgs(subjectLockKey(subjectType, id)).WillReturnResult(sqlmock.NewResult(0, 1))
 	for _, table := range []string{"skill_assignments", "model_assignments", "credential_assignments", "data_scope_rules"} {
 		mock.ExpectExec(`DELETE FROM "`+table+`" WHERE deployment_id = \$1 AND subject_type = \$2 AND subject_id = \$3`).
 			WithArgs("deployment-a", subjectType, id).WillReturnResult(sqlmock.NewResult(0, 1))
