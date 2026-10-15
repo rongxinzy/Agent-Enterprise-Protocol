@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestDeriveDataPlaneRoutesFiltersCatalogAndMapsCredentials(t *testing.T) {
 		t.Fatalf("derived route = %#v", routes[0])
 	}
 	reference := routes[0].CredentialRef
-	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace == nil || *reference.Namespace != "higress-system" {
+	if reference == nil || reference.Name != "aep-credential-credential-a" || reference.Key != "api-key" || reference.Namespace != nil {
 		t.Fatalf("credential reference = %#v", reference)
 	}
 	if routes[1].ModelID != "chat-b" || routes[1].CredentialRef != nil {
@@ -154,5 +155,49 @@ func TestCompareCatalogRoutesReportsMissingExtraAndMismatched(t *testing.T) {
 	comparison = compareCatalogRoutes(reprotocoled, derived)
 	if len(comparison.Mismatched) != 1 || strings.Join(comparison.Mismatched[0].Fields, ",") != "protocol,providerType" {
 		t.Fatalf("protocol drift = %#v", comparison.Mismatched)
+	}
+}
+
+// A desired state stored before the namespace left the desired state still
+// carries one. The reconciler resolves the namespace server-side, so the
+// catalog comparison must ignore it: otherwise every existing deployment would
+// report drift for every credential-bound route after the upgrade.
+func TestCompareCatalogRoutesIgnoresTheStoredCredentialNamespace(t *testing.T) {
+	stored := "higress-system"
+	legacy := []dataPlaneRoute{
+		{ModelID: "chat-a", Enabled: true, Endpoint: "http://provider-a/v1", UpstreamModel: "provider-a-chat", Protocol: "openai-compatible", ProviderType: "openai", CredentialRef: &dataPlaneSecretReference{Name: "aep-credential-credential-a", Key: "api-key", Namespace: &stored}},
+	}
+	derived := []dataPlaneRoute{
+		{ModelID: "chat-a", Enabled: true, Endpoint: "http://provider-a/v1", UpstreamModel: "provider-a-chat", Protocol: "openai-compatible", ProviderType: "openai", CredentialRef: &dataPlaneSecretReference{Name: "aep-credential-credential-a", Key: "api-key"}},
+	}
+	comparison := compareCatalogRoutes(legacy, derived)
+	if len(comparison.Missing) != 0 || len(comparison.Extra) != 0 || len(comparison.Mismatched) != 0 {
+		t.Fatalf("a stored credential namespace read as drift: %#v", comparison)
+	}
+}
+
+// Stored desired states keep the wire shape they were written with and the
+// content hash covers exactly that shape, so decoding a stored route and
+// serializing it again must be an identity for every shape that exists in the
+// wild. The reconciler re-hashes what it decodes; the matching pin for its side
+// is TestRouteCanonicalWireShape.
+func TestStoredRouteShapesSurviveDecodeAndEncode(t *testing.T) {
+	for name, raw := range map[string]string{
+		"namespace as a string": `[{"modelId":"chat","enabled":true,"endpoint":"http://provider.example/v1","upstreamModel":"provider-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-c1","key":"api-key","namespace":"higress-system"}}]`,
+		"namespace omitted":     `[{"modelId":"chat","enabled":true,"endpoint":"http://provider.example/v1","upstreamModel":"provider-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-c1","key":"api-key","namespace":null}}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var routes []dataPlaneRoute
+			if err := json.Unmarshal([]byte(raw), &routes); err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(routes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(encoded) != raw {
+				t.Fatalf("stored route shape round trip = %s, want %s", encoded, raw)
+			}
+		})
 	}
 }

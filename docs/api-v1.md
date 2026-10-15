@@ -744,7 +744,9 @@ must never be sent to the service.
 Desired state refers to external Secret names and keys only; it never includes
 provider secret values. Catalog-derived routes for Credential-bound models
 reference the conventional Secret `aep-credential-<credentialId>` (key
-`api-key`) in `higress-system`, which the deployment Secret system provisions.
+`api-key`) in the dedicated `aep-credentials` namespace, which the deployment
+Secret system provisions. The namespace is resolved server-side, so a
+`credentialRef.namespace` sent by a client is ignored.
 
 ### Deployment settings
 

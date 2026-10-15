@@ -37,6 +37,14 @@ type Config struct {
 	CredentialFetcher gatewayrender.CredentialFetcher
 }
 
+const (
+	// CredentialSecretNamespace is pinned for route credentials, regardless of
+	// the namespace carried by stored desired state.
+	CredentialSecretNamespace = "aep-credentials"
+	// DefaultSecretNamespace serves operator-configured native gateway refs.
+	DefaultSecretNamespace = "higress-system"
+)
+
 type DesiredState struct {
 	DeploymentID string                `json:"deploymentId"`
 	Revision     string                `json:"revision"`
@@ -89,7 +97,7 @@ func (r *Reconciler) Sync(ctx context.Context, tenant string) error {
 	if err := r.writeStatus(ctx, tenant, Status{State: "applying", ObservedRevision: &desired.Revision, ContentHash: &desired.ContentHash, ResourceCount: len(desired.Routes)}); err != nil {
 		return err
 	}
-	credentials, err := gatewayrender.FetchCredentials(ctx, desired.Routes, r.config.CredentialFetcher)
+	credentials, err := r.fetchCredentials(ctx, desired)
 	if err != nil {
 		return r.writeFailure(ctx, tenant, "CREDENTIAL_UNAVAILABLE", err)
 	}
@@ -170,6 +178,18 @@ func (r *Reconciler) writeFailure(ctx context.Context, tenant, code string, caus
 		return fmt.Errorf("%s: %w; status update: %v", code, cause, err)
 	}
 	return fmt.Errorf("%s: %w", code, cause)
+}
+
+// fetchCredentials pins route credentials before delegating resolution to the
+// shared renderer. Native gateway references use the unwrapped fetcher instead.
+func (r *Reconciler) fetchCredentials(ctx context.Context, desired DesiredState) (map[string]string, error) {
+	if r.config.CredentialFetcher == nil {
+		return nil, nil
+	}
+	return gatewayrender.FetchCredentials(ctx, desired.Routes, func(ctx context.Context, ref gatewayrender.SecretReference) (string, error) {
+		ref.Namespace = new(CredentialSecretNamespace)
+		return r.config.CredentialFetcher(ctx, ref)
+	})
 }
 
 func (r *Reconciler) addHeaders(request *http.Request, tenant string) {

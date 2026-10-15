@@ -34,8 +34,10 @@ roleRef:
   kind: Role
   name: aep-gateway-reconciler-leader
 ---
-# The reconciler is granted only the Higress objects it owns. Its live
-# server-side apply implementation is introduced with the data-plane E2E gate.
+# The reconciler is granted only the Higress objects it owns, and reads route
+# credential Secrets from the dedicated aep-credentials namespace instead of
+# higress-system. Its live server-side apply implementation is introduced with
+# the data-plane E2E gate.
 # Absolute OpenAI upstreams and Anthropic passthrough render an EnvoyFilter per model, hence
 # the networking.istio.io rule.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -67,3 +69,30 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: aep-gateway-reconciler
+---
+# Route credential Secrets only. An operator-configured native-gateway reference
+# (Redis password, quota admin credential) is read from higress-system and needs
+# its own rule, scoped by resourceNames, added with that configuration.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-gateway-credentials
+  namespace: aep-credentials
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-gateway-credentials
+  namespace: aep-credentials
+subjects:
+  - kind: ServiceAccount
+    name: aep-gateway-reconciler
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-gateway-credentials

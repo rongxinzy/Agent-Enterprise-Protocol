@@ -254,3 +254,29 @@ func TestNewReconcilerValidatesConfigAndSortsTenants(t *testing.T) {
 		t.Fatalf("normalized config = %#v", worker.config)
 	}
 }
+
+// The desired-state hash is computed over the routes as serialized: the control
+// service hashes the JSON it stores, and this package re-hashes the same routes
+// after decoding them. Any difference in field order, or in a key that one side
+// writes and the other omits, makes every sync fail with DESIRED_HASH_MISMATCH,
+// so both wire shapes are pinned here byte for byte: a credential reference
+// without a namespace (what the control service writes now) and one carrying
+// the namespace that rows written before the namespace was pinned still have.
+func TestRouteCanonicalWireShape(t *testing.T) {
+	for _, wire := range []string{
+		`{"modelId":"chat","enabled":true,"endpoint":"http://provider.example/v1","upstreamModel":"provider-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-c1","key":"api-key","namespace":null}}`,
+		`{"modelId":"chat","enabled":true,"endpoint":"http://provider.example/v1","upstreamModel":"provider-chat","protocol":"openai-compatible","providerType":"openai","credentialRef":{"name":"aep-credential-c1","key":"api-key","namespace":"higress-system"}}`,
+	} {
+		var route gatewayrender.Route
+		if err := json.Unmarshal([]byte(wire), &route); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(encoded) != wire {
+			t.Fatalf("canonical route form = %s, want %s", encoded, wire)
+		}
+	}
+}
