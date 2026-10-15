@@ -39,6 +39,8 @@ type Server struct {
 	router        chi.Router
 	transactions  map[string]federatedTransaction
 	transactionMu sync.Mutex
+	// auditFailures bounds repeated identical failure-audit rows per process.
+	auditFailures *auditFailureLimiter
 }
 
 // New mounts every API surface on one router — the all-in-one deployment
@@ -79,7 +81,7 @@ func NewAgentControlAPI(application *app.App, runtimeMiddleware ...func(http.Han
 }
 
 func newServer(application *app.App, runtimeMiddleware []func(http.Handler) http.Handler) *Server {
-	server := &Server{app: application, transactions: make(map[string]federatedTransaction)}
+	server := &Server{app: application, transactions: make(map[string]federatedTransaction), auditFailures: newAuditFailureLimiter(auditFailureWindow)}
 	router := chi.NewRouter()
 	router.Use(server.requestID)
 	for _, use := range runtimeMiddleware {
@@ -158,8 +160,11 @@ func (s *Server) mountAdmin(router chi.Router) {
 	router.Group(func(protected chi.Router) {
 		protected.Use(s.authenticate)
 		protected.Group(func(admin chi.Router) {
-			admin.Use(s.requireAdmin)
+			// The audit wraps the permission check so a refusal is recorded
+			// too: a denied attempt is exactly the evidence an investigation
+			// looks for, and it carries an authenticated actor.
 			admin.Use(s.auditAdminWrites)
+			admin.Use(s.requireAdmin)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
 			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
 			admin.Post("/aep/v1/admin/model-gateway/models/{modelId}/test-access", s.gatewayTestAccess)
@@ -591,6 +596,7 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 }
 
 func writeProblem(response http.ResponseWriter, request *http.Request, status int, code, detail string) {
+	noteAuditProblem(request, code)
 	response.Header().Set("Content-Type", "application/problem+json")
 	response.WriteHeader(status)
 	_ = json.NewEncoder(response).Encode(map[string]any{
