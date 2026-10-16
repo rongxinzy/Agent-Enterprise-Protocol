@@ -641,7 +641,7 @@ paths:
     get:
       tags: [Admin Audit]
       operationId: listAdminAudit
-      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment.
+      description: Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. A URL field keeps only its scheme, host, port and path — its query, fragment and userinfo are removed both when the record is written and when it is read back. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied.
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
         - {$ref: '#/components/parameters/Limit'}
@@ -649,6 +649,7 @@ paths:
         - {name: resourceType, in: query, schema: {type: string}}
         - {name: resourceId, in: query, schema: {type: string}}
         - {name: actorUserId, in: query, schema: {type: string}}
+        - {name: result, in: query, schema: {type: string, enum: [success, failure]}}
         - {name: createdAfter, in: query, schema: {type: string, format: date-time}}
         - {name: createdBefore, in: query, schema: {type: string, format: date-time}}
       responses:
@@ -1299,7 +1300,7 @@ components:
           description: Wire protocol the gateway serves for this model. openai-compatible routes render through the ai-proxy WasmPlugin; anthropic routes render as an EnvoyFilter passthrough under a per-model path prefix.
           type: string
           enum: [openai-compatible, anthropic]
-        endpoint: {type: string, format: uri}
+        endpoint: {type: string, format: uri, description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'}
         upstreamModel: {type: string}
         localModelRef: {type: string}
         credentialId: {type: [string, 'null']}
@@ -1314,7 +1315,7 @@ components:
       minProperties: 1
       properties:
         displayName: {type: string}
-        endpoint: {type: string, format: uri}
+        endpoint: {type: string, format: uri, description: 'Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.'}
         upstreamModel: {type: string}
         localModelRef: {type: string}
         credentialId: {type: [string, 'null']}
@@ -1470,15 +1471,30 @@ components:
         resourceType: {type: string}
         resourceId: {type: [string, 'null']}
         result: {type: string, enum: [success, failure]}
-        reason: {type: [string, 'null']}
-        changes: {type: [object, 'null'], additionalProperties: true, description: Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted.}
+        reason: {type: [string, 'null'], description: "Stable problem code for a failure row (e.g. INVALID_MODEL or ACCESS_DENIED); null for a success."}
+        changes:
+          type: [object, 'null']
+          additionalProperties: true
+          description: >-
+            Masked before/after snapshots or fallback request fields. Null when
+            no payload was recorded. A failure row instead carries the request
+            identifier and the response status next to the masked attempted
+            body, e.g. {"requestId":"0198...","status":400,"request":{...}}.
+            Unknown keys are redacted.
         createdAt: {type: string, format: date-time}
     AdminAuditPage:
       type: object
-      required: [items, nextCursor]
+      required: [items, nextCursor, timeRange]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/AdminAuditRecord'}}
         nextCursor: {type: [string, 'null']}
+        timeRange:
+          description: The created_at window actually applied to this page. after is null only when the caller bounded the range with createdBefore alone; before is null when the caller did not set an upper bound.
+          type: object
+          required: [after, before]
+          properties:
+            after: {type: [string, 'null'], format: date-time}
+            before: {type: [string, 'null'], format: date-time}
     DeploymentSettingValue:
       description: One deployment-level runtime setting with its override and resolution state.
       type: object
