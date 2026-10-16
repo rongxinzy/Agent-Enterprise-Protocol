@@ -2,7 +2,7 @@ import {createCipheriv, createDecipheriv, createHash, randomBytes} from 'node:cr
 import {chmod, lstat, mkdir, readFile, writeFile} from 'node:fs/promises';
 
 export const BACKUP_FORMAT = 'aep-backup-v2';
-export const BACKUP_ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+const BACKUP_ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
 const ARTIFACT_AAD_PREFIX = `${BACKUP_FORMAT}:artifact:`;
 const DATA_KEY_AAD = Buffer.from(`${BACKUP_FORMAT}:data-key`, 'utf8');
@@ -135,7 +135,7 @@ export function recoverArtifact(name, item, bytes, dataKey) {
   }
 }
 
-export function encryptionKeyId(key) {
+function encryptionKeyId(key) {
   assertKey(key, 'key encryption key');
   return `sha256:${createHash('sha256').update(key).digest('hex')}`;
 }

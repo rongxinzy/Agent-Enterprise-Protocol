@@ -164,6 +164,12 @@ assert(
   /go test[^\n`]*\.\/\.\.\.[^\n`]*-race|go test[^\n`]*-race[^\n`]*\.\/\.\.\./.test(workflow),
   "CI does not run the Go race detector",
 );
+assert(workflow.includes("deadcode@v0.52.0"), "CI does not run the Go deadcode gate");
+assert(workflow.includes("npm run deadcode:js"), "CI does not run the Knip dead-code gate");
+assert(workflow.includes("npm run deadcode:py"), "CI does not run the Python dead-code gate");
+assert(packageDocument.scripts?.["deadcode:js"] === "knip --no-progress", "deadcode:js script is not wired");
+assert(packageDocument.scripts?.["deadcode:go"]?.includes("deadcode@v0.52.0"), "deadcode:go script is not wired");
+assert(packageDocument.scripts?.["deadcode:py"]?.includes("ruff"), "deadcode:py script is not wired");
 assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
 assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
 assert(workflow.includes("backup-restore:"), "CI does not run the backup and restore rehearsal");

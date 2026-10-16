@@ -116,7 +116,7 @@ assert [step.get("run") for step in audit["steps"] if "run" in step] == ["npm ci
 # categories change with reusable callers and break introduced-alert comparison.
 for filename, name, languages, category in [
     ("codeql.yml", "analyze", {"go", "actions"}, ".github/workflows/codeql.yml:analyze/language:${{ matrix.language }}"),
-    ("security.yml", "codeql", {"go", "javascript-typescript"}, "/language:${{ matrix.language }}"),
+    ("security.yml", "codeql", {"javascript-typescript"}, "/language:${{ matrix.language }}"),
 ]:
     workflow = yaml.safe_load((root / "workflows" / filename).read_text(encoding="utf-8"))
     scan = workflow["jobs"][name]
