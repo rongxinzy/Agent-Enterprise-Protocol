@@ -733,6 +733,19 @@ pending，绝不回退旧状态表。`contentHash` 标识含路由与所选限�
 `replayDataPlanePublication(operationId, idempotencyKey)`。此接口不能回滚历史意图，
 不能绕过 Kubernetes 所有权／序号护栏；数据库与集群序号分叉需联合恢复。
 
+CLI 仅调用管理 API。通过受保护的本地环境设置 `AEPCTL_BASE_URL`、`AEPCTL_USERNAME`
+与 `AEPCTL_PASSWORD` 后执行：
+
+```sh
+aepctl data-plane publication queue --key <publish-key> --include-gateway-limits
+aepctl data-plane publication get --operation-id <operation-uuid>
+aepctl data-plane publication replay --operation-id <latest-operation-uuid> --key <recovery-key>
+```
+
+保留返回的 operation ID；响应不确定时使用完全相同的 key 与参数重试。CLI 不自动更换
+key，也不回退旧发布入口。原 `data-plane publish --file` 仅适用于旧部署，Operator 模式
+会拒绝该写入。
+
 两者均沿用数据平面管理的 `data_plane.write` 权限，部署范围取自认证会话。不存在、
 已清理或属于其他部署的 operation 统一返回 `404 RESOURCE_NOT_FOUND`。响应使用
 `Cache-Control: no-store`，不暴露原始 CR 或凭证明文。`includeGatewayLimits: true`

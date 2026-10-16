@@ -804,6 +804,19 @@ returns `409 PUBLICATION_NOT_LATEST`; pending reference withdrawals return
 new operation before evaluating the latest-intent check. Conflicting key reuse
 returns `409 IDEMPOTENCY_KEY_CONFLICT`. A 202 is durable acceptance only.
 The SDK exposes `replayDataPlanePublication(operationId, idempotencyKey)`.
+The CLI uses only these management APIs. Configure `AEPCTL_BASE_URL`,
+`AEPCTL_USERNAME` and `AEPCTL_PASSWORD` through the local protected environment:
+
+```sh
+aepctl data-plane publication queue --key <publish-key> --include-gateway-limits
+aepctl data-plane publication get --operation-id <operation-uuid>
+aepctl data-plane publication replay --operation-id <latest-operation-uuid> --key <recovery-key>
+```
+
+Save the returned operation ID and reuse the exact key and flags after an
+uncertain response. The CLI does not retry with a new key or fall back to legacy
+publishing. `data-plane publish --file` remains legacy-only and is rejected in
+operator mode.
 This is not historical rollback or a way around Kubernetes ownership/sequence
 fences. Restore PostgreSQL and Kubernetes together when their sequence diverges.
 
