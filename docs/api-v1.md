@@ -805,7 +805,11 @@ Raw idempotency keys are not stored; only their SHA-256 hashes are persisted.
 
 Relay delivery uses expiring claims, fenced acknowledgements, native retry
 backoff and per-object sequence/resourceVersion guards. A newer full snapshot
-supersedes older undelivered intents. Removed models retain disabled ModelRoute
+supersedes older undelivered intents. A latest snapshot in terminal `failed`
+state does not fall back to a superseded snapshot or retry automatically:
+repair its inputs/ownership
+and publish with a new key. Transient delivery errors still retry with backoff.
+Removed models retain disabled ModelRoute
 CR tombstones; they withdraw routing through the operator and fence delayed
 creates. They are not physically deleted in this stage. Do not delete these
 guards or mix direct spec writers with the relay. `projected` verifies these
