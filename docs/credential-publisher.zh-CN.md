@@ -31,6 +31,10 @@ API 成功仍只表示“已保存 DB”；Secret 交付、路由发布、Operat
 副本；停机期间已有 Secret 保留。`/readyz` 只在完整同步成功后就绪，`/healthz` 不受
 DB 或 Kubernetes 故障影响，端口为 8095。
 
+持续的 Secret 归属冲突或非法凭据 ID 会使 `/readyz` 一直未就绪，阻止滚动更新完成。
+应按已评审的归属迁移流程处理冲突或修正源数据，再等待整轮同步成功；不能通过移除
+归属校验强行完成升级。控制 API 生成小写 UUID 作为凭据 ID，导入数据需保持同一格式。
+
 ## 部署与安全边界
 
 1. 先启动正常 AEP／网关，确认 `aep-system`、`aep-credentials` 存在；该进程不迁移 DB
@@ -53,6 +57,7 @@ Secret 权限覆盖该命名空间，标签／归属检查只是应用防护，�
 `AEP_CREDENTIAL_MASTER_KEY_FILE`；间隔由 `AEP_CREDENTIAL_PUBLISHER_INTERVAL` 调整。
 除显式 development／test 外要求 DB 使用验证证书的 TLS，禁止回落明文连接。
 网络清单仅放行 DNS、API 443、DB 5432；按环境 overlay 收敛地址并调整端口。
+交付前需在目标 CNI 和 NetworkPolicy 下验证 kubelet 可访问 `/readyz`、`/healthz`。
 
 ## ESO 兼容、迁移与回滚
 

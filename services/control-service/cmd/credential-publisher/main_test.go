@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func publisherEnvironment(t *testing.T) string {
@@ -26,12 +27,17 @@ func publisherEnvironment(t *testing.T) string {
 }
 
 func TestConfigurationRejectsUnsafeOrAmbiguousInputs(t *testing.T) {
-	for _, name := range []string{"defaults", "file", "ambiguous", "missing-file", "invalid-url", "missing-deployment", "missing-keyring", "invalid-interval", "short-interval", "long-interval", "production-insecure", "production-fallback", "production-verified"} {
+	for _, name := range []string{"defaults", "custom-interval", "file", "ambiguous", "missing-file", "invalid-url", "missing-deployment", "missing-keyring", "invalid-interval", "short-interval", "long-interval", "production-insecure", "production-fallback", "production-verified"} {
 		t.Run(name, func(t *testing.T) {
 			publisherEnvironment(t)
 			expectError := true
+			expectInterval := 5 * time.Second
 			switch name {
 			case "defaults":
+				expectError = false
+			case "custom-interval":
+				t.Setenv("AEP_CREDENTIAL_PUBLISHER_INTERVAL", "30s")
+				expectInterval = 30 * time.Second
 				expectError = false
 			case "file":
 				path := filepath.Join(t.TempDir(), "database-url")
@@ -72,8 +78,8 @@ func TestConfigurationRejectsUnsafeOrAmbiguousInputs(t *testing.T) {
 			if (err != nil) != expectError {
 				t.Fatalf("configuration error = %v; expected error %v", err, expectError)
 			}
-			if !expectError && cfg.interval.Seconds() != 5 {
-				t.Fatal("unexpected default retry interval")
+			if !expectError && cfg.interval != expectInterval {
+				t.Fatalf("retry interval = %v; want %v", cfg.interval, expectInterval)
 			}
 			if err != nil && strings.Contains(err.Error(), "postgres://") {
 				t.Fatal("configuration error leaked database credentials")
