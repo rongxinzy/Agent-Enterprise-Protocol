@@ -530,7 +530,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 临时会话级实例：`ephemeral: true` 必须携带未来的 `expiresAt`；过期后登录与刷新以
 `AGENT_EXPIRED`（403）拒绝。`scopeFromUserId` 把所指用户当前的数据范围快照冻结到该账号
 （可见团队子树生成 management_scope 规则，显式拒绝原样复制），且请求的团队必须已落在该
-范围之内。`modelIds` 随账号一并创建模型授权。目录默认隐藏临时实例，传
+范围之内；来源账号必须处于启用状态。`modelIds` 随账号一并创建模型授权。目录默认隐藏临时实例，传
 `includeEphemeral=true` 才会列出。`DELETE /admin/agents/{agentId}` 连同绑定、授权与规则
 一并删除账号；存在未撤销会话时以 `AGENT_HAS_SESSIONS`（409）拒绝，需先撤销会话。
 
@@ -543,7 +543,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | `INVALID_ROLE`、`INVALID_TEAM` | 400 | 角色或团队绑定无效 |
 | `ROLE_GRANT_FORBIDDEN`、`TEAM_GRANT_FORBIDDEN` | 403 | 调用方无权授予请求的角色或团队 |
 | `AGENT_EXISTS` | 409 | 用户名已存在 |
-| `INVALID_SCOPE_SOURCE` | 400 | 范围来源用户不存在，或请求的团队超出来源用户的可见范围 |
+| `INVALID_SCOPE_SOURCE` | 400 | 范围来源用户不存在或已停用，或请求的团队超出来源用户的可见范围 |
 | `UNKNOWN_MODEL` | 400 | 请求的模型授权引用了不存在的模型 |
 | `AGENT_HAS_SESSIONS` | 409 | 存在活跃会话阻止删除，请先撤销会话 |
 | `AGENT_EXPIRED` | 403 | 临时账号已过期 |
@@ -590,7 +590,8 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 
 `GET /admin/data-scope/context?userId=...` 基于已存储的绑定和规则推导单个用户的检索上下文：
 `orgScope` 是用户所属团队的子树，`allowedResources` 和 `deniedResources` 是 `(kind, id)`
-引用（除 `team` 外 kind 均由部署定义），显式拒绝优先于允许。
+引用（除 `team` 外 kind 均由部署定义），显式拒绝优先于允许。已停用账号不是有效主体：该接口
+以 `USER_DISABLED`（403）拒绝，而不会推导其已存储的授权。
 
 规则列表使用 `cursor` 和 `limit` 分页，返回的 `nextCursor` 在最后一页为 `null`。
 
@@ -601,6 +602,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | `INVALID_DATA_SCOPE_RULE` | 400 | id、规则种类、主体或资源无效 |
 | `DATA_SCOPE_RULE_EXISTS` | 409 | 规则 id 已存在 |
 | `USER_REQUIRED` | 400 | 缺少必需的 `userId` 查询参数 |
+| `USER_DISABLED` | 403 | 指定账号已停用，不推导上下文 |
 | `RESOURCE_NOT_FOUND` | 404 | 规则或用户不存在 |
 
 ### Skill
