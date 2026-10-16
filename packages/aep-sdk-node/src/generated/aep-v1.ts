@@ -709,7 +709,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Requires the data_scope.read permission (or a full administrator). Returns the derived retrieval authorization context for one user. The organization scope is the subtree of the user's teams. allowed and denied resources are (kind, id) references; kind team is protocol-defined and every other kind is deployment-defined and opaque to the control plane. Problem codes: 400 USER_REQUIRED; 404 RESOURCE_NOT_FOUND. */
+        /** @description Requires the data_scope.read permission (or a full administrator). Returns the derived retrieval authorization context for one user. The organization scope is the subtree of the user's teams. allowed and denied resources are (kind, id) references; kind team is protocol-defined and every other kind is deployment-defined and opaque to the control plane. A disabled account is not resolved into a context. Problem codes: 400 USER_REQUIRED; 403 USER_DISABLED; 404 RESOURCE_NOT_FOUND. */
         get: operations["getDataScopeContext"];
         put?: never;
         post?: never;
