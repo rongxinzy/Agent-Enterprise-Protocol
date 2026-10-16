@@ -20,6 +20,7 @@ import (
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 	gateway "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
@@ -44,8 +45,9 @@ type Projector struct {
 }
 
 type snapshot struct {
-	Revision string                `json:"revision"`
-	Routes   []gatewayrender.Route `json:"routes"`
+	Revision      string                 `json:"revision"`
+	Routes        []gatewayrender.Route  `json:"routes"`
+	GatewayLimits *[]gatewaypolicy.Limit `json:"gatewayLimits,omitempty"`
 }
 
 func owner(deployment string) string {
@@ -174,6 +176,9 @@ func (p *Projector) Project(ctx context.Context, item repository.PublicationDeli
 	if err != nil {
 		return err
 	}
+	if _, err := desiredPolicies(item); err != nil {
+		return err
+	}
 	var deployment gateway.DeploymentConfig
 	key := client.ObjectKey{Namespace: p.Namespace, Name: "deployment"}
 	if err := p.Client.Get(ctx, key, &deployment); err != nil {
@@ -220,6 +225,9 @@ func (p *Projector) Project(ctx context.Context, item repository.PublicationDeli
 		if live.Annotations[sequenceKey] != strconv.FormatInt(item.Sequence, 10) || !reflect.DeepEqual(live.Spec, desired[id]) {
 			return ErrOwnership
 		}
+	}
+	if err := p.projectPolicies(ctx, item); err != nil {
+		return err
 	}
 	// Stamp the aggregate only after all model writes have been verified. The
 	// fresh read preserves native gateway settings and concurrent status writes.

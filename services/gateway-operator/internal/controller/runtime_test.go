@@ -74,7 +74,7 @@ func TestSnapshotRejectsUnusableInputs(t *testing.T) {
 		run([]client.Object{baseline, bad, s}, "credential unavailable")
 	})
 	t.Run("native disabled", func(t *testing.T) {
-		p := &gateway.ModelPolicy{ObjectMeta: metav1.ObjectMeta{Name: "policy", Namespace: "aep-system"}, Spec: gateway.ModelPolicySpec{TargetRef: gateway.PolicyTargetReference{Name: "alpha"}, Quota: &gateway.Quota{Maximum: 10, IntervalSeconds: 60}}}
+		p := &gateway.ModelPolicy{ObjectMeta: metav1.ObjectMeta{Name: "policy", Namespace: "aep-system"}, Spec: gateway.ModelPolicySpec{TargetRef: gateway.PolicyTargetReference{Kind: "ModelRoute", Name: "alpha"}, Quota: &gateway.Quota{Maximum: 10, IntervalSeconds: 60}}}
 		run([]client.Object{baseline, route, p}, "enabled Redis-backed")
 	})
 	t.Run("unsupported protocol", func(t *testing.T) {

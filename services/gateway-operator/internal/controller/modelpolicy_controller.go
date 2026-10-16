@@ -39,6 +39,19 @@ func (r *ModelPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if r.Runtime != nil {
 		return r.reconcileApplied(ctx, &policy)
 	}
+	if policy.Spec.Disabled {
+		return ctrl.Result{}, r.writeAccepted(ctx, &policy, metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, "Disabled publication fence accepted")
+	}
+	if policy.Spec.TargetRef.Kind == "DeploymentConfig" {
+		var deployment gatewayv1alpha1.DeploymentConfig
+		if err := r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: policy.Spec.TargetRef.Name}, &deployment); err != nil {
+			if apierrors.IsNotFound(err) {
+				return ctrl.Result{}, r.writeAccepted(ctx, &policy, metav1.ConditionFalse, gatewayv1alpha1.ReasonTargetNotFound, "Target DeploymentConfig does not exist")
+			}
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, r.writeAccepted(ctx, &policy, metav1.ConditionTrue, gatewayv1alpha1.ReasonAccepted, "Spec accepted")
+	}
 	var route gatewayv1alpha1.ModelRoute
 	err := r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: policy.Spec.TargetRef.Name}, &route)
 	if err != nil {

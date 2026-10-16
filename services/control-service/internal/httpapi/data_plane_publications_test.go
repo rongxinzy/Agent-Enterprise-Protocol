@@ -15,6 +15,7 @@ import (
 	pgxmock "github.com/pashagolub/pgxmock/v4"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/publicationrelay"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 )
 
 const publicationPath = "/aep/v1/admin/data-plane/publications"
@@ -132,6 +133,11 @@ func TestPublicationRejectsInvalidRequestsWithoutDatabaseWrites(t *testing.T) {
 		code      string
 	}{
 		{`{}`, "", 400, "INVALID_IDEMPOTENCY_KEY"}, {`{}`, "key with space", 400, "INVALID_IDEMPOTENCY_KEY"}, {`{}`, strings.Repeat("a", 129), 400, "INVALID_IDEMPOTENCY_KEY"},
+		{`{"includeGatewayLimits":null}`, "valid", 400, "INVALID_REQUEST"},
+		{`{"includeGatewayLimits":"true"}`, "valid", 400, "INVALID_REQUEST"},
+		{`{"revision":12,"routes":[]}`, "valid", 400, "INVALID_REQUEST"},
+		{`{"routes":[],"revision":12}`, "valid", 400, "INVALID_REQUEST"},
+		{`{"revision":12,"includeGatewayLimits":null}`, "valid", 400, "INVALID_REQUEST"},
 		{"", "valid", 400, "INVALID_REQUEST"}, {`null`, "valid", 400, "INVALID_REQUEST"}, {`[]`, "valid", 400, "INVALID_REQUEST"}, {`{`, "valid", 400, "INVALID_REQUEST"},
 		{`{} {}`, "valid", 400, "INVALID_REQUEST"}, {`{"revision":"one","revision":"two"}`, "valid", 400, "INVALID_REQUEST"},
 		{`{"revision":null}`, "valid", 422, "INVALID_DATA_PLANE_STATE"}, {`{"revision":12}`, "valid", 422, "INVALID_DATA_PLANE_STATE"},
@@ -288,6 +294,7 @@ func TestPublicationCreateAndErrorMapping(t *testing.T) {
 					status = 422
 				}
 				catalogModelsQuery(mock, rows)
+				mock.ExpectQuery(`SELECT s.payload FROM data_plane_publications`).WithArgs("deployment-a").WillReturnRows(sqlmock.NewRows([]string{"payload"}))
 				if outcome == "created" {
 					mock.ExpectExec(`INSERT INTO "data_plane_publication_snapshots"`).WillReturnResult(sqlmock.NewResult(0, 1))
 					mock.ExpectQuery(`SELECT "content_hash"`).WillReturnRows(sqlmock.NewRows([]string{"content_hash"}).AddRow(dataPlaneHash(mustPublicationState(t))))
@@ -304,6 +311,38 @@ func TestPublicationCreateAndErrorMapping(t *testing.T) {
 			response := publicationHTTP(New(a).Handler(), token, "POST", publicationPath, `{}`, "new-key")
 			if response.Code != status || strings.Contains(response.Body.String(), "private") {
 				t.Fatalf("create = %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestPublicationRejectsDanglingModelLimitsBeforeCreatingIntent(t *testing.T) {
+	for _, scope := range []string{"model", "user"} {
+		t.Run(scope, func(t *testing.T) {
+			a, mock, token := newStoreBackedHTTPApplication(t)
+			a.Config.GatewayPublicationsEnabled = true
+			missing, subject := "missing-model", "subject"
+			cfg := gatewaypolicy.Configuration{Kind: "requests", ScopeType: scope, ScopeID: &subject, ModelID: &missing, Maximum: 7, Interval: "minute", Enabled: true}
+			if scope == "model" {
+				cfg.ScopeID, cfg.ModelID = &missing, nil
+			}
+			if !cfg.Valid() {
+				t.Fatal("invalid limit fixture")
+			}
+			raw, _ := json.Marshal(cfg)
+			mock.ExpectBegin()
+			mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery(`SELECT \* FROM "data_plane_publications"`).WillReturnRows(sqlmock.NewRows([]string{"operation_id"}))
+			catalogModelsQuery(mock, catalogModelRows(time.Now().UTC()))
+			mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery(`SELECT \* FROM "gateway_limits"`).WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "id", "version", "configuration"}).AddRow("deployment-a", "rule-dangling", 1, raw))
+			mock.ExpectRollback()
+			response := publicationHTTP(New(a).Handler(), token, "POST", publicationPath, `{"includeGatewayLimits":true}`, "dangling-model")
+			if response.Code != 422 || !strings.Contains(response.Body.String(), "INVALID_DATA_PLANE_STATE") {
+				t.Fatalf("dangling model = %d %s", response.Code, response.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

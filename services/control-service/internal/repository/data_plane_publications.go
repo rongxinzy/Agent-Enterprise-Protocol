@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 	"gorm.io/gorm/clause"
 )
 
@@ -56,6 +57,48 @@ func (publicationOutbox) TableName() string { return "data_plane_publication_out
 // Derivation reads the catalog once, through this transaction, only after the
 // replay lookup. No Kubernetes/network calls are allowed in derive.
 func (s *DeploymentStore) QueueDataPlanePublication(ctx context.Context, keyHash, requestHash, actorID string, derive func([]Model) (PublicationSnapshot, error)) (DataPlanePublication, error) {
+	return s.queuePublication(ctx, keyHash, requestHash, actorID, func(tx *DeploymentStore, models []Model) (PublicationSnapshot, error) {
+		return derive(models)
+	})
+}
+
+// QueueGatewayPublication freezes the route and selected policy intents under
+// the same deployment lock. Route-only publications inherit the latest intent,
+// including queued work, rather than racing delivery or silently dropping it.
+func (s *DeploymentStore) QueueGatewayPublication(ctx context.Context, keyHash, requestHash, actorID string, includeLimits bool, derive func([]Model, *[]gatewaypolicy.Limit) (PublicationSnapshot, error)) (DataPlanePublication, error) {
+	return s.queuePublication(ctx, keyHash, requestHash, actorID, func(tx *DeploymentStore, models []Model) (PublicationSnapshot, error) {
+		var limits *[]gatewaypolicy.Limit
+		if includeLimits {
+			// The existing rule writer uses this lock. Keep lock ordering fixed:
+			// publication first, native rules second; no network in this transaction.
+			if err := tx.db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?,101))`, s.deploymentID).Error; err != nil {
+				return PublicationSnapshot{}, err
+			}
+			items, err := tx.GatewayLimits(ctx, true)
+			if err != nil {
+				return PublicationSnapshot{}, err
+			}
+			limits = &items
+		} else {
+			var prior struct{ Payload json.RawMessage }
+			if err := tx.db.Raw(`SELECT s.payload FROM data_plane_publications p JOIN data_plane_publication_snapshots s USING (deployment_id,revision,content_hash) WHERE p.deployment_id=? ORDER BY p.sequence DESC LIMIT 1`, s.deploymentID).Scan(&prior).Error; err != nil {
+				return PublicationSnapshot{}, err
+			}
+			if len(prior.Payload) > 0 {
+				var state struct {
+					GatewayLimits *[]gatewaypolicy.Limit `json:"gatewayLimits"`
+				}
+				if err := json.Unmarshal(prior.Payload, &state); err != nil {
+					return PublicationSnapshot{}, err
+				}
+				limits = state.GatewayLimits
+			}
+		}
+		return derive(models, limits)
+	})
+}
+
+func (s *DeploymentStore) queuePublication(ctx context.Context, keyHash, requestHash, actorID string, derive func(*DeploymentStore, []Model) (PublicationSnapshot, error)) (DataPlanePublication, error) {
 	var result DataPlanePublication
 	err := s.transaction(ctx, func(tx *DeploymentStore) error {
 		if err := tx.db.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, "aep:publication:"+s.deploymentID).Error; err != nil {
@@ -75,7 +118,7 @@ func (s *DeploymentStore) QueueDataPlanePublication(ctx context.Context, keyHash
 		if err != nil {
 			return err
 		}
-		snapshot, err := derive(models)
+		snapshot, err := derive(tx, models)
 		if err != nil {
 			return err
 		}

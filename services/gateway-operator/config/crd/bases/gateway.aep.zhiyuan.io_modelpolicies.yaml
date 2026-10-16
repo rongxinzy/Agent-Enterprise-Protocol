@@ -27,7 +27,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ModelPolicy is rate limiting and quota intent bound to one ModelRoute.
+        description: ModelPolicy is native rate limiting and quota intent for a model
+          or deployment.
         properties:
           apiVersion:
             description: |-
@@ -47,9 +48,28 @@ spec:
           metadata:
             type: object
           spec:
-            description: ModelPolicySpec holds rate limiting and quota intent for
-              one ModelRoute.
+            description: ModelPolicySpec holds native rules for one model or the whole
+              deployment.
             properties:
+              disabled:
+                description: Disabled retains a publication fence while rendering
+                  no native rule.
+                type: boolean
+              nativeRule:
+                description: NativeRule preserves the business rule identity/version
+                  used by Higress.
+                properties:
+                  id:
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$
+                    type: string
+                  version:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                required:
+                - id
+                - version
+                type: object
               quota:
                 description: Quota caps total consumption for the policy target over
                   an interval.
@@ -109,8 +129,8 @@ spec:
                 type: array
               subject:
                 description: |-
-                  Subject defaults to the target model. User/team/role subjects are intersected
-                  with that model, preserving AEP's composite membership header semantics.
+                  Subject defaults to model or global according to the target. User/team/role
+                  subjects use trusted AEP membership headers, optionally intersected by model.
                 properties:
                   id:
                     maxLength: 256
@@ -119,6 +139,7 @@ spec:
                   type:
                     enum:
                     - model
+                    - global
                     - user
                     - team
                     - role
@@ -127,22 +148,22 @@ spec:
                 - type
                 type: object
                 x-kubernetes-validations:
-                - message: user/team/role subjects require an id; model subjects must
-                    omit it
-                  rule: 'self.type == ''model'' ? !has(self.id) : has(self.id)'
+                - message: user/team/role subjects require an id; model/global subjects
+                    must omit it
+                  rule: 'self.type in [''model'',''global''] ? !has(self.id) : has(self.id)'
               targetRef:
-                description: |-
-                  PolicyTargetReference selects the ModelRoute a ModelPolicy applies to. Only
-                  ModelRoute targets are currently supported.
+                description: PolicyTargetReference selects one model or deployment-wide
+                  policy scope.
                 properties:
                   kind:
-                    description: Kind is the target resource kind; only ModelRoute
-                      is supported.
+                    description: Kind selects one model or the whole deployment.
                     enum:
                     - ModelRoute
+                    - DeploymentConfig
                     type: string
                   name:
-                    description: Name is the target ModelRoute name in the same namespace.
+                    description: Name is the target in the same namespace; deployments
+                      use "deployment".
                     maxLength: 253
                     minLength: 1
                     type: string
@@ -153,10 +174,22 @@ spec:
             required:
             - targetRef
             type: object
+            x-kubernetes-validations:
+            - message: deployment target must name deployment
+              rule: self.targetRef.kind != 'DeploymentConfig' || self.targetRef.name
+                == 'deployment'
+            - message: model subjects require a model target
+              rule: '!has(self.subject) || self.subject.type != ''model'' || self.targetRef.kind
+                == ''ModelRoute'''
+            - message: native rule identity requires exactly one quota
+              rule: '!has(self.nativeRule) || (has(self.quota) && (!has(self.rateLimits)
+                || size(self.rateLimits) == 0))'
           status:
             description: ModelPolicyStatus carries the operator's observations for
               one ModelPolicy.
             properties:
+              appliedSnapshot:
+                type: string
               conditions:
                 description: |-
                   Conditions report semantic acceptance, aggregate application and
@@ -225,6 +258,31 @@ spec:
                   reconciled.
                 format: int64
                 type: integer
+              observedPublication:
+                description: |-
+                  PublicationReference correlates conditions with an immutable relay intent.
+                  It contains no credentials, snapshot payload or data-plane readiness proof.
+                properties:
+                  contentHash:
+                    pattern: ^[a-f0-9]{64}$
+                    type: string
+                  operationId:
+                    pattern: ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$
+                    type: string
+                  revision:
+                    maxLength: 200
+                    minLength: 1
+                    type: string
+                  sequence:
+                    format: int64
+                    minimum: 1
+                    type: integer
+                required:
+                - contentHash
+                - operationId
+                - revision
+                - sequence
+                type: object
             type: object
         type: object
     served: true

@@ -20,13 +20,15 @@ import (
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/publicationrelay"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 )
 
 var publicationKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 var errPublicationSnapshot = errors.New("invalid publication snapshot")
 
 type publicationRequest struct {
-	Revision *string `json:"revision,omitempty"`
+	Revision             *string `json:"revision,omitempty"`
+	IncludeGatewayLimits bool    `json:"includeGatewayLimits,omitempty"`
 }
 
 type publicationCondition = publicationrelay.Condition
@@ -150,11 +152,20 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 		return
 	}
 	var input publicationRequest
-	for key, raw := range fields {
-		if key != "revision" {
+	// Reject unknown fields before validating values, independent of map order.
+	for key := range fields {
+		if key != "revision" && key != "includeGatewayLimits" {
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The publication request contains an unknown field.")
 			return
 		}
+	}
+	if raw, exists := fields["includeGatewayLimits"]; exists {
+		if string(raw) == "null" || json.Unmarshal(raw, &input.IncludeGatewayLimits) != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The gateway limits selection must be a boolean.")
+			return
+		}
+	}
+	if raw, exists := fields["revision"]; exists {
 		var revision string
 		if string(raw) == "null" || json.Unmarshal(raw, &revision) != nil {
 			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DATA_PLANE_STATE", "The revision must be a non-empty string.")
@@ -171,7 +182,7 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 	claims := claimsFrom(request)
 	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
 	defer cancel()
-	value, err := s.app.Store.Deployment(claims.DeploymentID).QueueDataPlanePublication(ctx, publicationDigest([]byte(keys[0])), publicationDigest(normalized), claims.Subject, func(models []repository.Model) (repository.PublicationSnapshot, error) {
+	value, err := s.app.Store.Deployment(claims.DeploymentID).QueueGatewayPublication(ctx, publicationDigest([]byte(keys[0])), publicationDigest(normalized), claims.Subject, input.IncludeGatewayLimits, func(models []repository.Model, limits *[]gatewaypolicy.Limit) (repository.PublicationSnapshot, error) {
 		revision := ""
 		if input.Revision != nil {
 			revision = *input.Revision
@@ -180,8 +191,34 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 		if !valid {
 			return repository.PublicationSnapshot{}, errPublicationSnapshot
 		}
-		payload, err := json.Marshal(state)
-		return repository.PublicationSnapshot{Revision: state.Revision, ContentHash: dataPlaneHash(state), Payload: payload}, err
+		modelsInSnapshot := make(map[string]bool, len(state.Routes))
+		for _, route := range state.Routes {
+			modelsInSnapshot[route.ModelID] = true
+		}
+		for _, item := range dereferenceLimits(limits) {
+			if !gatewaypolicy.ValidID(item.ID) || item.Version < 1 || !item.Configuration.Valid() {
+				return repository.PublicationSnapshot{}, errPublicationSnapshot
+			}
+			model := item.Configuration.ModelID
+			if item.Configuration.ScopeType == "model" {
+				model = item.Configuration.ScopeID
+			}
+			if item.Configuration.Enabled && model != nil && !modelsInSnapshot[*model] {
+				return repository.PublicationSnapshot{}, errPublicationSnapshot
+			}
+		}
+		captured := struct {
+			Revision      string                 `json:"revision"`
+			Routes        []dataPlaneRoute       `json:"routes"`
+			GatewayLimits *[]gatewaypolicy.Limit `json:"gatewayLimits,omitempty"`
+		}{state.Revision, state.Routes, limits}
+		if limits != nil && input.Revision == nil {
+			captured.Revision = "gateway-"
+			encoded, _ := json.Marshal(captured)
+			captured.Revision += publicationDigest(encoded)
+		}
+		payload, err := json.Marshal(captured)
+		return repository.PublicationSnapshot{Revision: captured.Revision, ContentHash: publicationDigest(payload), Payload: payload}, err
 	})
 	switch {
 	case errors.Is(err, repository.ErrPublicationKeyConflict):
@@ -197,6 +234,13 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 		response.Header().Set("Location", "/aep/v1/admin/data-plane/publications/"+value.OperationID)
 		writeJSON(response, http.StatusAccepted, s.observedPublication(request.Context(), value))
 	}
+}
+
+func dereferenceLimits(limits *[]gatewaypolicy.Limit) []gatewaypolicy.Limit {
+	if limits == nil {
+		return nil
+	}
+	return *limits
 }
 
 func (s *Server) getDataPlanePublication(response http.ResponseWriter, request *http.Request) {

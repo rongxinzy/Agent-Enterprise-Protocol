@@ -70,9 +70,16 @@ reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-pl
 `AEP_GATEWAY_PUBLICATIONS_ENABLED` 默认 `false`，提供快照、operation、审计与 outbox
 的事务入队。`AEP_GATEWAY_PUBLICATION_RELAY_ENABLED` 独立默认关闭；同时开启后，
 Control Service 启动集群内 relay，把当前 `AEP_DEPLOYMENT_ID` 的意图投影为
-`aep-system` 内的 ModelRoute 并更新预先配置的单例 DeploymentConfig。命名空间当前
+`aep-system` 内的 ModelRoute／ModelPolicy 并更新预先配置的单例 DeploymentConfig。命名空间当前
 固定为 `aep-system`；其他值在开启时拒绝启动。不读取 kubeconfig，不读取 Secret，
-不写 Higress 资源、ModelPolicy 或 status。初始化集群凭据失败会阻止启动。
+不写 Higress 资源或 status。初始化集群凭据失败会阻止启动。
+
+发布请求选择 `includeGatewayLimits: true` 时，在同一事务捕获模型目录与限流草稿，
+包含禁用和软删除规则。省略或 false 继承最新已入队的策略意图，不隐式发布新草稿。
+部署级规则使用一个 DeploymentConfig 目标，不按模型拆分共享计数器；指定模型规则
+使用 ModelRoute 目标。保留原生规则 ID／版本及禁用墓碑，重试不能复活旧规则。
+先安装新增 ModelPolicy schema、operator 与 relay 的窄 RBAC，再启用组合发布。
+限额主体仅限定计数范围，不授予用户、团队或角色模型访问权限。
 
 RBAC 见未纳入默认 kustomization 的 [显式授权清单](../deploy/kubernetes/production/publication-relay-rbac.yaml)。
 部署前必须安装匹配 CRD、配置 singleton/native gateway、确认旧 reconciler 停写并完成

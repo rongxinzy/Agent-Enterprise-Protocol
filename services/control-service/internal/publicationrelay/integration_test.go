@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	database "github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/db"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 	gateway "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewaypolicy"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayrender"
 )
 
@@ -356,6 +358,80 @@ func testPostgresRelay(t *testing.T, kube client.Client, url string) {
 		t.Fatal("observation changed delivery phase")
 	}
 	t.Log("PostgreSQL + API Server acceptance passed: concurrent claims, crash/reclaim, token fencing, immutable replay, supersession, tombstones and durable retry")
+	t.Run("combined policies remain immutable and survive route-only supersession", func(t *testing.T) {
+		const deployment = "policy-demo"
+		if _, err := repo.UpsertDeployment(ctx, repository.Deployment{ID: deployment, Name: "Policy acceptance"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: deployment}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Create(ctx, &gateway.DeploymentConfig{ObjectMeta: metav1.ObjectMeta{Name: "deployment", Namespace: deployment}, Spec: gateway.DeploymentConfigSpec{DeploymentID: deployment}}); err != nil {
+			t.Fatal(err)
+		}
+		c := gatewaypolicy.Configuration{Kind: "tokens", ScopeType: "global", Maximum: 100, Interval: "day", Enabled: true}
+		raw, _ := json.Marshal(c)
+		if err := orm.Exec(`INSERT INTO gateway_limits (deployment_id,id,version,configuration) VALUES (?,'shared',1,?::jsonb)`, deployment, string(raw)).Error; err != nil {
+			t.Fatal(err)
+		}
+		policyStore := repo.Deployment(deployment)
+		queueCombined := func(key string, include bool) repository.DataPlanePublication {
+			t.Helper()
+			value, err := policyStore.QueueGatewayPublication(ctx, publicationHash(key), publicationHash(key), "", include, func(_ []repository.Model, rules *[]gatewaypolicy.Limit) (repository.PublicationSnapshot, error) {
+				state := snapshot{Revision: key, Routes: []gatewayrender.Route{}, GatewayLimits: rules}
+				payload, err := json.Marshal(state)
+				return repository.PublicationSnapshot{Revision: key, ContentHash: publicationHash(string(payload)), Payload: payload}, err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return value
+		}
+		first := queueCombined("policy-1", true)
+		// Changing a draft must not change captured intent or get published by
+		// a later ordinary model-route operation, even before relay delivery.
+		if err := orm.Exec(`UPDATE gateway_limits SET version=2,configuration=jsonb_set(configuration,'{maximum}','999') WHERE deployment_id=?`, deployment).Error; err != nil {
+			t.Fatal(err)
+		}
+		replay := queueCombined("policy-1", true)
+		if replay.OperationID != first.OperationID {
+			t.Fatal("replay created new intent")
+		}
+		second := queueCombined("routes-2", false)
+		inputs, err := policyStore.ReadDataPlanePublicationInputs(ctx, second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state snapshot
+		if json.Unmarshal(inputs.Payload, &state) != nil || state.GatewayLimits == nil || len(*state.GatewayLimits) != 1 || (*state.GatewayLimits)[0].Configuration.Maximum != 100 || (*state.GatewayLimits)[0].Version != 1 {
+			t.Fatalf("route publication leaked draft: %s", inputs.Payload)
+		}
+		projector := &Projector{Client: kube, Namespace: deployment}
+		if err := New(policyStore, projector).Step(ctx); err != nil {
+			t.Fatal(err)
+		}
+		// Exercise actual CRD storage/CEL (global DeploymentConfig target).
+		var policies gateway.ModelPolicyList
+		if err := kube.List(ctx, &policies, client.InNamespace(deployment)); err != nil {
+			t.Fatal(err)
+		}
+		if len(policies.Items) != 1 || policies.Items[0].Spec.NativeRule.ID != "shared" || policies.Items[0].Spec.TargetRef.Kind != "DeploymentConfig" {
+			t.Fatal("stored native policy identity/scope lost")
+		}
+		if err := orm.Exec(`UPDATE gateway_limits SET version=3,deleted=true WHERE deployment_id=?`, deployment).Error; err != nil {
+			t.Fatal(err)
+		}
+		queueCombined("deleted-3", true)
+		if err := New(policyStore, projector).Step(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.List(ctx, &policies, client.InNamespace(deployment)); err != nil {
+			t.Fatal(err)
+		}
+		if len(policies.Items) != 1 || !policies.Items[0].Spec.Disabled {
+			t.Fatal("deletion tombstone lost")
+		}
+	})
 }
 
 func publicationHash(value string) string {

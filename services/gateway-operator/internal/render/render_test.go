@@ -15,7 +15,7 @@ func TestNativePolicyProjection(t *testing.T) {
 		t.Fatalf("provider mapping changed: %+v", projected)
 	}
 	for _, subject := range []string{"model", "user", "team", "role"} {
-		policy := gateway.ModelPolicy{ObjectMeta: metav1.ObjectMeta{Name: "policy"}, Spec: gateway.ModelPolicySpec{TargetRef: gateway.PolicyTargetReference{Name: "route"}, Quota: &gateway.Quota{Maximum: 10, IntervalSeconds: 60}}}
+		policy := gateway.ModelPolicy{ObjectMeta: metav1.ObjectMeta{Name: "policy"}, Spec: gateway.ModelPolicySpec{TargetRef: gateway.PolicyTargetReference{Kind: "ModelRoute", Name: "route"}, Quota: &gateway.Quota{Maximum: 10, IntervalSeconds: 60}}}
 		id := "alpha"
 		if subject != "model" {
 			id = "subject"
@@ -36,7 +36,7 @@ func TestNativePolicyProjection(t *testing.T) {
 			t.Fatalf("token quota: %+v %v", publication, err)
 		}
 	}
-	policy := gateway.ModelPolicy{Spec: gateway.ModelPolicySpec{TargetRef: gateway.PolicyTargetReference{Name: "missing"}}}
+	policy := gateway.ModelPolicy{Spec: gateway.ModelPolicySpec{TargetRef: gateway.PolicyTargetReference{Kind: "ModelRoute", Name: "missing"}}}
 	if _, err := Limits([]gateway.ModelPolicy{policy}, map[string]gateway.ModelRoute{}); err == nil {
 		t.Fatal("orphan policy silently omitted")
 	}

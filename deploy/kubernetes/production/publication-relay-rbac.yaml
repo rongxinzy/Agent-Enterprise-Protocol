@@ -7,7 +7,7 @@ metadata:
   namespace: aep-system
 rules:
   - apiGroups: [gateway.aep.zhiyuan.io]
-    resources: [modelroutes]
+    resources: [modelroutes, modelpolicies]
     verbs: [get, list, create, update]
   - apiGroups: [gateway.aep.zhiyuan.io]
     resources: [deploymentconfigs]

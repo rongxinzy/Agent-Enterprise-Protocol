@@ -129,8 +129,13 @@ func (r *ModelPolicyReconciler) reconcileApplied(ctx context.Context, policy *ga
 	}
 	conditions(&policy.Status.Conditions, policy.Generation, accepted, applied, reason, message)
 	policy.Status.ObservedGeneration = policy.Generation
+	policy.Status.ObservedPublication = publicationReference(policy)
+	policy.Status.AppliedSnapshot = ""
+	if applied {
+		policy.Status.AppliedSnapshot = in.hash
+	}
 	if !reflect.DeepEqual(base.Status, policy.Status) {
-		if err := r.Status().Patch(ctx, policy, client.MergeFrom(base)); err != nil {
+		if err := r.Status().Patch(ctx, policy, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, err
 		}
 	}

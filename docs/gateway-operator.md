@@ -14,10 +14,16 @@ gateway reconciler; no temporary shadow runtime is required.
   native provider adapters such as `deepseek`. Protocol `openai` projects to
   the existing `openai-compatible` wire name. Route controllers own only their
   Ingress/EnvoyFilter resources.
-- `ModelPolicy` selects one route. An omitted subject means model scope;
-  user/team/role subjects intersect with the selected model using existing
-  trusted AEP authorizer headers. The subject is an identifier, never a
-  client-supplied authentication header.
+- `ModelPolicy` selects a `ModelRoute` or the `DeploymentConfig` named
+  `deployment`. An omitted subject defaults to model or global respectively.
+  Global/user/team/role rules can span all models; a ModelRoute target narrows
+  them to that model. Shared rules remain one native rule and one shared
+  counter, never one counter per model. Subjects use existing trusted AEP
+  authorizer headers and never grant model access.
+- Relay-created policies carry `nativeRule.id/version` to preserve native
+  Higress/Redis identity. Soft-deleted rules remain disabled CR tombstones;
+  replaying older work cannot resurrect them. Direct policies can still use
+  rateLimits and quota without a native identity.
 - Rate limits count requests. Interval quota defaults to `requests`; explicit
   `unit: tokens` counts Tokens. This is an interval limit, distinct from the
   existing ai-quota balance-management API. Intervals are exactly 1, 60, 3600
@@ -95,7 +101,7 @@ input. Status patches use resourceVersion optimistic locking: a reconcile
 started before a metadata/spec update cannot acknowledge the newer publication.
 An incomplete marker clears the reference rather than reusing prior evidence.
 
-ModelRoute also records the aggregate render digest in `status.appliedSnapshot`
+ModelRoute and ModelPolicy record the aggregate render digest in `status.appliedSnapshot`
 after successful resource application. Control Service performs read-only,
 bounded evidence reads for the latest projected operation. It verifies the
 captured route specs/tombstones, all publication markers and ownership,
@@ -105,6 +111,17 @@ observation. A final deployment-scoped DB read rejects evidence superseded by
 newer queued intent. Reads never acquire claims, mutate phases, resolve
 credentials or write Kubernetes resources. Evidence is not a durable history
 and is current only as of the observation; future changes can invalidate it.
+
+`includeGatewayLimits: true` captures the route catalog and all native limit
+drafts, including disabled/soft-deleted rules, in the same publication
+transaction. Omitting it inherits the latest queued policy intent instead of
+publishing unselected drafts or dropping existing policy. Reusing an idempotency
+key never rereads drafts. The relay verifies policy specs/markers before
+acknowledging delivery; the evidence reader checks their matching generation,
+publication and aggregate digest. Missing or foreign policies fail closed.
+Install the additive CRD schema, operator and ModelPolicy relay RBAC before
+enabling combined publication. This does not activate the legacy limit publisher
+or convert quota scopes into resource assignments.
 
 Roll out the additive generated CRDs and operator before relying on the reader.
 Old status or absent evidence stays Unknown. No additional Secret RBAC is
