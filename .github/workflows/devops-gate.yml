@@ -1,47 +1,15 @@
 name: DevOps gate
 
+# Legacy event-driven publisher retired: branch protection uses the native
+# ci-gate job from CI validation. Kept for manual recovery only.
 on:
-  pull_request_target:
-    types: [edited]
-  workflow_run:
-    workflows: [CodeQL, AEP, AEP security baseline, DevOps gate tests, CI validation]
-    types: [completed]
   workflow_dispatch:
-    inputs:
-      pull_request:
-        description: Open pull request number to refresh
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  refresh-gate:
-    name: refresh-ci-gate
-    if: (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request') && (github.event_name != 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-      actions: read
-      checks: write
-    concurrency:
-      group: devops-gate-${{ github.event.pull_request.number || github.event.inputs.pull_request || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch }}
-      cancel-in-progress: false
     steps:
-      # Write permission only accompanies trusted default-branch code. Never
-      # check out a PR head, consume upstream artifacts or execute user refs.
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-          sparse-checkout: .github
-      - name: Refresh the required check without polling or sleeping
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-        with:
-          script: |
-            const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/devops-gate.cjs`);
-            const config = require(`${process.env.GITHUB_WORKSPACE}/.github/devops-ci.json`);
-            await gate.refresh({ github, context, core, config });
+      - run: echo "Use the ci-gate job in CI validation; this workflow is retired."

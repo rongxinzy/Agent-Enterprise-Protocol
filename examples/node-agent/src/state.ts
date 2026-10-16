@@ -2,7 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 
 import type {AepTokens, AepTokenStore, ControlEvent, JsonObject} from '@aep/sdk-node';
 
-export interface InboxItem {
+interface InboxItem {
   deliveryId: string;
   event: ControlEvent;
   state: 'received' | 'running' | 'succeeded' | 'failed';

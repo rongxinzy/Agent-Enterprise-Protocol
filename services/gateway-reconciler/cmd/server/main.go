@@ -93,7 +93,9 @@ func run() error {
 	select {
 	case <-ctx.Done():
 		// SIGTERM/SIGINT: orderly shutdown; wait for the guarded lease release.
-		<-electionDone
+		if err := <-electionDone; err != nil && ctx.Err() == nil {
+			return err
+		}
 		return nil
 	case err := <-electionDone:
 		if ctx.Err() != nil {

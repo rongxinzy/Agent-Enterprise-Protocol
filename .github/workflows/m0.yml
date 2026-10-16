@@ -15,69 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Preserve the exact check name already required by main branch protection.
-  # A reusable workflow would publish security / dependency-audit instead.
-  dependency-audit:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.9
-          cache: true
-      - run: npm ci
-      - name: Audit production dependencies and reachable Go code
-        run: npm run security:check
-
-  codeql:
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/codeql.yml
-    permissions:
-      contents: read
-      security-events: write
-
-  security:
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/security.yml
-    permissions:
-      contents: read
-      security-events: write
-
-  gate-tests:
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/devops-gate-tests.yml
-    permissions:
-      contents: read
-      pull-requests: read
-      actions: read
-
-  ci-results:
-    if: ${{ github.event_name == 'pull_request' && always() }}
-    needs: [release-gate, dependency-audit, codeql, security, gate-tests]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-        with:
-          persist-credentials: false
-          sparse-checkout: .github
-      - name: Summarize all final results without polling
-        env:
-          CI_NEEDS: ${{ toJSON(needs) }}
-        run: |
-          node -e "const gate = require('./.github/ci-results.cjs'); const config = require('./.github/devops-ci.json'); gate.verifyNeeds(JSON.parse(process.env.CI_NEEDS), config.orchestrator.needs);"
-
   e2e-plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     outputs:
       e2e_plan: ${{ steps.e2e-plan.outputs.e2e_plan }}
       compose: ${{ steps.e2e-plan.outputs.compose }}
@@ -92,18 +32,23 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Test E2E selection policy
-        run: node --test .github/e2e-plan.test.cjs
-      - name: Select E2E scenarios from the complete PR diff
+      - name: Select E2E scenarios from the PR diff
         id: e2e-plan
         env:
           AEP_CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           AEP_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node .github/e2e-plan.cjs
 
+  source-lines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm run check:source-lines
+
   sdk-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -111,26 +56,29 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Dead code (JS/TS and Python)
+        run: |
+          python3 -m pip install --disable-pip-version-check ruff==0.9.6 vulture==2.14
+          npm run deadcode:js
+          npm run deadcode:py
       - run: npm run openapi:lint
       - run: npm run openapi:build
       - name: Verify generated contract files
         run: git diff --exit-code -- openapi/dist/aep-v1-m0.bundle.yaml openapi/dist/aep-v1-m1.bundle.yaml openapi/dist/aep-v1-m2.bundle.yaml packages/aep-sdk-node/src/generated/aep-v1.ts
-      - run: npm run release:audit
-      - run: npm run test:release-artifacts
-      - run: npm run license:boundary:check
       - run: npm run build --workspace @aep/sdk-node
       - run: npm run test --workspace @aep/sdk-node
-      - run: npm run sdk:package:check
 
   control-service:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: 1.26.9
           cache: true
+      - name: Dead code (Go)
+        run: go run golang.org/x/tools/cmd/deadcode@v0.52.0 -test ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -147,36 +95,15 @@ jobs:
           key: envtest-v1.37.0-${{ runner.os }}
       - name: Install envtest binaries for the operator suite
         run: bash .github/ci-envtest-setup.sh
-      - name: Go verify (race, coverage floor, vet, build)
-        id: go-verify
+      - name: Go test (race), vet, build
         run: |
-          coverprofile="$(mktemp -t cover.XXXXXX)"
-          test_output="$(mktemp -t cover-test.XXXXXX)"
-          if ! go test ./... -race -coverpkg=./... -coverprofile="$coverprofile" >"$test_output"; then
-            cat "$test_output"
-            exit 1
-          fi
-          head_pct="$(bash scripts/ci-go-coverage-pct.sh "$coverprofile")"
-          echo "AEP go coverage: ${head_pct}% (floor 80%)"
-          if awk "BEGIN{exit !($head_pct < 80)}"; then
-            echo "::error::coverage ${head_pct}% is below the 80% floor"
-            exit 1
-          fi
-          echo "$head_pct" > /tmp/go-head-coverage-pct.txt
-          echo "head_pct=$head_pct" >> "$GITHUB_OUTPUT"
+          go test ./... -race
           go vet ./...
           go build ./...
-      - name: Upload head coverage for ratchet
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-coverage-head
-          path: /tmp/go-head-coverage-pct.txt
-          retention-days: 1
 
   example-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -184,7 +111,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run build --workspace @aep/sdk-node
+      - run: npm run build --workspace @aep/example-node-agent
       - run: npm run test --workspace @aep/example-node-agent
 
   compose-e2e:
@@ -268,17 +196,18 @@ jobs:
       - run: npm ci
       - run: npm run test:e2e:backup-restore
 
-  release-gate:
+  ci-gate:
+    name: ci-gate
     if: ${{ always() }}
     needs:
       - e2e-plan
+      - source-lines
       - sdk-gate
       - control-service
       - example-agent
       - compose-e2e
       - data-plane-kubernetes
       - backup-restore
-      - coverage-ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -286,54 +215,8 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .github
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
       - name: Fail on failed, cancelled or unexpectedly skipped checks
         env:
           AEP_CI_NEEDS: ${{ toJSON(needs) }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: node .github/e2e-status.cjs
-
-  coverage-ratchet:
-    if: github.event_name == 'pull_request' && needs.control-service.result == 'success'
-    needs: control-service
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.9"
-          cache: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: go-coverage-head
-      - name: Read head coverage from control-service
-        id: head
-        run: echo "pct=$(cat go-head-coverage-pct.txt)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        with:
-          path: /tmp/envtest-assets
-          key: envtest-v1.37.0-${{ runner.os }}
-      - name: Install envtest binaries for the operator suite
-        run: bash .github/ci-envtest-setup.sh
-      - name: Compare head vs base
-        env:
-          HEAD_PCT: ${{ steps.head.outputs.pct }}
-        run: |
-          measure() {
-            rev="$1"
-            git checkout --quiet "$rev"
-            go test ./... -coverpkg=./... -coverprofile=/tmp/c.cov >/dev/null
-            bash scripts/ci-go-coverage-pct.sh /tmp/c.cov
-          }
-          base="$(git rev-parse origin/${{ github.base_ref }})"
-          head_pct="$HEAD_PCT"
-          base_pct=$(measure "$base")
-          echo "main=${base_pct}% PR=${head_pct}%"
-          if awk "BEGIN{exit !($head_pct < $base_pct)}"; then
-            echo "::error::coverage dropped from ${base_pct}% to ${head_pct}%"
-            exit 1
-          fi

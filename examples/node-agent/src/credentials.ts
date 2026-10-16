@@ -13,12 +13,12 @@ interface CachedCredential {
   expiresAtMs: number;
 }
 
-export interface CredentialManagerOptions {
+interface CredentialManagerOptions {
   maxCacheMs?: number;
   now?: () => number;
 }
 
-export interface CredentialUseResult<T> {
+interface CredentialUseResult<T> {
   credential: CredentialMetadata;
   result: T;
 }
@@ -125,7 +125,7 @@ export class CredentialManager {
   }
 }
 
-export interface CredentialHttpResult {
+interface CredentialHttpResult {
   credentialId: string;
   service: string;
   status: number;

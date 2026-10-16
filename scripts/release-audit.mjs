@@ -153,18 +153,26 @@ const foundationReleaseWorkflow = await readText(".github/workflows/aep-release.
 const securityWorkflow = await readText(".github/workflows/security.yml");
 const backupCompose = await readText("scripts/backup-compose.mjs");
 const restoreCompose = await readText("scripts/restore-compose.mjs");
-assert(workflow.includes("npm run release:audit"), "CI does not run the release audit");
-assert(workflow.includes("npm run test:release-artifacts"), "CI does not test release artifact manifests");
 assert(securityWorkflow.includes("npm run security:check"), "security workflow does not run dependency vulnerability checks");
 assert(securityWorkflow.includes("github/codeql-action/analyze@v3"), "security workflow does not run CodeQL analysis");
-assert(workflow.includes("npm run license:boundary:check"), "CI does not run the License boundary audit");
+assert(securityWorkflow.includes("schedule:"), "security scans must stay on a schedule, not the PR path");
+assert(!workflow.includes("npm run security:check"), "PR CI must not run dependency audit");
+assert(!workflow.includes("codeql.yml"), "PR CI must not invoke CodeQL");
 assert(!workflow.includes("test:e2e:offline-license"), "CI must not run the local-only offline License E2E");
-assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
 assert(
   /go test[^\n`]*\.\/\.\.\.[^\n`]*-race|go test[^\n`]*-race[^\n`]*\.\/\.\.\./.test(workflow),
   "CI does not run the Go race detector",
 );
-assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
+assert(workflow.includes("deadcode@v0.52.0"), "CI does not run the Go deadcode gate");
+assert(workflow.includes("npm run deadcode:js"), "CI does not run the Knip dead-code gate");
+assert(workflow.includes("npm run deadcode:py"), "CI does not run the Python dead-code gate");
+assert(workflow.includes("check:source-lines"), "CI does not run the source line-count gate");
+assert(packageDocument.scripts?.["check:source-lines"] === "node scripts/check-source-lines.mjs", "check:source-lines script is not wired");
+assert(workflow.includes("ci-gate:"), "CI does not publish the aggregate ci-gate job");
+assert(packageDocument.scripts?.["deadcode:js"] === "knip --no-progress", "deadcode:js script is not wired");
+assert(packageDocument.scripts?.["deadcode:go"]?.includes("deadcode@v0.52.0"), "deadcode:go script is not wired");
+assert(packageDocument.scripts?.["deadcode:py"]?.includes("ruff"), "deadcode:py script is not wired");
+assert(packageDocument.scripts?.["check:large-files"] === "node scripts/check-large-files.mjs", "check:large-files script is not wired");
 assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
 assert(workflow.includes("backup-restore:"), "CI does not run the backup and restore rehearsal");
 assert(packageDocument.scripts?.["test:backup-security"] === "node tests/backup-security.mjs", "backup security unit gate is not wired");

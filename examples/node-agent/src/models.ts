@@ -8,20 +8,20 @@ import {AgentState} from './state.js';
 type ModelControlClient = Pick<AepClient, 'getModelConnection' | 'listModels'>;
 type ModelState = Pick<AgentState, 'enqueueTelemetry'>;
 
-export interface ModelChatOptions {
+interface ModelChatOptions {
   prompt: string;
   modelId?: string;
   stream?: boolean;
 }
 
-export interface ModelChatResult {
+interface ModelChatResult {
   modelId: string;
   responseModel: string;
   content: string;
   streamed: boolean;
 }
 
-export interface OpenAIModelClientOptions {
+interface OpenAIModelClientOptions {
   timeoutMs?: number;
 }
 

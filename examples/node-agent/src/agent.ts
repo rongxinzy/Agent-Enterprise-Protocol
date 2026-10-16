@@ -5,7 +5,7 @@ import {AepClient, type ControlEvent, type JsonObject} from '@aep/sdk-node';
 import {SkillReconciler, type SkillSyncOutcome} from './skills.js';
 import {AgentState} from './state.js';
 
-export interface ExampleAgentOptions {
+interface ExampleAgentOptions {
   client: AepClient;
   state: AgentState;
   reconciler: SkillReconciler;

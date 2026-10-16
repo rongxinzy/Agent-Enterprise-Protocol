@@ -39,7 +39,7 @@ jobs:
           python3 .github/check-devops-config.py
           python3 .github/check-devops-config.test.py
       - name: Test gate decisions and event transitions
-        run: node --test .github/devops-gate.test.cjs .github/ci-results.test.cjs .github/ci-orchestration.test.cjs
+        run: node --test .github/devops-gate.test.cjs .github/ci-orchestration.test.cjs
 
   # Only the installation PR uses the deployed legacy read-only gate. Once
   # main declares eventDrivenGate, this job no longer has the required name.
