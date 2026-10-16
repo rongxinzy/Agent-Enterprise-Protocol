@@ -481,7 +481,7 @@ Agent 上报 `running`、`succeeded` 或 `failed`。重复提交相同状态和�
 | PATCH | `/admin/users/{userId}` | 启用、禁用或更新账号 |
 | POST | `/admin/users/{userId}/reset-password` | 设置新的临时密码 |
 
-每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符。临时密码的前后空白：创建或重置时拒绝（`PASSWORD_POLICY_VIOLATION`）；导入时则去除（trim），因为导入行来自导出文件和电子表格。创建或导入未提供临时密码（或导入 trim 后为空）时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
+每个用户在创建或导入时必须至少绑定一个角色和一个团队。密码长度须为 6 到 1024 个字符。临时密码的前后空白：创建或重置时拒绝（`PASSWORD_POLICY_VIOLATION`）；导入时则去除（trim），因为导入行来自导出文件和电子表格。整批行都被拒绝的导入是失败而不是空成功：服务端返回 `422 USER_IMPORT_REJECTED`，并把逐行原因附在 problem 文档里，因为一个账号都没创建的批次并没有生效；只要创建了至少一个账号，仍是 `200` 并返回 `created`/`rejected` 计数。创建或导入未提供临时密码（或导入 trim 后为空）时，服务端分配默认密码 `123456`。每个账号都带有 `kind` 标注（`human` 或 `agent`）；平台用户列表只返回人类账号，数字员工（`kind=agent`）由数字员工目录列出。当前身份接口对已认证主体使用同样的标注。对调用者本人重置密码且携带 `requirePasswordChange=true` 时，服务端返回 `409 SELF_PASSWORD_RESET_RESTRICTED`；请改用自助改密接口或传 `requirePasswordChange=false`。
 
 ### RBAC 与会话
 
@@ -664,6 +664,10 @@ Skill、凭证和模型授权均支持 `user`、`role` 或 `team` 主体。用�
 | DELETE | `/admin/model-assignments/{assignmentId}` | 删除授权关系 |
 
 管理端使用的 `credentialId` 不得出现在 Agent 模型目录中。
+
+`endpoint` 不得内联凭据：URL 中带 userinfo 会以 400 `INVALID_MODEL` 拒绝，
+密钥应通过 `credentialId` 引用。endpoint 在审计中的记录方式见
+[管理操作审计](#管理操作审计)。
 
 ### License
 
@@ -891,8 +895,29 @@ RFC 3339。响应包含 `items` 和可空的 `nextCursor`。
 
 每条记录包含操作人、动作、资源、结果、时间和 `changes`：脱敏的变更前后快照或
 兜底捕获的请求字段；没有载荷时为 `null`。创建账号的载荷保留用户名，密码与未知
-字段继续打码。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
+字段继续打码。URL 字段（模型 `endpoint`）只保留 scheme、host、port 和 path：
+query、fragment 与 userinfo 在写入和读取时都会去掉，内联凭据不会进入审计表，
+也不会回显给读取方。此只读接口不提供凭据明文。记录按 `AEP_AUDIT_RETENTION` 清理，
 配置说明见[生产运行基线](production-runtime.zh-CN.md)。
+
+创建账号——以及批量导入创建的每一个账号——的审计行与账号本身、角色/团队绑定
+在同一事务提交。审计行写不进去的账号不会被创建：单条创建返回
+`INTERNAL_ERROR`，批量导入把该行记入 `errors` 并保留已审计通过的行。一个账号都没创建的
+导入返回 `422 USER_IMPORT_REJECTED`，且不写任何 success 审计行，审计记录里不会出现
+没有实际生效的导入。
+
+被拒绝或失败的写操作同样入表：`result` 为 `failure`，`reason` 放稳定错误码。
+覆盖范围是到达管理面、且已通过认证的非读取请求（POST、PUT、PATCH、DELETE），
+包括被权限检查拒绝的请求——审计包在权限检查外层，因此拒绝也会带操作人和目标
+落库。认证之前就被拒的请求（缺少 bearer 令牌、令牌无效或已撤销、临时密码未改）
+没有可归属的操作人，仍归认证审计；读取请求不记。该链路始终是尽力而为：审计写
+失败只记日志，不改变已返回给调用方的响应。
+
+失败记录的 `changes` 在脱敏后的尝试内容之外，还带请求标识与状态码，例如
+`{"requestId":"0198...","status":400,"request":{"displayName":"..."}}`；脱敏
+规则与成功写入一致。两条规则控制容量：已在事务内自行记录审计的处理函数不会被
+兜底路径重复记录；同一操作人、同一目标、同一错误码、同一脱敏内容的重复失败，
+每个副本每 30 秒只写一条，不同内容仍各自入表。
 
 ## 11. 错误与重试
 

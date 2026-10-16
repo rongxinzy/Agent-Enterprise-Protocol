@@ -386,7 +386,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Imports at most 1000 administrator-provisioned accounts. */
+        /** @description Imports at most 1000 administrator-provisioned accounts. Every created account is audited in the same transaction that creates it. A batch that creates at least one account answers 200 with the created and rejected counts; a batch whose every row is rejected answers 422 USER_IMPORT_REJECTED with the same counts and the per-row reasons attached to the problem document, because an import that created no account did not apply. */
         post: operations["importPlatformUsers"];
         delete?: never;
         options?: never;
@@ -1038,7 +1038,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. Read-only, cursor paginated, and always scoped to the caller's deployment. */
+        /** @description Returns the recorded administrative write operations (actor, action, resource, result, and masked changes), newest first. Changes may contain before/after snapshots or a fallback request payload, and are null when no payload was recorded. A URL field keeps only its scheme, host, port and path — its query, fragment and userinfo are removed both when the record is written and when it is read back. Read-only, cursor paginated, and always scoped to the caller's deployment. Without createdAfter or createdBefore the last seven days are returned, and timeRange reports the window actually applied. */
         get: operations["listAdminAudit"];
         put?: never;
         post?: never;
@@ -2900,8 +2900,9 @@ export interface components {
             resourceId?: string | null;
             /** @enum {string} */
             result: "success" | "failure";
+            /** @description Stable problem code for a failure row (e.g. INVALID_MODEL or ACCESS_DENIED); null for a success. */
             reason?: string | null;
-            /** @description Masked before/after snapshots or fallback request fields. Null when no payload was recorded. Unknown keys are redacted. */
+            /** @description Masked before/after snapshots or fallback request fields. Null when no payload was recorded. A failure row instead carries the request identifier and the response status next to the masked attempted body, e.g. {"requestId":"0198...","status":400,"request":{...}}. Unknown keys are redacted. */
             changes?: {
                 [key: string]: unknown;
             } | null;
@@ -2911,6 +2912,13 @@ export interface components {
         AdminAuditPage: {
             items: components["schemas"]["AdminAuditRecord"][];
             nextCursor: string | null;
+            /** @description The created_at window actually applied to this page. after is null only when the caller bounded the range with createdBefore alone; before is null when the caller did not set an upper bound. */
+            timeRange: {
+                /** Format: date-time */
+                after: string | null;
+                /** Format: date-time */
+                before: string | null;
+            };
         };
         CredentialCreate: {
             name: string;
@@ -2992,7 +3000,10 @@ export interface components {
              * @enum {string}
              */
             protocol: "openai-compatible" | "anthropic";
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.
+             */
             endpoint?: string;
             upstreamModel?: string;
             localModelRef?: string;
@@ -3005,7 +3016,10 @@ export interface components {
         };
         AdminModelPatch: {
             displayName?: string;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Upstream endpoint. It must not embed credentials: a URL carrying userinfo is rejected with 400 INVALID_MODEL, and secrets belong in credentialId.
+             */
             endpoint?: string;
             upstreamModel?: string;
             localModelRef?: string;
@@ -3987,6 +4001,15 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            /** @description No row could be created: the problem document carries the import result counts and the rejected rows as extension members. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"] & components["schemas"]["ImportPlatformUsersResponse"];
+                };
+            };
         };
     };
     getPlatformUser: {
@@ -5402,6 +5425,7 @@ export interface operations {
                 resourceType?: string;
                 resourceId?: string;
                 actorUserId?: string;
+                result?: "success" | "failure";
                 createdAfter?: string;
                 createdBefore?: string;
             };
