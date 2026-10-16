@@ -213,6 +213,18 @@ func TestDataScopeContextRoute(t *testing.T) {
 		}
 	})
 
+	t.Run("disabled user is refused", func(t *testing.T) {
+		// A disabled account keeps its bindings; handing out its derived
+		// scope would let a retired account keep executing managed calls.
+		mock.ExpectQuery(`SELECT \* FROM "users"`).
+			WithArgs("deployment-a", "retired", 1).
+			WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("retired", "deployment-a", "bob", "Bob", nil, "hash", "disabled", false, false, "human", now, now))
+		response := userRequest(handler, adminToken, http.MethodGet, "/aep/v1/admin/data-scope/context?userId=retired", "")
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"USER_DISABLED"`) {
+			t.Fatalf("disabled = %d %s", response.Code, response.Body.String())
+		}
+	})
+
 	t.Run("known user returns the resolved context", func(t *testing.T) {
 		mock.ExpectQuery(`SELECT \* FROM "users"`).
 			WithArgs("deployment-a", "user-a", 1).
