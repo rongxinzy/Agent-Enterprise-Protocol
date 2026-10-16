@@ -75,7 +75,7 @@ class WorkflowBoundaryTests(unittest.TestCase):
         config = json.loads((self.root / "devops-ci.json").read_text(encoding="utf-8"))
         parent = yaml.safe_load((self.root.parent / config["orchestrator"]["path"]).read_text(encoding="utf-8"))
         self.assertEqual(len(config["workflows"]), 1)
-        self.assertEqual(parent["concurrency"]["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}")
+        self.assertEqual(parent["concurrency"]["cancel-in-progress"], True)
         for name in config["orchestrator"]["localNeeds"]:
             self.assertIn(name, parent["jobs"])
 
