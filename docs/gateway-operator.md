@@ -70,6 +70,9 @@ and Kubernetes versions; no nested module or Dockerfile is introduced.
 The Manager watches CRs in `aep-system`. ModelRoute owns only per-route
 Ingress/EnvoyFilter objects; DeploymentConfig owns aggregate plugins and the
 quota-admin route. Routes wait for the aggregate's matching input digest.
+Disabled routes have no serving ingress, so their model-scoped native rules
+are omitted in both publication and direct-management modes. The ModelPolicy
+is retained; re-enabling the route restores the same rule configuration.
 On invalid/missing inputs they withdraw owned routing objects rather than
 opening an anonymous or unconstrained route. Ready remains Unknown until
 independent effectiveness observation is added in the integration stage.
