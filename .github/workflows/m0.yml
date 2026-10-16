@@ -6,17 +6,13 @@ on:
   push:
     branches:
       - main
-      - codex/m0-*
-      - codex/m1-*
-      - codex/m2-*
-      - codex/m3-*
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-validation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   # Preserve the exact check name already required by main branch protection.
@@ -24,6 +20,7 @@ jobs:
   dependency-audit:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -78,8 +75,9 @@ jobs:
         run: |
           node -e "const gate = require('./.github/ci-results.cjs'); const config = require('./.github/devops-ci.json'); gate.verifyNeeds(JSON.parse(process.env.CI_NEEDS), config.orchestrator.needs);"
 
-  sdk-gate:
+  e2e-plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       e2e_plan: ${{ steps.e2e-plan.outputs.e2e_plan }}
       compose: ${{ steps.e2e-plan.outputs.compose }}
@@ -94,14 +92,25 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Test E2E selection and gate decisions
-        run: node --test .github/e2e-plan.test.cjs .github/devops-gate.test.cjs
+      - name: Test E2E selection policy
+        run: node --test .github/e2e-plan.test.cjs
       - name: Select E2E scenarios from the complete PR diff
         id: e2e-plan
         env:
           AEP_CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           AEP_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node .github/e2e-plan.cjs
+
+  sdk-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
       - run: npm run openapi:lint
       - run: npm run openapi:build
       - name: Verify generated contract files
@@ -114,8 +123,8 @@ jobs:
       - run: npm run sdk:package:check
 
   control-service:
-    needs: sdk-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -132,22 +141,42 @@ jobs:
         run: |
           bash services/gateway-operator/generate.sh
           git diff --exit-code -- services/gateway-operator/
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/envtest-assets
+          key: envtest-v1.37.0-${{ runner.os }}
       - name: Install envtest binaries for the operator suite
+        run: bash .github/ci-envtest-setup.sh
+      - name: Go verify (race, coverage floor, vet, build)
+        id: go-verify
         run: |
-          curl -sfL --retry 3 --max-time 300 -o /tmp/envtest.tar.gz https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v1.37.0/envtest-v1.37.0-linux-amd64.tar.gz
-          echo "1d1c453633b72c161a5d5a886cde7ac850be1a2ac796a9e1d4ffacacc64868295bdd2d57aa66cd0c158f5ce510f5dfe3fbc61ac21bd3dcfb875bd70658aa663a  /tmp/envtest.tar.gz" | sha512sum --check
-          mkdir -p /tmp/envtest-assets
-          tar -xzf /tmp/envtest.tar.gz -C /tmp/envtest-assets
-          echo "KUBEBUILDER_ASSETS=/tmp/envtest-assets/controller-tools/envtest" >> "$GITHUB_ENV"
-      - name: Coverage floor
-        run: scripts/check-coverage.sh 80
-      - run: go test -race ./...
-      - run: go vet ./...
-      - run: go build ./...
+          coverprofile="$(mktemp -t cover.XXXXXX)"
+          test_output="$(mktemp -t cover-test.XXXXXX)"
+          if ! go test ./... -race -coverpkg=./... -coverprofile="$coverprofile" >"$test_output"; then
+            cat "$test_output"
+            exit 1
+          fi
+          head_pct="$(bash scripts/ci-go-coverage-pct.sh "$coverprofile")"
+          echo "AEP go coverage: ${head_pct}% (floor 80%)"
+          if awk "BEGIN{exit !($head_pct < 80)}"; then
+            echo "::error::coverage ${head_pct}% is below the 80% floor"
+            exit 1
+          fi
+          echo "$head_pct" > /tmp/go-head-coverage-pct.txt
+          echo "head_pct=$head_pct" >> "$GITHUB_OUTPUT"
+          go vet ./...
+          go build ./...
+      - name: Upload head coverage for ratchet
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage-head
+          path: /tmp/go-head-coverage-pct.txt
+          retention-days: 1
 
   example-agent:
-    needs: sdk-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -159,12 +188,14 @@ jobs:
       - run: npm run test --workspace @aep/example-node-agent
 
   compose-e2e:
-    if: ${{ needs.sdk-gate.outputs.compose == 'true' }}
+    if: ${{ needs.e2e-plan.outputs.compose == 'true' }}
     needs:
+      - e2e-plan
       - sdk-gate
       - control-service
       - example-agent
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     env:
       GOPROXY: https://proxy.golang.org,direct
     steps:
@@ -181,16 +212,18 @@ jobs:
       - run: npm run build
       - name: Run selected Compose E2E scenarios
         env:
-          AEP_E2E_PLAN: ${{ needs.sdk-gate.outputs.e2e_plan }}
+          AEP_E2E_PLAN: ${{ needs.e2e-plan.outputs.e2e_plan }}
         run: node .github/run-selected-e2e.cjs
 
   data-plane-kubernetes:
-    if: ${{ needs.sdk-gate.outputs.kubernetes == 'true' }}
+    if: ${{ needs.e2e-plan.outputs.kubernetes == 'true' }}
     needs:
+      - e2e-plan
       - sdk-gate
       - control-service
       - example-agent
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -212,12 +245,14 @@ jobs:
       - run: npm run test:e2e:m3-kubernetes
 
   backup-restore:
-    if: ${{ needs.sdk-gate.outputs.backup == 'true' }}
+    if: ${{ needs.e2e-plan.outputs.backup == 'true' }}
     needs:
+      - e2e-plan
       - sdk-gate
       - control-service
       - example-agent
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       GOPROXY: https://proxy.golang.org,direct
     steps:
@@ -236,6 +271,7 @@ jobs:
   release-gate:
     if: ${{ always() }}
     needs:
+      - e2e-plan
       - sdk-gate
       - control-service
       - example-agent
@@ -244,6 +280,7 @@ jobs:
       - backup-restore
       - coverage-ratchet
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -258,8 +295,10 @@ jobs:
         run: node .github/e2e-status.cjs
 
   coverage-ratchet:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.control-service.result == 'success'
+    needs: control-service
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -268,24 +307,30 @@ jobs:
         with:
           go-version: "1.26.9"
           cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: go-coverage-head
+      - name: Read head coverage from control-service
+        id: head
+        run: echo "pct=$(cat go-head-coverage-pct.txt)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/envtest-assets
+          key: envtest-v1.37.0-${{ runner.os }}
       - name: Install envtest binaries for the operator suite
-        run: |
-          curl -sfL --retry 3 --max-time 300 -o /tmp/envtest.tar.gz https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-v1.37.0/envtest-v1.37.0-linux-amd64.tar.gz
-          echo "1d1c453633b72c161a5d5a886cde7ac850be1a2ac796a9e1d4ffacacc64868295bdd2d57aa66cd0c158f5ce510f5dfe3fbc61ac21bd3dcfb875bd70658aa663a  /tmp/envtest.tar.gz" | sha512sum --check
-          mkdir -p /tmp/envtest-assets
-          tar -xzf /tmp/envtest.tar.gz -C /tmp/envtest-assets
-          echo "KUBEBUILDER_ASSETS=/tmp/envtest-assets/controller-tools/envtest" >> "$GITHUB_ENV"
+        run: bash .github/ci-envtest-setup.sh
       - name: Compare head vs base
+        env:
+          HEAD_PCT: ${{ steps.head.outputs.pct }}
         run: |
           measure() {
             rev="$1"
             git checkout --quiet "$rev"
             go test ./... -coverpkg=./... -coverprofile=/tmp/c.cov >/dev/null
-            python3 scripts/merge-coverprofile.py /tmp/c.cov /tmp/c.merged
-            go tool cover -func=/tmp/c.merged | awk '/^total:/ {sub(/%/, "", $3); print $3}'
+            bash scripts/ci-go-coverage-pct.sh /tmp/c.cov
           }
           base="$(git rev-parse origin/${{ github.base_ref }})"
-          head_pct=$(measure HEAD)
+          head_pct="$HEAD_PCT"
           base_pct=$(measure "$base")
           echo "main=${base_pct}% PR=${head_pct}%"
           if awk "BEGIN{exit !($head_pct < $base_pct)}"; then

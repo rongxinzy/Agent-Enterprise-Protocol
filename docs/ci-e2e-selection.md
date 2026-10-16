@@ -1,6 +1,6 @@
 # Pull request E2E selection
 
-The `AEP` workflow runs for every PR. SDK/contract checks, Go unit coverage,
+The `CI validation` workflow runs for every PR. SDK/contract checks, Go unit coverage,
 race/vet/build, reference-Agent tests and the coverage ratchet remain required.
 CodeQL and the security baseline keep their existing triggers and checks.
 Only the expensive Compose, Kubernetes and backup E2E jobs use scoped selection.
@@ -49,7 +49,7 @@ It reduces E2E work for scoped PRs; runner queue time can still cause a timeout.
 ## Local verification
 
 ```bash
-node --test .github/e2e-plan.test.cjs .github/devops-gate.test.cjs
+node --test .github/e2e-plan.test.cjs
 python .github/check-devops-config.py
 AEP_CI_BASE_SHA=<base-commit> AEP_CI_HEAD_SHA=<head-commit> GITHUB_EVENT_NAME=pull_request node .github/e2e-plan.cjs
 AEP_E2E_PLAN='{"compose":["m1-control"],"kubernetes":false,"backup":false}' node .github/run-selected-e2e.cjs
