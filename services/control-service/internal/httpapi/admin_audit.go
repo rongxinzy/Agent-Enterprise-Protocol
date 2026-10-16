@@ -26,6 +26,10 @@ import (
 // the audit trail; a runaway payload must not become an audit row.
 const auditPayloadLimit = 64 << 10
 
+// auditOperationDefaultWindow is the default operations-log window: the audit
+// page loads the last seven days unless the caller narrows the range.
+const auditOperationDefaultWindow = 7 * 24 * time.Hour
+
 // auditFailureWindow collapses an identical repeated failing administrative
 // write into a single row: a client stuck retrying a denied or rejected call
 // must not turn one policy decision into unbounded audit traffic. Distinct
@@ -591,12 +595,14 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 		{"resourceType", "resource_type"},
 		{"resourceId", "resource_id"},
 		{"actorUserId", "actor_user_id"},
+		{"result", "result"},
 	} {
 		if value := strings.TrimSpace(filters.Get(filter.name)); value != "" {
 			args = append(args, value)
 			conditions = append(conditions, fmt.Sprintf("%s=$%d", filter.column, len(args)))
 		}
 	}
+	var after, before *time.Time
 	for _, filter := range []struct {
 		name string
 		op   string
@@ -615,6 +621,19 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 		}
 		args = append(args, parsed)
 		conditions = append(conditions, fmt.Sprintf("created_at %s $%d", filter.op, len(args)))
+		if filter.op == ">=" {
+			after = &parsed
+		} else {
+			before = &parsed
+		}
+	}
+	// Without an explicit bound the operations log defaults to the last seven
+	// days; the effective window is echoed back so the console can state it.
+	if after == nil && before == nil {
+		defaultAfter := time.Now().UTC().Add(-auditOperationDefaultWindow)
+		after = &defaultAfter
+		args = append(args, defaultAfter)
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)))
 	}
 	if raw := strings.TrimSpace(filters.Get("cursor")); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
@@ -680,5 +699,8 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
+	writeJSON(response, http.StatusOK, map[string]any{
+		"items": items, "nextCursor": nextCursor,
+		"timeRange": map[string]any{"after": after, "before": before},
+	})
 }
