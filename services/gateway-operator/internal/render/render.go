@@ -58,7 +58,9 @@ func Limits(policies []gateway.ModelPolicy, routes map[string]gateway.ModelRoute
 			if !ok {
 				return publication, errors.New("policy target unavailable")
 			}
-			// A terminating route is being removed from both route and aggregate sets.
+			// Disabled/terminating routes have no serving ingress. Omit their
+			// model-scoped rules in both publication and direct-management modes;
+			// keep the ModelPolicy so re-enabling restores its original limits.
 			if !route.DeletionTimestamp.IsZero() || !route.Spec.Enabled {
 				continue
 			}

@@ -356,6 +356,9 @@ func verifyPlugin(l *loaded, name string, p *plugin) error {
 		return errMismatch
 	}
 	file := cfg.GetVmConfig().GetCode().GetLocal().GetFilename()
+	if strings.Contains(file, "..") {
+		return errUnsupported
+	}
 	if path.Base(file) != p.Digest+".wasm" {
 		return errMismatch
 	}
@@ -379,9 +382,6 @@ func verifyPlugin(l *loaded, name string, p *plugin) error {
 	// Exact comparison also rejects extra matching routes or stale credentials.
 	if !reflect.DeepEqual(content.Rules, p.Rules) {
 		return errMismatch
-	}
-	if strings.Contains(file, "..") {
-		return errUnsupported
 	}
 	return nil
 }
