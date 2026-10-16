@@ -47,6 +47,24 @@ async function fixture(handler: (url: URL, init: RequestInit) => Response | Prom
 }
 
 describe('asynchronous data-plane publication SDK contract (mock service)', () => {
+  test('publishes limits explicitly and keeps retries bound to the original combined intent', async () => {
+    const seen: string[] = [];
+    const input = {includeGatewayLimits: true, revision: 'combined-1'};
+    const {client} = await fixture((_url, init) => {
+      seen.push(String(init.body));
+      if (seen.length === 1) {
+        input.includeGatewayLimits = false;
+        throw new TypeError('Mock acknowledgement lost');
+      }
+      return json(publication({revision: 'combined-1'}), 202);
+    });
+    await client.createDataPlanePublication('combined-fixture', input);
+    expect(seen).toEqual([
+      '{"includeGatewayLimits":true,"revision":"combined-1"}',
+      '{"includeGatewayLimits":true,"revision":"combined-1"}',
+    ]);
+  });
+
   test('sends a management request with a caller key, and queries its operation without inferring Ready', async () => {
     const queued = publication();
     const projected = publication({phase: 'projected', conditions: queued.conditions.map(condition => (

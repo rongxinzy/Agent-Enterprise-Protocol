@@ -714,8 +714,12 @@ operator 移交。现有客户端继续使用同步 `POST /publish`
 
 两者均沿用数据平面管理的 `data_plane.write` 权限，部署范围取自认证会话。不存在、
 已清理或属于其他部署的 operation 统一返回 `404 RESOURCE_NOT_FOUND`。响应使用
-`Cache-Control: no-store`，不暴露原始 CR 或凭证明文。本接口**仅发布路由**，不发布
-限流配额、不修改模型授权；模型访问授权与配额消耗主体是不同概念。
+`Cache-Control: no-store`，不暴露原始 CR 或凭证明文。`includeGatewayLimits: true`
+沿用 `data_plane.write`，在同一事务快照中捕获限流规则草稿。省略或 false
+保留最近一次发布捕获的策略（包括仍在队列中的意图），不读取规则草稿、不清空已发布
+策略。未指定模型的全局、用户／团队／角色规则仍在所有模型间共享计数器；禁用和删除
+保留带序号防护的墓碑。不修改模型授权；访问授权与配额主体是不同概念。此增量契约
+需要后续支持策略投递的 relay/operator 实现，不能仅升级 SDK 后使用。
 
 必须携带 `Idempotency-Key`（1–128 个 ASCII 字母、数字或 `._:-`），请求体为 `{}` 或
 `{"revision":"release-1"}`。不得用秘密作为幂等键。revision 去掉首尾空白后比较，

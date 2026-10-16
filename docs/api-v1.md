@@ -783,8 +783,14 @@ Both require `data_plane.write`, the same permission as existing data-plane
 management, and derive deployment scope from the authenticated session. A
 missing, expired or other deployment's operation returns `404 RESOURCE_NOT_FOUND`.
 Responses use `Cache-Control: no-store`; no raw CRs or resolved credentials
-are exposed. This operation publishes **routes only**, not gateway limits or
-model access assignments. Model access remains separate from quota scope.
+are exposed. `includeGatewayLimits: true` captures draft rules in the same
+immutable snapshot under the existing `data_plane.write` permission.
+Omission/false preserves the latest publication's captured policies, even if
+still queued; it never reads draft rules or resets published limits. Global
+and user/team/role rules without a model remain shared across models. Disabled
+and removed rules retain fenced tombstones. This does not change model access
+assignments: access remains separate from quota scope. This additive contract
+requires the policy-capable relay/operator implementation before use.
 
 Send a required `Idempotency-Key` header (1–128 ASCII letters, digits or
 `._:-`) and a JSON body `{}` or `{"revision":"release-1"}`. Never use a secret
