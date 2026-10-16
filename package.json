@@ -65,11 +65,11 @@
     "test:release-artifacts": "node tests/release-artifacts.mjs"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.6.0",
-    "js-yaml": "^4.1.0",
-    "knip": "^5.88.1",
+    "@redocly/cli": "^2.63.0",
+    "js-yaml": "^5.4.3",
+    "knip": "^6.41.0",
     "openapi-typescript": "^7.10.1",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "yazl": "^3.3.1"
   }
 }
