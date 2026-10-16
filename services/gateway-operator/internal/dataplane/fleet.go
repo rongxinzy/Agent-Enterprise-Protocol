@@ -109,6 +109,9 @@ func (f *Fleet) roster(ctx context.Context) (roster, error) {
 	}
 	// The configured Service is the traffic boundary. Deployment labels alone
 	// cannot prove that all pods selected by the Service have been covered.
+	// Deployment and Service deliberately share one configured ObjectKey.
+	// A differently named Service requires a reviewed deployment overlay;
+	// never guess it from labels or silently reduce the observed traffic set.
 	if f.Reader.Get(ctx, f.Deployment, &r.service) != nil || r.service.UID == "" || !r.service.DeletionTimestamp.IsZero() || len(r.service.Spec.Selector) == 0 {
 		return r, errFleet
 	}

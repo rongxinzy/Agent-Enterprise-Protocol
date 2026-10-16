@@ -2,6 +2,7 @@ package dataplane
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -145,6 +146,11 @@ func TestLoadedConfigurationRequiresActiveCompleteMatchingSnapshot(t *testing.T)
 			c := mp(firstWasm(d)["config"])
 			mp(mp(mp(c["vm_config"])["code"])["local"])["filename"] = "/wrong.wasm"
 		}},
+		{"artifact-parent-directory", func(_ *Desired, d map[string]any) {
+			c := mp(firstWasm(d)["config"])
+			local := mp(mp(mp(c["vm_config"])["code"])["local"])
+			local["filename"] = "/cache/../" + strings.TrimPrefix(local["filename"].(string), "/var/lib/istio/data/cache/")
+		}},
 		{"stale-secret-or-rules", func(_ *Desired, d map[string]any) {
 			mp(mp(firstWasm(d)["config"])["configuration"])["value"] = `{"_rules_":[{"provider":{"apiTokens":["old-disposable"]}}]}`
 		}},
@@ -164,6 +170,26 @@ func TestLoadedConfigurationRequiresActiveCompleteMatchingSnapshot(t *testing.T)
 				t.Fatal("configuration leaked")
 			}
 		})
+	}
+}
+
+// This fixed mock-only wire snapshot is deliberately not reconstructed from
+// Compile during the test. Renderer/Compile changes must continue to match it
+// or require explicit fixture review; the live Kind check remains separate.
+func TestRendererMatchesPinnedSyntheticHigressWire(t *testing.T) {
+	raw, err := os.ReadFile("testdata/higress-2.2.4-synthetic-wire.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired, _ := fixture(t)
+	if err := desired.Verify(raw); err != nil {
+		t.Fatalf("renderer no longer matches pinned wire fixture: %v", err)
+	}
+	for _, route := range desired.ingresses {
+		route.Path = "/different-expected-path"
+	}
+	if desired.Verify(raw) == nil {
+		t.Fatal("fixed wire fixture followed changed expected route paths")
 	}
 }
 
