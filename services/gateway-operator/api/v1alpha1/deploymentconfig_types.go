@@ -1,6 +1,39 @@
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"time"
+)
+
+// DataPlaneEvidence records a complete serving fleet configuration observation.
+// It contains no configuration, provider data or credentials.
+type DataPlaneEvidence struct {
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`
+	Snapshot   string      `json:"snapshot"`
+	ObservedAt metav1.Time `json:"observedAt"`
+	GatewayUID types.UID   `json:"gatewayUid"`
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=set
+	PodUIDs []types.UID `json:"podUids"`
+}
+
+// Fresh ignores condition transition times: repeated success refreshes the
+// evidence timestamp even while the Ready condition remains True.
+func (e *DataPlaneEvidence) Fresh(hash string, now time.Time) bool {
+	if e == nil || len(hash) != 64 || e.Snapshot != hash || e.GatewayUID == "" || len(e.PodUIDs) == 0 || len(e.PodUIDs) > 64 || e.ObservedAt.IsZero() || e.ObservedAt.After(now) || now.Sub(e.ObservedAt.Time) > 90*time.Second {
+		return false
+	}
+	seen := map[types.UID]bool{}
+	for _, uid := range e.PodUIDs {
+		if uid == "" || seen[uid] {
+			return false
+		}
+		seen[uid] = true
+	}
+	return true
+}
 
 // AppliedResource identifies an operator-owned object. Cross-namespace
 // ownership uses UID labels and finalizers, not invalid OwnerReferences.
@@ -47,6 +80,9 @@ type DeploymentConfigSpec struct {
 }
 
 type DeploymentConfigStatus struct {
+	// DataPlane binds independent loaded-configuration evidence to AppliedSnapshot.
+	// +optional
+	DataPlane *DataPlaneEvidence `json:"dataPlane,omitempty"`
 	// ObservedPublication binds the conditions to the processed relay markers.
 	// +optional
 	ObservedPublication *PublicationReference `json:"observedPublication,omitempty"`

@@ -1,0 +1,357 @@
+{
+  "configs": [
+    {
+      "@type": "type.googleapis.com/envoy.admin.v3.ListenersConfigDump",
+      "dynamic_listeners": [
+        {
+          "active_state": {
+            "listener": {
+              "address": {
+                "socket_address": {
+                  "address": "0.0.0.0",
+                  "port_value": 80
+                }
+              },
+              "filter_chains": [
+                {
+                  "filters": [
+                    {
+                      "typed_config": {
+                        "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+                        "http_filters": [
+                          {
+                            "config_discovery": {
+                              "config_source": {
+                                "ads": {}
+                              }
+                            },
+                            "name": "extensions.istio.io/wasmplugin/higress-system.aep-ai-proxy-test-9f86d081"
+                          },
+                          {
+                            "config_discovery": {
+                              "config_source": {
+                                "ads": {}
+                              }
+                            },
+                            "name": "extensions.istio.io/wasmplugin/higress-system.aep-ai-statistics-test-9f86d081"
+                          }
+                        ],
+                        "scoped_routes": {
+                          "name": "scoped-route",
+                          "scope_key_builder": {
+                            "fragments": [
+                              {
+                                "local_port_value_extractor": {}
+                              },
+                              {
+                                "host_value_extractor": {}
+                              }
+                            ]
+                          },
+                          "scoped_rds": {
+                            "scoped_rds_config_source": {
+                              "ads": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "@type": "type.googleapis.com/envoy.admin.v3.ScopedRoutesConfigDump",
+      "dynamic_scoped_route_configs": [
+        {
+          "name": "scoped-route",
+          "scoped_route_configs": [
+            {
+              "key": {
+                "fragments": [
+                  {
+                    "string_key": "80"
+                  },
+                  {
+                    "string_key": "*"
+                  }
+                ]
+              },
+              "route_configuration_name": "routes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "@type": "type.googleapis.com/envoy.admin.v3.RoutesConfigDump",
+      "dynamic_route_configs": [
+        {
+          "route_config": {
+            "name": "routes",
+            "virtual_hosts": [
+              {
+                "domains": [
+                  "*"
+                ],
+                "routes": [
+                  {
+                    "match": {
+                      "case_sensitive": true,
+                      "headers": [
+                        {
+                          "name": "x-aep-model-id",
+                          "string_match": {
+                            "exact": "chat"
+                          }
+                        }
+                      ],
+                      "path": "/v1"
+                    },
+                    "name": "aep-openai-test-chat-d25702d8",
+                    "route": {
+                      "cluster": "aep-openai-test-chat-d25702d8",
+                      "host_rewrite_literal": "provider.example"
+                    }
+                  },
+                  {
+                    "match": {
+                      "case_sensitive": true,
+                      "headers": [
+                        {
+                          "name": "x-aep-model-id",
+                          "string_match": {
+                            "exact": "chat"
+                          }
+                        }
+                      ],
+                      "prefix": "/v1/"
+                    },
+                    "name": "aep-openai-test-chat-d25702d8",
+                    "route": {
+                      "cluster": "aep-openai-test-chat-d25702d8",
+                      "host_rewrite_literal": "provider.example"
+                    }
+                  },
+                  {
+                    "match": {
+                      "case_sensitive": true,
+                      "path": "/claude"
+                    },
+                    "name": "aep-anthropic-claude-c857d09d",
+                    "request_headers_to_add": [
+                      {
+                        "append": false,
+                        "header": {
+                          "key": "x-api-key",
+                          "value": "disposable-fixture-value"
+                        }
+                      },
+                      {
+                        "append": false,
+                        "header": {
+                          "key": "authorization",
+                          "value": "Bearer disposable-fixture-value"
+                        }
+                      }
+                    ],
+                    "route": {
+                      "cluster": "aep-anthropic-claude-c857d09d",
+                      "host_rewrite_literal": "anthropic.example",
+                      "regex_rewrite": {
+                        "pattern": {
+                          "google_re2": {},
+                          "regex": "^/claude/(?:v1/)?(.*)$"
+                        },
+                        "substitution": "/v1/\\1"
+                      }
+                    }
+                  },
+                  {
+                    "match": {
+                      "case_sensitive": true,
+                      "prefix": "/claude/"
+                    },
+                    "name": "aep-anthropic-claude-c857d09d",
+                    "request_headers_to_add": [
+                      {
+                        "append": false,
+                        "header": {
+                          "key": "x-api-key",
+                          "value": "disposable-fixture-value"
+                        }
+                      },
+                      {
+                        "append": false,
+                        "header": {
+                          "key": "authorization",
+                          "value": "Bearer disposable-fixture-value"
+                        }
+                      }
+                    ],
+                    "route": {
+                      "cluster": "aep-anthropic-claude-c857d09d",
+                      "host_rewrite_literal": "anthropic.example",
+                      "regex_rewrite": {
+                        "pattern": {
+                          "google_re2": {},
+                          "regex": "^/claude/(?:v1/)?(.*)$"
+                        },
+                        "substitution": "/v1/\\1"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "@type": "type.googleapis.com/envoy.admin.v3.ClustersConfigDump",
+      "dynamic_active_clusters": [
+        {
+          "cluster": {
+            "@type": "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+            "connect_timeout": "10s",
+            "dns_lookup_family": "V4_ONLY",
+            "load_assignment": {
+              "cluster_name": "aep-openai-test-chat-d25702d8",
+              "endpoints": [
+                {
+                  "lb_endpoints": [
+                    {
+                      "endpoint": {
+                        "address": {
+                          "socket_address": {
+                            "address": "provider.example",
+                            "port_value": 443
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "name": "aep-openai-test-chat-d25702d8",
+            "transport_socket": {
+              "name": "envoy.transport_sockets.tls",
+              "typed_config": {
+                "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
+                "common_tls_context": {
+                  "validation_context": {
+                    "match_typed_subject_alt_names": [
+                      {
+                        "matcher": {
+                          "exact": "provider.example"
+                        },
+                        "san_type": "DNS"
+                      }
+                    ],
+                    "trusted_ca": {
+                      "filename": "/etc/ssl/certs/ca-certificates.crt"
+                    }
+                  }
+                },
+                "sni": "provider.example"
+              }
+            },
+            "type": "STRICT_DNS"
+          }
+        },
+        {
+          "cluster": {
+            "@type": "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+            "connect_timeout": "10s",
+            "dns_lookup_family": "V4_ONLY",
+            "load_assignment": {
+              "cluster_name": "aep-anthropic-claude-c857d09d",
+              "endpoints": [
+                {
+                  "lb_endpoints": [
+                    {
+                      "endpoint": {
+                        "address": {
+                          "socket_address": {
+                            "address": "anthropic.example",
+                            "port_value": 443
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "name": "aep-anthropic-claude-c857d09d",
+            "transport_socket": {
+              "name": "envoy.transport_sockets.tls",
+              "typed_config": {
+                "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext",
+                "sni": "anthropic.example"
+              }
+            },
+            "type": "STRICT_DNS"
+          }
+        }
+      ]
+    },
+    {
+      "@type": "type.googleapis.com/envoy.admin.v3.EcdsConfigDump",
+      "ecds_filters": [
+        {
+          "ecds_filter": {
+            "name": "extensions.istio.io/wasmplugin/higress-system.aep-ai-proxy-test-9f86d081",
+            "typed_config": {
+              "@type": "type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm",
+              "config": {
+                "configuration": {
+                  "@type": "type.googleapis.com/google.protobuf.StringValue",
+                  "value": "{\"_rules_\":[{\"_match_route_\":[\"aep-openai-test-chat-d25702d8\"],\"provider\":{\"apiTokens\":[\"disposable-fixture-value\"],\"modelMapping\":{\"chat\":\"upstream-chat\"},\"openaiCustomUrl\":\"https://provider.example/v1\",\"type\":\"openai\"}}]}"
+                },
+                "fail_open": false,
+                "vm_config": {
+                  "code": {
+                    "local": {
+                      "filename": "/var/lib/istio/data/cache/b5d3ec8d829d2c5e2334b1b770e8decfbea08b7e072cd29483a299922d0449c2.wasm"
+                    }
+                  },
+                  "runtime": "envoy.wasm.runtime.v8"
+                }
+              }
+            }
+          }
+        },
+        {
+          "ecds_filter": {
+            "name": "extensions.istio.io/wasmplugin/higress-system.aep-ai-statistics-test-9f86d081",
+            "typed_config": {
+              "@type": "type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm",
+              "config": {
+                "configuration": {
+                  "@type": "type.googleapis.com/google.protobuf.StringValue",
+                  "value": "{\"_rules_\":[{\"_match_route_\":[\"aep-openai-test-chat-d25702d8\",\"aep-anthropic-claude-c857d09d\"],\"enable_path_suffixes\":[\"/chat/completions\",\"/completions\",\"/responses\",\"/messages\"],\"use_default_attributes\":false,\"use_default_response_attributes\":true}]}"
+                },
+                "fail_open": true,
+                "vm_config": {
+                  "code": {
+                    "local": {
+                      "filename": "/var/lib/istio/data/cache/9bebfc803f6ea92c0805670bd9a6e8a5bb727f2e1a86b133f20bb7002e71511e.wasm"
+                    }
+                  },
+                  "runtime": "envoy.wasm.runtime.v8"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

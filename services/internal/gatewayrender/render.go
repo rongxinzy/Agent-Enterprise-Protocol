@@ -20,9 +20,9 @@ import (
 	"strings"
 )
 
-// aiProxyPluginVersion pins the Higress built-in ai-proxy wasm build the
-// rendered WasmPlugin references (oci:// tag).
-const aiProxyPluginVersion = "2.0.1"
+// Pin the official ai-proxy 2.0.1 artifact so loaded-code evidence cannot
+// silently accept a different image behind a mutable version tag.
+const aiProxyPluginURL = "oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-proxy@sha256:b5d3ec8d829d2c5e2334b1b770e8decfbea08b7e072cd29483a299922d0449c2"
 
 // Pin the official ai-statistics 2.0.1 OCI artifact, independently of the
 // gateway image and mutable plugin tags.
@@ -215,7 +215,7 @@ func renderOpenAIIngress(name string, route Route) string {
 func renderWasmPlugin(deployment string, enabled []Route, credentialValues map[string]string) string {
 	suffix := ResourceSuffix(deployment)
 	var document strings.Builder
-	document.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar("oci://higress-registry.cn-hangzhou.cr.aliyuncs.com/plugins/ai-proxy:"+aiProxyPluginVersion) + "\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
+	document.WriteString("apiVersion: extensions.higress.io/v1alpha1\nkind: WasmPlugin\nmetadata:\n  name: " + yamlScalar("aep-ai-proxy-"+suffix) + "\n  namespace: higress-system\nspec:\n  url: " + yamlScalar(aiProxyPluginURL) + "\n  failStrategy: FAIL_CLOSE\n  defaultConfigDisable: true\n")
 	if len(enabled) == 0 {
 		document.WriteString("  matchRules: []\n")
 		return document.String()

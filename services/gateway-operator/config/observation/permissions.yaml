@@ -1,0 +1,44 @@
+# Optional, sensitive permission: Kubernetes port-forward reaches the Envoy
+# admin port inside a gateway pod. It is not constrained to GET by Kubernetes
+# RBAC. Review and grant only to the operator's dedicated service account.
+# No exec, pod mutation or public admin listener is needed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-gateway-operator-observation
+  namespace: higress-system
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [higress-gateway]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [higress-gateway]
+    verbs: [get]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/portforward]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-gateway-operator-observation
+  namespace: higress-system
+subjects:
+  - kind: ServiceAccount
+    name: aep-gateway-operator
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-gateway-operator-observation

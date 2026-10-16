@@ -145,5 +145,25 @@ func (o *Observer) Observe(ctx context.Context, item repository.PublicationDeliv
 			unknown[index] = Condition{Type: kind, Status: status, ObservedRevision: &revision, Reason: reason, LastTransitionTime: at}
 		}
 	}
+	// Ready requires the exact publication/spec/generation checks above plus
+	// fresh independent full-fleet evidence. Historical True is insufficient.
+	if unknown[0].Status == "True" && unknown[1].Status == "True" && deployment.Status.DataPlane.Fresh(deployment.Status.AppliedSnapshot, time.Now()) {
+		ready := true
+		at := item.CreatedAt
+		for _, observed := range objects {
+			condition := meta.FindStatusCondition(observed.conditions, gateway.ConditionReady)
+			if condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != observed.generation || condition.LastTransitionTime.IsZero() {
+				ready = false
+				break
+			}
+			if condition.LastTransitionTime.After(at) {
+				at = condition.LastTransitionTime.Time
+			}
+		}
+		if ready {
+			revision := item.Revision
+			unknown[2] = Condition{Type: "Ready", Status: "True", ObservedRevision: &revision, Reason: "EnvoyConfigurationObserved", LastTransitionTime: at}
+		}
+	}
 	return unknown, nil
 }

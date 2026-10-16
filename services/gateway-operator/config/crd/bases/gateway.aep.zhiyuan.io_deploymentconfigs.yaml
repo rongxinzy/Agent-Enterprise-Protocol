@@ -211,6 +211,39 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              dataPlane:
+                description: DataPlane binds independent loaded-configuration evidence
+                  to AppliedSnapshot.
+                properties:
+                  gatewayUid:
+                    description: |-
+                      UID is a type that holds unique ID values, including UUIDs.  Because we
+                      don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                      intent and helps make sure that UIDs and names do not get conflated.
+                    type: string
+                  observedAt:
+                    format: date-time
+                    type: string
+                  podUids:
+                    items:
+                      description: |-
+                        UID is a type that holds unique ID values, including UUIDs.  Because we
+                        don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                        intent and helps make sure that UIDs and names do not get conflated.
+                      type: string
+                    maxItems: 64
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  snapshot:
+                    pattern: ^[0-9a-f]{64}$
+                    type: string
+                required:
+                - gatewayUid
+                - observedAt
+                - podUids
+                - snapshot
+                type: object
               observedGeneration:
                 format: int64
                 type: integer
