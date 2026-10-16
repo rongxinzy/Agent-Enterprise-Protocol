@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aep-credential-publisher
+  namespace: aep-system
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: aep-credential-publisher}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{namespaceSelector: {}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    # Delivery overlays should restrict these destinations to the API server
+    # and database addresses appropriate to their CNI/service implementation.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 443}, {protocol: TCP, port: 5432}]

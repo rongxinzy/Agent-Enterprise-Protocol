@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aep-credential-publisher
+  namespace: aep-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-credential-publisher
+  namespace: aep-credentials
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, create, update, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-credential-publisher
+  namespace: aep-credentials
+subjects:
+  - kind: ServiceAccount
+    name: aep-credential-publisher
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-credential-publisher
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aep-credential-publisher-leader
+  namespace: aep-system
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [aep-credential-publisher]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aep-credential-publisher-leader
+  namespace: aep-system
+subjects:
+  - kind: ServiceAccount
+    name: aep-credential-publisher
+    namespace: aep-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: aep-credential-publisher-leader
