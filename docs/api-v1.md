@@ -575,7 +575,8 @@ Ephemeral conversation-scoped instances: `ephemeral: true` requires a future
 `AGENT_EXPIRED` (403). `scopeFromUserId` freezes the referenced user's
 data-scope snapshot onto the account (visible team subtrees become
 management_scope rules, explicit denies are copied), and the requested teams
-must already lie inside that scope. `modelIds` creates model assignments
+must already lie inside that scope; the source must be an active account.
+`modelIds` creates model assignments
 together with the account. The directory hides ephemeral instances unless
 `includeEphemeral=true` is passed. `DELETE /admin/agents/{agentId}` removes
 the account with its bindings, assignments, and rules; live sessions block
@@ -590,7 +591,7 @@ Error codes:
 | `INVALID_ROLE`, `INVALID_TEAM` | 400 | Invalid role or team binding |
 | `ROLE_GRANT_FORBIDDEN`, `TEAM_GRANT_FORBIDDEN` | 403 | The caller cannot grant a requested role or team |
 | `AGENT_EXISTS` | 409 | The username already exists |
-| `INVALID_SCOPE_SOURCE` | 400 | The scope source user is unknown, or the requested teams lie outside the source's visible scope |
+| `INVALID_SCOPE_SOURCE` | 400 | The scope source user is unknown or disabled, or the requested teams lie outside the source's visible scope |
 | `UNKNOWN_MODEL` | 400 | A requested model assignment references an unknown model |
 | `AGENT_HAS_SESSIONS` | 409 | Deletion is blocked by live sessions; revoke them first |
 | `AGENT_EXPIRED` | 403 | The ephemeral account's expiry has passed |
@@ -645,7 +646,9 @@ deployment kinds and treats them as opaque references. `startsAt` and
 one user from stored bindings and rules: `orgScope` is the subtree of the
 user's teams, `allowedResources` and `deniedResources` are `(kind, id)`
 references where every non-`team` kind is deployment-defined, and an explicit
-deny wins over an allow.
+deny wins over an allow. A disabled account is not a valid subject: the
+endpoint refuses it with `USER_DISABLED` (403) instead of deriving its stored
+grants.
 
 Rule lists paginate with `cursor` and `limit` and return a `nextCursor` that
 is `null` on the last page.
@@ -657,6 +660,7 @@ Error codes:
 | `INVALID_DATA_SCOPE_RULE` | 400 | Invalid id, rule kind, subject, or resource |
 | `DATA_SCOPE_RULE_EXISTS` | 409 | The rule id already exists |
 | `USER_REQUIRED` | 400 | The `userId` query parameter is required |
+| `USER_DISABLED` | 403 | The named user account is disabled, so no context is derived |
 | `RESOURCE_NOT_FOUND` | 404 | The rule or user was not found |
 
 ### Skills

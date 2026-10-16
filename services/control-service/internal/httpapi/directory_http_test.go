@@ -8,6 +8,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"gorm.io/gorm"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 )
@@ -365,5 +366,37 @@ func TestCreateAgentHappyPathPersistsEverything(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "research-helper") {
 		t.Fatalf("response should name the agent: %s", response.Body.String())
+	}
+}
+
+func TestCreateAgentScopeSourceRequiresActiveUser(t *testing.T) {
+	application, mock, _, adminToken, _ := newDirectoryHTTPApplication(t)
+	handler := New(application).Handler()
+	const path = "/aep/v1/admin/agents"
+	now := time.Now().UTC()
+
+	// Freezing a disabled user's visible teams onto a fresh ephemeral
+	// instance would transfer authority the server has already withdrawn.
+	expectTeamRecord(mock, "eng", "Engineering", "", true, 3, now)
+	expectRoleRecord(mock, "member", "Member", "", true, nil, now)
+	mock.ExpectQuery(`SELECT \* FROM "users"`).
+		WithArgs("deployment-a", "retired", 1).
+		WillReturnRows(sqlmock.NewRows(userColumns()).AddRow("retired", "deployment-a", "bob", "Bob", nil, "hash", "disabled", false, false, "human", now, now))
+	disabled := adminRequest(handler, adminToken, http.MethodPost, path,
+		`{"username":"ephemeral-9","displayName":"Ephemeral Helper","password":"long-password-123","roleIds":["member"],"teamIds":[],"homeTeamId":"eng","ephemeral":true,"expiresAt":"2030-01-01T00:00:00Z","scopeFromUserId":"retired"}`)
+	if disabled.Code != http.StatusBadRequest || !strings.Contains(disabled.Body.String(), "INVALID_SCOPE_SOURCE") {
+		t.Fatalf("disabled scope source = %d %s", disabled.Code, disabled.Body.String())
+	}
+
+	// An unknown source is refused with the same code, without reading any
+	// scope values for it.
+	expectTeamRecord(mock, "eng", "Engineering", "", true, 3, now)
+	expectRoleRecord(mock, "member", "Member", "", true, nil, now)
+	mock.ExpectQuery(`SELECT \* FROM "users"`).
+		WithArgs("deployment-a", "ghost", 1).WillReturnError(gorm.ErrRecordNotFound)
+	unknown := adminRequest(handler, adminToken, http.MethodPost, path,
+		`{"username":"ephemeral-10","displayName":"Ephemeral Helper","password":"long-password-123","roleIds":["member"],"teamIds":[],"homeTeamId":"eng","ephemeral":true,"expiresAt":"2030-01-01T00:00:00Z","scopeFromUserId":"ghost"}`)
+	if unknown.Code != http.StatusBadRequest || !strings.Contains(unknown.Body.String(), "INVALID_SCOPE_SOURCE") {
+		t.Fatalf("unknown scope source = %d %s", unknown.Code, unknown.Body.String())
 	}
 }
