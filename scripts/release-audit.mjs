@@ -166,7 +166,8 @@ assert(
 assert(workflow.includes("deadcode@v0.52.0"), "CI does not run the Go deadcode gate");
 assert(workflow.includes("npm run deadcode:js"), "CI does not run the Knip dead-code gate");
 assert(workflow.includes("npm run deadcode:py"), "CI does not run the Python dead-code gate");
-assert(workflow.includes("check-large-files.mjs"), "CI does not run the large-file gate");
+assert(workflow.includes("check:source-lines"), "CI does not run the source line-count gate");
+assert(packageDocument.scripts?.["check:source-lines"] === "node scripts/check-source-lines.mjs", "check:source-lines script is not wired");
 assert(workflow.includes("ci-gate:"), "CI does not publish the aggregate ci-gate job");
 assert(packageDocument.scripts?.["deadcode:js"] === "knip --no-progress", "deadcode:js script is not wired");
 assert(packageDocument.scripts?.["deadcode:go"]?.includes("deadcode@v0.52.0"), "deadcode:go script is not wired");

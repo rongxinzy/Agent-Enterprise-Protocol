@@ -140,7 +140,7 @@ test('real Git three-dot diff handles advanced main, removed files, renames and 
 function needsFor(plan, event = 'pull_request') {
   return Object.fromEntries([
     ['e2e-plan', { result: 'success', outputs: { e2e_plan: JSON.stringify(plan) } }],
-    ['large-files', { result: 'success' }],
+    ['source-lines', { result: 'success' }],
     ['sdk-gate', { result: 'success' }],
     ...['control-service', 'example-agent'].map(name => [name, { result: 'success' }]),
     ['compose-e2e', { result: plan.compose.length ? 'success' : 'skipped' }],
@@ -199,7 +199,7 @@ test('workflow graph keeps mandatory checks, consumes the plan and always valida
   assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
   assert.ok(workflow.on.push.branches.includes('main'));
   const jobs = workflow.jobs;
-  for (const name of ['e2e-plan', 'large-files', 'sdk-gate', 'control-service', 'example-agent']) assert.equal(jobs[name].if, undefined);
+  for (const name of ['e2e-plan', 'source-lines', 'sdk-gate', 'control-service', 'example-agent']) assert.equal(jobs[name].if, undefined);
   const planner = jobs['e2e-plan'];
   assert.equal(planner.steps.find(step => step.uses === 'actions/checkout@v4').with['fetch-depth'], 0);
   for (const output of ['e2e_plan', 'compose', 'kubernetes', 'backup'])

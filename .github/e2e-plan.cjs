@@ -58,7 +58,7 @@ function readPlan(value) {
 }
 
 function verifyResults(needs, event) {
-  for (const name of ['e2e-plan', 'large-files', 'sdk-gate', 'control-service', 'example-agent']) {
+  for (const name of ['e2e-plan', 'source-lines', 'sdk-gate', 'control-service', 'example-agent']) {
     if (needs[name]?.result !== 'success') throw new Error(name + ' did not succeed');
   }
   const plan = readPlan(needs['e2e-plan']?.outputs?.e2e_plan);

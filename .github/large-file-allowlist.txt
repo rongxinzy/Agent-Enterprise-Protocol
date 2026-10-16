@@ -1,2 +1,0 @@
-# One path per line (repo-relative). Add only intentional binary or generated assets.
-# Example: openapi/fixtures/large-sample.bin

@@ -44,7 +44,7 @@ assert "pull_request" in parent.get("on", parent.get(True, {}))
 gate = parent["jobs"]["ci-gate"]
 assert gate.get("name") == "ci-gate", "Branch protection requires the ci-gate job name"
 assert gate["if"] == "${{ always() }}", "Aggregate gate must observe skipped/failed upstream jobs"
-required = {"e2e-plan", "large-files", "sdk-gate", "control-service", "example-agent", "compose-e2e", "data-plane-kubernetes", "backup-restore"}
+required = {"e2e-plan", "source-lines", "sdk-gate", "control-service", "example-agent", "compose-e2e", "data-plane-kubernetes", "backup-restore"}
 assert set(gate["needs"]) == required, "Aggregate gate dependency drift"
 assert "go test ./... -race" in yaml.safe_dump(parent), "PR Go verification must keep the race detector"
 print(f"PASS: {len(actual)} required PR workflows")
