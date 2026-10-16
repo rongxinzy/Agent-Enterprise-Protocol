@@ -1,4 +1,4 @@
-# Additive operator publication path. Queue/query support is opt-in; relay and
+# Additive operator publication path. Queue and relay are separate opt-ins;
 # revision-specific observations follow separately. Legacy publish is unchanged.
 paths:
   /publications:
@@ -25,8 +25,11 @@ paths:
         must never overwrite a newer publication for the same deployment.
         Queue/query support requires AEP_GATEWAY_PUBLICATIONS_ENABLED=true;
         disabled deployments return 503 DATA_PLANE_PUBLICATIONS_DISABLED.
-        The current queue stage has no relay or observation reader: operations
-        remain queued with Unknown conditions. Do not fall back automatically
+        An independently enabled AEP_GATEWAY_PUBLICATION_RELAY_ENABLED worker
+        projects snapshots to AEP CRs. Without it operations remain queued.
+        Removed routes retain disabled CR tombstones to fence delayed writes.
+        Operator observations are not read yet, so conditions remain Unknown
+        even after phase projected. Do not fall back automatically
         to synchronous publish when this endpoint is unavailable.
       parameters:
         - name: Idempotency-Key
@@ -82,7 +85,7 @@ paths:
         Operator observations must match the publication's immutable revision;
         missing or stale evidence is Unknown, never inferred from a successful
         write or from the legacy reconciliation ready flag.
-        The current queue stage returns Unknown conditions and requires the
+        The current relay stage returns Unknown conditions and requires the
         same explicit opt-in as POST; disabled deployments return 503.
       parameters:
         - name: operationId
@@ -140,8 +143,9 @@ components:
             Delivery lifecycle only: queued -> projecting -> projected, failed or
             superseded. Transient failures remain queued/projecting and retry;
             failed means an unrecoverable projection error. Superseded means
-            replaced by newer intent; it must not subsequently write older
-            configuration. Projected means all AEP CR writes/deletions for this
+            replaced by newer intent; it must not overwrite newer CR
+            configuration. Projected means all AEP CR writes, including disabled
+            tombstones for removed routes, for this
             snapshot were verified, not that operator application or readiness
             succeeded. Projected may later become superseded; failed and
             superseded are terminal. Conditions evolve independently of phase.

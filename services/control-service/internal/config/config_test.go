@@ -27,6 +27,31 @@ var environmentKeys = []string{
 	"AEP_TRUSTED_PROXY_CIDRS",
 	"AEP_COMPUTE_TIERS_FILE", "AEP_COMPUTE_DEFAULT_TIER", "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "AEP_COMPUTE_CONCURRENCY_CAP",
 	"AEP_GATEWAY_PUBLICATIONS_ENABLED",
+	"AEP_GATEWAY_PUBLICATION_RELAY_ENABLED", "AEP_GATEWAY_PUBLICATION_NAMESPACE",
+}
+
+func TestPublicationRelayOptIn(t *testing.T) {
+	for _, test := range []struct {
+		relay, publish, namespace string
+		invalid                   bool
+	}{
+		{"false", "false", "", false}, {"true", "false", "aep-system", true}, {"true", "true", "aep-system", false},
+		{"true", "true", "other", true}, {"invalid", "true", "aep-system", true},
+	} {
+		t.Run(test.relay+test.publish+test.namespace, func(t *testing.T) {
+			clearEnvironment(t)
+			t.Setenv("AEP_GATEWAY_PUBLICATION_RELAY_ENABLED", test.relay)
+			t.Setenv("AEP_GATEWAY_PUBLICATIONS_ENABLED", test.publish)
+			t.Setenv("AEP_GATEWAY_PUBLICATION_NAMESPACE", test.namespace)
+			cfg, err := Load()
+			if (err != nil) != test.invalid {
+				t.Fatalf("Load = %v", err)
+			}
+			if err == nil && cfg.GatewayRelayNamespace != "aep-system" {
+				t.Fatal("unexpected operator namespace")
+			}
+		})
+	}
 }
 
 func TestLoadDevelopmentDefaults(t *testing.T) {

@@ -763,9 +763,12 @@ Secret system provisions. The namespace is resolved server-side, so a
 
 The Control Service implements durable queueing and operation queries behind
 `AEP_GATEWAY_PUBLICATIONS_ENABLED` (default `false`); disabled deployments
-return `503 DATA_PLANE_PUBLICATIONS_DISABLED`. This stage **does not implement
-the relay or operator observation reader**: enabled requests remain `queued`
-with Unknown conditions. Opt in only for isolated queue-stage acceptance.
+return `503 DATA_PLANE_PUBLICATIONS_DISABLED`. A separate
+`AEP_GATEWAY_PUBLICATION_RELAY_ENABLED=true` opt-in runs the in-cluster relay
+for the configured deployment in `aep-system`. Without it requests stay queued.
+The relay projects and verifies AEP CRs; **operator observations are not read**,
+so conditions remain Unknown even when phase is `projected`.
+Opt in only during isolated acceptance and reviewed operator handover.
 Existing clients keep using synchronous `POST /publish`
 (`200 DataPlaneDesiredState`); there is no automatic fallback between paths.
 Do not switch production clients until relay recovery, operator exclusive
@@ -808,14 +811,31 @@ The queue stage retains operations and snapshots without automatic GC;
 Pending outbox entries are never removed by the existing retention cleaner.
 Raw idempotency keys are not stored; only their SHA-256 hashes are persisted.
 
+Relay delivery uses expiring claims, fenced acknowledgements, native retry
+backoff and per-object sequence/resourceVersion guards. A newer full snapshot
+supersedes older undelivered intents. A latest snapshot in terminal `failed`
+state does not fall back to a superseded snapshot or retry automatically:
+repair its inputs/ownership
+and publish with a new key. Transient delivery errors still retry with backoff.
+Removed models retain disabled ModelRoute
+CR tombstones; they withdraw routing through the operator and fence delayed
+creates. They are not physically deleted in this stage. Do not delete these
+guards or mix direct spec writers with the relay. `projected` verifies these
+CR writes, including disabled tombstones; it does not mean Higress is ready.
+CRs converge individually; delivery is not an atomic multi-CR snapshot switch,
+and the operator may observe intermediate configurations during delivery.
+Relative upstream endpoints cannot be represented by ModelRoute and fail with
+`INVALID_OPERATOR_SNAPSHOT`; the relay does not invent provider addresses.
+
 `phase` describes delivery only: `queued` → `projecting` → `projected`,
 `failed` or `superseded`. Transient delivery failures back off and retry;
 `failed` is an unrecoverable projection error with a sanitized `errorCode`.
-`projected` means the relay verified the snapshot's CR writes and deletions.
+`projected` means the relay verified the snapshot's CR writes, including disabled
+tombstones for removed routes.
 A newer deployment publication can supersede an older one, including a
 projected one; an older delayed worker must never overwrite newer intent.
 `failed` and `superseded` are terminal. The relay's crash recovery, ordering
-and fencing must be tested in the outbox implementation stage.
+and fencing are covered by PostgreSQL and API Server acceptance tests.
 
 The response always includes exactly one each of `Accepted`, `Applied` and
 `Ready`, initially `Unknown`. Accepted is operator semantic validation;

@@ -40,7 +40,8 @@ Electron `safeStorage` 适配器和 Renderer IPC 边界详见仓库中的桌面�
 ## 异步路由发布
 
 管控服务已实现入队／查询，以 `AEP_GATEWAY_PUBLICATIONS_ENABLED=true` 显式开启，
-默认关闭。relay 和 operator 观测读取器尚未实现，任务保持 queued／Unknown；
+默认关闭。另以 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED` 开启集群内 CR 投递，否则保持
+queued。operator 观测读取尚未实现，即使 projected，conditions 仍为 Unknown；
 完整链路验收前仅用于隔离环境的入队验证。
 现有 `publishDataPlaneRoutes()` 保留同步 `200` 契约。SDK 不自动回退至旧接口，
 也不自动轮询直到 Ready。

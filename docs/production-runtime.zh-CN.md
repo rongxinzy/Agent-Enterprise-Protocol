@@ -67,16 +67,41 @@ reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-pl
 
 ## 模型路由异步发布入队（默认关闭）
 
-`AEP_GATEWAY_PUBLICATIONS_ENABLED` 默认 `false`。本阶段仅实现新路由快照、operation、
-管理审计和 outbox 的事务提交及同部署进度查询，没有 CR relay、operator 观测读取或
-Ready 检测；显式开启后任务会保持 queued／Unknown。仅在隔离验收中启用，不切换
-Console、不修改现有期望状态、不增加 K8s 写入者。生产切换需等待后续 relay 恢复、
-单写者及真实数据面验证。
+`AEP_GATEWAY_PUBLICATIONS_ENABLED` 默认 `false`，提供快照、operation、审计与 outbox
+的事务入队。`AEP_GATEWAY_PUBLICATION_RELAY_ENABLED` 独立默认关闭；同时开启后，
+Control Service 启动集群内 relay，把当前 `AEP_DEPLOYMENT_ID` 的意图投影为
+`aep-system` 内的 ModelRoute 并更新预先配置的单例 DeploymentConfig。命名空间当前
+固定为 `aep-system`；其他值在开启时拒绝启动。不读取 kubeconfig，不读取 Secret，
+不写 Higress 资源、ModelPolicy 或 status。初始化集群凭据失败会阻止启动。
+
+RBAC 见未纳入默认 kustomization 的 [显式授权清单](../deploy/kubernetes/production/publication-relay-rbac.yaml)。
+部署前必须安装匹配 CRD、配置 singleton/native gateway、确认旧 reconciler 停写并完成
+operator 独占写移交，网络策略须允许 Control Service 到 API Server。不要直接用于已有
+无归属 CR 的命名空间：relay 会拒绝接管。默认配置、Console 与现有期望状态路径不变。
+默认 Control Service ServiceAccount 关闭自动 token 挂载；显式部署覆盖还需给该 Pod
+投射会轮转的短期 ServiceAccount token、`kube-root-ca.crt` 与 namespace，挂载到标准
+`/var/run/secrets/kubernetes.io/serviceaccount` 路径。不能把管理员 kubeconfig 或静态
+长效 token 写入环境变量。上述 RBAC 清单不会自动开启 token 挂载或 relay 开关。
+
+claim 30 秒到期、每轮 Kubernetes 操作总预算 10 秒；进程崩溃后其他副本重新获取
+token，核对 CR 后继续。临时失败按 client-go 原生退避并持久化下次时间；多个副本
+共享 DB claim。新快照取代旧待投递任务，每个 CR 的序号和 resourceVersion 拦截旧写入。
+多个 CR 逐个最终收敛，不是原子快照切换；operator 可能观察到部分投递的中间状态。
+最新快照因非法内容或资源归属冲突进入 `failed` 后，不自动回退旧快照，也不自动重试
+终态操作。修正源配置或归属冲突后，使用新的幂等键重新发布；数据面不会因此恢复已
+被取代的旧意图。短暂网络故障仍按退避重试，不能与终态失败混为一谈。
+历史模型保留禁用墓碑（含从未成功投递的旧快照），本阶段不 GC，不允许其他 spec 写者
+或删除墓碑，否则失去晚到创建防护。墓碑容量和后续安全回收须纳入容量规划。
+
+projected 仅确认 AEP CR 投递，Accepted／Applied／Ready 仍为 Unknown；本阶段没有
+operator 观测读取和独立 Ready 检测。仅用于隔离验收，生产切换还需完整数据面验证。
 
 新增 `data_plane_publication_snapshots`、`data_plane_publications` 和
 `data_plane_publication_outbox` 表纳入 PostgreSQL 备份。迁移只新增表，旧二进制仍可
 运行；回滚应用不得删表或丢弃已受理任务。当前不自动清理这些表，最短幂等留存为 24
-小时，待投递意图不会因到期被删。后续启用 relay 前需制定终态留存、容量与恢复策略。
+小时，待投递意图不会因到期被删。迁移 047 增加 claim、重试与完成字段，同样纳入备份。
+回滚前先关闭 relay 并排干进程；保留 CR、墓碑和任务，禁止开启第二个 Higress 写入者。
+恢复 DB 早于 CR 的备份时，遇到更高 CR 序号会停止旧投递，不能清零标记强行回退。
 
 参见 [异步发布 API](api-v1.zh-CN.md#operator-异步发布入队阶段)。
 
