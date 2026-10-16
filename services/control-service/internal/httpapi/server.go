@@ -239,6 +239,8 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Get("/aep/v1/admin/data-plane/desired-state", s.getDataPlaneDesiredState)
 			admin.Put("/aep/v1/admin/data-plane/desired-state", s.putDataPlaneDesiredState)
 			admin.Post("/aep/v1/admin/data-plane/publish", s.publishDataPlaneRoutes)
+			admin.Post("/aep/v1/admin/data-plane/publications", s.createDataPlanePublication)
+			admin.Get("/aep/v1/admin/data-plane/publications/{operationId}", s.getDataPlanePublication)
 			admin.Get("/aep/v1/admin/data-plane/status", s.getDataPlaneStatus)
 			admin.Get("/aep/v1/admin/deployment/settings", s.getDeploymentSettings)
 			admin.Put("/aep/v1/admin/deployment/settings", s.updateDeploymentSettings)

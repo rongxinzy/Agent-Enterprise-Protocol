@@ -39,8 +39,10 @@ See the repository's desktop session integration guide for the Electron `safeSto
 
 ## Asynchronous route publication
 
-Contract/SDK stage only: the new Control Service endpoints and transactional
-outbox must be implemented and deployed before using these methods. Existing
+The Control Service queue/query stage requires explicit
+`AEP_GATEWAY_PUBLICATIONS_ENABLED=true` (default disabled). Relay and operator
+observations are not implemented yet: operations stay queued/Unknown. Use
+only for isolated queue acceptance until the full path is ready. Existing
 `publishDataPlaneRoutes()` retains its synchronous `200` contract. The SDK
 does not fall back to it or automatically poll for readiness.
 
@@ -57,4 +59,4 @@ bounded retries with the same validated `Idempotency-Key` and body; never
 generate a fresh key for each retry or reuse one after `idempotencyExpiresAt`.
 Persist the returned operation ID and query it after an uncertain outcome
 when known. A `409 IDEMPOTENCY_KEY_CONFLICT` is an `AepProblem`, not a retry
-signal. See [API semantics](../../docs/api-v1.md#asynchronous-operator-publication-contractsdk-stage).
+signal. See [API semantics](../../docs/api-v1.md#asynchronous-operator-publication-queue-stage).

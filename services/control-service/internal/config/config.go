@@ -69,6 +69,7 @@ type Config struct {
 	GatewayQuotaToken           string
 	GatewayMetricsDeployment    string
 	GatewayOrganizationLogs     bool
+	GatewayPublicationsEnabled  bool
 	MaxResidentAgents           int
 	CredentialMasterKeyBase64   string
 	CredentialMasterKeyFile     string
@@ -243,6 +244,9 @@ func Load() (Config, error) {
 		}
 	}
 	if cfg.GatewayOrganizationLogs, err = boolean("AEP_GATEWAY_ORGANIZATION_LOGS", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.GatewayPublicationsEnabled, err = boolean("AEP_GATEWAY_PUBLICATIONS_ENABLED", false); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {

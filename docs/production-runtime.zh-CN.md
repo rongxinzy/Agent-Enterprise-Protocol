@@ -65,6 +65,21 @@ reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-pl
 
 数据库 migration 只向前执行。仅当旧二进制兼容新 schema 时才能直接回滚应用；否则必须恢复同一恢复点的 PostgreSQL 与 RustFS，并恢复匹配的签名 seed 和 Credential keyring。
 
+## 模型路由异步发布入队（默认关闭）
+
+`AEP_GATEWAY_PUBLICATIONS_ENABLED` 默认 `false`。本阶段仅实现新路由快照、operation、
+管理审计和 outbox 的事务提交及同部署进度查询，没有 CR relay、operator 观测读取或
+Ready 检测；显式开启后任务会保持 queued／Unknown。仅在隔离验收中启用，不切换
+Console、不修改现有期望状态、不增加 K8s 写入者。生产切换需等待后续 relay 恢复、
+单写者及真实数据面验证。
+
+新增 `data_plane_publication_snapshots`、`data_plane_publications` 和
+`data_plane_publication_outbox` 表纳入 PostgreSQL 备份。迁移只新增表，旧二进制仍可
+运行；回滚应用不得删表或丢弃已受理任务。当前不自动清理这些表，最短幂等留存为 24
+小时，待投递意图不会因到期被删。后续启用 relay 前需制定终态留存、容量与恢复策略。
+
+参见 [异步发布 API](api-v1.zh-CN.md#operator-异步发布入队阶段)。
+
 ## 备份恢复
 
 使用维护窗口或协调存储快照，使 PostgreSQL 与 Skill bucket 属于同一恢复点。PostgreSQL 保存身份、授权、Credential 密文、事件、审计和对象引用；RustFS 保存不可变 Skill ZIP。签名 seed 和所有 Credential keyring 条目必须由 Secret 系统独立备份，旧密钥丢失会导致对应 Credential 无法解密。
