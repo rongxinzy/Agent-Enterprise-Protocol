@@ -97,20 +97,25 @@ func (c pooledBootstrapConnection) Close(ctx context.Context) error {
 	return c.connection.Conn().Close(ctx)
 }
 
+type PublicationObserver interface {
+	Observe(context.Context, repository.PublicationDelivery) ([]publicationrelay.Condition, error)
+}
+
 type App struct {
-	Config           config.Config
-	Pool             *pgxpool.Pool
-	SQLDB            *sql.DB
-	Store            *repository.Store
-	Blobs            blob.Store
-	Tokens           *auth.Service
-	Credentials      *credential.Sealer
-	LicenseVerifier  *license.Verifier
-	License          *license.Verified
-	PublicationRelay *publicationrelay.Worker
-	runtimeDB        RuntimeDatabase
-	accessSessions   AccessSessionValidator
-	licenseMu        sync.RWMutex
+	Config              config.Config
+	Pool                *pgxpool.Pool
+	SQLDB               *sql.DB
+	Store               *repository.Store
+	Blobs               blob.Store
+	Tokens              *auth.Service
+	Credentials         *credential.Sealer
+	LicenseVerifier     *license.Verifier
+	License             *license.Verified
+	PublicationRelay    *publicationrelay.Worker
+	PublicationObserver PublicationObserver
+	runtimeDB           RuntimeDatabase
+	accessSessions      AccessSessionValidator
+	licenseMu           sync.RWMutex
 }
 
 func (a *App) database() RuntimeDatabase {
@@ -305,6 +310,7 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 		application.PublicationRelay = publicationrelay.New(application.Store.Deployment(cfg.DeploymentID), &publicationrelay.Projector{Client: kube, Namespace: cfg.GatewayRelayNamespace})
+		application.PublicationObserver = &publicationrelay.Observer{Reader: kube, Namespace: cfg.GatewayRelayNamespace}
 	}
 	return application, nil
 }

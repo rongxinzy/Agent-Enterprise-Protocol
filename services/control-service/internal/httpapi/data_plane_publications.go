@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/publicationrelay"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
@@ -28,13 +29,7 @@ type publicationRequest struct {
 	Revision *string `json:"revision,omitempty"`
 }
 
-type publicationCondition struct {
-	Type               string    `json:"type"`
-	Status             string    `json:"status"`
-	ObservedRevision   *string   `json:"observedRevision"`
-	Reason             string    `json:"reason"`
-	LastTransitionTime time.Time `json:"lastTransitionTime"`
-}
+type publicationCondition = publicationrelay.Condition
 
 type publicationView struct {
 	OperationID          string                 `json:"operationId"`
@@ -49,18 +44,38 @@ type publicationView struct {
 	ErrorCode            *string                `json:"errorCode"`
 }
 
-// There is deliberately no legacy ready lookup: the relay/observation stage
-// will supply revision-specific evidence. Queueing alone establishes none.
+// Queue acceptance alone establishes no operator or data-plane observation.
 func publicationJSON(value repository.DataPlanePublication) publicationView {
-	conditions := make([]publicationCondition, 0, 3)
-	for _, kind := range []string{"Accepted", "Applied", "Ready"} {
-		conditions = append(conditions, publicationCondition{Type: kind, Status: "Unknown", Reason: "NotObserved", LastTransitionTime: value.CreatedAt})
-	}
 	return publicationView{
 		OperationID: value.OperationID, DeploymentID: value.DeploymentID, Revision: value.Revision, ContentHash: value.ContentHash,
 		Phase: value.Phase, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, IdempotencyExpiresAt: value.IdempotencyExpiresAt,
-		Conditions: conditions, ErrorCode: value.ErrorCode,
+		Conditions: publicationrelay.UnknownConditions(value.CreatedAt, "NotObserved"), ErrorCode: value.ErrorCode,
 	}
+}
+
+func (s *Server) observedPublication(ctx context.Context, value repository.DataPlanePublication) publicationView {
+	view := publicationJSON(value)
+	if !s.app.Config.GatewayRelayEnabled || s.app.PublicationObserver == nil || value.Phase != "projected" {
+		return view
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	store := s.app.Store.Deployment(value.DeploymentID)
+	inputs, err := store.ReadDataPlanePublicationInputs(ctx, value)
+	if err == nil {
+		view.Conditions, err = s.app.PublicationObserver.Observe(ctx, inputs)
+	}
+	if err != nil {
+		view.Conditions = publicationrelay.UnknownConditions(value.CreatedAt, "ObservationUnavailable")
+		return view // Never expose raw Kubernetes/SQL errors or break operation lookup.
+	}
+	latest, err := store.IsLatestDataPlanePublication(ctx, value)
+	if err != nil {
+		view.Conditions = publicationrelay.UnknownConditions(value.CreatedAt, "ObservationUnavailable")
+	} else if !latest {
+		view.Conditions = publicationrelay.UnknownConditions(value.CreatedAt, "PublicationSuperseded")
+	}
+	return view
 }
 
 func publicationDigest(value []byte) string {
@@ -180,7 +195,7 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 		// best-effort audit middleware must not append a second success row.
 		markAdminAuditRecorded(request)
 		response.Header().Set("Location", "/aep/v1/admin/data-plane/publications/"+value.OperationID)
-		writeJSON(response, http.StatusAccepted, publicationJSON(value))
+		writeJSON(response, http.StatusAccepted, s.observedPublication(request.Context(), value))
 	}
 }
 
@@ -202,5 +217,5 @@ func (s *Server) getDataPlanePublication(response http.ResponseWriter, request *
 		publicationUnavailable(response, request, err, "The publication status could not be read.")
 		return
 	}
-	writeJSON(response, http.StatusOK, publicationJSON(value))
+	writeJSON(response, http.StatusOK, s.observedPublication(request.Context(), value))
 }

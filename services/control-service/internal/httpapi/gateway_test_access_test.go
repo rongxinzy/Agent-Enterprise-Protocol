@@ -184,7 +184,9 @@ func TestGatewayTestAccessLicensedSession(t *testing.T) {
 					pool.ExpectCommit()
 				}
 			}
+			started := time.Now().UTC().Truncate(time.Second)
 			got := adminRequest(New(a).Handler(), token, "POST", "/aep/v1/admin/model-gateway/models/model-a/test-access", "")
+			finished := time.Now().UTC().Truncate(time.Second)
 			if got.Code != want {
 				t.Fatal(got.Code, got.Body.String())
 			}
@@ -203,8 +205,16 @@ func TestGatewayTestAccessLicensedSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			claims, err := a.Tokens.ParseEntitlement(access.ModelAccessToken)
-			if err != nil || claims.SessionID != "session-admin" || claims.LicenseID != "test-license" || claims.Admin || len(claims.ModelScopes) != 1 || claims.ModelScopes[0] != "model-a" || !claims.ExpiresAt.Equal(access.ExpiresAt) || access.ExpiresAt.After(now.Add(2*time.Minute)) || access.BaseURL != "https://tenant.example/v1" {
+			if err != nil || claims.SessionID != "session-admin" || claims.LicenseID != "test-license" || claims.Admin || len(claims.ModelScopes) != 1 || claims.ModelScopes[0] != "model-a" || !claims.ExpiresAt.Equal(access.ExpiresAt) || access.BaseURL != "https://tenant.example/v1" {
 				t.Fatal("licensed test binding/lifetime/endpoint")
+			}
+			// Issuance can cross a second boundary after fixture setup. Bound the
+			// signed lifetime by the actual request, retaining the two-minute cap.
+			if claims.IssuedAt == nil || claims.IssuedAt.Before(started) || claims.IssuedAt.After(finished) || access.ExpiresAt.After(finished.Add(2*time.Minute)) || access.ExpiresAt.After(claims.IssuedAt.Add(2*time.Minute)) {
+				t.Fatal("licensed test token exceeded request issuance or two-minute cap")
+			}
+			if state != "active" && access.ExpiresAt.Before(started.Add(2*time.Minute)) {
+				t.Fatal("unclamped licensed test token ended before the request lifetime")
 			}
 			if state == "active" && access.ExpiresAt.After(expiry) {
 				t.Fatal("test access exceeded license expiry")

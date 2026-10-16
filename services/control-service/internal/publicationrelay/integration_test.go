@@ -66,6 +66,57 @@ func TestPublicationRelayWithEnvtest(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &Projector{Client: kube, Namespace: "aep-system"}
+	t.Run("read-only evidence survives CRD storage and rejects metadata-only stale status", func(t *testing.T) {
+		const ns = "publication-evidence"
+		if err := kube.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Create(ctx, &gateway.DeploymentConfig{ObjectMeta: metav1.ObjectMeta{Name: "deployment", Namespace: ns}, Spec: gateway.DeploymentConfigSpec{DeploymentID: "demo"}}); err != nil {
+			t.Fatal(err)
+		}
+		projector := &Projector{Client: kube, Namespace: ns}
+		observer := &Observer{Reader: kube, Namespace: ns}
+		previousGeneration := int64(0)
+		for _, seq := range []int64{1, 2} {
+			item := delivery(seq, []gatewayrender.Route{testRoute("observed")}, nil)
+			item.CreatedAt = time.Now().UTC()
+			if err := projector.Project(ctx, item); err != nil {
+				t.Fatal(err)
+			}
+			got, err := observer.Observe(ctx, item)
+			if err != nil || got[0].Status != "Unknown" || got[1].Status != "Unknown" {
+				t.Fatalf("unobserved publication = %+v %v", got, err)
+			}
+			var aggregate gateway.DeploymentConfig
+			var route gateway.ModelRoute
+			if err := kube.Get(ctx, client.ObjectKey{Namespace: ns, Name: "deployment"}, &aggregate); err != nil {
+				t.Fatal(err)
+			}
+			if err := kube.Get(ctx, client.ObjectKey{Namespace: ns, Name: "model-observed"}, &route); err != nil {
+				t.Fatal(err)
+			}
+			if seq == 2 && route.Generation != previousGeneration {
+				t.Fatal("metadata-only republish changed generation")
+			}
+			previousGeneration = route.Generation
+			// This boundary test stores actual operator-shaped status through the
+			// real status subresources. Controller watch/apply is tested separately
+			// in TestAppliedControllersWithEnvtest; no Higress runtime is claimed.
+			dcEvidence, routeEvidence := observationFixture(t, item)
+			aggregate.Status = dcEvidence.Status
+			route.Status = routeEvidence[0].Status
+			if err := kube.Status().Update(ctx, &aggregate); err != nil {
+				t.Fatal(err)
+			}
+			if err := kube.Status().Update(ctx, &route); err != nil {
+				t.Fatal(err)
+			}
+			got, err = observer.Observe(ctx, item)
+			if err != nil || got[0].Status != "True" || got[1].Status != "True" || got[2].Status != "Unknown" {
+				t.Fatalf("stored evidence = %+v %v", got, err)
+			}
+		}
+	})
 	t.Run("late update is rejected by actual API server", func(t *testing.T) {
 		initial := delivery(1, []gatewayrender.Route{testRoute("fenced")}, nil)
 		if err := p.Project(ctx, initial); err != nil {
@@ -269,12 +320,40 @@ func testPostgresRelay(t *testing.T, kube client.Client, url string) {
 	if err != nil || failed.Phase != "failed" || failed.ErrorCode == nil || *failed.ErrorCode != "INVALID_OPERATOR_SNAPSHOT" {
 		t.Fatalf("invalid historical operation = %+v %v", failed, err)
 	}
-	queue(6, []gatewayrender.Route{})
+	removed := queue(6, []gatewayrender.Route{})
 	if err := New(store, p).Step(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := kube.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: "model-history"}, &live); err != nil || live.Spec.Enabled {
 		t.Fatal("invalid later revision hid an active historical route")
+	}
+	// Observation reads share the immutable JSONB history but never acquire a
+	// new claim. Current evidence is invalid as soon as a newer intent is queued.
+	projected, err := store.GetDataPlanePublication(ctx, removed.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs, err := store.ReadDataPlanePublicationInputs(ctx, projected)
+	if err != nil || inputs.ClaimToken != "" {
+		t.Fatalf("read-only inputs = %+v %v", inputs, err)
+	}
+	desired, err := desiredRoutes(inputs)
+	if err != nil || len(desired) != 3 || desired["history"].Enabled {
+		t.Fatalf("immutable history = %+v %v", desired, err)
+	}
+	if ok, err := store.IsLatestDataPlanePublication(ctx, projected); err != nil || !ok {
+		t.Fatalf("latest = %t %v", ok, err)
+	}
+	if _, err := repo.Deployment("other").ReadDataPlanePublicationInputs(ctx, projected); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatal("cross-deployment snapshot readable")
+	}
+	queue(7, []gatewayrender.Route{})
+	if ok, err := store.IsLatestDataPlanePublication(ctx, projected); err != nil || ok {
+		t.Fatalf("new queued intent failed to invalidate evidence: %t %v", ok, err)
+	}
+	unchanged, err := store.GetDataPlanePublication(ctx, projected.OperationID)
+	if err != nil || unchanged.Phase != "projected" {
+		t.Fatal("observation changed delivery phase")
 	}
 	t.Log("PostgreSQL + API Server acceptance passed: concurrent claims, crash/reclaim, token fencing, immutable replay, supersession, tombstones and durable retry")
 }

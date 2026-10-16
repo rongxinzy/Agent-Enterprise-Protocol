@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +13,105 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	pgxmock "github.com/pashagolub/pgxmock/v4"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/publicationrelay"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
 const publicationPath = "/aep/v1/admin/data-plane/publications"
 const publicationTestID = "11347ddd-5234-4b3d-8936-a45f683e5f56"
+
+type testPublicationObserver func(context.Context, repository.PublicationDelivery) ([]publicationrelay.Condition, error)
+
+func (f testPublicationObserver) Observe(ctx context.Context, item repository.PublicationDelivery) ([]publicationrelay.Condition, error) {
+	return f(ctx, item)
+}
+
+func TestPublicationQueryReadsOnlyCurrentOperatorEvidence(t *testing.T) {
+	for _, method := range []string{"GET", "POST"} {
+		for _, stage := range []string{"ok", "disabled", "no-reader", "queued", "superseded-phase", "snapshot-error", "observer-error", "fence-error", "newer-queued"} {
+			t.Run(method+"/"+stage, func(t *testing.T) {
+				a, mock, token := newStoreBackedHTTPApplication(t)
+				a.Config.GatewayPublicationsEnabled = true
+				a.Config.GatewayRelayEnabled = stage != "disabled"
+				now := time.Now().UTC()
+				called := false
+				a.PublicationObserver = testPublicationObserver(func(ctx context.Context, item repository.PublicationDelivery) ([]publicationrelay.Condition, error) {
+					called = true
+					deadline, ok := ctx.Deadline()
+					if !ok || time.Until(deadline) > 5*time.Second || item.DeploymentID != "deployment-a" || item.OperationID != publicationTestID || item.Sequence != 42 || string(item.Payload) != `{}` || string(item.HistoricalRoutes) != `[]` || item.ClaimToken != "" {
+						t.Fatal("observer received unbounded or wrong inputs")
+					}
+					if stage == "observer-error" {
+						return nil, errors.New("sensitive Kubernetes diagnostic")
+					}
+					conditions := publicationrelay.UnknownConditions(now, "RevisionNotObserved")
+					conditions[0].Status = "True"
+					conditions[0].ObservedRevision = &item.Revision
+					conditions[0].Reason = "OperatorConfirmed"
+					return conditions, nil
+				})
+				if stage == "no-reader" {
+					a.PublicationObserver = nil
+				}
+				phase := "projected"
+				if stage == "queued" {
+					phase = "queued"
+				}
+				if stage == "superseded-phase" {
+					phase = "superseded"
+				}
+				if method == "POST" {
+					mock.ExpectBegin()
+					mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 1))
+				}
+				mock.ExpectQuery(`SELECT \* FROM "data_plane_publications"`).WillReturnRows(sqlmock.NewRows([]string{"deployment_id", "operation_id", "sequence", "revision", "content_hash", "phase", "created_at", "request_hash"}).AddRow("deployment-a", publicationTestID, 42, "rev-42", strings.Repeat("a", 64), phase, now, publicationDigest([]byte(`{}`))))
+				if method == "POST" {
+					mock.ExpectCommit()
+				}
+				observe := stage != "disabled" && stage != "no-reader" && phase == "projected"
+				if observe {
+					q := mock.ExpectQuery(`SELECT payload FROM data_plane_publication_snapshots`).WithArgs("deployment-a", "rev-42", strings.Repeat("a", 64))
+					if stage == "snapshot-error" {
+						q.WillReturnError(errors.New("sensitive SQL diagnostic"))
+					} else {
+						q.WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow([]byte(`{}`)))
+						mock.ExpectQuery(`SELECT COALESCE\(jsonb_agg`).WithArgs("deployment-a", 42).WillReturnRows(sqlmock.NewRows([]string{"historical_routes"}).AddRow([]byte(`[]`)))
+						if stage != "observer-error" {
+							q := mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM data_plane_publications p`).WithArgs("deployment-a", publicationTestID, 42)
+							if stage == "fence-error" {
+								q.WillReturnError(errors.New("sensitive SQL diagnostic"))
+							} else {
+								q.WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(stage != "newer-queued"))
+							}
+						}
+					}
+				}
+				path, status := publicationPath, 202
+				if method == "GET" {
+					path += "/" + publicationTestID
+					status = 200
+				}
+				response := publicationHTTP(New(a).Handler(), token, method, path, `{}`, "replay")
+				var view publicationView
+				if response.Code != status || json.Unmarshal(response.Body.Bytes(), &view) != nil || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "sensitive") {
+					t.Fatalf("query = %d %s", response.Code, response.Body.String())
+				}
+				wantStatus, wantReason := "Unknown", "NotObserved"
+				switch stage {
+				case "ok":
+					wantStatus, wantReason = "True", "OperatorConfirmed"
+				case "snapshot-error", "observer-error", "fence-error":
+					wantReason = "ObservationUnavailable"
+				case "newer-queued":
+					wantReason = "PublicationSuperseded"
+				}
+				if view.Conditions[0].Status != wantStatus || view.Conditions[0].Reason != wantReason || view.Conditions[2].Status != "Unknown" || view.Conditions[2].ObservedRevision != nil || called != (observe && stage != "snapshot-error") {
+					t.Fatalf("view = %+v, called=%t", view, called)
+				}
+			})
+		}
+	}
+}
 
 func publicationHTTP(handler http.Handler, token, method, path, body string, keys ...string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))

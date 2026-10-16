@@ -42,8 +42,10 @@ See the repository's desktop session integration guide for the Electron `safeSto
 The Control Service queue/query stage requires explicit
 `AEP_GATEWAY_PUBLICATIONS_ENABLED=true` (default disabled). A separate in-cluster
 `AEP_GATEWAY_PUBLICATION_RELAY_ENABLED` opt-in projects AEP CRs; without it tasks
-stay queued. Operator observations are not read yet: conditions stay Unknown
-even for projected tasks. Use only for isolated acceptance until the full path is ready. Existing
+stay queued. The latest projected operation can expose Accepted/Applied from
+matching operator status; missing, stale or unavailable evidence stays Unknown.
+Ready remains Unknown until independent data-plane observation exists. Use only
+for isolated acceptance until the full path is ready. Existing
 `publishDataPlaneRoutes()` retains its synchronous `200` contract. The SDK
 does not fall back to it or automatically poll for readiness.
 

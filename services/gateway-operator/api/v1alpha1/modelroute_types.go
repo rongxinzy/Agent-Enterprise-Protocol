@@ -88,6 +88,13 @@ type ModelRouteSpec struct {
 
 // ModelRouteStatus carries the operator's observations for one ModelRoute.
 type ModelRouteStatus struct {
+	// ObservedPublication binds the conditions to the processed relay markers.
+	// +optional
+	ObservedPublication *PublicationReference `json:"observedPublication,omitempty"`
+	// AppliedSnapshot must match the deployment aggregate for Applied evidence.
+	// It is an opaque render digest, not an effectiveness observation.
+	// +optional
+	AppliedSnapshot string `json:"appliedSnapshot,omitempty"`
 	// ObservedGeneration is the metadata.generation the operator last
 	// reconciled.
 	// +optional

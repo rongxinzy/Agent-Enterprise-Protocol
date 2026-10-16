@@ -30,15 +30,17 @@ func conditions(items *[]metav1.Condition, generation int64, accepted, applied b
 	meta.SetStatusCondition(items, metav1.Condition{Type: gateway.ConditionReady, Status: metav1.ConditionUnknown, ObservedGeneration: generation, Reason: "DataPlaneNotObserved", Message: "Independent Higress/Envoy effectiveness observation is not available"})
 }
 
-func (r *ModelRouteReconciler) appliedStatus(ctx context.Context, route *gateway.ModelRoute, accepted, applied bool, reason, message string, inventory []gateway.AppliedResource) (ctrl.Result, error) {
+func (r *ModelRouteReconciler) appliedStatus(ctx context.Context, route *gateway.ModelRoute, accepted, applied bool, reason, message string, inventory []gateway.AppliedResource, hash string) (ctrl.Result, error) {
 	base := route.DeepCopy()
 	conditions(&route.Status.Conditions, route.Generation, accepted, applied, reason, message)
 	route.Status.ObservedGeneration = route.Generation
+	route.Status.ObservedPublication = publicationReference(route)
+	route.Status.AppliedSnapshot = hash
 	if applied {
 		route.Status.AppliedResources = inventory
 	}
 	if !reflect.DeepEqual(base.Status, route.Status) {
-		if err := r.Status().Patch(ctx, route, client.MergeFrom(base)); err != nil {
+		if err := r.Status().Patch(ctx, route, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -69,7 +71,7 @@ func (r *ModelRouteReconciler) reconcileApplied(ctx context.Context, route *gate
 		if err := r.Runtime.prune(ctx, route.UID, nil); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.appliedStatus(ctx, route, false, false, "InvalidSpec", "Route spec is invalid", nil)
+		return r.appliedStatus(ctx, route, false, false, "InvalidSpec", "Route spec is invalid", nil, "")
 	}
 	if changed, err := r.Runtime.ensureFinalizer(ctx, route); err != nil {
 		return ctrl.Result{}, err
@@ -81,7 +83,7 @@ func (r *ModelRouteReconciler) reconcileApplied(ctx context.Context, route *gate
 		if cleanupErr := r.Runtime.prune(ctx, route.UID, nil); cleanupErr != nil {
 			return ctrl.Result{}, cleanupErr
 		}
-		return r.appliedStatus(ctx, route, true, false, "InputsUnavailable", err.Error(), nil)
+		return r.appliedStatus(ctx, route, true, false, "InputsUnavailable", err.Error(), nil, "")
 	}
 	// Route admission follows the matching aggregate. A new route must never
 	// expose an ingress before its provider and native policies are installed.
@@ -89,11 +91,11 @@ func (r *ModelRouteReconciler) reconcileApplied(ctx context.Context, route *gate
 		if err := r.Runtime.prune(ctx, route.UID, nil); err != nil {
 			return ctrl.Result{}, err
 		}
-		return r.appliedStatus(ctx, route, true, false, "AggregatePending", "Matching aggregate plugins have not been applied", nil)
+		return r.appliedStatus(ctx, route, true, false, "AggregatePending", "Matching aggregate plugins have not been applied", nil, "")
 	}
 	strategy, err := gatewayrender.StrategyFor(projection.RouteFromCR(*route))
 	if err != nil {
-		return r.appliedStatus(ctx, route, false, false, "RenderFailed", "Route rendering failed", nil)
+		return r.appliedStatus(ctx, route, false, false, "RenderFailed", "Route rendering failed", nil, "")
 	}
 	name := gatewayrender.OpenAIResourceName(in.deployment.Spec.DeploymentID, route.Spec.ModelID)
 	if strategy.Bucket() == gatewayrender.BucketAnthropic {
@@ -108,9 +110,9 @@ func (r *ModelRouteReconciler) reconcileApplied(ctx context.Context, route *gate
 	}
 	inventory, err := r.Runtime.apply(ctx, route, routeResources, in.hash)
 	if err != nil {
-		return r.appliedStatus(ctx, route, true, false, "ApplyFailed", err.Error(), nil)
+		return r.appliedStatus(ctx, route, true, false, "ApplyFailed", err.Error(), nil, "")
 	}
-	return r.appliedStatus(ctx, route, true, true, "ResourcesApplied", "Route resources applied; data-plane readiness is unobserved", inventory)
+	return r.appliedStatus(ctx, route, true, true, "ResourcesApplied", "Route resources applied; data-plane readiness is unobserved", inventory, in.hash)
 }
 
 func (r *ModelPolicyReconciler) reconcileApplied(ctx context.Context, policy *gateway.ModelPolicy) (ctrl.Result, error) {

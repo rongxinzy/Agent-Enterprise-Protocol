@@ -26,11 +26,16 @@ func TestDeepCopyRoundtrip(t *testing.T) {
 			},
 		},
 		Status: ModelRouteStatus{
-			ObservedGeneration: 3,
-			Conditions:         []metav1.Condition{{Type: ConditionAccepted, Status: metav1.ConditionTrue, Reason: ReasonAccepted, Message: "ok"}},
+			ObservedPublication: &PublicationReference{Sequence: 42},
+			ObservedGeneration:  3,
+			Conditions:          []metav1.Condition{{Type: ConditionAccepted, Status: metav1.ConditionTrue, Reason: ReasonAccepted, Message: "ok"}},
 		},
 	}
 	copied := route.DeepCopy()
+	copied.Status.ObservedPublication.Sequence = 43
+	if route.Status.ObservedPublication.Sequence != 42 {
+		t.Fatal("publication reference aliased across deep copy")
+	}
 	copied.Spec.ModelID = "other"
 	copied.Spec.Upstream.Model = "other-model"
 	copied.Spec.CredentialRef.Key = "other-key"
@@ -42,6 +47,11 @@ func TestDeepCopyRoundtrip(t *testing.T) {
 	}
 	if object := route.DeepCopyObject(); object.(*ModelRoute).Spec.ModelID != "deepseek-chat" {
 		t.Fatalf("DeepCopyObject = %#v", object)
+	}
+	dc := &DeploymentConfig{Status: DeploymentConfigStatus{ObservedPublication: &PublicationReference{Sequence: 42}}}
+	dc.DeepCopy().Status.ObservedPublication.Sequence = 43
+	if dc.Status.ObservedPublication.Sequence != 42 {
+		t.Fatal("deployment publication reference aliased")
 	}
 
 	policy := &ModelPolicy{
@@ -116,6 +126,7 @@ func TestDeepCopyGuardsNilAndEmpty(t *testing.T) {
 		(&ModelRouteSpec{}).DeepCopy(), (&ModelRouteStatus{}).DeepCopy(), (&ModelRouteUpstream{}).DeepCopy(),
 		(&CredentialReference{}).DeepCopy(), (&TenantScope{}).DeepCopy(), (&PolicyTargetReference{}).DeepCopy(),
 		(&RateLimit{}).DeepCopy(), (&Quota{}).DeepCopy(), (&ModelPolicySpec{}).DeepCopy(), (&ModelPolicyStatus{}).DeepCopy(),
+		(&PublicationReference{}).DeepCopy(),
 	} {
 		if copy == nil {
 			t.Fatal("populated nested deep copy must not be nil")
@@ -131,10 +142,11 @@ func TestDeepCopyGuardsNilAndEmpty(t *testing.T) {
 	var nilQuota *Quota
 	var nilPolicySpec *ModelPolicySpec
 	var nilPolicyStatus *ModelPolicyStatus
+	var nilPublication *PublicationReference
 	if nilSpec.DeepCopy() != nil || nilRouteStatus.DeepCopy() != nil || nilUpstream.DeepCopy() != nil ||
 		nilCredential.DeepCopy() != nil || nilScope.DeepCopy() != nil || nilTarget.DeepCopy() != nil ||
 		nilRate.DeepCopy() != nil || nilQuota.DeepCopy() != nil || nilPolicySpec.DeepCopy() != nil ||
-		nilPolicyStatus.DeepCopy() != nil {
+		nilPolicyStatus.DeepCopy() != nil || nilPublication.DeepCopy() != nil {
 		t.Fatal("nil nested deep copy must be nil")
 	}
 }
