@@ -93,6 +93,15 @@ Readiness is `/readyz`, liveness `/healthz`, on port 8095. No Secret-serving HTT
 API is exposed. The network baseline permits DNS, database 5432 and API 443;
 restrict destinations and adapt ports in the reviewed environment overlay.
 
+Readiness requires a complete successful pass. A persistent ownership conflict
+or invalid Credential identity keeps `/readyz` unavailable and blocks rollout
+completion; liveness remains separate. Repair the conflicting object through
+the reviewed ownership migration or correct the source identity, then wait for
+a successful pass. Do not remove ownership checks to force a rollout through.
+Credential IDs created by the control API are lowercase UUIDs; imported data
+must preserve the same ID format. Verify kubelet access to both probe endpoints
+with the target CNI and NetworkPolicy before delivery.
+
 ## Existing ESO deployments and rollback
 
 ESO remains useful for enterprises that already have an external secret manager,
