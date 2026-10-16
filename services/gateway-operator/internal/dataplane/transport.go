@@ -38,7 +38,10 @@ func PodDump(config *rest.Config, client kubernetes.Interface) func(context.Cont
 		select {
 		case <-ctx.Done():
 			return nil, errUnsupported
-		case <-finished:
+		case err := <-finished:
+			if err != nil {
+				return nil, errUnsupported
+			}
 			return nil, errUnsupported
 		case <-ready:
 		}

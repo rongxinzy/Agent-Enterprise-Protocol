@@ -1,6 +1,5 @@
 """Fail closed when the PR CI inventory drifts from workflow triggers."""
 import json
-import re
 from pathlib import Path
 
 import yaml
