@@ -93,6 +93,9 @@ func deriveCatalogState(models []modelRecord, revision string) (dataPlaneDesired
 }
 
 func (s *Server) publishDataPlaneRoutes(response http.ResponseWriter, request *http.Request) {
+	if !s.legacyGatewayEnabled(response, request) {
+		return
+	}
 	var input dataPlanePublishRequest
 	if request.ContentLength != 0 && !decodeJSON(response, request, &input) {
 		return

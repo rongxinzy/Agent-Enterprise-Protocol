@@ -27,7 +27,32 @@ var environmentKeys = []string{
 	"AEP_TRUSTED_PROXY_CIDRS",
 	"AEP_COMPUTE_TIERS_FILE", "AEP_COMPUTE_DEFAULT_TIER", "AEP_COMPUTE_IDLE_HIBERNATE_SECONDS", "AEP_COMPUTE_CONCURRENCY_CAP",
 	"AEP_GATEWAY_PUBLICATIONS_ENABLED",
+	"AEP_GATEWAY_OPERATOR_MODE",
 	"AEP_GATEWAY_PUBLICATION_RELAY_ENABLED", "AEP_GATEWAY_PUBLICATION_NAMESPACE",
+}
+
+func TestGatewayOperatorModeKeepsFenceWhileRelayPaused(t *testing.T) {
+	for _, test := range []struct {
+		mode, publish, namespace string
+		invalid                  bool
+	}{
+		{"false", "false", "aep-system", false},
+		{"true", "true", "aep-system", false},
+		{"true", "false", "aep-system", true},
+		{"true", "true", "other", true},
+		{"invalid", "true", "aep-system", true},
+	} {
+		t.Run(test.mode+test.publish+test.namespace, func(t *testing.T) {
+			clearEnvironment(t)
+			t.Setenv("AEP_GATEWAY_OPERATOR_MODE", test.mode)
+			t.Setenv("AEP_GATEWAY_PUBLICATIONS_ENABLED", test.publish)
+			t.Setenv("AEP_GATEWAY_PUBLICATION_NAMESPACE", test.namespace)
+			cfg, err := Load()
+			if (err != nil) != test.invalid || (err == nil && cfg.UsesGatewayOperator() != (test.mode == "true")) {
+				t.Fatalf("Load mode=%v err=%v", cfg.UsesGatewayOperator(), err)
+			}
+		})
+	}
 }
 
 func TestPublicationRelayOptIn(t *testing.T) {

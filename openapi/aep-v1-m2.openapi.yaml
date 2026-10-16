@@ -295,13 +295,21 @@ paths:
     get:
       tags: [Admin Data Plane]
       operationId: getDataPlaneDesiredState
-      description: Returns the tenant-scoped model gateway state intended for reconciliation. Secret values are never returned.
+      description: >-
+        Returns the deployment-scoped gateway intent without Secret values.
+        In operator mode (AEP_GATEWAY_OPERATOR_MODE or the publication relay
+        enabled), reads the latest selected immutable publication, including
+        queued or failed intent, never unpublished drafts or legacy tables.
+        contentHash identifies the full publication, including selected limits.
+        Concurrent intent changes or unavailable dependencies return 503;
+        retry both desired-state and status and compare their contentHash.
       responses:
         '200':
           description: Current desired state, or an empty state when none has been published.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
+        '503': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
     put:
       tags: [Admin Data Plane]
       operationId: putDataPlaneDesiredState
@@ -316,6 +324,8 @@ paths:
         upstream; the remaining rendering fields (providerType, upstreamModel,
         protocol, enabled) may be overridden. Secret references identify
         external Secret material and never contain values.
+        Operator mode rejects this legacy writer with
+        503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous publications.
       requestBody:
         required: true
         content:
@@ -329,6 +339,7 @@ paths:
               schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
         '400': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
         '409': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+        '503': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/data-plane/publish:
     post:
       tags: [Admin Data Plane]
@@ -349,6 +360,8 @@ paths:
         the publish is a no-op and the stored revision and content hash are
         returned; otherwise the server assigns a content-addressed
         catalog-prefixed revision unless the request carries an explicit one.
+        Operator mode rejects this legacy writer with
+        503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous publications.
       requestBody:
         required: false
         content:
@@ -361,6 +374,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneDesiredState'}
         '400': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
+        '503': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/data-plane/publications:
     $ref: './aep-v1-data-plane-publications.openapi.yaml#/paths/~1publications'
   /aep/v1/admin/data-plane/publications/{operationId}:
@@ -369,13 +383,22 @@ paths:
     get:
       tags: [Admin Data Plane]
       operationId: getDataPlaneStatus
-      description: Returns the latest observed gateway reconciliation state and the drift between the catalog-publishable route set and the current desired routes.
+      description: >-
+        Returns gateway observations and catalog drift. In operator mode it
+        compares catalog routes against the latest selected publication and
+        exposes only matching, current operator evidence. Applied maps to
+        applying; ready requires fresh independent full-fleet Envoy evidence.
+        Missing or stale observations remain pending, never legacy ready.
+        contentHash identifies the selected full publication. Separate GET
+        responses must have matching hashes; otherwise retry both reads.
+        A concurrent publication or unavailable snapshot/catalog returns 503.
       responses:
         '200':
           description: Data plane observation.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DataPlaneStatus'}
+        '503': {$ref: './aep-v1-control-events.openapi.yaml#/components/responses/Problem'}
   /aep/v1/admin/deployment/settings:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1deployment~1settings'
   /aep/v1/admin/compute/tiers:
