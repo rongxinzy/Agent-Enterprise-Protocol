@@ -1520,6 +1520,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/data-plane/publications/{operationId}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Requires data_plane.write and publications enabled. Re-enqueues only the latest selected immutable intent, including its selected policies, under a new operation ID and monotonically increasing sequence. It does not capture current catalog or policy drafts and does not change role assignments. This is recovery replay, not rollback to an older intent. Authenticate and authorize before lookup. Unknown or cross-deployment source IDs return 404 RESOURCE_NOT_FOUND; a superseded source returns 409 PUBLICATION_NOT_LATEST. Pending reference invalidations return 409 PUBLICATION_REFERENCES_CHANGED; let the relay withdraw deleted references before replaying the resulting latest intent. A deployment-scoped Idempotency-Key binds to this source operation and the empty request object. Repeating that key returns the same new operation even after a newer intent is selected; it never queues more work. A key bound to any different publication request returns 409 IDEMPOTENCY_KEY_CONFLICT. Retention is at least 24 hours. Returning 202 confirms durable outbox acceptance only, never readiness. Kubernetes ownership/sequence fences still apply; replay does not override a CR newer than the restored database or take over foreign resources. A newer-CR/older-DB disaster requires reviewed joint recovery. */
+        post: operations["replayDataPlanePublication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/data-plane/status": {
         parameters: {
             query?: never;
@@ -6415,6 +6432,42 @@ export interface operations {
             401: components["responses"]["Problem-2"];
             403: components["responses"]["Problem-2"];
             404: components["responses"]["Problem-2"];
+            503: components["responses"]["Problem-2"];
+        };
+    };
+    replayDataPlanePublication: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Durably queued recovery operation, or the operation previously created for this key. */
+            202: {
+                headers: {
+                    Location: string;
+                    "Cache-Control": "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPlanePublication"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            401: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
             503: components["responses"]["Problem-2"];
         };
     };

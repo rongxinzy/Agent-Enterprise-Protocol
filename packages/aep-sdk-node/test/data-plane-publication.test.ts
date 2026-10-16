@@ -199,6 +199,41 @@ describe('asynchronous data-plane publication SDK contract (mock service)', () =
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  test('replays through the authenticated recovery contract and retains the key after lost acknowledgement', async () => {
+    const result = publication({operationId: '81e147fc-c3b9-49b0-8ecf-0a88386734dd'});
+    let calls = 0;
+    const {client, fetch} = await fixture((url, init) => {
+      expect(url.pathname).toBe(`${path}/source%2Foperation%3Fignored/replay`);
+      expect(url.search).toBe('');
+      expect(init.method).toBe('POST');
+      const headers = new Headers(init.headers);
+      expect(headers.get('Authorization')).toBe('Bearer access-fixture');
+      expect(headers.get('X-AEP-Protocol-Version')).toBe('1.0');
+      expect(headers.get('Idempotency-Key')).toBe('recovery-key');
+      expect(init.body).toBe('{}');
+      if (++calls === 1) throw new TypeError('lost acknowledgement');
+      return json(result, 202);
+    });
+    expect(await client.replayDataPlanePublication('source/operation?ignored', 'recovery-key')).toEqual(result);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([
+    [404, 'RESOURCE_NOT_FOUND'], [409, 'PUBLICATION_NOT_LATEST'],
+    [409, 'PUBLICATION_REFERENCES_CHANGED'], [409, 'IDEMPOTENCY_KEY_CONFLICT'], [403, 'ACCESS_DENIED'],
+  ])('preserves recovery error %i %s without publishing drafts', async (status, code) => {
+    const {client, fetch} = await fixture(() => problem(status, code));
+    await expect(client.replayDataPlanePublication(operationId, 'recovery-error')).rejects.toMatchObject({status, code});
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetch.mock.calls[0]?.[0])).pathname).toBe(`${path}/${operationId}/replay`);
+  });
+
+  test.each(['', 'contains space', 'newline\n', '汉字', 'x'.repeat(129), null, undefined, 42])('rejects unsafe recovery key %j', async key => {
+    const {client, fetch} = await fixture(() => json(publication(), 202));
+    expect(() => client.replayDataPlanePublication(operationId, key as string)).toThrow(TypeError);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   test('does not replace Unknown or failed observations with a fabricated ready result', async () => {
     const result = publication({phase: 'projected', conditions: publication().conditions.map(condition => (
       condition.type === 'Accepted' ? {...condition, status: 'False', observedRevision: 'catalog-fixture', reason: 'InvalidSpec'} : condition

@@ -923,6 +923,21 @@ export class AepClient {
     return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-plane/publications/${segment(operationId)}`});
   }
 
+  /** Replay selected immutable intent; never recapture drafts or roll back older intent. */
+  replayDataPlanePublication(operationId: string, idempotencyKey: string): Promise<DataPlanePublication> {
+    if (typeof idempotencyKey !== 'string' || idempotencyKey.length < 1 || idempotencyKey.length > 128
+      || /[^A-Za-z0-9._:-]/.test(idempotencyKey)) {
+      throw new TypeError('Idempotency-Key must contain 1-128 ASCII letters, digits or ._:-');
+    }
+    return this.#send({
+      method: HttpMethod.Post,
+      path: `/aep/v1/admin/data-plane/publications/${segment(operationId)}/replay`,
+      headers: {'Idempotency-Key': idempotencyKey},
+      body: {},
+      retry: true,
+    });
+  }
+
   getDeploymentSettings(): Promise<DeploymentSettings> {
     return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/deployment/settings'});
   }

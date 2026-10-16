@@ -379,6 +379,8 @@ paths:
     $ref: './aep-v1-data-plane-publications.openapi.yaml#/paths/~1publications'
   /aep/v1/admin/data-plane/publications/{operationId}:
     $ref: './aep-v1-data-plane-publications.openapi.yaml#/paths/~1publications~1{operationId}'
+  /aep/v1/admin/data-plane/publications/{operationId}/replay:
+    $ref: './aep-v1-data-plane-publications.openapi.yaml#/paths/~1publications~1{operationId}~1replay'
   /aep/v1/admin/data-plane/status:
     get:
       tags: [Admin Data Plane]

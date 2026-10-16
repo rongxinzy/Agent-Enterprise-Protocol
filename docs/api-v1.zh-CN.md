@@ -723,6 +723,15 @@ pending，绝不回退旧状态表。`contentHash` 标识含路由与所选限�
 | --- | --- | --- |
 | POST | `/admin/data-plane/publications` | 将目录派生路由快照持久入队，返回 `202 DataPlanePublication` 与 `Location` |
 | GET | `/admin/data-plane/publications/{operationId}` | 查询投递进度及对应版本的 operator conditions |
+| POST | `/admin/data-plane/publications/{operationId}/replay` | 将最新已选不可变意图重新入队，返回新的 operation ID |
+
+恢复重放要求 `data_plane.write`、新的 `Idempotency-Key` 与请求体 `{}`。服务复制含限额的
+已选快照，不读取草稿；未知或跨部署来源返回 404；来源不再是最新意图返回
+`409 PUBLICATION_NOT_LATEST`；引用撤下尚待处理返回 `409 PUBLICATION_REFERENCES_CHANGED`。
+同键重试先返回原先创建的新 operation，不因后续发布再创建任务；键冲突返回
+`409 IDEMPOTENCY_KEY_CONFLICT`。202 仅证明持久入队。SDK 提供
+`replayDataPlanePublication(operationId, idempotencyKey)`。此接口不能回滚历史意图，
+不能绕过 Kubernetes 所有权／序号护栏；数据库与集群序号分叉需联合恢复。
 
 两者均沿用数据平面管理的 `data_plane.write` 权限，部署范围取自认证会话。不存在、
 已清理或属于其他部署的 operation 统一返回 `404 RESOURCE_NOT_FOUND`。响应使用

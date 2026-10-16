@@ -794,6 +794,18 @@ writing and end-to-end effectiveness have passed acceptance.
 | --- | --- | --- |
 | POST | `/admin/data-plane/publications` | Durably queue a catalog-derived route snapshot; return `202 DataPlanePublication` and `Location` |
 | GET | `/admin/data-plane/publications/{operationId}` | Read delivery progress and version-specific operator conditions |
+| POST | `/admin/data-plane/publications/{operationId}/replay` | Recovery replay of the latest selected immutable intent, with a new operation ID |
+
+Recovery replay requires `data_plane.write`, a fresh `Idempotency-Key` and body
+`{}`. It copies the selected snapshot, including policies, without capturing
+drafts. Unknown/cross-deployment sources return 404; a source no longer latest
+returns `409 PUBLICATION_NOT_LATEST`; pending reference withdrawals return
+`409 PUBLICATION_REFERENCES_CHANGED`. Reusing the same key returns the same
+new operation before evaluating the latest-intent check. Conflicting key reuse
+returns `409 IDEMPOTENCY_KEY_CONFLICT`. A 202 is durable acceptance only.
+The SDK exposes `replayDataPlanePublication(operationId, idempotencyKey)`.
+This is not historical rollback or a way around Kubernetes ownership/sequence
+fences. Restore PostgreSQL and Kubernetes together when their sequence diverges.
 
 Both require `data_plane.write`, the same permission as existing data-plane
 management, and derive deployment scope from the authenticated session. A
