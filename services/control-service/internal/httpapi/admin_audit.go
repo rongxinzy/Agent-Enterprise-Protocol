@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +25,78 @@ import (
 // auditPayloadLimit bounds how much of a mutating request body is retained in
 // the audit trail; a runaway payload must not become an audit row.
 const auditPayloadLimit = 64 << 10
+
+// auditOperationDefaultWindow is the default operations-log window: the audit
+// page loads the last seven days unless the caller narrows the range.
+const auditOperationDefaultWindow = 7 * 24 * time.Hour
+
+// auditFailureWindow collapses an identical repeated failing administrative
+// write into a single row: a client stuck retrying a denied or rejected call
+// must not turn one policy decision into unbounded audit traffic. Distinct
+// attempts (another actor, target, error code or body) are always recorded, and
+// the first occurrence of any attempt is never suppressed.
+const auditFailureWindow = 30 * time.Second
+
+// auditFailureKeys bounds the limiter's memory. Past it the limiter stops
+// caching new fingerprints rather than evicting live ones, so a burst can slow
+// the limiter down but can never make the trail drop an attempt.
+const auditFailureKeys = 4096
+
+// auditFailureLimiter is a process-local window limiter. It is intentionally
+// not shared state: replicas each admit their own share of a repeat, which
+// bounds the row rate per process without coordinating through the database the
+// limiter is protecting.
+type auditFailureLimiter struct {
+	mu      sync.Mutex
+	window  time.Duration
+	maxKeys int
+	seen    map[string]time.Time
+}
+
+func newAuditFailureLimiter(window time.Duration) *auditFailureLimiter {
+	return &auditFailureLimiter{window: window, maxKeys: auditFailureKeys, seen: make(map[string]time.Time)}
+}
+
+// allow reports whether this attempt may be written, and remembers it.
+func (limiter *auditFailureLimiter) allow(fingerprint string, now time.Time) bool {
+	if limiter == nil || limiter.window <= 0 {
+		return true
+	}
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	if last, seen := limiter.seen[fingerprint]; seen && now.Sub(last) < limiter.window {
+		return false
+	}
+	if len(limiter.seen) >= limiter.maxKeys {
+		for candidate, at := range limiter.seen {
+			if now.Sub(at) >= limiter.window {
+				delete(limiter.seen, candidate)
+			}
+		}
+		if len(limiter.seen) >= limiter.maxKeys {
+			// Every entry is still live. Record the attempt and skip caching,
+			// so saturated memory degrades the limiter, never the evidence.
+			return true
+		}
+	}
+	limiter.seen[fingerprint] = now
+	return true
+}
+
+// auditFailureFingerprint identifies one attempt: the same actor repeating the
+// same operation with the same body and the same error is one decision, while a
+// different body is a different attempt worth its own row. The request
+// identifier is deliberately absent: every attempt carries a fresh one, so
+// including it would defeat the throttle entirely.
+func auditFailureFingerprint(deploymentID, actor, action, resourceType, resourceID, code string, attempt []byte) string {
+	digest := sha256.New()
+	for _, part := range []string{deploymentID, actor, action, resourceType, resourceID, code} {
+		_, _ = digest.Write([]byte(part))
+		_, _ = digest.Write([]byte{0})
+	}
+	_, _ = digest.Write(attempt)
+	return hex.EncodeToString(digest.Sum(nil))
+}
 
 // auditSafeKeys is a fail-closed allowlist: only these request fields keep
 // their value, and every other key is redacted. A denylist would leak any
@@ -88,6 +163,15 @@ var auditSafeKeys = map[string]struct{}{
 	"displaytitle":           {},
 	"reasoningcompatibility": {},
 	"skillid":                {},
+	// A failed operation is audited with the row shape
+	// {"requestId","status","request"}. Keeping requestId readable ties the
+	// retained evidence back to the request that produced it, and keeping
+	// request readable preserves the body that was rejected. "request" is
+	// recursed like any other allowlisted value, so unknown keys inside it are
+	// still withheld and an endpoint nested in it is still sanitized; only the
+	// envelope key is trusted, not its contents.
+	"requestid": {},
+	"request":   {},
 }
 
 // auditChanges documents a mutation's before/after state, masked by the
@@ -111,14 +195,35 @@ func auditCreation(after map[string]any) map[string]any {
 	return masked
 }
 
-// stripURLQuery drops a URL's query and fragment before it is audited: an
-// endpoint may carry an inline credential in its query string.
-func stripURLQuery(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || (parsed.RawQuery == "" && parsed.Fragment == "") {
+// auditRedactedValue replaces a value the audit trail withholds.
+const auditRedactedValue = "[redacted]"
+
+// auditURLKeys names the allowlisted fields whose value is a URL that can carry
+// an inline credential. Every one of them is redacted by redactAuditURL, which
+// is the single implementation shared by the write path (maskAuditValue), the
+// mutation snapshots and the read path.
+var auditURLKeys = map[string]struct{}{
+	"endpoint": {},
+}
+
+// redactAuditURL keeps the part of a URL that locates the endpoint — scheme,
+// host, port and path — and drops the parts that can carry an inline
+// credential: userinfo, query and fragment. A URL-shaped value that cannot be
+// parsed is withheld entirely, because an unparsed URL's structure is unknown
+// and the original text must not reach the audit trail.
+func redactAuditURL(raw string) string {
+	if !strings.Contains(raw, "//") && !strings.ContainsAny(raw, "?#@") {
+		// No URL syntax that could hide a credential (a bare host:port, for
+		// example); net/url rejects such a value as a path containing a colon,
+		// and dropping it would lose the only locating information there is.
 		return raw
 	}
-	parsed.RawQuery, parsed.Fragment = "", ""
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return auditRedactedValue
+	}
+	parsed.User = nil
+	parsed.RawQuery, parsed.ForceQuery, parsed.Fragment = "", false, ""
 	return parsed.String()
 }
 
@@ -174,11 +279,44 @@ func markAdminAuditRecorded(request *http.Request) {
 	}
 }
 
-// auditAdminWrites records every successful administrative write that its
-// handler did not record itself. It is deliberately best-effort: an audit
-// failure never turns a completed operation into an error response, but it is
-// logged so the gap is visible. Handlers that write the audit in their own
-// transaction take precedence.
+// auditProblem carries the stable problem code a request was rejected with to
+// the audit middleware, so a failure row names the reason without buffering the
+// response body. Only the first code wins: it is the one the client was told.
+type auditProblem struct{ code string }
+
+const auditProblemKey contextKey = "aep-audit-problem"
+
+// noteAuditProblem records the problem code a response reports. It is a no-op
+// unless an administrator-write audit is capturing this request.
+func noteAuditProblem(request *http.Request, code string) {
+	problem, ok := request.Context().Value(auditProblemKey).(*auditProblem)
+	if !ok || problem.code != "" {
+		return
+	}
+	problem.code = code
+}
+
+// requestIDFrom returns the request identifier stamped on every response, which
+// correlates an audit row with the request log and the client-visible problem.
+func requestIDFrom(request *http.Request) string {
+	if id, ok := request.Context().Value(contextKey("request-id")).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// auditAdminWrites records administrative writes: the successes a handler did
+// not record itself, and the write attempts that were rejected or failed. It is
+// deliberately best-effort: an audit failure never turns a completed operation
+// into an error response (and never upgrades a 400 into a 500), but it is logged
+// so the gap is visible. Handlers that write the audit in their own transaction
+// take precedence and are not duplicated here.
+//
+// Scope: authenticated, non-read requests that reach the administrative surface.
+// Requests refused before authentication (no token, invalid token, a session
+// that is not bound to a user, a temporary password that must be changed first)
+// carry no authenticated actor and so cannot be attributed here; those belong to
+// the authentication audit. Reads (GET/HEAD/OPTIONS) are not audited.
 func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
@@ -199,14 +337,18 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 		}
 		recorder := &auditStatusWriter{ResponseWriter: response, status: http.StatusOK}
 		recorded := &auditRecorded{}
-		next.ServeHTTP(recorder, request.WithContext(context.WithValue(request.Context(), auditRecordedKey, recorded)))
+		problem := &auditProblem{}
+		ctx := context.WithValue(request.Context(), auditRecordedKey, recorded)
+		ctx = context.WithValue(ctx, auditProblemKey, problem)
+		next.ServeHTTP(recorder, request.WithContext(ctx))
 		if recorded.done {
 			return
 		}
-		if recorder.status < 200 || recorder.status >= 300 {
+		if s.app.Database() == nil {
 			return
 		}
-		if s.app.Database() == nil {
+		if recorder.status < 200 || recorder.status >= 300 {
+			s.recordAdminAuditFailure(request, recorder.status, problem.code, payload)
 			return
 		}
 		claims := claimsFrom(request)
@@ -223,6 +365,51 @@ func (s *Server) auditAdminWrites(next http.Handler) http.Handler {
 			slog.Error("administrative audit failed", "error", err, "action", action, "resource", resourceType)
 		}
 	})
+}
+
+// recordAdminAuditFailure persists one rejected or failed administrative write
+// attempt: who tried, against what, the stable error code, the request
+// identifier, and the masked body that was attempted. The payload keeps the
+// wrapped shape documented for failure rows so an attempted field can never be
+// confused with the audit metadata around it.
+func (s *Server) recordAdminAuditFailure(request *http.Request, status int, code string, attempted any) {
+	claims := claimsFrom(request)
+	if claims.DeploymentID == "" {
+		// Nothing to attribute the attempt to: the row would be invisible to
+		// every deployment-scoped audit query anyway.
+		return
+	}
+	action, resourceType, resourceID := adminAuditTarget(request.Method, request.URL.Path)
+	if code == "" {
+		code = fmt.Sprintf("HTTP_%d", status)
+	}
+	var attempt []byte
+	if attempted != nil {
+		if raw, err := json.Marshal(attempted); err == nil {
+			attempt = raw
+		}
+	}
+	fingerprint := auditFailureFingerprint(claims.DeploymentID, claims.Subject, action, resourceType, resourceID, code, attempt)
+	if !s.auditFailures.allow(fingerprint, time.Now()) {
+		slog.Warn("administrative failure audit suppressed as a repeat",
+			"action", action, "resource", resourceType, "code", code, "actor", claims.Subject,
+			"request_id", requestIDFrom(request))
+		return
+	}
+	entry := map[string]any{"requestId": requestIDFrom(request), "status": status}
+	if attempted != nil {
+		entry["request"] = attempted
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		slog.Error("administrative failure audit payload was not encodable", "error", err, "action", action, "resource", resourceType)
+		return
+	}
+	if _, err := s.app.Database().Exec(request.Context(),
+		`INSERT INTO admin_audit_events (deployment_id,actor_user_id,action,resource_type,resource_id,result,reason,payload) VALUES ($1,$2,$3,$4,$5,'failure',$6,$7)`,
+		claims.DeploymentID, nullableString(claims.Subject), action, resourceType, nullableString(resourceID), code, encoded); err != nil {
+		slog.Error("administrative failure audit failed", "error", err, "action", action, "resource", resourceType)
+	}
 }
 
 func nullableString(value string) any {
@@ -248,8 +435,18 @@ func maskAuditValue(value any) any {
 	case map[string]any:
 		masked := make(map[string]any, len(typed))
 		for key, item := range typed {
-			if _, safe := auditSafeKeys[strings.ToLower(key)]; !safe {
-				masked[key] = "[redacted]"
+			lowercase := strings.ToLower(key)
+			// A URL field is redacted rather than echoed, and rather than
+			// withheld: the endpoint's host and path are what an auditor needs
+			// to identify the target.
+			if _, urlField := auditURLKeys[lowercase]; urlField {
+				if text, ok := item.(string); ok {
+					masked[key] = redactAuditURL(text)
+					continue
+				}
+			}
+			if _, safe := auditSafeKeys[lowercase]; !safe {
+				masked[key] = auditRedactedValue
 				continue
 			}
 			masked[key] = maskAuditValue(item)
@@ -398,12 +595,14 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 		{"resourceType", "resource_type"},
 		{"resourceId", "resource_id"},
 		{"actorUserId", "actor_user_id"},
+		{"result", "result"},
 	} {
 		if value := strings.TrimSpace(filters.Get(filter.name)); value != "" {
 			args = append(args, value)
 			conditions = append(conditions, fmt.Sprintf("%s=$%d", filter.column, len(args)))
 		}
 	}
+	var after, before *time.Time
 	for _, filter := range []struct {
 		name string
 		op   string
@@ -422,6 +621,19 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 		}
 		args = append(args, parsed)
 		conditions = append(conditions, fmt.Sprintf("created_at %s $%d", filter.op, len(args)))
+		if filter.op == ">=" {
+			after = &parsed
+		} else {
+			before = &parsed
+		}
+	}
+	// Without an explicit bound the operations log defaults to the last seven
+	// days; the effective window is echoed back so the console can state it.
+	if after == nil && before == nil {
+		defaultAfter := time.Now().UTC().Add(-auditOperationDefaultWindow)
+		after = &defaultAfter
+		args = append(args, defaultAfter)
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)))
 	}
 	if raw := strings.TrimSpace(filters.Get("cursor")); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
@@ -464,7 +676,12 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 			break
 		}
 		var changes any
-		_ = json.Unmarshal(payload, &changes)
+		if err := json.Unmarshal(payload, &changes); err == nil {
+			// Rows written before endpoint redaction existed still hold the
+			// original URL, so the same masking runs on the way out: a reader
+			// must not receive a credential that reached the table earlier.
+			changes = maskAuditValue(changes)
+		}
 		items = append(items, map[string]any{
 			"cursor":       strconv.FormatInt(cursor, 10),
 			"actorUserId":  nullablePGText(actorUserID),
@@ -482,5 +699,8 @@ func (s *Server) listAdminAudit(response http.ResponseWriter, request *http.Requ
 		databaseFailure(response, request, err)
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
+	writeJSON(response, http.StatusOK, map[string]any{
+		"items": items, "nextCursor": nextCursor,
+		"timeRange": map[string]any{"after": after, "before": before},
+	})
 }

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -42,6 +43,10 @@ func (s *Server) listUsers(response http.ResponseWriter, request *http.Request) 
 	writeJSON(response, http.StatusOK, map[string]any{"items": result, "nextCursor": nextCursor})
 }
 
+// createUser creates a platform account with its role and team bindings. The
+// account and the audit row recording who created it share one transaction (see
+// createUserWithAudit): an account that cannot be audited is not created, so a
+// privileged grant can never outlive the evidence that explains it.
 func (s *Server) createUser(response http.ResponseWriter, request *http.Request) {
 	var input createUserRequest
 	if !decodeJSON(response, request, &input) {
@@ -61,24 +66,33 @@ func (s *Server) createUser(response http.ResponseWriter, request *http.Request)
 	if !s.authorizeTeamGrant(response, request, input.TeamIDs) {
 		return
 	}
-	user, err := s.insertUser(request, input)
+	params, err := buildCreateUserParams(input)
 	if err != nil {
-		if errors.Is(err, auth.ErrPasswordEdgeWhitespace) {
-			writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must not start or end with whitespace.")
-			return
-		}
-		if errors.Is(err, auth.ErrPasswordPolicy) {
-			writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 6 to 1024 characters.")
-			return
-		}
-		if isUniqueViolation(err) {
-			writeProblem(response, request, http.StatusConflict, "USER_ALREADY_EXISTS", "The username already exists.")
-			return
-		}
-		databaseFailure(response, request, err)
+		writeCreateUserFailure(response, request, err)
 		return
 	}
+	user, err := s.createUserWithAudit(request, claimsFrom(request).DeploymentID, params)
+	if err != nil {
+		writeCreateUserFailure(response, request, err)
+		return
+	}
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusCreated, publicUser(user))
+}
+
+// writeCreateUserFailure maps the failures a single account creation can raise
+// onto the stable problem codes its callers rely on.
+func writeCreateUserFailure(response http.ResponseWriter, request *http.Request, err error) {
+	switch {
+	case errors.Is(err, auth.ErrPasswordEdgeWhitespace):
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must not start or end with whitespace.")
+	case errors.Is(err, auth.ErrPasswordPolicy):
+		writeProblem(response, request, http.StatusBadRequest, "PASSWORD_POLICY_VIOLATION", "Temporary passwords must contain 6 to 1024 characters.")
+	case isUniqueViolation(err):
+		writeProblem(response, request, http.StatusConflict, "USER_ALREADY_EXISTS", "The username already exists.")
+	default:
+		databaseFailure(response, request, err)
+	}
 }
 
 func (s *Server) importUsers(response http.ResponseWriter, request *http.Request) {
@@ -127,7 +141,12 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 		// data noise, so trim instead of rejecting the row. A whitespace-only
 		// password falls through to the default below.
 		item.TemporaryPassword = auth.TrimPassword(item.TemporaryPassword)
-		_, err := s.insertUser(request, createUserRequest{DeploymentID: input.DeploymentID, Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: item.TeamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
+		params, err := buildCreateUserParams(createUserRequest{Username: item.Username, DisplayName: item.DisplayName, Email: item.Email, TemporaryPassword: item.TemporaryPassword, TeamIDs: item.TeamIDs, RoleIDs: item.RoleIDs, RequirePasswordChange: item.RequirePasswordChange})
+		if err == nil {
+			// Each imported row is created -- and audited -- on its own so a
+			// rejected row cannot take a committed one down with it.
+			_, err = s.createUserWithAudit(request, input.DeploymentID, params)
+		}
 		if err != nil {
 			code := "USER_IMPORT_FAILED"
 			detail := "The account could not be created."
@@ -143,6 +162,23 @@ func (s *Server) importUsers(response http.ResponseWriter, request *http.Request
 		}
 		created++
 	}
+	// A batch that created nothing did not do what its caller asked. Reporting
+	// 200 for it let a fully rejected import read as applied, so the whole
+	// batch is refused as one unprocessable request and the per-row reasons
+	// ride along as problem extensions.
+	if created == 0 {
+		// Nothing was created, so there is no success to audit: marking the
+		// request as recorded keeps the collection-level fallback from writing
+		// a row about an import that changed nothing.
+		markAdminAuditRecorded(request)
+		writeProblemWithExtensions(response, request, http.StatusUnprocessableEntity, "USER_IMPORT_REJECTED",
+			fmt.Sprintf("None of the %d users could be created.", len(errorsResult)),
+			map[string]any{"created": created, "rejected": len(errorsResult), "errors": errorsResult})
+		return
+	}
+	// Every account this request created already carries its own audit row, so
+	// the collection-level fallback would only duplicate the report.
+	markAdminAuditRecorded(request)
 	writeJSON(response, http.StatusOK, map[string]any{"created": created, "rejected": len(errorsResult), "errors": errorsResult})
 }
 
@@ -169,26 +205,51 @@ func userMembershipProblem(roleIDs, teamIDs []string) (string, string) {
 	return "", ""
 }
 
-func (s *Server) insertUser(request *http.Request, input createUserRequest) (repository.UserRecord, error) {
+// buildCreateUserParams validates a create or import request and prepares the
+// row parameters, applying the default temporary password. Hashing happens here
+// rather than inside the write so the account transaction is not held open
+// while the password is derived.
+func buildCreateUserParams(input createUserRequest) (repository.CreateUserParams, error) {
 	if input.TemporaryPassword == "" {
 		input.TemporaryPassword = auth.DefaultTemporaryPassword
 	}
 	if auth.EdgeWhitespace(input.TemporaryPassword) {
-		return repository.UserRecord{}, auth.ErrPasswordEdgeWhitespace
+		return repository.CreateUserParams{}, auth.ErrPasswordEdgeWhitespace
 	}
 	hash, err := auth.HashPassword(input.TemporaryPassword)
 	if err != nil {
-		return repository.UserRecord{}, err
+		return repository.CreateUserParams{}, err
 	}
 	requireChange := true
 	if input.RequirePasswordChange != nil {
 		requireChange = *input.RequirePasswordChange
 	}
-	return s.app.Store.Deployment(input.DeploymentID).CreateUser(request.Context(), repository.CreateUserParams{
+	return repository.CreateUserParams{
 		ID: uuid.NewString(), Username: input.Username, DisplayName: input.DisplayName,
 		Email: input.Email, PasswordHash: hash, RequirePasswordChange: requireChange,
 		RoleIDs: input.RoleIDs, TeamIDs: input.TeamIDs,
+	}, nil
+}
+
+// createUserWithAudit writes the account, its role and team bindings and its
+// administrative audit row in one transaction. An account that cannot be
+// audited is not created: reporting a durable account without the record of who
+// created it would leave the audit trail unable to explain a privileged grant.
+// The audit row commits or rolls back with the bindings it describes.
+func (s *Server) createUserWithAudit(request *http.Request, deploymentID string, params repository.CreateUserParams) (repository.UserRecord, error) {
+	var user repository.UserRecord
+	err := s.app.Store.Deployment(deploymentID).WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		created, err := tx.CreateUser(request.Context(), params)
+		if err != nil {
+			return err
+		}
+		user = created
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claimsFrom(request).Subject, Action: "create", ResourceType: "user", ResourceID: created.ID, Result: "success",
+			Changes: auditUserCreation(created),
+		})
 	})
+	return user, err
 }
 
 func (s *Server) updateUser(response http.ResponseWriter, request *http.Request) {
@@ -386,4 +447,16 @@ func auditUserSnapshot(record repository.UserRecord) map[string]any {
 		email = *record.Email
 	}
 	return map[string]any{"displayName": record.DisplayName, "email": email, "status": record.Status}
+}
+
+// auditUserCreation documents the account a create established: its identity
+// plus the role and team grants that make it privileged. The snapshot goes
+// through the same fail-closed allowlist as every other audit document, so the
+// temporary password cannot reach the row.
+func auditUserCreation(record repository.UserRecord) map[string]any {
+	snapshot := auditUserSnapshot(record)
+	snapshot["username"] = record.Username
+	snapshot["roleIds"] = record.RoleIDs
+	snapshot["teamIds"] = record.TeamIDs
+	return auditCreation(snapshot)
 }
