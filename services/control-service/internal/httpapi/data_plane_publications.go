@@ -152,18 +152,20 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 		return
 	}
 	var input publicationRequest
-	for key, raw := range fields {
-		if key == "includeGatewayLimits" {
-			if string(raw) == "null" || json.Unmarshal(raw, &input.IncludeGatewayLimits) != nil {
-				writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The gateway limits selection must be a boolean.")
-				return
-			}
-			continue
-		}
-		if key != "revision" {
+	// Reject unknown fields before validating values, independent of map order.
+	for key := range fields {
+		if key != "revision" && key != "includeGatewayLimits" {
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The publication request contains an unknown field.")
 			return
 		}
+	}
+	if raw, exists := fields["includeGatewayLimits"]; exists {
+		if string(raw) == "null" || json.Unmarshal(raw, &input.IncludeGatewayLimits) != nil {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_REQUEST", "The gateway limits selection must be a boolean.")
+			return
+		}
+	}
+	if raw, exists := fields["revision"]; exists {
 		var revision string
 		if string(raw) == "null" || json.Unmarshal(raw, &revision) != nil {
 			writeProblem(response, request, http.StatusUnprocessableEntity, "INVALID_DATA_PLANE_STATE", "The revision must be a non-empty string.")
@@ -189,8 +191,19 @@ func (s *Server) createDataPlanePublication(response http.ResponseWriter, reques
 		if !valid {
 			return repository.PublicationSnapshot{}, errPublicationSnapshot
 		}
+		modelsInSnapshot := make(map[string]bool, len(state.Routes))
+		for _, route := range state.Routes {
+			modelsInSnapshot[route.ModelID] = true
+		}
 		for _, item := range dereferenceLimits(limits) {
 			if !gatewaypolicy.ValidID(item.ID) || item.Version < 1 || !item.Configuration.Valid() {
+				return repository.PublicationSnapshot{}, errPublicationSnapshot
+			}
+			model := item.Configuration.ModelID
+			if item.Configuration.ScopeType == "model" {
+				model = item.Configuration.ScopeID
+			}
+			if item.Configuration.Enabled && model != nil && !modelsInSnapshot[*model] {
 				return repository.PublicationSnapshot{}, errPublicationSnapshot
 			}
 		}
