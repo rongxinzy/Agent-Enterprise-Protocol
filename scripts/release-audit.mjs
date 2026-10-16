@@ -160,7 +160,10 @@ assert(securityWorkflow.includes("github/codeql-action/analyze@v3"), "security w
 assert(workflow.includes("npm run license:boundary:check"), "CI does not run the License boundary audit");
 assert(!workflow.includes("test:e2e:offline-license"), "CI must not run the local-only offline License E2E");
 assert(workflow.includes("npm run sdk:package:check"), "CI does not test the installable SDK package");
-assert(workflow.includes("go test -race ./..."), "CI does not run the Go race detector");
+assert(
+  /go test[^\n`]*\.\/\.\.\.[^\n`]*-race|go test[^\n`]*-race[^\n`]*\.\/\.\.\./.test(workflow),
+  "CI does not run the Go race detector",
+);
 assert(workflow.includes("release-gate:"), "CI does not aggregate the release gate");
 assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
 assert(workflow.includes("backup-restore:"), "CI does not run the backup and restore rehearsal");
