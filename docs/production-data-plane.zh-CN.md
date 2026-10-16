@@ -1,5 +1,9 @@
 # 生产数据面部署
 
+新 CRD/Operator 链路使用 opt-in 的 `deploy/kubernetes/operator`；切换、旧写入者撤权及
+DB/CR 联合恢复见[网关 Operator 切换手册](gateway-operator-cutover.zh-CN.md)。下文旧默认
+清单仍用于未迁移部署，不能与新 writer 同时启用；旧 ready 语义也不能作为新链路的数据面证据。
+
 `deploy/kubernetes/production` 是 AEP control-service、gateway-authorizer 和 gateway-reconciler 的生产部署基线，目标是已通过 Helm 部署 Higress 的 Kubernetes 集群。`higress-standalone` 仅用于本地 Compose 和 CI 夹具。
 
 Admin Console 录入的供应商凭据也可通过可选的[凭据直接交付组件](credential-publisher.zh-CN.md)

@@ -101,6 +101,11 @@ requires routes to be removed first. Invalid references retain a finalizer
 until repaired, while route resources are withdrawn.
 
 This stage does not adopt legacy reconciler resources or switch deployments.
+
+The opt-in deployment composition and explicit writer retirement are now in
+`deploy/kubernetes/operator`; sensitive Envoy observation is separately selected
+with `deploy/kubernetes/operator-observation`. See the
+[handover and recovery runbook](gateway-operator-cutover.md) before applying.
 Reviewed ownership handover, narrow RBAC revocation, outbox, DB-reference
 validation and data-plane observation remain cutover prerequisites.
 

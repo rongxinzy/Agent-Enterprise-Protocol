@@ -1,0 +1,14 @@
+# Delivery overlay must set the same deployment ID as the control service and
+# review native Redis settings. No model routes/policies or private values here.
+apiVersion: gateway.aep.zhiyuan.io/v1alpha1
+kind: DeploymentConfig
+metadata: {name: deployment, namespace: aep-system}
+spec:
+  deploymentId: deployment-enterprise-001
+  nativeGateway:
+    enabled: true
+    redisService: redis.higress-system.svc.cluster.local
+    redisPort: 6379
+    redisDatabase: 0
+    redisPasswordRef: {name: aep-native-gateway, key: redis-password}
+    quotaAdminCredentialRef: {name: aep-native-gateway, key: quota-admin-key}
