@@ -1,32 +1,6 @@
 {
-  "eventDrivenGate": true,
-  "orchestrator": {
-    "name": "CI validation",
-    "path": ".github/workflows/m0.yml",
-    "callers": {"codeql":".github/workflows/codeql.yml","security":".github/workflows/security.yml","gate-tests":".github/workflows/devops-gate-tests.yml"},
-    "localNeeds": ["release-gate","dependency-audit"],
-    "needs": ["release-gate","dependency-audit","codeql","security","gate-tests"]
-  },
   "workflows": [
     { "name": "CI validation", "path": ".github/workflows/m0.yml" }
-  ],
-  "legacyWorkflows": [
-    {
-      "name": "CodeQL",
-      "path": ".github/workflows/codeql.yml"
-    },
-    {
-      "name": "AEP",
-      "path": ".github/workflows/m0.yml"
-    },
-    {
-      "name": "AEP security baseline",
-      "path": ".github/workflows/security.yml"
-    },
-    {
-      "name": "DevOps gate tests",
-      "path": ".github/workflows/devops-gate-tests.yml"
-    }
   ],
   "e2e": {
     "compose": [

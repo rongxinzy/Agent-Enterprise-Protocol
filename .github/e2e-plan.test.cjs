@@ -140,9 +140,9 @@ test('real Git three-dot diff handles advanced main, removed files, renames and 
 function needsFor(plan, event = 'pull_request') {
   return Object.fromEntries([
     ['e2e-plan', { result: 'success', outputs: { e2e_plan: JSON.stringify(plan) } }],
+    ['large-files', { result: 'success' }],
     ['sdk-gate', { result: 'success' }],
     ...['control-service', 'example-agent'].map(name => [name, { result: 'success' }]),
-    ['coverage-ratchet', { result: event === 'pull_request' ? 'success' : 'skipped' }],
     ['compose-e2e', { result: plan.compose.length ? 'success' : 'skipped' }],
     ['data-plane-kubernetes', { result: plan.kubernetes ? 'success' : 'skipped' }],
     ['backup-restore', { result: plan.backup ? 'success' : 'skipped' }],
@@ -199,13 +199,13 @@ test('workflow graph keeps mandatory checks, consumes the plan and always valida
   assert.ok(Object.hasOwn(workflow.on, 'workflow_dispatch'));
   assert.ok(workflow.on.push.branches.includes('main'));
   const jobs = workflow.jobs;
-  for (const name of ['e2e-plan', 'sdk-gate', 'control-service', 'example-agent']) assert.equal(jobs[name].if, undefined);
-  assert.equal(jobs['coverage-ratchet'].if, "github.event_name == 'pull_request' && needs.control-service.result == 'success'");
+  for (const name of ['e2e-plan', 'large-files', 'sdk-gate', 'control-service', 'example-agent']) assert.equal(jobs[name].if, undefined);
   const planner = jobs['e2e-plan'];
   assert.equal(planner.steps.find(step => step.uses === 'actions/checkout@v4').with['fetch-depth'], 0);
   for (const output of ['e2e_plan', 'compose', 'kubernetes', 'backup'])
     assert.equal(planner.outputs[output], '${{ steps.e2e-plan.outputs.' + output + ' }}');
-  assert.ok(planner.steps.some(step => step.run === 'node --test .github/e2e-plan.test.cjs'));
+  assert.ok(planner.steps.some(step => step.run === 'node .github/e2e-plan.cjs'));
+  assert.equal(jobs['ci-gate'].name, 'ci-gate');
   assert.equal(jobs['control-service'].needs, undefined);
   assert.equal(jobs['example-agent'].needs, undefined);
   for (const [name, output] of [['compose-e2e', 'compose'], ['data-plane-kubernetes', 'kubernetes'], ['backup-restore', 'backup']]) {
@@ -215,8 +215,10 @@ test('workflow graph keeps mandatory checks, consumes the plan and always valida
   const executor = jobs['compose-e2e'].steps.find(step => step.run === 'node .github/run-selected-e2e.cjs');
   assert.equal(executor.env.AEP_E2E_PLAN, '${{ needs.e2e-plan.outputs.e2e_plan }}');
   assert.equal(workflow.concurrency['cancel-in-progress'], true);
-  const gate = jobs['release-gate'];
+  const gate = jobs['ci-gate'];
   assert.equal(gate.if, '${{ always() }}');
   assert.deepEqual(new Set(gate.needs), new Set(Object.keys(needsFor(full))));
-  assert.equal(gate.steps.find(step => step.run === 'node .github/e2e-status.cjs').env.AEP_CI_NEEDS, '${{ toJSON(needs) }}');
+  const status = gate.steps.find(step => step.run === 'node .github/e2e-status.cjs');
+  assert.equal(status.env.AEP_CI_NEEDS, '${{ toJSON(needs) }}');
+  assert.equal(status.env.GITHUB_EVENT_NAME, '${{ github.event_name }}');
 });

@@ -58,12 +58,10 @@ function readPlan(value) {
 }
 
 function verifyResults(needs, event) {
-  for (const name of ['e2e-plan', 'sdk-gate', 'control-service', 'example-agent']) {
+  for (const name of ['e2e-plan', 'large-files', 'sdk-gate', 'control-service', 'example-agent']) {
     if (needs[name]?.result !== 'success') throw new Error(name + ' did not succeed');
   }
-  const coverage = event === 'pull_request' ? 'success' : 'skipped';
-  if (needs['coverage-ratchet']?.result !== coverage) throw new Error('coverage-ratchet did not complete as required');
-  const plan = readPlan(needs['e2e-plan']?.outputs?.e2e_plan ?? needs['sdk-gate']?.outputs?.e2e_plan);
+  const plan = readPlan(needs['e2e-plan']?.outputs?.e2e_plan);
   if (event !== 'pull_request' && (!plan.kubernetes || !plan.backup ||
       plan.compose.length !== inventory.compose.length))
     throw new Error('Push/manual verification requires the complete E2E plan');

@@ -1,11 +1,9 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
-  workflow_call:
   schedule:
-    - cron: '23 3 * * 1'
+    - cron: '23 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,5 +25,4 @@ jobs:
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
         with:
-          # Match the existing main baselines even when called by m0.yml.
           category: .github/workflows/codeql.yml:analyze/language:${{ matrix.language }}

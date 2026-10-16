@@ -15,6 +15,7 @@
     "deadcode:go": "go run golang.org/x/tools/cmd/deadcode@v0.52.0 -test ./...",
     "deadcode:js": "knip --no-progress",
     "deadcode:py": "python3 -m ruff check --select F401,F841 .github scripts/merge-coverprofile.py && python3 -m vulture .github scripts/merge-coverprofile.py --min-confidence 80",
+    "check:large-files": "node scripts/check-large-files.mjs",
     "compose:down": "docker compose -f deploy/compose/compose.yaml down",
     "compose:gateway:down": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml down",
     "compose:gateway:up": "docker compose -f deploy/compose/compose.yaml -f deploy/compose/gateway.yaml up -d --build",
