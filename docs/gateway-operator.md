@@ -51,6 +51,16 @@ required before routing Console writes to CRs.
 Direct CR writes are an administrator-only local acceptance/break-glass path,
 not a new unauthenticated product configuration entry point.
 
+The operator fences partial relay delivery: every route and policy (including
+disabled tombstones) must carry the same complete publication tuple and
+deployment owner label as the aggregate before rendering begins. A child-first,
+missing, foreign or mixed marker makes inputs unavailable; route controllers
+withdraw owned ingress resources until the complete set converges. The last
+aggregate plugins remain installed. This is fail-closed eventual convergence,
+not an atomic xDS rollout or a guarantee of zero request interruption. Direct
+administrator CR mode remains available only for an entirely unmarked set;
+mixing direct and relay writers is rejected. Relay RBAC must remain exclusive.
+
 ## Formal apply runtime
 
 The project metadata was scaffolded with kubebuilder v4.9.0, go/v4, project
@@ -60,6 +70,9 @@ and Kubernetes versions; no nested module or Dockerfile is introduced.
 The Manager watches CRs in `aep-system`. ModelRoute owns only per-route
 Ingress/EnvoyFilter objects; DeploymentConfig owns aggregate plugins and the
 quota-admin route. Routes wait for the aggregate's matching input digest.
+Disabled routes have no serving ingress, so their model-scoped native rules
+are omitted in both publication and direct-management modes. The ModelPolicy
+is retained; re-enabling the route restores the same rule configuration.
 On invalid/missing inputs they withdraw owned routing objects rather than
 opening an anonymous or unconstrained route. Ready remains Unknown until
 independent effectiveness observation is added in the integration stage.

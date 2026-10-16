@@ -47,6 +47,23 @@ func TestNativePolicyProjection(t *testing.T) {
 	}
 }
 
+func TestDisabledRouteOmitsAndRestoresItsPolicyWithoutPublicationMarkers(t *testing.T) {
+	route := gateway.ModelRoute{Spec: gateway.ModelRouteSpec{ModelID: "alpha", Enabled: false}}
+	policy := gateway.ModelPolicy{ObjectMeta: metav1.ObjectMeta{Name: "retained"}, Spec: gateway.ModelPolicySpec{
+		TargetRef: gateway.PolicyTargetReference{Kind: "ModelRoute", Name: "route"},
+		Quota:     &gateway.Quota{Maximum: 37, IntervalSeconds: 60, Unit: "tokens"},
+	}}
+	publication, err := Limits([]gateway.ModelPolicy{policy}, map[string]gateway.ModelRoute{"route": route})
+	if err != nil || len(publication.Items) != 0 {
+		t.Fatalf("disabled route retained enforcement: %+v %v", publication, err)
+	}
+	route.Spec.Enabled = true
+	publication, err = Limits([]gateway.ModelPolicy{policy}, map[string]gateway.ModelRoute{"route": route})
+	if err != nil || len(publication.Items) != 1 || publication.Items[0].Configuration.Maximum != 37 || publication.Items[0].Configuration.Kind != "tokens" {
+		t.Fatalf("re-enabled route lost its original policy: %+v %v", publication, err)
+	}
+}
+
 func TestOwnershipPartition(t *testing.T) {
 	input := gatewayrender.Input{Deployment: "local", Revision: "cr", Routes: []gatewayrender.Route{{ModelID: "alpha", Protocol: "openai-compatible", Enabled: true, Endpoint: "https://provider.example/v1", UpstreamModel: "chat"}}}
 	_, all, _, err := gatewayrender.Render(input, nil)
