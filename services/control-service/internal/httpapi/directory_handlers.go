@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,6 +17,27 @@ import (
 )
 
 // ---- Digital employee directory ----
+
+// errUserDisabled marks a named target user whose account may not act. A
+// disabled account keeps its stored bindings, so every entry point that
+// derives authority for a named user must refuse it instead of handing out
+// the stale grants.
+var errUserDisabled = errors.New("the user account is disabled")
+
+// requireActiveUser resolves the deployment user a request names and refuses
+// accounts that are not active. The users.status column is constrained to
+// ('active','disabled') by the schema, so anything other than "active" means
+// the account may no longer act.
+func (s *Server) requireActiveUser(ctx context.Context, deploymentID, userID string) error {
+	user, err := s.app.Store.Deployment(deploymentID).GetUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.Status != "active" {
+		return errUserDisabled
+	}
+	return nil
+}
 
 func (s *Server) createAgent(response http.ResponseWriter, request *http.Request) {
 	var input struct {
@@ -124,6 +146,17 @@ func (s *Server) createAgent(response http.ResponseWriter, request *http.Request
 	// would carry a wider org subtree than the requester it serves.
 	var snapshot *app.RetrievalContext
 	if input.ScopeFrom != "" {
+		switch err := s.requireActiveUser(request.Context(), claimsFrom(request).DeploymentID, input.ScopeFrom); {
+		case errors.Is(err, errUserDisabled):
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE_SOURCE", "The scope source user is disabled.")
+			return
+		case errors.Is(err, repository.ErrNotFound):
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE_SOURCE", "The scope source user does not exist.")
+			return
+		case err != nil:
+			databaseFailure(response, request, err)
+			return
+		}
 		resolved, err := s.app.DataScopeContext(request.Context(), claimsFrom(request).DeploymentID, input.ScopeFrom)
 		if err != nil || resolved.PrincipalID == "" {
 			writeProblem(response, request, http.StatusBadRequest, "INVALID_SCOPE_SOURCE", "The scope source user does not exist.")
@@ -779,8 +812,11 @@ func (s *Server) dataScopeContext(response http.ResponseWriter, request *http.Re
 		writeProblem(response, request, http.StatusBadRequest, "USER_REQUIRED", "The userId query parameter is required.")
 		return
 	}
-	if _, err := s.app.Store.Deployment(claimsFrom(request).DeploymentID).GetUser(request.Context(), userID); errors.Is(err, repository.ErrNotFound) {
+	if err := s.requireActiveUser(request.Context(), claimsFrom(request).DeploymentID, userID); errors.Is(err, repository.ErrNotFound) {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The user was not found.")
+		return
+	} else if errors.Is(err, errUserDisabled) {
+		writeProblem(response, request, http.StatusForbidden, "USER_DISABLED", "The user account is disabled.")
 		return
 	} else if err != nil {
 		databaseFailure(response, request, err)
