@@ -517,7 +517,7 @@ Administrative endpoints require an administrator identity.
 | PATCH | `/admin/users/{userId}` | Enable, disable, or update an account |
 | POST | `/admin/users/{userId}/reset-password` | Set a new temporary password |
 
-Every user must have at least one role and one team when created or imported. Passwords must contain 6 to 1024 characters. Temporary passwords must not start or end with whitespace: create and reset reject it (`PASSWORD_POLICY_VIOLATION`), while import trims it because imported rows come from exports and spreadsheets. When create or import omits the temporary password (or import trims it to empty), the server assigns the default `123456`. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
+Every user must have at least one role and one team when created or imported. Passwords must contain 6 to 1024 characters. Temporary passwords must not start or end with whitespace: create and reset reject it (`PASSWORD_POLICY_VIOLATION`), while import trims it because imported rows come from exports and spreadsheets. An import that rejects every row is a failure, not an empty success: it answers `422 USER_IMPORT_REJECTED` with the per-row reasons attached to the problem document, because a batch that created no account did not apply. A batch that created at least one account stays `200` and reports `created` and `rejected` counts. When create or import omits the temporary password (or import trims it to empty), the server assigns the default `123456`. Every account carries a `kind` label (`human` or `agent`); the platform user listing returns human accounts only, and digital employees (`kind=agent`) are listed by the agent directory. The current-identity response labels the authenticated principal the same way. Resetting the caller's own password with `requirePasswordChange=true` is rejected with `409 SELF_PASSWORD_RESET_RESTRICTED`; use the self-service password change endpoint or pass `requirePasswordChange=false` instead.
 
 ### RBAC and sessions
 
@@ -722,6 +722,10 @@ Read responses never return `value`. Rotation accepts a new `value`.
 | DELETE | `/admin/model-assignments/{assignmentId}` | Remove an assignment |
 
 Administrative `credentialId` MUST NOT appear in the Agent model catalog.
+
+An `endpoint` MUST NOT embed credentials: a URL carrying userinfo is rejected
+with 400 `INVALID_MODEL`, and secrets belong in `credentialId`. See
+[Administrative audit](#administrative-audit) for how an endpoint is recorded.
 
 ### Licenses
 
@@ -965,9 +969,41 @@ and a nullable `nextCursor`.
 Each record includes the actor, action, resource, result, timestamp, and
 `changes`: masked before/after snapshots or a fallback request payload, or
 `null` when no payload was recorded. Account-creation payloads retain the
-username; passwords and unknown fields remain redacted. This read-only endpoint
-does not expose credential values. Records follow `AEP_AUDIT_RETENTION`, as
-described in the [production runtime guide](production-runtime.md).
+username; passwords and unknown fields remain redacted. A URL field — a model
+`endpoint` — keeps only its scheme, host, port, and path: the query, fragment,
+and userinfo are removed both when the record is written and when it is read
+back, so an inline credential never reaches the trail or a reader. This
+read-only endpoint does not expose credential values. Records follow
+`AEP_AUDIT_RETENTION`, as described in the [production runtime
+guide](production-runtime.md).
+
+Creating an account — and each account a bulk import creates — writes its audit
+row in the same transaction as the account and its role/team bindings. An
+account whose audit row cannot be written is not created: a single create fails
+with `INTERNAL_ERROR`, and an import reports that row in `errors` and keeps the
+rows that were audited. An import that ends up creating no account answers
+`422 USER_IMPORT_REJECTED` and writes no success audit row, so the trail never
+records an import that changed nothing.
+
+Write attempts that were refused or failed are recorded too, with
+`result: failure` and the stable problem code in `reason`. Coverage is every
+authenticated non-read request (POST, PUT, PATCH, DELETE) that reaches the
+administrative surface, including a request refused by the permission check:
+the audit wraps that check, so a denial is captured with the acting user and the
+attempted target. Requests refused before authentication (no bearer token,
+invalid or revoked token, a temporary password that must be changed first) carry
+no authenticated actor and stay the authentication audit's concern; reads are not
+audited. The middleware stays best-effort: an audit write that fails is logged
+and never changes the response the caller already received.
+
+A failure record's `changes` document carries the request identifier and status
+next to the masked attempted body, for example
+`{"requestId":"0198...","status":400,"request":{"displayName":"..."}}`. The
+masking rules are the same as for a successful write. Two rules keep this
+bounded: a handler that committed its own audit row inside the transaction is
+never duplicated by the fallback, and an identical repeated failure (same actor,
+target, error code and masked body) is written once per 30 seconds per replica,
+while a different attempt is always recorded.
 
 ## 11. Errors and Retry
 
