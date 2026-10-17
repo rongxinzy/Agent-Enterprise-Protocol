@@ -24,14 +24,14 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.26.9
           cache: true
@@ -177,25 +177,25 @@ jobs:
           cache-from: type=gha,scope=aep-gateway-reconciler
           cache-to: type=gha,mode=max,scope=aep-gateway-reconciler
       - name: Attest control-service image
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-control-service
           subject-digest: ${{ steps.push_control_service.outputs.digest }}
           push-to-registry: true
       - name: Attest agent-control image
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-agent-control
           subject-digest: ${{ steps.push_agent_control.outputs.digest }}
           push-to-registry: true
       - name: Attest gateway-authorizer image
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-gateway-authorizer
           subject-digest: ${{ steps.push_gateway_authorizer.outputs.digest }}
           push-to-registry: true
       - name: Attest gateway-reconciler image
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-gateway-reconciler
           subject-digest: ${{ steps.push_gateway_reconciler.outputs.digest }}
