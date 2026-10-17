@@ -12,6 +12,7 @@ const commit = '0123456789abcdef0123456789abcdef01234567';
 const expected = [
   'aep-foundation.source.sbom.cdx.json',
   'aep-control-service.image.sbom.cdx.json',
+  'aep-agent-control.image.sbom.cdx.json',
   'aep-gateway-authorizer.image.sbom.cdx.json',
   'aep-gateway-reconciler.image.sbom.cdx.json',
 ];

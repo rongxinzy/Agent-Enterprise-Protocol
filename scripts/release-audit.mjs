@@ -188,6 +188,12 @@ assert(!foundationReleaseWorkflow.includes("tar -C release/offline"), "cloud rel
 assert(foundationReleaseWorkflow.includes("aep-control-service.image.sbom.cdx.json"), "foundation release workflow omits the control-service image SBOM");
 assert(foundationReleaseWorkflow.includes("aep-gateway-authorizer.image.sbom.cdx.json"), "foundation release workflow omits the gateway-authorizer image SBOM");
 assert(foundationReleaseWorkflow.includes("aep-gateway-reconciler.image.sbom.cdx.json"), "foundation release workflow omits the gateway-reconciler image SBOM");
+assert(foundationReleaseWorkflow.includes("aep-agent-control.image.sbom.cdx.json"), "foundation release workflow omits the agent-control image SBOM");
+for (const image of ["aep-control-service", "aep-agent-control", "aep-gateway-authorizer", "aep-gateway-reconciler"]) {
+  assert(foundationReleaseWorkflow.includes(`/${image}:\${{ env.AEP_RELEASE_VERSION }}`), `foundation release workflow does not push ${image} to the registry`);
+}
+assert(foundationReleaseWorkflow.includes("provenance: mode=max"), "foundation release images must carry SLSA provenance");
+assert(foundationReleaseWorkflow.includes("actions/attest-build-provenance@"), "foundation release images must get an artifact attestation");
 assert(foundationReleaseWorkflow.includes("release:artifacts:manifest"), "foundation release workflow does not publish a release manifest and checksums");
 assert(!foundationReleaseWorkflow.toLowerCase().includes("private.key"), "foundation release workflow must not reference a private signing key");
 const offlineBundle = await readText("scripts/offline-bundle.mjs");

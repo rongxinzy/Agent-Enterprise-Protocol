@@ -6,11 +6,23 @@ on:
       - aep-v*
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: aep-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AEP_IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,6 +46,7 @@ jobs:
           echo "AEP_CONTROL_SERVICE_IMAGE=aep-control-service:$version" >> "$GITHUB_ENV"
           echo "AEP_GATEWAY_AUTHORIZER_IMAGE=aep-gateway-authorizer:$version" >> "$GITHUB_ENV"
           echo "AEP_GATEWAY_RECONCILER_IMAGE=aep-gateway-reconciler:$version" >> "$GITHUB_ENV"
+          echo "AEP_AGENT_CONTROL_IMAGE=aep-agent-control:$version" >> "$GITHUB_ENV"
       - run: npm run release:check
       - name: Prepare release artifact directory
         run: mkdir -p release/artifacts
@@ -49,7 +62,8 @@ jobs:
           docker compose \
             -f deploy/compose/compose.yaml \
             -f deploy/compose/gateway.yaml \
-            build control-service gateway-authorizer gateway-reconciler
+            --profile agent-split \
+            build control-service agent-control gateway-authorizer gateway-reconciler
       - name: Validate unsigned offline bundle signing inputs
         run: |
           npm run offline:bundle -- --output-dir release/offline-base --profile base
@@ -77,6 +91,137 @@ jobs:
           format: cyclonedx-json
           output-file: release/artifacts/aep-gateway-reconciler.image.sbom.cdx.json
           upload-artifact: false
+      - name: Generate agent-control image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.AEP_AGENT_CONTROL_IMAGE }}
+          format: cyclonedx-json
+          output-file: release/artifacts/aep-agent-control.image.sbom.cdx.json
+          upload-artifact: false
+      # All gates above passed: publish the service images to ghcr. Each image
+      # is rebuilt by buildx (sharing the layer cache) so the registry copy
+      # carries an in-toto SBOM and SLSA provenance, then gets a GitHub
+      # artifact attestation. Tags are immutable release versions only.
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push control-service image
+        id: push_control_service
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/control-service/Dockerfile
+          build-args: GOPROXY=https://proxy.golang.org,direct
+          push: true
+          tags: ${{ env.AEP_IMAGE_REGISTRY }}/aep-control-service:${{ env.AEP_RELEASE_VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.AEP_RELEASE_VERSION }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=aep-control-service
+          cache-to: type=gha,mode=max,scope=aep-control-service
+      - name: Push agent-control image
+        id: push_agent_control
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/control-service/Dockerfile.agent-control
+          build-args: GOPROXY=https://proxy.golang.org,direct
+          push: true
+          tags: ${{ env.AEP_IMAGE_REGISTRY }}/aep-agent-control:${{ env.AEP_RELEASE_VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.AEP_RELEASE_VERSION }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=aep-agent-control
+          cache-to: type=gha,mode=max,scope=aep-agent-control
+      - name: Push gateway-authorizer image
+        id: push_gateway_authorizer
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/gateway-authorizer/Dockerfile
+          build-args: GOPROXY=https://proxy.golang.org,direct
+          push: true
+          tags: ${{ env.AEP_IMAGE_REGISTRY }}/aep-gateway-authorizer:${{ env.AEP_RELEASE_VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.AEP_RELEASE_VERSION }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=aep-gateway-authorizer
+          cache-to: type=gha,mode=max,scope=aep-gateway-authorizer
+      - name: Push gateway-reconciler image
+        id: push_gateway_reconciler
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/gateway-reconciler/Dockerfile
+          build-args: GOPROXY=https://proxy.golang.org,direct
+          push: true
+          tags: ${{ env.AEP_IMAGE_REGISTRY }}/aep-gateway-reconciler:${{ env.AEP_RELEASE_VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.AEP_RELEASE_VERSION }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=aep-gateway-reconciler
+          cache-to: type=gha,mode=max,scope=aep-gateway-reconciler
+      - name: Attest control-service image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-control-service
+          subject-digest: ${{ steps.push_control_service.outputs.digest }}
+          push-to-registry: true
+      - name: Attest agent-control image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-agent-control
+          subject-digest: ${{ steps.push_agent_control.outputs.digest }}
+          push-to-registry: true
+      - name: Attest gateway-authorizer image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-gateway-authorizer
+          subject-digest: ${{ steps.push_gateway_authorizer.outputs.digest }}
+          push-to-registry: true
+      - name: Attest gateway-reconciler image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.AEP_IMAGE_REGISTRY }}/aep-gateway-reconciler
+          subject-digest: ${{ steps.push_gateway_reconciler.outputs.digest }}
+          push-to-registry: true
+      - name: Record image digests
+        env:
+          CONTROL_SERVICE_DIGEST: ${{ steps.push_control_service.outputs.digest }}
+          AGENT_CONTROL_DIGEST: ${{ steps.push_agent_control.outputs.digest }}
+          GATEWAY_AUTHORIZER_DIGEST: ${{ steps.push_gateway_authorizer.outputs.digest }}
+          GATEWAY_RECONCILER_DIGEST: ${{ steps.push_gateway_reconciler.outputs.digest }}
+        run: |
+          {
+            echo "## AEP ${AEP_RELEASE_VERSION} images"
+            echo
+            echo "| Image | Digest | Pin |"
+            echo "| --- | --- | --- |"
+            for pair in "aep-control-service=$CONTROL_SERVICE_DIGEST" \
+                        "aep-agent-control=$AGENT_CONTROL_DIGEST" \
+                        "aep-gateway-authorizer=$GATEWAY_AUTHORIZER_DIGEST" \
+                        "aep-gateway-reconciler=$GATEWAY_RECONCILER_DIGEST"; do
+              name="${pair%%=*}"
+              digest="${pair#*=}"
+              test -n "$digest"
+              echo "| \`$name\` | \`$digest\` | \`$AEP_IMAGE_REGISTRY/$name:$AEP_RELEASE_VERSION@$digest\` |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Generate release manifest and checksums
         run: npm run release:artifacts:manifest -- --version "$AEP_RELEASE_VERSION" --commit "$GITHUB_SHA"
       - name: Publish foundation release artifacts
