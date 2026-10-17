@@ -14,6 +14,7 @@ if (!commit || !/^[a-f0-9]{40}$/i.test(commit)) throw new Error('--commit must b
 const expected = [
   'aep-foundation.source.sbom.cdx.json',
   'aep-control-service.image.sbom.cdx.json',
+  'aep-agent-control.image.sbom.cdx.json',
   'aep-gateway-authorizer.image.sbom.cdx.json',
   'aep-gateway-reconciler.image.sbom.cdx.json',
 ];
