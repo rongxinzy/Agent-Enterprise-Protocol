@@ -172,7 +172,10 @@ assert(workflow.includes("ci-gate:"), "CI does not publish the aggregate ci-gate
 assert(packageDocument.scripts?.["deadcode:js"] === "knip --no-progress", "deadcode:js script is not wired");
 assert(packageDocument.scripts?.["deadcode:go"]?.includes("deadcode@v0.52.0"), "deadcode:go script is not wired");
 assert(packageDocument.scripts?.["deadcode:py"]?.includes("ruff"), "deadcode:py script is not wired");
-assert(packageDocument.scripts?.["check:large-files"] === "node scripts/check-large-files.mjs", "check:large-files script is not wired");
+// #326 folded the tracked-file byte cap into check:source-lines (check-large-files.mjs was removed).
+const sourceLinesCheck = await readText("scripts/check-source-lines.mjs");
+assert(sourceLinesCheck.includes("AEP_LARGE_FILE_MAX_BYTES") && sourceLinesCheck.includes("byte limit"), "check:source-lines no longer enforces the tracked large-file byte cap");
+assert(workflow.includes("npm run check:source-lines"), "CI does not run the source line and large-file gate");
 assert(workflow.includes("data-plane-kubernetes:"), "CI does not run the real Kubernetes data-plane gate");
 assert(workflow.includes("backup-restore:"), "CI does not run the backup and restore rehearsal");
 assert(packageDocument.scripts?.["test:backup-security"] === "node tests/backup-security.mjs", "backup security unit gate is not wired");
