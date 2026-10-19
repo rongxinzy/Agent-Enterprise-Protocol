@@ -1,0 +1,123 @@
+# Authentication-result reuse: component feasibility
+
+[简体中文](auth-result-cache-feasibility.zh-CN.md) | English
+
+Scope: the component gate in [#337](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/337), before implementing [effective access publication](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338). This is an opt-in experiment, not a replacement for the AEP authorizer or a deployment profile.
+
+The target reuses a result bound to the deployment, principal, session/workload, model scope, policy version and validity. Repeated matching requests with a valid warm result must avoid full authentication and authorization evaluation. Replica-local cold misses, including a replica's first request, restart or eviction, may perform full evaluation again; deployment-wide exactly-once authentication is not required. A publication affecting Alice must invalidate Alice without flushing Bob. Expiry, session withdrawal and recovery retain explicit freshness boundaries; rate/quota accounting still executes independently.
+
+## Components examined
+
+| Component | Evidence | Boundary |
+|---|---|---|
+| Higress v2.2.4 `ext-auth` | [Configuration](https://github.com/alibaba/higress/blob/v2.2.4/plugins/wasm-go/extensions/ext-auth/config/config.go) | No complete decision cache or targeted invalidation setting in the inspected configuration |
+| Higress v2.2.4 `response-cache` | [Cache handling](https://github.com/higress-group/higress/blob/58666ac985cee19a0a9a353421c63cead6d0cb47/plugins/wasm-go/extensions/response-cache/core.go), [Redis provider](https://github.com/higress-group/higress/blob/58666ac985cee19a0a9a353421c63cead6d0cb47/plugins/wasm-go/extensions/response-cache/cache/redis.go) | Redis stores response-body values, not complete authorization responses; not a transparent shared Authorino cache |
+| Higress v2.2.4 `key-auth` (C++) | [Configuration and lookup](https://github.com/higress-group/higress/blob/58666ac985cee19a0a9a353421c63cead6d0cb47/plugins/wasm-cpp/extensions/key_auth/plugin.cc), [types](https://github.com/higress-group/higress/blob/58666ac985cee19a0a9a353421c63cead6d0cb47/plugins/wasm-cpp/extensions/key_auth/plugin.h) | Can associate a configured credential with a Consumer and enforce a route allow-set; does not itself implement AEP session expiry or publication freshness |
+| Envoy v1.36.4 `jwt_authn` | [JWT cache schema](https://github.com/envoyproxy/envoy/blob/v1.36.4/api/envoy/extensions/filters/http/jwt_authn/v3/config.proto) | Valid-JWT caching is not a complete AEP authorization result |
+| Envoy v1.36.4 `ext_authz` | [Filter schema](https://github.com/envoyproxy/envoy/blob/v1.36.4/api/envoy/extensions/filters/http/ext_authz/v3/ext_authz.proto) | No full-result/subject-invalidation setting in the inspected schema; route-cache invalidation concerns routing |
+| Authorino v0.26.4 | [Evaluator cache](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/cache.go), [identity cache](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/identity.go), [reconciler](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/controllers/auth_config_controller.go) | Supports evaluator-result caching and CR watches; must test invalidation granularity and cached-token expiry |
+
+This is a bounded comparison, not proof that every available mature component lacks a capability. Authorino is a candidate; adopting it is not part of this change.
+
+## Reproduce
+
+From the repository root, with Node 24, Docker, `kubectl`, Kind, registry/raw-GitHub access, and enough capacity for a disposable one-node cluster:
+
+```bash
+node tests/e2e/auth-result-cache.mjs
+```
+
+Optional environment variables:
+
+- `KIND`: Kind executable path.
+- `AEP_AUTH_CACHE_NODE_IMAGE`: Kind node image compatible with the installed Kind version.
+- `AEP_AUTH_CACHE_REPORT`: output JSON report path, outside the repository if desired.
+- `AEP_AUTH_CACHE_CRD_PATH`: local copy of the pinned upstream `install/crd/authorino.kuadrant.io_authconfigs.yaml`. The same SHA-256 integrity check applies; use this when raw GitHub is unavailable. LF and CRLF normalize to the same digest.
+- `AEP_AUTH_CACHE_GATEWAY=1`: also run the shared-host native Envoy `ext_authz` experiment described below; requires access to Docker Hub from the test cluster.
+- `AEP_AUTH_CACHE_JWT=1`: also run JWT compatibility and negative boundaries with the real AEP Ed25519 issuer; requires the repository's Go toolchain. Disposable keys remain in the helper's memory and tokens in captured runner memory; neither is logged or stored in the report. Only the public JWKS is uploaded to the fixture.
+
+The probe creates a randomly named `aep-auth-cache-*` cluster with its own kubeconfig, installs the pinned upstream CRD there, and runs two independent Authorino replicas plus a disposable RFC 7662 introspection fixture. The replicas use native `--enable-leader-election` with a namespace-scoped Lease role for the status updater; both still reconcile and serve authorization. It does not use an existing cluster, change the active kubeconfig, call a real model, read AEP credentials, or publish provider keys. The supporting Node image is exported for `linux/amd64` before Kind import; Docker must support `docker image save --platform`. Authorino is pulled by the test cluster using its pinned digest to avoid dangling OCI-index import references in Docker/containerd. The cluster and temporary archive are removed on normal success or failure. If the process is forcibly terminated, remove only the owned `aep-auth-cache-*` cluster identified in Docker/Kind; never delete unrelated clusters.
+
+The Authorino image is pinned to digest `sha256:67273e9a2619ba832e710cf3177aee2615c0c41ec49198ec17a9882aeac5d010`; source and CRD are pinned to `8232753b58bec6994f5d914d239cc410fcf5173f`. The CRD LF SHA-256 is `ccaf7e85c8e678d42dc87050f79e1cd2bd92fefe1a75511577c3f3513fb0b15c`. The Node mock contains disposable fixture credentials only and is not an AEP introspection API implementation.
+
+Kind is only the local test harness. It is not a new product component or a production prerequisite; production Kubernetes/k3s deployment remains independent of this script.
+
+## What the probe distinguishes
+
+- Identity reuse: introspection invocation counts and a cached identity serial remain unchanged on matching requests.
+- Authorization reuse: a timestamp generated by the native OPA evaluator remains unchanged. Observing only the identity witness would not prove decision reuse.
+- Shared configuration: updating one shared `AuthConfig` reconstructs its evaluator caches; the probe deliberately records unrelated-subject invalidation as a **target failure**, not a passing architecture.
+- Separate principal configurations: update Alice's model or withdraw sessions, check both replicas directly, and require Bob's identity/decision witnesses to stay unchanged. Cross-subject and unknown-credential requests must fail.
+- Restart: separately restart a follower and the status leader, identify leadership through the native Lease and ready Pod, and wait for a new holder after leader restart. Each recovered replica denies revoked access. Bob performs one cold authentication, changes both identity and authorization witnesses, then reuses both for three requests; the surviving replica retains Bob's cached result and the Bob introspection increment is exactly one per restart.
+- Expiry: a long evaluator TTL alone must reproduce the expired-result limitation. An uncached native OPA expiration guard must reject the expired cached result without another introspection request. This cheap validity guard is distinct from repeating full authentication or role expansion.
+
+The report marks `adoptionGate: false` deliberately. `completed: true` means all component observations were reproduced, including known target failures; it does not mean the complete product architecture passed. `cleaned: true` confirms that the probe's cluster is no longer listed by Kind.
+
+## Observed on 2026-10-19
+
+The isolated Kind run reproduced all eight observations above with two serving replicas. Matching requests retained both identity and authorization witnesses, and only two introspections per principal were performed while warming the two independent caches. Separate principal CR updates, session withdrawal, cross-principal rejection and replica restart behaved as asserted. The report recorded `completed: true`, `adoptionGate: false` and `cleaned: true`.
+
+Two limitations were reproduced: a shared CR also invalidates unrelated principals, and a cached introspection result outlives its token unless a separate validity guard runs. The native uncached expiration guard rejected that expired result without another introspection. Initial AuthConfig status writes also trigger cache reconstruction; the probe waits for Ready and initialization settling before measuring steady-state reuse. Ready alone is not a multi-replica data-plane acknowledgement: each replica is checked directly after publication.
+
+These observations support further integration research, not component adoption. In particular, the probe cannot yet bind per-principal configurations at the shared product gateway, acknowledge all serving replicas through the publication chain, or bound stale permissions after a watch outage.
+
+## Shared-host experiment
+
+The optional extension uses Envoy v1.36.4 pinned to image digest `sha256:08acc53db6f4ac46e77e36b203c5254b4a2549869314bb54cf97aab81baa4566`. Two proxy Pods accept the same `gateway.probe.invalid/v1/chat/completions` entry, with each mapped to a particular Authorino replica so neither serving path can be missed by load balancing. This is a deterministic fixture, not a proposed production availability topology or a Higress plugin compatibility test.
+
+Native per-route `ext_authz` context extensions select the principal AuthConfig from an **untrusted routing hint**. That hint cannot grant access: the selected config must bind the introspected principal and deployment, and caches are keyed by the entire bearer credential. The test tries Alice's credential against Bob's selector and forges identity headers. Actual AEP JWT verification, employee identity and product API/SDK changes remain outside this fixture.
+
+The cached decision carries the complete allowed model range, independent of the prompt. A subsequent native OPA guard checks the actual JSON request body's model against that range and the credential scope, plus expiry and a fixed publication validity cap. These are per-request range/validity checks; they do not repeat full principal/role resolution. It also tests an out-of-range body with a forged allowed-model header, a prompt change retaining both witnesses, an Alice-only publication with Bob retained, and expiry when renewal stops. The cap demonstrates rejection of a stale grant, not actual failure detection or renewal by the AEP publication system. The fixture's simple JSON parsing does not establish the product's duplicate-key, streaming or oversized-request contract.
+
+The opt-in extension was run on 2026-10-19: all four additional checks passed on both serving paths. Together with the original eight observations, the report recorded twelve checks, `completed: true`, `adoptionGate: false` and `cleaned: true`. The unknown-selector case returns Authorino's native 404 denial, not an allow or an upstream response. This confirms the fixture's request/config association and bounds enforcement; it does not solve the process-local cache and product integration gates below.
+
+## Shared-state follow-up: source evidence
+
+This follow-up is source inspection, not another runtime acceptance run. Higress v2.2.4 resolves to commit `58666ac985cee19a0a9a353421c63cead6d0cb47`; links in this section use that immutable revision. The twelve-observation report above is unchanged.
+
+Authorino's pinned [cache constructor](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/cache.go) unconditionally creates a Freecache memory store. Its [startup configuration](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/main.go) exposes evaluator cache size, not a selectable Redis backend. The presence of a generic cache library dependency is not a supported shared-cache configuration.
+
+Higress `response-cache` does have a native Redis provider, but cannot transparently supply the missing complete-result store:
+
+- Its [configuration](https://github.com/higress-group/higress/blob/58666ac985cee19a0a9a353421c63cead6d0cb47/plugins/wasm-go/extensions/response-cache/config/config.go) selects a header or body field as the key and a response-body value as the cached value. It does not serialize the original HTTP authorization status and headers.
+- `cacheResponse` skips empty values. `processCacheHit` returns status 200 with the cached body, content type and cache-status header. Authorino's [raw HTTP success path](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/service/auth.go) supplies authorization response headers with an empty body. Those headers cannot be recovered from this body-only cache. The existing probe uses gRPC `ext_authz`, which this HTTP response cache also does not transparently wrap.
+- The inspected request-miss and Redis provider paths use a read followed by ordinary `SET`/`SETEX`; they do not expose distributed cold-miss coalescing or principal/version invalidation. Adding Redis alone therefore does not establish a deployment-wide first-authentication guarantee.
+- The cache code logs keys at Info on hits and misses. Using an unmodified bearer credential as the key would disclose it in those logs. The existing disposable Authorino fixture's key choice must not be copied into this plugin. A safe opaque key alone would still not repair the response, invalidation or concurrency semantics.
+
+The inspected C++ `key-auth` plugin offers another useful primitive: its common-key path uses a credential-to-Consumer hash lookup and an allow-set for the selected route. That is cheap request association and a flattened range check, not role expansion or a business DB query. It is a possible consumer of precomputed grants, not evidence that the complete AEP lifecycle is already implemented. Its inspected configuration and request path contain no session-expiry or publication-validity check. Removing a credential could revoke it after configuration propagation, but publication outage would not itself expire that configuration. A route allow-set also does not establish that the actual request body's model is bound to that route. Per-session binding, safe credential delivery, trusted-header handling, stable quota identity and all-serving-replica acknowledgement remain integration work. No key-auth runtime acceptance is claimed here.
+
+Consequently neither native Redis response caching nor a bare Consumer allow-set closes the current adoption gate. Keep the existing authorizer path. Do not add an AEP cache/executor to make the experiment pass or treat projected API keys as tokenless employee identity. A supported complete-result mechanism must still demonstrate protected keys, expiry, principal/version invalidation, concurrent first requests and recovery across replicas before integration is selected. This bounded inspection does not rule out all other components or compositions.
+
+## Accepted cold-cache boundary
+
+The clarified requirement on 2026-10-19 permits replica-local cold-cache full evaluation: the first request reaching another replica, restart or eviction may repeat authentication. Valid warm results must still reuse both identity and authorization evaluation, and unrelated principal publications must not clear them. This removes deployment-wide exactly-once authentication as an adoption prerequisite; it does not approve this component for product use or relax revocation, expiry, trusted identity or publication freshness.
+
+The report states `cacheSemantics.scope: replica`, `coldMiss: full-evaluation` and `warmHit: identity-and-authorization-reuse`. Its follower and leader restart assertions each check one new Bob introspection, three subsequent full-result reuses, the surviving replica's unchanged witnesses, and rejection of Alice's revoked session. Eviction is an accepted cold-miss boundary, not an independently induced runtime observation in this probe. Arbitrary periodic flushing or broad invalidation after unrelated publications is not justified by the exception.
+
+A follow-up run without status leader election reproduced Bob's identity and authorization witnesses changing on the surviving replica during another replica's restart. The assertion was retained. The pinned [native startup configuration](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/main.go) has separate reconciliation and status managers: `--enable-leader-election` elects only the status updater, leaving both serving replicas' configuration watches active. The fixture enables that upstream option and grants namespaced Lease access. Leadership and CR Ready are not acknowledgements from all serving replicas; request witnesses still check both paths.
+
+The complete follow-up run on 2026-10-19 finished thirteen observations, including the two deliberately reproduced target limitations and both restart roles. Each restart recorded one cold Bob authentication and three warm reuses; the other replica retained both witnesses, and Alice's revoked access remained denied. Native status leadership changed only in the leader-restart case. The optional shared-host checks also completed. The report recorded `completed: true`, `adoptionGate: false` and `cleaned: true`; no existing cluster or default traffic path changed. A transient Envoy registry pull failure recovered through kubelet retries within the test's existing timeout, without changing the pinned image or checks.
+
+## Native AEP JWT compatibility gate
+
+The optional JWT probe invokes [the actual AEP signer](../services/control-service/internal/auth/tokens.go) from a [testdata helper](../services/control-service/testdata/auth-cache-tokens/main.go). Positive model/access token pairs use `IssueWithDeploymentSession`; negative variants use the same disposable key and `auth.Claims` structure, except the deliberately foreign signature. It binds `session_id`, not the opaque-introspection fixture's `sid`.
+
+Authorino's pinned [JWT implementation](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/identity/jwt.go) uses different verifier construction for direct JWKS and OIDC discovery. The probe checks both without changing AEP's Ed25519 algorithm. A disposable discovery fixture declares EdDSA; it is not a new AEP endpoint or a production adapter. AEP currently publishes `/.well-known/jwks.json`, not this discovery document, so a successful discovery experiment alone cannot establish drop-in integration.
+
+Native OPA configuration explicitly binds issuer, audience, token use, deployment, subject, active session and password-change state. It caches the complete allowed model range and keeps actual request scope, required expiry and not-before checks uncached. Negative cases include a foreign signature, access JWT, wrong issuer/audience/use/deployment/subject/session, missing session, wrong scope, required password change, expired/missing expiry and future not-before. A valid cached short-lived token must first succeed and then be denied after expiry. Session withdrawal and a disabled-principal projection must deny an already warm model JWT on both replicas.
+
+An unchanged JWT `jti` is only a binding witness; it does not prove skipped signature evaluation. The native authorization timestamp establishes decision reuse; identity-cache mechanics remain source evidence here. JWKS fetch caching must not be reported as complete identity or authorization caching. Disabled-principal/session configurations are component fixtures, not business API/outbox acceptance or license validation.
+
+The full run on 2026-10-19 with both optional extensions completed nineteen observations, including three deliberately reproduced limitations. Direct JWKS rejected the genuine AEP model token with 401 on both replicas. Discovery declaring EdDSA accepted it, retained the allowed-range decision timestamp across three repeats on each replica, and rejected fourteen invalid-token cases plus an out-of-range model request without disturbing valid warm decisions. A warmed short token was denied after expiry, and published session withdrawal and principal disablement denied the valid model token on both replicas. The report recorded `completed: true`, `adoptionGate: false`, `cleaned: true`.
+
+The first JWT run failed because its access evaluator omitted native `allValues`: the following bounds evaluator could not read the complete model range and correctly denied with 403. The fixture was corrected and the entire probe rerun; no rejection assertion was removed. This was a test configuration error, not a product defect. Actual AEP JWT compatibility is now component evidence through discovery, but direct JWKS incompatibility and the absence of product discovery remain integration work. No AEP public API, business publisher or default path was changed.
+
+## Before integration
+
+Separate per-principal `AuthConfig` resources use synthetic test hosts. The product does not yet have a verified way to select and bind these configs from its shared gateway entry. A caller-controlled URL or header is not a workload identity. Per-principal CR/cache cardinality, cache eviction, capacity and update frequency require sizing; a shared CR cannot be presented as targeted invalidation based on this experiment.
+
+Authorino still receives an external authorization subrequest on each model call. Its cache hit avoids full evaluation inside that service; this is not gateway-local zero-hop enforcement. The probe does not establish latency or throughput benefits.
+
+Caches are process-local: the initial run performs a full authentication on each replica, and a cold or evicted cache repeats it. That behavior is permitted by the accepted cold-cache boundary above; a custom distributed cache is not needed solely to eliminate those cold misses. Valid-result reuse and targeted invalidation remain required, and cache lifetime/capacity and concurrent cold requests still require sizing and measurement. `adoptionGate` remains false for the outstanding integration gates.
+
+The AEP integration must additionally prove DB role/team changes → outbox → publication relay → CR → Operator → all serving replicas, monotonic versions and replay protection, publication failure/freshness bounds, existing hashed Consumer/Redis key compatibility, license/account changes, real model-body routing, trusted-header sanitization, and human/employee binding. Existing JWT, issuer/audience/time/scope checks cannot be removed merely because this fixture uses opaque tokens. There is no new product policy interpreter or cache implementation here: caching, policy evaluation and configuration watches are supplied by Authorino; the test code only supplies fixtures and assertions.
