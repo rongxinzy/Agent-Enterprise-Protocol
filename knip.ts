@@ -14,6 +14,10 @@ const config: KnipConfig = {
         'tests/e2e/credential-publisher.mjs',
         // Dedicated Kind fixture; invoked manually per docs/gateway-operator-cutover*.md.
         'tests/e2e/gateway-publication-recovery.mjs',
+        // Opt-in isolated component feasibility probe; see docs/auth-result-cache-feasibility.md.
+        'tests/e2e/auth-result-cache.mjs',
+        // ConfigMap-mounted disposable introspection service for the component probe.
+        'tests/e2e/auth-cache/mock-introspection.mjs',
       ],
       project: [
         'scripts/**/*.{js,mjs,cjs}',
