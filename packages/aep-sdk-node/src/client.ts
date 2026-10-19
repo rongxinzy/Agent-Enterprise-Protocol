@@ -2,15 +2,10 @@ import {AEP_PROTOCOL_VERSION, AepCapability, HttpMethod} from './constants.js';
 import {AepProblem} from './problem.js';
 import {FetchTransport} from './transport.js';
 import type {
-  GatewayCapabilities,
-  GatewayNativeResult,
-  GatewayMetricResult,
-  GatewayHealth,
-  GatewayMetricQuery,
-  GatewayRequestQuery,
+  GatewayCapabilities, GatewayNativeResult, GatewayHealth,
+  GatewayMetricResult, GatewayMetricQuery, GatewayRequestQuery,
   GatewayLimitWrite,
-  ModelPricing,
-  ModelPricingWrite,
+  ModelPricing, ModelPricingWrite, JwtVerifierConfiguration,
   GatewayLimit,
   GatewayLimitPage,
   GatewayLimitPublication,
@@ -140,6 +135,10 @@ export class AepClient {
 
   getJwks(): Promise<JsonObject> {
     return this.#send({method: HttpMethod.Get, path: '/.well-known/jwks.json'}, false);
+  }
+
+  getJwtVerifierConfiguration(): Promise<JwtVerifierConfiguration> {
+    return this.#send({method: HttpMethod.Get, path: '/.well-known/openid-configuration'}, false);
   }
 
   getAuthenticationMethods(deploymentHint: string): Promise<AuthenticationMethods> {

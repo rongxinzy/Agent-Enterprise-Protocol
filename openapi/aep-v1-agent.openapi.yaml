@@ -75,6 +75,8 @@ paths:
     $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1skills~1sync-results'
   /aep/v1/user/events/batch:
     $ref: './aep-v1-m0.openapi.yaml#/paths/~1aep~1v1~1user~1events~1batch'
+  /.well-known/openid-configuration:
+    $ref: './aep-v1-jwt-discovery.openapi.yaml#/paths/~1.well-known~1openid-configuration'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

@@ -147,6 +147,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1audit~1authentication'
   /aep/v1/admin/audit/operations:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1audit~1operations'
+  /.well-known/openid-configuration:
+    $ref: './aep-v1-jwt-discovery.openapi.yaml#/paths/~1.well-known~1openid-configuration'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
