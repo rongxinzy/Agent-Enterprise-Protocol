@@ -26,6 +26,11 @@
   密码、refresh token 或签名私钥。
 - `models` 使用 AEP 模型 ID，空集合拒绝全部。`roleIds`/`teamIds` 仅用于保留原生配额与
   观测的可信成员身份，不是新的用户/团队资源授权。
+- `licenses` 保存企业 entitlement 可接受的许可证 ID/摘要对及宽限截止时间。原生验证器
+  必须同时匹配 `license_id`、`license_digest`、部署/主体/会话，热缓存命中也须逐请求检查
+  截止时间；永久许可证省略 `validUntil`。空/缺失列表拒绝 entitlement，不能解除部署的
+  entitlement 要求；模型令牌/工作负载令牌的接纳仍遵循经评审的部署验证器配置。不保存
+  签名许可证正文、激活密钥或私有材料。
 
 ## 发布和失效
 
@@ -62,7 +67,7 @@
 Consumer/Redis 哈希身份，继续逐请求/usage 计算配额。CR 变化不会自动终止已接纳的流。
 允许首次命中冷副本、重启或驱逐后重新完整求值，有效热缓存及无关主体仍须复用。
 
-生成命令为 `bash services/gateway-operator/generate.sh`。真实 envtest 覆盖版本/身份护栏、
+生成命令为 `bash services/gateway-operator/generate.sh`。真实 envtest 覆盖版本/身份/许可证护栏、
 撤权 tombstone、有效窗口和 status 隔离。采用前仍须完成业务 API→DB→outbox→relay→CR→
 Operator→全部服务副本、乱序/断链/恢复、可信人类/员工绑定、容量/并发与原生配额兼容验收。
 完成之前保留现有 authorizer。

@@ -53,6 +53,22 @@ type ModelAccessBinding struct {
 	Workload *ModelAccessWorkload `json:"workload,omitempty"`
 }
 
+// ModelAccessLicense is an exact accepted entitlement binding, not a signed
+// license or private key. The verifier still checks JWT issuer/audience/use/time
+// and matches BOTH license ID and digest. Empty/omitted bindings deny entitlement
+// tokens; they do not opt out of deployment-wide entitlement requirements.
+type ModelAccessLicense struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	ID string `json:"id"`
+	// +kubebuilder:validation:Pattern=`^sha256:[0-9a-f]{64}$`
+	Digest string `json:"digest"`
+	// ValidUntil is the existing license grace boundary; absent means perpetual.
+	// Check it per request even when a complete authorization result is cached.
+	// +optional
+	ValidUntil *metav1.Time `json:"validUntil,omitempty"`
+}
+
 // ModelAccessGrantSpec is the immutable, versioned output of DB authorization.
 // One resource covers one subject binding; a role change republishes only the
 // affected resources. The ModelPolicy quota contract remains independent.
@@ -80,6 +96,13 @@ type ModelAccessGrantSpec struct {
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9][a-z0-9-]*$`
 	// +listType=set
 	Models []string `json:"models"`
+	// Licenses contains only current accepted ID/digest pairs for this deployment.
+	// A different active license must never satisfy an entitlement token's binding.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=map
+	// +listMapKey=id
+	Licenses []ModelAccessLicense `json:"licenses,omitempty"`
 	// RoleIDs and TeamIDs preserve trusted quota/observability membership only.
 	// +optional
 	// +kubebuilder:validation:MaxItems=256

@@ -37,6 +37,14 @@ Names, URLs and caller-provided headers are selectors, never proof of identity.
 - `models` holds AEP model IDs, not provider-native names. Empty denies all.
   `roleIds`/`teamIds` are trusted derived membership for existing native quota
   and observation identities, not independent user/team resource assignments.
+- `licenses` preserves accepted license ID/digest pairs and their grace deadlines
+  for enterprise entitlement tokens. The native verifier must match **both**
+  `license_id` and `license_digest`, as well as deployment/subject/session, and
+  enforce the deadline per request even on a warm result. A perpetual license
+  omits `validUntil`. Empty/omitted bindings deny entitlement tokens; they never
+  waive the deployment's requirement for an entitlement. Model/workload token
+  acceptance still follows the reviewed deployment verifier configuration. No
+  signed license body, activation secret or private material belongs here.
 
 ## Publication and invalidation
 
@@ -94,7 +102,7 @@ evaluation after first use, restart or eviction is allowed; valid warm results
 and unrelated principal results must still be reused.
 
 Use `bash services/gateway-operator/generate.sh` to generate deepcopy and CRD
-artifacts. Real envtest admission covers version/identity fences, deny
+artifacts. Real envtest admission covers version/identity/license fences, deny
 tombstones, validity and status isolation. Product adoption still requires
 business API→DB→outbox→relay→CR→Operator→all serving replicas, replay/failure/
 recovery tests, trusted human/employee binding, capacity/concurrency and native
