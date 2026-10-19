@@ -21,9 +21,10 @@ func TestJWTDiscoveryAcrossSurfacesAndUntrustedHeaders(t *testing.T) {
 			// Discovery must follow the live signer, not a stale Config field.
 			application.Config.Issuer = "https://stale.example"
 			server := New(application)
-			if surface == "enterprise" {
+			switch surface {
+			case "enterprise":
 				server = NewEnterpriseAPI(application)
-			} else if surface == "agent" {
+			case "agent":
 				server = NewAgentControlAPI(application)
 			}
 			request := httptest.NewRequest(http.MethodGet, "http://attacker.invalid/.well-known/openid-configuration", nil)
