@@ -782,6 +782,10 @@ export class AepClient {
     });
   }
 
+  detectAsset(assetId: string): Promise<Asset> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/assets/' + segment(assetId) + '/detect'});
+  }
+
   deleteAsset(assetId: string): Promise<void> {
     return this.#send({
       method: HttpMethod.Delete,

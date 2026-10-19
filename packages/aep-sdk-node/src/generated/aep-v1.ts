@@ -2305,8 +2305,11 @@ export interface components {
             id: string;
             name: string;
             service: string;
-            /** @enum {string} */
-            type: "api_key";
+            /**
+             * @description ssh_private_key and password credential material is server-only and never eligible for client delivery.
+             * @enum {string}
+             */
+            type: "api_key" | "ssh_private_key" | "password";
             /** @enum {string} */
             deliveryMode: "server_only" | "client";
             maskedValue: string;
@@ -2323,8 +2326,11 @@ export interface components {
         };
         ResolvedCredential: {
             credentialId: string;
-            /** @enum {string} */
-            type: "api_key";
+            /**
+             * @description ssh_private_key and password credential material is server-only and never eligible for client delivery.
+             * @enum {string}
+             */
+            type: "api_key" | "ssh_private_key" | "password";
             value: string;
             /** Format: date-time */
             expiresAt: string | null;
@@ -3008,8 +3014,11 @@ export interface components {
         CredentialCreate: {
             name: string;
             service: string;
-            /** @enum {string} */
-            type: "api_key";
+            /**
+             * @description ssh_private_key and password credential material is server-only and never eligible for client delivery.
+             * @enum {string}
+             */
+            type: "api_key" | "ssh_private_key" | "password";
             /** @enum {string} */
             deliveryMode: "server_only" | "client";
             value: string;

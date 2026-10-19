@@ -82,6 +82,17 @@ func validDeliveryMode(value string) bool {
 	return value == "server_only" || value == "client"
 }
 
+// validCredentialType reports whether the credential type is storable. SSH
+// auth material (password, private key) is server-side only: it must never
+// qualify for client delivery.
+func validCredentialType(value string) bool {
+	return value == "api_key" || value == "ssh_private_key" || value == "password"
+}
+
+func credentialTypeRequiresServerOnly(value string) bool {
+	return value == "ssh_private_key" || value == "password"
+}
+
 func validCredentialSubject(value string) bool {
 	return value == "user" || value == "role" || value == "team"
 }
@@ -267,7 +278,7 @@ func (s *Server) createCredential(response http.ResponseWriter, request *http.Re
 		return
 	}
 	input.Name, input.Service = strings.TrimSpace(input.Name), strings.TrimSpace(input.Service)
-	if input.Name == "" || input.Service == "" || input.Type != "api_key" || !validDeliveryMode(input.DeliveryMode) || !validCredentialValue(input.Value) || input.Enabled == nil {
+	if input.Name == "" || input.Service == "" || !validCredentialType(input.Type) || !validDeliveryMode(input.DeliveryMode) || credentialTypeRequiresServerOnly(input.Type) && input.DeliveryMode != "server_only" || !validCredentialValue(input.Value) || input.Enabled == nil {
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL", "The credential descriptor is invalid or incomplete.")
 		return
 	}

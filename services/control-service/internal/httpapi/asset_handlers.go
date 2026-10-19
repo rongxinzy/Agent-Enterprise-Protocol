@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,7 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/assetprobe"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/assettypes"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
@@ -725,4 +728,125 @@ func toStringArray(values []string) repository.JSONArray {
 		items = append(items, value)
 	}
 	return repository.JSONArray(items)
+}
+
+// detectAsset runs the type's connectivity and authentication probe and
+// stores the outcome in the asset health columns (FR-AS-04). The probe
+// separates an unreachable endpoint from an authentication failure and its
+// stored detail never contains credential material.
+func (s *Server) detectAsset(response http.ResponseWriter, request *http.Request) {
+	claims := claimsFrom(request)
+	store := s.app.Store.Deployment(claims.DeploymentID)
+	assetID := chi.URLParam(request, "assetId")
+	record, err := store.GetAsset(request.Context(), assetID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The asset was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if record.TypeID != "ssh_server" {
+		writeProblem(response, request, http.StatusBadRequest, "DETECT_NOT_SUPPORTED", "This asset type has no probe registered.")
+		return
+	}
+	credentialID := credentialRefDefault(map[string]any(record.CredentialRefs))
+	if credentialID == "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", "The asset has no default credential reference to probe with.")
+		return
+	}
+	if s.app.Credentials == nil {
+		writeProblem(response, request, http.StatusServiceUnavailable, "CREDENTIALS_NOT_CONFIGURED", "Credential management is not configured on this service.")
+		return
+	}
+	stored, err := store.GetCredential(request.Context(), credentialID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL_REF", "The referenced credential does not exist.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	if !stored.Enabled {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL_REF", "The referenced credential is disabled.")
+		return
+	}
+	secret, err := s.app.Credentials.Open(request.Context(), credential.Envelope{
+		KeyID: stored.KeyID, Nonce: stored.Nonce, Ciphertext: stored.EncryptedValue,
+	}, credential.AssociatedData(claims.DeploymentID, stored.ID))
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	auth, problem := sshAuthFromCredential(record, stored, secret)
+	if problem != "" {
+		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL_REF", problem)
+		return
+	}
+	probeCtx, cancel := context.WithTimeout(request.Context(), assetprobe.HandshakeTimeout+assetprobe.DialTimeout)
+	defer cancel()
+	result := assetprobe.ProbeSSH(probeCtx, assetString(record.Spec, "host"), assetNumber(record.Spec, "port"), auth)
+	var updated repository.Asset
+	err = store.WithTransaction(request.Context(), func(tx *repository.DeploymentStore) error {
+		saved, err := tx.SetAssetHealth(request.Context(), assetID, repository.UpdateAssetHealthParams{
+			State: result.State, Detail: result.Detail,
+		})
+		if err != nil {
+			return err
+		}
+		updated = saved
+		return tx.RecordAdminAudit(request.Context(), repository.AdminAuditEntry{
+			ActorUserID: claims.Subject, Action: "detect", ResourceType: "asset", ResourceID: assetID, Result: "success",
+			Changes: map[string]any{"healthState": result.State},
+		})
+	})
+	if errors.Is(err, repository.ErrNotFound) {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The asset was not found.")
+		return
+	}
+	if err != nil {
+		databaseFailure(response, request, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, assetJSON(updated))
+}
+
+func sshAuthFromCredential(record repository.Asset, credential repository.Credential, secret []byte) (assetprobe.SSHAuth, string) {
+	auth := assetprobe.SSHAuth{
+		Username: assetString(record.Spec, "username"),
+		Password: string(secret),
+	}
+	switch record.Spec["authMethod"] {
+	case "password":
+		if credential.Type != "password" {
+			return auth, "authMethod password requires a password-type credential."
+		}
+		auth.Method = "password"
+	case "private_key":
+		if credential.Type != "ssh_private_key" {
+			return auth, "authMethod private_key requires an ssh_private_key-type credential."
+		}
+		auth.Method = "private_key"
+		auth.Password = ""
+		auth.PrivateKeyPEM = secret
+	default:
+		return auth, "The asset spec has no recognized authMethod."
+	}
+	return auth, ""
+}
+
+func assetString(spec repository.JSONObject, field string) string {
+	if value, ok := spec[field].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func assetNumber(spec repository.JSONObject, field string) float64 {
+	if value, ok := spec[field].(float64); ok {
+		return value
+	}
+	return 0
 }
