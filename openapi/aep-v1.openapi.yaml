@@ -570,6 +570,17 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/assets/{assetId}/detect:
+    post:
+      tags: [Admin Assets]
+      operationId: detectAsset
+      description: Runs the type's connectivity and authentication probe and stores the health outcome; distinguishes unreachable from auth_failed and never echoes credential material.
+      parameters:
+        - {$ref: '#/components/parameters/AssetId'}
+      responses:
+        '200': {$ref: '#/components/responses/Asset'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /admin/assets/{assetId}/bindings/{bindingId}:
     delete:
       tags: [Admin Assets]
@@ -1135,7 +1146,7 @@ components:
         id: {type: string}
         name: {type: string}
         service: {type: string}
-        type: {type: string, enum: [api_key]}
+        type: {type: string, enum: [api_key, ssh_private_key, password], description: ssh_private_key and password credential material is server-only and never eligible for client delivery.}
         deliveryMode: {type: string, enum: [server_only, client]}
         maskedValue: {type: string}
         enabled: {type: boolean}
@@ -1156,7 +1167,7 @@ components:
       required: [credentialId, type, value, expiresAt]
       properties:
         credentialId: {type: string}
-        type: {type: string, enum: [api_key]}
+        type: {type: string, enum: [api_key, ssh_private_key, password], description: ssh_private_key and password credential material is server-only and never eligible for client delivery.}
         value: {type: string}
         expiresAt: {type: [string, 'null'], format: date-time}
     UserModel:
@@ -1380,7 +1391,7 @@ components:
       properties:
         name: {type: string}
         service: {type: string}
-        type: {type: string, enum: [api_key]}
+        type: {type: string, enum: [api_key, ssh_private_key, password], description: ssh_private_key and password credential material is server-only and never eligible for client delivery.}
         deliveryMode: {type: string, enum: [server_only, client]}
         value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
         enabled: {type: boolean}

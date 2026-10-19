@@ -257,3 +257,28 @@ func (s *DeploymentStore) DeleteAssetBinding(ctx context.Context, id string) err
 	result := s.db.WithContext(ctx).Where("deployment_id = ? AND id = ?", s.deploymentID, id).Delete(&AssetBinding{})
 	return resultError(result)
 }
+
+// UpdateAssetHealthParams records one probe outcome. Detail must already be
+// bounded and free of credential material.
+type UpdateAssetHealthParams struct {
+	State  string
+	Detail string
+}
+
+// SetAssetHealth persists a probe result with its check time.
+func (s *DeploymentStore) SetAssetHealth(ctx context.Context, id string, params UpdateAssetHealthParams) (Asset, error) {
+	now := time.Now().UTC()
+	result := s.db.WithContext(ctx).Model(&Asset{}).
+		Where("deployment_id = ? AND id = ?", s.deploymentID, id).
+		Updates(map[string]any{
+			"health_state": params.State, "health_detail": params.Detail,
+			"health_checked_at": now, "updated_at": now,
+		})
+	if result.Error != nil {
+		return Asset{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return Asset{}, ErrNotFound
+	}
+	return s.GetAsset(ctx, id)
+}

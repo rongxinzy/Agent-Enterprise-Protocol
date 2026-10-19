@@ -266,6 +266,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Get("/aep/v1/admin/assets/{assetId}/bindings", s.listAssetBindings)
 			admin.Post("/aep/v1/admin/assets/{assetId}/bindings", s.createAssetBinding)
 			admin.Delete("/aep/v1/admin/assets/{assetId}/bindings/{bindingId}", s.deleteAssetBinding)
+			admin.Post("/aep/v1/admin/assets/{assetId}/detect", s.detectAsset)
 			admin.Get("/aep/v1/admin/agents", s.listAgents)
 			admin.Post("/aep/v1/admin/agents", s.createAgent)
 			admin.Delete("/aep/v1/admin/agents/{agentId}", s.deleteAgent)

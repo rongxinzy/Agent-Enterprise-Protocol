@@ -1,7 +1,7 @@
 {
   "openapi/aep-v1-authentication.openapi.yaml": 1462,
   "openapi/aep-v1-gateway.openapi.yaml": 1119,
-  "openapi/aep-v1.openapi.yaml": 2002,
-  "packages/aep-sdk-node/src/client.ts": 1204,
+  "openapi/aep-v1.openapi.yaml": 2013,
+  "packages/aep-sdk-node/src/client.ts": 1208,
   "services/control-service/internal/app/app_test.go": 1050
 }

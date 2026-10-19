@@ -4941,6 +4941,9 @@ components:
           type: string
           enum:
             - api_key
+            - ssh_private_key
+            - password
+          description: ssh_private_key and password credential material is server-only and never eligible for client delivery.
         deliveryMode:
           type: string
           enum:
@@ -4990,6 +4993,9 @@ components:
           type: string
           enum:
             - api_key
+            - ssh_private_key
+            - password
+          description: ssh_private_key and password credential material is server-only and never eligible for client delivery.
         value:
           type: string
         expiresAt:
@@ -6861,6 +6867,9 @@ components:
           type: string
           enum:
             - api_key
+            - ssh_private_key
+            - password
+          description: ssh_private_key and password credential material is server-only and never eligible for client delivery.
         deliveryMode:
           type: string
           enum:
