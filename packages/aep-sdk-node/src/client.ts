@@ -51,6 +51,8 @@ import type {
   ClientIdentity,
   ControlEventPage,
   CredentialAssignment,
+  Asset, AssetCreate, AssetPatch, AssetList, AssetSubject,
+  AssetBinding, AssetBindingCreate, AssetBindingList, AssetTypeList,
   CredentialAssignmentList,
   CredentialAssignmentWrite,
   CredentialCreate,
@@ -753,6 +755,58 @@ export class AepClient {
       method: HttpMethod.Post,
       path: '/aep/v1/admin/credential-assignments',
       body: asJson(input),
+    });
+  }
+
+  listAssetTypes(): Promise<AssetTypeList> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/asset-types'});
+  }
+
+  listAssets(filters: Query = {}): Promise<AssetList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/assets?${query(filters)}`});
+  }
+
+  createAsset(input: AssetCreate): Promise<Asset> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/assets', body: asJson(input)});
+  }
+
+  getAsset(assetId: string): Promise<Asset> {
+    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/assets/' + segment(assetId)});
+  }
+
+  updateAsset(assetId: string, input: AssetPatch): Promise<Asset> {
+    return this.#send({
+      method: HttpMethod.Patch,
+      path: '/aep/v1/admin/assets/' + segment(assetId),
+      body: asJson(input),
+    });
+  }
+
+  deleteAsset(assetId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: '/aep/v1/admin/assets/' + segment(assetId),
+      responseType: 'empty',
+    });
+  }
+
+  listAssetBindings(assetId: string, filters: Query = {}): Promise<AssetBindingList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/assets/${segment(assetId)}/bindings?${query(filters)}`});
+  }
+
+  createAssetBinding(assetId: string, input: AssetBindingCreate): Promise<AssetBinding> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/assets/' + segment(assetId) + '/bindings',
+      body: asJson(input),
+    });
+  }
+
+  deleteAssetBinding(assetId: string, bindingId: string): Promise<void> {
+    return this.#send({
+      method: HttpMethod.Delete,
+      path: '/aep/v1/admin/assets/' + segment(assetId) + '/bindings/' + segment(bindingId),
+      responseType: 'empty',
     });
   }
 

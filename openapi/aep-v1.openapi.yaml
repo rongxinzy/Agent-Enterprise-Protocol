@@ -19,6 +19,7 @@ tags:
   - {name: User Runtime}
   - {name: Admin Skills}
   - {name: Admin Credentials}
+  - {name: Admin Assets}
   - {name: Admin Models}
   - {name: Admin Events}
   - {name: Admin Licenses}
@@ -478,6 +479,107 @@ paths:
         - {$ref: '#/components/parameters/AssignmentId'}
       responses:
         '204': {description: Assignment removed}
+  /admin/asset-types:
+    get:
+      tags: [Admin Assets]
+      operationId: listAssetTypes
+      responses:
+        '200':
+          description: Registered asset types with capability templates
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetTypeList'}
+  /admin/assets:
+    get:
+      tags: [Admin Assets]
+      operationId: listAssets
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: typeId, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string, enum: [draft, active, disabled]}}
+      responses:
+        '200':
+          description: Asset catalog page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetList'}
+    post:
+      tags: [Admin Assets]
+      operationId: createAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssetCreate'}
+      responses:
+        '201': {$ref: '#/components/responses/Asset'}
+        '400': {$ref: '#/components/responses/Problem'}
+  /admin/assets/{assetId}:
+    parameters:
+      - {$ref: '#/components/parameters/AssetId'}
+    get:
+      tags: [Admin Assets]
+      operationId: getAsset
+      responses:
+        '200': {$ref: '#/components/responses/Asset'}
+        '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      tags: [Admin Assets]
+      operationId: updateAsset
+      description: Partial update; typeId is immutable. Omitted fields keep their stored values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssetPatch'}
+      responses:
+        '200': {$ref: '#/components/responses/Asset'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    delete:
+      tags: [Admin Assets]
+      operationId: deleteAsset
+      responses:
+        '204': {description: Asset removed; bindings cascade}
+  /admin/assets/{assetId}/bindings:
+    parameters:
+      - {$ref: '#/components/parameters/AssetId'}
+    get:
+      tags: [Admin Assets]
+      operationId: listAssetBindings
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Binding page for one asset
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetBindingList'}
+    post:
+      tags: [Admin Assets]
+      operationId: createAssetBinding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssetBindingCreate'}
+      responses:
+        '201': {$ref: '#/components/responses/AssetBinding'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /admin/assets/{assetId}/bindings/{bindingId}:
+    delete:
+      tags: [Admin Assets]
+      operationId: deleteAssetBinding
+      parameters:
+        - {$ref: '#/components/parameters/AssetId'}
+        - {$ref: '#/components/parameters/AssetBindingId'}
+      responses:
+        '204': {description: Binding removed}
+        '404': {$ref: '#/components/responses/Problem'}
   /admin/models:
     get:
       tags: [Admin Models]
@@ -761,6 +863,8 @@ components:
     SkillId: {name: skillId, in: path, required: true, schema: {$ref: '#/components/schemas/SkillIdentifier'}}
     Version: {name: version, in: path, required: true, schema: {$ref: '#/components/schemas/SkillVersionIdentifier'}}
     CredentialId: {name: credentialId, in: path, required: true, schema: {type: string}}
+    AssetId: {name: assetId, in: path, required: true, schema: {type: string}}
+    AssetBindingId: {name: bindingId, in: path, required: true, schema: {type: string}}
     ModelId: {name: modelId, in: path, required: true, schema: {type: string}}
     AssignmentId: {name: assignmentId, in: path, required: true, schema: {type: string}}
     LicenseId: {name: licenseId, in: path, required: true, schema: {type: string}}
@@ -788,6 +892,16 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/CredentialMetadata'}
+    Asset:
+      description: Asset catalog record with effective capabilities
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Asset'}
+    AssetBinding:
+      description: Asset usage binding
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AssetBinding'}
     AdminModel:
       description: Model descriptor
       content:
@@ -1283,6 +1397,172 @@ components:
       required: [value]
       properties:
         value: {type: string, minLength: 1, maxLength: 32768, writeOnly: true}
+    Asset:
+      description: One managed object in the asset catalog. Credentials appear as references only.
+      type: object
+      required: [id, typeId, name, spec, capabilities, status, source, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        typeId: {type: string}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        orgTeamId: {type: [string, 'null']}
+        locationId: {type: [string, 'null']}
+        ownerUserId: {type: [string, 'null']}
+        undertakers:
+          type: array
+          items: {$ref: '#/components/schemas/AssetUndertaker'}
+        spec:
+          description: Type-specific connection parameters validated by the type registry.
+          type: object
+        credentialRefs:
+          description: Credential references into the AEP credential store; the "default" key names the connection credential.
+          type: object
+        capabilitiesOverride:
+          description: Per-capability template overrides; disabled capabilities drop out of the effective list.
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/AssetCapabilityOverride'}
+        capabilities:
+          type: array
+          items: {$ref: '#/components/schemas/AssetCapability'}
+        status: {type: string, enum: [draft, active, disabled]}
+        health: {$ref: '#/components/schemas/AssetHealth'}
+        source: {type: string, enum: [manual, discovered]}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    AssetUndertaker:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, enum: [de_employee, companion], description: The agent responsible for handling requests about the asset.}
+        id: {type: string}
+    AssetCapability:
+      type: object
+      required: [key, kind, risk, level, connector, description]
+      properties:
+        key: {type: string}
+        kind: {type: string, enum: [query, action, event]}
+        risk: {type: string, enum: [low, medium, high, critical]}
+        level: {type: string, enum: [L1, L2, L3, L4], description: Undertaking level; L1 standard interface through L4 human fallback.}
+        connector: {type: string}
+        description: {type: string}
+    AssetCapabilityOverride:
+      type: object
+      properties:
+        enabled: {type: boolean}
+        risk: {type: string, enum: [low, medium, high, critical]}
+        level: {type: string, enum: [L1, L2, L3, L4]}
+    AssetHealth:
+      type: [object, 'null']
+      required: [state]
+      properties:
+        state: {type: string, enum: [reachable, auth_failed, unreachable]}
+        checkedAt: {type: [string, 'null'], format: date-time}
+        detail: {type: [string, 'null']}
+    AssetCreate:
+      type: object
+      required: [typeId, name, spec]
+      properties:
+        typeId: {type: string}
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string}
+        orgTeamId: {type: string}
+        locationId: {type: string}
+        ownerUserId: {type: string}
+        undertakers:
+          type: array
+          maxItems: 16
+          items: {$ref: '#/components/schemas/AssetUndertaker'}
+        spec:
+          description: Type-specific connection parameters; validated against the registry for the typeId.
+          type: object
+        credentialRefs:
+          type: object
+          description: References a server-only credential by id under "default".
+        capabilitiesOverride:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/AssetCapabilityOverride'}
+        status: {type: string, enum: [draft, active, disabled], default: draft}
+    AssetPatch:
+      type: object
+      minProperties: 1
+      description: Partial update. typeId is immutable and absent by design.
+      properties:
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string}
+        orgTeamId: {type: string}
+        locationId: {type: string}
+        ownerUserId: {type: string}
+        undertakers:
+          type: array
+          maxItems: 16
+          items: {$ref: '#/components/schemas/AssetUndertaker'}
+        spec:
+          description: Full replacement; must satisfy the type's validation as a whole.
+          type: object
+        credentialRefs:
+          type: object
+        capabilitiesOverride:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/AssetCapabilityOverride'}
+        status: {type: string, enum: [draft, active, disabled]}
+    AssetList:
+      type: object
+      required: [assets]
+      properties:
+        assets: {type: array, items: {$ref: '#/components/schemas/Asset'}}
+        nextCursor: {type: [string, 'null']}
+    AssetSubject:
+      type: object
+      required: [type, id]
+      properties:
+        type: {type: string, enum: [de_employee, companion, user, team]}
+        id: {type: string}
+    AssetBinding:
+      type: object
+      required: [id, assetId, subject, grantedBy, createdAt]
+      properties:
+        id: {type: string}
+        assetId: {type: string}
+        subject: {$ref: '#/components/schemas/AssetSubject'}
+        capabilityAllowlist:
+          description: When null the subject may use every capability of the asset.
+          type: [array, 'null']
+          items: {type: string}
+        grantedBy: {type: string}
+        expiresAt: {type: [string, 'null'], format: date-time}
+        createdAt: {type: string, format: date-time}
+    AssetBindingCreate:
+      type: object
+      required: [subject]
+      properties:
+        subject: {$ref: '#/components/schemas/AssetSubject'}
+        capabilityAllowlist:
+          type: array
+          maxItems: 32
+          items: {type: string}
+        expiresAt: {type: string, format: date-time}
+    AssetBindingList:
+      type: object
+      required: [bindings]
+      properties:
+        bindings: {type: array, items: {$ref: '#/components/schemas/AssetBinding'}}
+        nextCursor: {type: [string, 'null']}
+    AssetType:
+      type: object
+      required: [id, category, displayName, description, requiresCredential, capabilities]
+      properties:
+        id: {type: string}
+        category: {type: string, enum: [device, business_system, tool_source]}
+        displayName: {type: string}
+        description: {type: string}
+        requiresCredential: {type: boolean}
+        capabilities: {type: array, items: {$ref: '#/components/schemas/AssetCapability'}}
+    AssetTypeList:
+      type: object
+      required: [types]
+      properties:
+        types: {type: array, items: {$ref: '#/components/schemas/AssetType'}}
     AdminModelWrite:
       description: >-
         Model creation payload. The model identifier is server-generated from
