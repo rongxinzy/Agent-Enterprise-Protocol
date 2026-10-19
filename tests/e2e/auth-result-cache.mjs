@@ -19,7 +19,10 @@ const kubeconfig = path.join(work, 'kubeconfig');
 const forwards = [];
 let owned = false;
 const report = {component: 'Authorino v0.26.4', sourceRevision, image,
-  scope: 'isolated component probe, not AEP/Higress integration', checks: [], adoptionGate: false};
+  scope: 'isolated component probe, not AEP/Higress integration',
+  cacheSemantics: {scope: 'replica', coldMiss: 'full-evaluation', warmHit: 'identity-and-authorization-reuse'},
+  statusWriter: 'native-lease-leader',
+  checks: [], adoptionGate: false};
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function command(binary, args, {input, timeout = 180_000} = {}) {
   return new Promise((resolve, reject) => {
@@ -172,14 +175,46 @@ try {
   for (const [i, port] of ports.entries()) assert.deepEqual(await allowed(port, 'bob'), bobWarm[i]);
   record('Session withdrawal converges on both replicas without invalidating Bob');
 
-  await kubectl(['-n', namespace, 'delete', 'pods', '-l', 'app=authorino-a', '--wait=true']);
-  await kubectl(['-n', namespace, 'rollout', 'status', 'deployment/authorino-a', '--timeout=120s']);
-  ports[0] = await forward('deployment/authorino-a', 5001);
-  await until(async () => assert.equal((await call(ports[0], 'alice', 'model-b')).status, 403));
-  const bobAfterRestart = await allowed(ports[0], 'bob');
-  assert.notEqual(bobAfterRestart.identity, bobWarm[0].identity);
-  assert.deepEqual(await allowed(ports[1], 'bob'), bobWarm[1]);
-  record('Restarted replica reloads revoked configuration and starts cold; surviving replica keeps Bob cached');
+  async function leader() {
+    const leases = JSON.parse(await kubectl(['-n', namespace, 'get', 'leases', '-o', 'json']));
+    assert.equal(leases.items.length, 1);
+    const holder = leases.items[0].spec.holderIdentity;
+    const pods = JSON.parse(await kubectl(['-n', namespace, 'get', 'pods', '-o', 'json']));
+    const pod = pods.items.find(item => holder?.startsWith(item.metadata.name + '_'));
+    assert(pod && pod.status.conditions?.some(item => item.type === 'Ready' && item.status === 'True'));
+    const replica = ['authorino-a', 'authorino-b'].indexOf(pod.metadata.labels.app);
+    assert(replica >= 0);
+    return {holder, replica};
+  }
+  // Status leadership is native Authorino behavior. All replicas still reconcile
+  // and serve; only one publishes status so a cold process cannot reset peers.
+  const bobCurrent = [...bobWarm];
+  for (const mode of ['follower', 'leader']) {
+    const previousLeader = await until(leader);
+    const index = mode === 'leader' ? previousLeader.replica : 1 - previousLeader.replica;
+    const name = ['authorino-a', 'authorino-b'][index];
+    const beforeRestart = await stats();
+    await kubectl(['-n', namespace, 'delete', 'pods', '-l', 'app=' + name, '--wait=true']);
+    await kubectl(['-n', namespace, 'rollout', 'status', 'deployment/' + name, '--timeout=120s']);
+    const elected = await until(async () => {
+      const current = await leader();
+      if (mode === 'leader') assert.notEqual(current.holder, previousLeader.holder);
+      else assert.equal(current.holder, previousLeader.holder);
+      return current;
+    });
+    await delay(750);
+    ports[index] = await forward('deployment/' + name, 5001);
+    await until(async () => assert.equal((await call(ports[index], 'alice', 'model-b')).status, 403));
+    const cold = await allowed(ports[index], 'bob');
+    assert.notEqual(cold.identity, bobCurrent[index].identity);
+    assert.notEqual(cold.decision, bobCurrent[index].decision);
+    for (let i = 0; i < 3; i++) assert.deepEqual(await allowed(ports[index], 'bob'), cold);
+    assert.deepEqual(await allowed(ports[1 - index], 'bob'), bobCurrent[1 - index]);
+    assert.equal((await stats()).calls['session-b'] - beforeRestart.calls['session-b'], 1);
+    bobCurrent[index] = cold;
+    record('Restarted ' + mode + ' denies revoked access and evaluates Bob once before three reuses; surviving replica stays warm',
+      {coldAuthentications: 1, warmReuses: 3, cacheScope: 'replica', leadershipChanged: elected.holder !== previousLeader.holder});
+  }
 
   await publish([policy('alice', {subject: 'alice', revision: '4'})]);
   const cachedShort = await allowed(ports[0], 'alice', '4', 'model-a', 'probe-short-session');
