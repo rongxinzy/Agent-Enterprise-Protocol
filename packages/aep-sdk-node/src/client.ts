@@ -51,7 +51,7 @@ import type {
   ClientIdentity,
   ControlEventPage,
   CredentialAssignment,
-  Asset, AssetCreate, AssetPatch, AssetList, AssetSubject,
+  Asset, AssetCreate, AssetPatch, AssetList, AssetSubject, AssetRuntimeList, AssetExecute, AssetExecuteResult,
   AssetBinding, AssetBindingCreate, AssetBindingList, AssetTypeList,
   CredentialAssignmentList,
   CredentialAssignmentWrite,
@@ -779,6 +779,19 @@ export class AepClient {
       method: HttpMethod.Patch,
       path: '/aep/v1/admin/assets/' + segment(assetId),
       body: asJson(input),
+    });
+  }
+
+  listRuntimeAssets(subjectType: string, subjectId: string): Promise<AssetRuntimeList> {
+    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/assets/runtime?${query({subjectType, subjectId})}`});
+  }
+
+  executeAsset(assetId: string, input: AssetExecute): Promise<AssetExecuteResult> {
+    return this.#send({
+      method: HttpMethod.Post,
+      path: '/aep/v1/admin/assets/' + segment(assetId) + '/execute',
+      body: asJson(input),
+      retry: false,
     });
   }
 

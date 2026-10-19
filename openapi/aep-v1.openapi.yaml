@@ -489,6 +489,21 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/AssetTypeList'}
+  /admin/assets/runtime:
+    get:
+      tags: [Admin Assets]
+      operationId: listRuntimeAssets
+      description: Runtime discovery — the assets and narrowed capabilities one subject may use, for governed tool registration.
+      parameters:
+        - {name: subjectType, in: query, required: true, schema: {type: string, enum: [de_employee, companion, user, team]}}
+        - {name: subjectId, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Usable assets for the subject
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetRuntimeList'}
+        '400': {$ref: '#/components/responses/Problem'}
   /admin/assets:
     get:
       tags: [Admin Assets]
@@ -570,6 +585,30 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+  /admin/assets/{assetId}/execute:
+    post:
+      tags: [Admin Assets]
+      operationId: executeAsset
+      description: Runs one governed capability invocation as a declared subject on behalf of a requester. Execution honors the deployment-wide kill switch, the asset status, the binding and its allowlist, and writes an execution audit row.
+      parameters:
+        - {$ref: '#/components/parameters/AssetId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AssetExecute'}
+      responses:
+        '200':
+          description: Execution outcome with bounded combined output
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetExecuteResult'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '502': {$ref: '#/components/responses/Problem'}
+        '504': {$ref: '#/components/responses/Problem'}
   /admin/assets/{assetId}/detect:
     post:
       tags: [Admin Assets]
@@ -1574,6 +1613,38 @@ components:
       required: [types]
       properties:
         types: {type: array, items: {$ref: '#/components/schemas/AssetType'}}
+    AssetRuntime:
+      type: object
+      required: [assetId, name, typeId, capabilities]
+      properties:
+        assetId: {type: string}
+        name: {type: string}
+        typeId: {type: string}
+        capabilities: {type: array, items: {$ref: '#/components/schemas/AssetCapability'}}
+        bindingId: {type: string}
+        expiresAt: {type: [string, 'null'], format: date-time}
+    AssetRuntimeList:
+      type: object
+      required: [assets]
+      properties:
+        assets: {type: array, items: {$ref: '#/components/schemas/AssetRuntime'}}
+    AssetExecute:
+      type: object
+      required: [subject, requesterUserId, capability, command]
+      properties:
+        subject: {$ref: '#/components/schemas/AssetSubject'}
+        requesterUserId: {type: string, description: The AEP user on whose behalf the governed runtime invokes the capability; carried into the audit trail.}
+        capability: {type: string, enum: [exec]}
+        command: {type: string, minLength: 1, maxLength: 8192}
+        timeoutSeconds: {type: integer, minimum: 1, maximum: 120, default: 30}
+    AssetExecuteResult:
+      type: object
+      required: [exitCode, output, truncated, durationMs]
+      properties:
+        exitCode: {type: integer}
+        output: {type: string, description: Bounded combined stdout and stderr; at most 64 KiB.}
+        truncated: {type: boolean}
+        durationMs: {type: integer}
     AdminModelWrite:
       description: >-
         Model creation payload. The model identifier is server-generated from

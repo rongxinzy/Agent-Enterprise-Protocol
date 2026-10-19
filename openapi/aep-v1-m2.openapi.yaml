@@ -259,6 +259,10 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1asset-types'
   /aep/v1/admin/assets:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets'
+  /aep/v1/admin/assets/runtime:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets~1runtime'
+  /aep/v1/admin/assets/{assetId}/execute:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets~1{assetId}~1execute'
   /aep/v1/admin/assets/{assetId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets~1{assetId}'
   /aep/v1/admin/assets/{assetId}/bindings:

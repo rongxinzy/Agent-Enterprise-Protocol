@@ -1162,6 +1162,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/assets/runtime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runtime discovery — the assets and narrowed capabilities one subject may use, for governed tool registration. */
+        get: operations["listRuntimeAssets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/assets/{assetId}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Runs one governed capability invocation as a declared subject on behalf of a requester. Execution honors the deployment-wide kill switch, the asset status, the binding and its allowlist, and writes an execution audit row. */
+        post: operations["executeAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/assets/{assetId}": {
         parameters: {
             query?: never;
@@ -3163,6 +3197,40 @@ export interface components {
              */
             status: "draft" | "active" | "disabled";
         };
+        AssetRuntime: {
+            assetId: string;
+            name: string;
+            typeId: string;
+            capabilities: components["schemas"]["AssetCapability"][];
+            bindingId?: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+        };
+        AssetRuntimeList: {
+            assets: components["schemas"]["AssetRuntime"][];
+        };
+        AssetSubject: {
+            /** @enum {string} */
+            type: "de_employee" | "companion" | "user" | "team";
+            id: string;
+        };
+        AssetExecute: {
+            subject: components["schemas"]["AssetSubject"];
+            /** @description The AEP user on whose behalf the governed runtime invokes the capability; carried into the audit trail. */
+            requesterUserId: string;
+            /** @enum {string} */
+            capability: "exec";
+            command: string;
+            /** @default 30 */
+            timeoutSeconds: number;
+        };
+        AssetExecuteResult: {
+            exitCode: number;
+            /** @description Bounded combined stdout and stderr; at most 64 KiB. */
+            output: string;
+            truncated: boolean;
+            durationMs: number;
+        };
         /** @description Partial update. typeId is immutable and absent by design. */
         AssetPatch: {
             name?: string;
@@ -3179,11 +3247,6 @@ export interface components {
             };
             /** @enum {string} */
             status?: "draft" | "active" | "disabled";
-        };
-        AssetSubject: {
-            /** @enum {string} */
-            type: "de_employee" | "companion" | "user" | "team";
-            id: string;
         };
         AssetBinding: {
             id: string;
@@ -5930,6 +5993,62 @@ export interface operations {
         responses: {
             201: components["responses"]["Asset"];
             400: components["responses"]["Problem-2"];
+        };
+    };
+    listRuntimeAssets: {
+        parameters: {
+            query: {
+                subjectType: "de_employee" | "companion" | "user" | "team";
+                subjectId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Usable assets for the subject */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetRuntimeList"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+        };
+    };
+    executeAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetExecute"];
+            };
+        };
+        responses: {
+            /** @description Execution outcome with bounded combined output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetExecuteResult"];
+                };
+            };
+            400: components["responses"]["Problem-2"];
+            403: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
+            502: components["responses"]["Problem-2"];
+            504: components["responses"]["Problem-2"];
         };
     };
     getAsset: {

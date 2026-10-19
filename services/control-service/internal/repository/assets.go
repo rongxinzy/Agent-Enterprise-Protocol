@@ -282,3 +282,14 @@ func (s *DeploymentStore) SetAssetHealth(ctx context.Context, id string, params 
 	}
 	return s.GetAsset(ctx, id)
 }
+
+// ListAssetBindingsForSubject returns every unexpired binding of one
+// subject, the runtime-side discovery query for tool registration.
+func (s *DeploymentStore) ListAssetBindingsForSubject(ctx context.Context, subjectType, subjectID string) ([]AssetBinding, error) {
+	items := make([]AssetBinding, 0)
+	err := s.db.WithContext(ctx).
+		Where("deployment_id = ? AND subject_type = ? AND subject_id = ? AND (expires_at IS NULL OR expires_at > now())", s.deploymentID, subjectType, subjectID).
+		Order("asset_id").
+		Find(&items).Error
+	return items, err
+}
