@@ -13,7 +13,6 @@ import (
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/assetprobe"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/assettypes"
-	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/credential"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
 )
 
@@ -751,38 +750,8 @@ func (s *Server) detectAsset(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "DETECT_NOT_SUPPORTED", "This asset type has no probe registered.")
 		return
 	}
-	credentialID := credentialRefDefault(map[string]any(record.CredentialRefs))
-	if credentialID == "" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", "The asset has no default credential reference to probe with.")
-		return
-	}
-	if s.app.Credentials == nil {
-		writeProblem(response, request, http.StatusServiceUnavailable, "CREDENTIALS_NOT_CONFIGURED", "Credential management is not configured on this service.")
-		return
-	}
-	stored, err := store.GetCredential(request.Context(), credentialID)
-	if errors.Is(err, repository.ErrNotFound) {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL_REF", "The referenced credential does not exist.")
-		return
-	}
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	if !stored.Enabled {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL_REF", "The referenced credential is disabled.")
-		return
-	}
-	secret, err := s.app.Credentials.Open(request.Context(), credential.Envelope{
-		KeyID: stored.KeyID, Nonce: stored.Nonce, Ciphertext: stored.EncryptedValue,
-	}, credential.AssociatedData(claims.DeploymentID, stored.ID))
-	if err != nil {
-		databaseFailure(response, request, err)
-		return
-	}
-	auth, problem := sshAuthFromCredential(record, stored, secret)
-	if problem != "" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_CREDENTIAL_REF", problem)
+	auth, ok := s.resolveSSHAuth(response, request, store, claims.DeploymentID, record)
+	if !ok {
 		return
 	}
 	probeCtx, cancel := context.WithTimeout(request.Context(), assetprobe.HandshakeTimeout+assetprobe.DialTimeout)

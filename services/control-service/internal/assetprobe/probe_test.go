@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -77,7 +79,15 @@ func startTestSSHServer(t *testing.T) (host string, port float64, clientKeyPEM [
 				}
 				go ssh.DiscardRequests(requests)
 				for channel := range channels {
-					_ = channel.Reject(ssh.Prohibited, "probe only")
+					if channel.ChannelType() != "session" {
+						_ = channel.Reject(ssh.Prohibited, "probe only")
+						continue
+					}
+					connection, channelRequests, err := channel.Accept()
+					if err != nil {
+						continue
+					}
+					go serveSession(connection, channelRequests)
 				}
 				_ = server.Close()
 			}(connection)
@@ -194,4 +204,53 @@ func TestProbeSSHNonSSHPortIsUnreachable(t *testing.T) {
 	if result.State != StateUnreachable {
 		t.Fatalf("non-ssh port = %#v, want unreachable", result)
 	}
+}
+
+// serveSession answers exec requests with canned behaviors keyed by the
+// command text: "uptime" succeeds, "fail" exits 7, "big" floods output,
+// anything else echoes and exits 1.
+func serveSession(connection ssh.Channel, requests <-chan *ssh.Request) {
+	defer func() { _ = connection.Close() }()
+	for request := range requests {
+		if request.Type != "exec" {
+			if request.WantReply {
+				_ = request.Reply(false, nil)
+			}
+			continue
+		}
+		command := execPayloadCommand(request.Payload)
+		var output []byte
+		var exit uint32
+		switch {
+		case strings.Contains(command, "uptime"):
+			output, exit = []byte("up 42 days\n"), 0
+		case strings.Contains(command, "fail"):
+			output, exit = []byte("boom\n"), 7
+		case strings.Contains(command, "big"):
+			output, exit = bytes.Repeat([]byte("x"), 200*1024), 0
+		case strings.Contains(command, "sleep"):
+			time.Sleep(5 * time.Second)
+			output, exit = []byte("slept\n"), 0
+		default:
+			output, exit = []byte("echo: "+command+"\n"), 1
+		}
+		_, _ = connection.Write(output)
+		_, _ = connection.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{exit}))
+		if request.WantReply {
+			_ = request.Reply(true, nil)
+		}
+		return
+	}
+}
+
+// execPayloadCommand strips the uint32 length prefix of an exec payload.
+func execPayloadCommand(payload []byte) string {
+	if len(payload) < 4 {
+		return ""
+	}
+	length := binary.BigEndian.Uint32(payload[:4])
+	if int(length) > len(payload)-4 {
+		return string(payload[4:])
+	}
+	return string(payload[4 : 4+length])
 }

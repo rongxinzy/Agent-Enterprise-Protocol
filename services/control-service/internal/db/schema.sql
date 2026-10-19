@@ -531,6 +531,7 @@ CREATE TABLE IF NOT EXISTS deployment_settings (
   compute_default_tier text,
   compute_idle_hibernate_seconds integer,
   compute_concurrency_cap integer,
+  assets_execute_enabled boolean,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
