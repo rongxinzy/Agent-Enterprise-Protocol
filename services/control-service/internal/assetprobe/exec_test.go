@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-func execAuth(host string, port float64, password string) (string, float64, SSHAuth) {
-	return host, port, SSHAuth{Method: "password", Username: "probe-user", Password: password}
-}
-
 func TestExecSSHSuccess(t *testing.T) {
 	host, port, _ := startTestSSHServer(t)
 	result, err := ExecSSH(context.Background(), host, port, SSHAuth{Method: "password", Username: "probe-user", Password: "probe-secret"}, "uptime")

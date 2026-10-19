@@ -212,7 +212,11 @@ func (s *Server) executeAsset(response http.ResponseWriter, request *http.Reques
 			writeProblem(response, request, http.StatusBadGateway, "ASSET_ENDPOINT_FAILED", classified.Detail)
 			return
 		}
-		writeProblem(response, request, http.StatusGatewayTimeout, "ASSET_EXECUTION_TIMEOUT", execErr.Error())
+		if errors.Is(execErr, context.DeadlineExceeded) {
+			writeProblem(response, request, http.StatusGatewayTimeout, "ASSET_EXECUTION_TIMEOUT", execErr.Error())
+			return
+		}
+		writeProblem(response, request, http.StatusBadGateway, "ASSET_EXECUTION_FAILED", execErr.Error())
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
