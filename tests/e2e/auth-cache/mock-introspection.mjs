@@ -3,6 +3,7 @@ import http from 'node:http';
 
 const calls = {};
 const expirations = {};
+let jwks = {keys: []};
 const subjects = {
   'probe-alice-session': ['alice', 'session-a'],
   'probe-bob-session': ['bob', 'session-b'],
@@ -12,6 +13,17 @@ const subjects = {
 http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.url === '/stats') return res.end(JSON.stringify({calls, expirations}));
+  if (req.url === '/jwks' && req.method === 'POST') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    jwks = JSON.parse(body); // Public keys only; disposable private keys never enter the cluster.
+    return res.end('{}');
+  }
+  if (req.url === '/jwks') return res.end(JSON.stringify(jwks));
+  if (req.url === '/oidc/.well-known/openid-configuration') return res.end(JSON.stringify({
+    issuer: 'http://introspection:8080/oidc', jwks_uri: 'http://introspection:8080/jwks',
+    id_token_signing_alg_values_supported: ['EdDSA'],
+  }));
   if (req.url === '/echo' && req.method === 'POST') {
     for await (const chunk of req) void chunk;
     return res.end(JSON.stringify({witness: req.headers['x-probe-witness']}));

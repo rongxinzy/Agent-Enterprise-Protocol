@@ -83,6 +83,20 @@ Higress `response-cache` 虽支持 Redis，但不能直接放到 Authorino 前�
 
 2026-10-19 完整重跑完成十三项观察，包含两项已知目标限制的复现，以及两种角色的重启。每次重启均记录 Bob 一次冷鉴权后连续三次复用，另一副本的身份和授权见证值不变，Alice 已撤销访问继续拒绝；只有状态 leader 重启时原生 Lease holder 发生切换。同入口扩展也完成。报告为 `completed: true`、`adoptionGate: false`、`cleaned: true`，既有集群与默认流量不变。期间 Envoy 镜像仓拉取短暂失败，由 kubelet 在既有测试时限内自动重试恢复，未更换固定镜像或放宽断言。
 
+## 原生 AEP JWT 兼容门槛
+
+设置 `AEP_AUTH_CACHE_JWT=1` 可追加 JWT 兼容与负向边界测试，需要仓库要求的 Go 工具链。[testdata 夹具](../services/control-service/testdata/auth-cache-tokens/main.go) 调用[现有 AEP 签发实现](../services/control-service/internal/auth/tokens.go)的 `IssueWithDeploymentSession` 生成正向模型/访问令牌；负向变体使用相同随机密钥和 `auth.Claims`，错误签名用独立密钥。私钥仅在夹具内存，令牌只经捕获输出进入运行器内存，不打印、不写报告；集群仅接收公开 JWKS。绑定的是正式字段 `session_id`，不是 introspection 夹具的 `sid`。
+
+固定 Authorino 的[原生 JWT 实现](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/identity/jwt.go)对直接 JWKS 和 OIDC discovery 使用不同验证器。本测试分别验证两者，不降低 AEP Ed25519 签名强度。临时 discovery 声明 EdDSA，仅用于组件实验；AEP 目前发布 `/.well-known/jwks.json`，没有该 discovery 文档，实验成功不能当成可直接上线。
+
+原生 OPA 配置显式绑定 issuer、audience、token_use、deployment、subject、有效 session 和密码变更状态；缓存完整允许模型集合，逐请求只检查实际模型范围、必须存在的到期和 not-before。负向覆盖外部签名、访问令牌、错误发行者/受众/用途/部署/主体/会话、缺少会话、越界范围、必须改密、过期/缺少到期及未来生效时间。短期有效令牌必须先成功预热、再于过期后被拒绝；会话撤销及主体禁用投影须在两个副本拒绝热缓存令牌。
+
+JWT `jti` 不变只证明绑定，不证明跳过验签；原生授权时间戳证明决策复用，JWT 身份缓存机制在此仍属源码证据。JWKS 拉取缓存也不等于完整鉴权缓存。禁用/会话配置是组件夹具，未代替业务 API/outbox、许可证状态或正式发布验收。
+
+2026-10-19 同时启用两项可选扩展，完整运行十九项观察，含三项刻意复现的限制。直接 JWKS 在两副本均以 401 拒绝正式 AEP 模型令牌；声明 EdDSA 的 discovery 接受该令牌，每副本随后三次调用的完整允许范围决策时间戳不变。十四类错误令牌及实际请求模型越界均被拒绝，有效热决策不受影响。短令牌先成功预热，过期后拒绝；发布会话撤销和主体禁用后，两副本均拒绝有效模型令牌。报告 `completed: true`、`adoptionGate: false`、`cleaned: true`。
+
+首轮 JWT 测试因 access 配置漏写原生 `allValues`，下一层无法读取完整模型集合而正确返回 403；修正夹具后完整重跑，未删减拒绝断言。此为测试配置错误，不是产品缺陷。经 discovery 的 AEP JWT 兼容现已取得组件证据，但直接 JWKS 不兼容、产品没有 discovery 仍需解决；未修改公共 API、业务发布器或默认链路。
+
 ## 尚未完成
 
 逐主体配置使用合成测试域名，尚未接通产品共享网关入口的可信绑定；URL、请求头或 Pod 中的模型列表本身不能代替身份。每主体 CR 和缓存数量、容量、驱逐与更新开销需要独立验证。

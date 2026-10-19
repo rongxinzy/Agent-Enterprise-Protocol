@@ -10,6 +10,7 @@ import http from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {namespace, sourceRevision, crdHash, image, resources, policy} from './auth-cache/resources.mjs';
 import {sharedGateway, gatewayImage} from './auth-cache/shared-gateway.mjs';
+import {aepJwt} from './auth-cache/aep-jwt.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const kind = process.env.KIND ?? 'kind';
@@ -232,6 +233,9 @@ try {
   if (process.env.AEP_AUTH_CACHE_GATEWAY === '1') {
     report.gatewayImage = gatewayImage;
     await sharedGateway({apply, publish, kubectl, forward, stats, record, until});
+  }
+  if (process.env.AEP_AUTH_CACHE_JWT === '1') {
+    await aepJwt({command, publish, request, ports, statsPort, record, until});
   }
   report.completed = true;
 } catch (error) {
