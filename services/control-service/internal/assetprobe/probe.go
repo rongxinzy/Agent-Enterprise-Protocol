@@ -57,7 +57,7 @@ func ProbeSSH(ctx context.Context, host string, port float64, auth SSHAuth) Resu
 	if err != nil {
 		return Result{State: StateUnreachable, Detail: fmt.Sprintf("tcp dial %s: %v", address, err)}
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(HandshakeTimeout))
 
 	sshConfig, result := sshClientConfig(auth)
