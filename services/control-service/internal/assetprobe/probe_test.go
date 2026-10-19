@@ -220,7 +220,7 @@ func serveSession(connection ssh.Channel, requests <-chan *ssh.Request) {
 		}
 		command := execPayloadCommand(request.Payload)
 		var output []byte
-		exit := uint32(1)
+		var exit uint32
 		switch {
 		case strings.Contains(command, "uptime"):
 			output, exit = []byte("up 42 days\n"), 0
