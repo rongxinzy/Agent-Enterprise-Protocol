@@ -38,6 +38,11 @@ gateway reconciler; no temporary shadow runtime is required.
 
 ## Development and migration boundary
 
+The additive [effective model-access projection](model-access-grants.md) defines
+`ModelAccessGrant` separately from rate/quota `ModelPolicy`. Its CRD is an
+authorization contract only; publication, native enforcement and adoption
+observations are separate stages and the default authorizer stays unchanged.
+
 Run `bash services/gateway-operator/generate.sh` for CRDs, deepcopy and RBAC.
 Use `KUBEBUILDER_ASSETS` with the pinned envtest assets for real admission,
 watch and status tests. Existing Kind/Higress acceptance remains required
