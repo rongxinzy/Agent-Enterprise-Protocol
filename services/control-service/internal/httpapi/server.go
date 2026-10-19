@@ -257,6 +257,15 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Get("/aep/v1/admin/credential-assignments", s.listCredentialAssignments)
 			admin.Post("/aep/v1/admin/credential-assignments", s.createCredentialAssignment)
 			admin.Delete("/aep/v1/admin/credential-assignments/{assignmentId}", s.deleteCredentialAssignment)
+			admin.Get("/aep/v1/admin/asset-types", s.listAssetTypes)
+			admin.Get("/aep/v1/admin/assets", s.listAssets)
+			admin.Post("/aep/v1/admin/assets", s.createAsset)
+			admin.Get("/aep/v1/admin/assets/{assetId}", s.getAsset)
+			admin.Patch("/aep/v1/admin/assets/{assetId}", s.updateAsset)
+			admin.Delete("/aep/v1/admin/assets/{assetId}", s.deleteAsset)
+			admin.Get("/aep/v1/admin/assets/{assetId}/bindings", s.listAssetBindings)
+			admin.Post("/aep/v1/admin/assets/{assetId}/bindings", s.createAssetBinding)
+			admin.Delete("/aep/v1/admin/assets/{assetId}/bindings/{bindingId}", s.deleteAssetBinding)
 			admin.Get("/aep/v1/admin/agents", s.listAgents)
 			admin.Post("/aep/v1/admin/agents", s.createAgent)
 			admin.Delete("/aep/v1/admin/agents/{agentId}", s.deleteAgent)
@@ -488,6 +497,11 @@ func requiredAdminPermission(method, path string) []string {
 			return []string{"credentials.read"}
 		}
 		return []string{"credentials.write"}
+	case strings.HasPrefix(path, "/aep/v1/admin/asset-types"), strings.HasPrefix(path, "/aep/v1/admin/assets"):
+		if method == http.MethodGet {
+			return []string{"assets.read"}
+		}
+		return []string{"assets.write"}
 	// Grants live under their own prefixes (`skill-assignments`), which the
 	// resource-prefix cases above cannot match: listing follows the resource
 	// read permission, changing a grant needs the matching `*.assign` one.

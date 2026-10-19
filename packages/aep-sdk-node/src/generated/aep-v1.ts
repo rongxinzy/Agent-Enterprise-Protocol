@@ -1130,6 +1130,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/asset-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAssetTypes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAssets"];
+        put?: never;
+        post: operations["createAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/assets/{assetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAsset"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteAsset"];
+        options?: never;
+        head?: never;
+        /** @description Partial update; typeId is immutable. Omitted fields keep their stored values. */
+        patch: operations["updateAsset"];
+        trace?: never;
+    };
+    "/aep/v1/admin/assets/{assetId}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        get: operations["listAssetBindings"];
+        put?: never;
+        post: operations["createAssetBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aep/v1/admin/assets/{assetId}/bindings/{bindingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteAssetBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/models": {
         parameters: {
             query?: never;
@@ -2967,6 +3052,152 @@ export interface components {
              */
             expiresAt?: string | null;
         };
+        AssetCapability: {
+            key: string;
+            /** @enum {string} */
+            kind: "query" | "action" | "event";
+            /** @enum {string} */
+            risk: "low" | "medium" | "high" | "critical";
+            /**
+             * @description Undertaking level; L1 standard interface through L4 human fallback.
+             * @enum {string}
+             */
+            level: "L1" | "L2" | "L3" | "L4";
+            connector: string;
+            description: string;
+        };
+        AssetType: {
+            id: string;
+            /** @enum {string} */
+            category: "device" | "business_system" | "tool_source";
+            displayName: string;
+            description: string;
+            requiresCredential: boolean;
+            capabilities: components["schemas"]["AssetCapability"][];
+        };
+        AssetTypeList: {
+            types: components["schemas"]["AssetType"][];
+        };
+        AssetUndertaker: {
+            /**
+             * @description The agent responsible for handling requests about the asset.
+             * @enum {string}
+             */
+            type: "de_employee" | "companion";
+            id: string;
+        };
+        AssetCapabilityOverride: {
+            enabled?: boolean;
+            /** @enum {string} */
+            risk?: "low" | "medium" | "high" | "critical";
+            /** @enum {string} */
+            level?: "L1" | "L2" | "L3" | "L4";
+        };
+        AssetHealth: {
+            /** @enum {string} */
+            state: "reachable" | "auth_failed" | "unreachable";
+            /** Format: date-time */
+            checkedAt?: string | null;
+            detail?: string | null;
+        } | null;
+        /** @description One managed object in the asset catalog. Credentials appear as references only. */
+        Asset: {
+            id: string;
+            typeId: string;
+            name: string;
+            description?: string | null;
+            orgTeamId?: string | null;
+            locationId?: string | null;
+            ownerUserId?: string | null;
+            undertakers?: components["schemas"]["AssetUndertaker"][];
+            /** @description Type-specific connection parameters validated by the type registry. */
+            spec: Record<string, never>;
+            /** @description Credential references into the AEP credential store; the "default" key names the connection credential. */
+            credentialRefs?: Record<string, never>;
+            /** @description Per-capability template overrides; disabled capabilities drop out of the effective list. */
+            capabilitiesOverride?: {
+                [key: string]: components["schemas"]["AssetCapabilityOverride"];
+            };
+            capabilities: components["schemas"]["AssetCapability"][];
+            /** @enum {string} */
+            status: "draft" | "active" | "disabled";
+            health?: components["schemas"]["AssetHealth"];
+            /** @enum {string} */
+            source: "manual" | "discovered";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AssetList: {
+            assets: components["schemas"]["Asset"][];
+            nextCursor?: string | null;
+        };
+        AssetCreate: {
+            typeId: string;
+            name: string;
+            description?: string;
+            orgTeamId?: string;
+            locationId?: string;
+            ownerUserId?: string;
+            undertakers?: components["schemas"]["AssetUndertaker"][];
+            /** @description Type-specific connection parameters; validated against the registry for the typeId. */
+            spec: Record<string, never>;
+            /** @description References a server-only credential by id under "default". */
+            credentialRefs?: Record<string, never>;
+            capabilitiesOverride?: {
+                [key: string]: components["schemas"]["AssetCapabilityOverride"];
+            };
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "active" | "disabled";
+        };
+        /** @description Partial update. typeId is immutable and absent by design. */
+        AssetPatch: {
+            name?: string;
+            description?: string;
+            orgTeamId?: string;
+            locationId?: string;
+            ownerUserId?: string;
+            undertakers?: components["schemas"]["AssetUndertaker"][];
+            /** @description Full replacement; must satisfy the type's validation as a whole. */
+            spec?: Record<string, never>;
+            credentialRefs?: Record<string, never>;
+            capabilitiesOverride?: {
+                [key: string]: components["schemas"]["AssetCapabilityOverride"];
+            };
+            /** @enum {string} */
+            status?: "draft" | "active" | "disabled";
+        };
+        AssetSubject: {
+            /** @enum {string} */
+            type: "de_employee" | "companion" | "user" | "team";
+            id: string;
+        };
+        AssetBinding: {
+            id: string;
+            assetId: string;
+            subject: components["schemas"]["AssetSubject"];
+            /** @description When null the subject may use every capability of the asset. */
+            capabilityAllowlist?: string[] | null;
+            grantedBy: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AssetBindingList: {
+            bindings: components["schemas"]["AssetBinding"][];
+            nextCursor?: string | null;
+        };
+        AssetBindingCreate: {
+            subject: components["schemas"]["AssetSubject"];
+            capabilityAllowlist?: string[];
+            /** Format: date-time */
+            expiresAt?: string;
+        };
         AdminModel: components["schemas"]["UserModel"] & {
             credentialId?: string | null;
             /**
@@ -3333,6 +3564,24 @@ export interface components {
                 "application/json": components["schemas"]["CredentialAssignment"];
             };
         };
+        /** @description Asset catalog record with effective capabilities */
+        Asset: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Asset"];
+            };
+        };
+        /** @description Asset usage binding */
+        AssetBinding: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AssetBinding"];
+            };
+        };
         /** @description Model descriptor */
         AdminModel: {
             headers: {
@@ -3382,6 +3631,8 @@ export interface components {
         AssignmentId: string;
         EventId: string;
         LicenseId: string;
+        AssetId: string;
+        AssetBindingId: string;
         ModelId: string;
     };
     requestBodies: never;
@@ -5608,6 +5859,191 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    listAssetTypes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registered asset types with capability templates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetTypeList"];
+                };
+            };
+        };
+    };
+    listAssets: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+                typeId?: string;
+                status?: "draft" | "active" | "disabled";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Asset catalog page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetList"];
+                };
+            };
+        };
+    };
+    createAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetCreate"];
+            };
+        };
+        responses: {
+            201: components["responses"]["Asset"];
+            400: components["responses"]["Problem-2"];
+        };
+    };
+    getAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Asset"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    deleteAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Asset removed; bindings cascade */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetPatch"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Asset"];
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+        };
+    };
+    listAssetBindings: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit-2"];
+            };
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binding page for one asset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetBindingList"];
+                };
+            };
+        };
+    };
+    createAssetBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetBindingCreate"];
+            };
+        };
+        responses: {
+            201: components["responses"]["AssetBinding"];
+            400: components["responses"]["Problem-2"];
+            404: components["responses"]["Problem-2"];
+            409: components["responses"]["Problem-2"];
+        };
+    };
+    deleteAssetBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["AssetId"];
+                bindingId: components["parameters"]["AssetBindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binding removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem-2"];
         };
     };
     listModels: {

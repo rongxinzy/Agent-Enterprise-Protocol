@@ -255,6 +255,16 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1credential-assignments'
   /aep/v1/admin/credential-assignments/{assignmentId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1credential-assignments~1{assignmentId}'
+  /aep/v1/admin/asset-types:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1asset-types'
+  /aep/v1/admin/assets:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets'
+  /aep/v1/admin/assets/{assetId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets~1{assetId}'
+  /aep/v1/admin/assets/{assetId}/bindings:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets~1{assetId}~1bindings'
+  /aep/v1/admin/assets/{assetId}/bindings/{bindingId}:
+    $ref: './aep-v1.openapi.yaml#/paths/~1admin~1assets~1{assetId}~1bindings~1{bindingId}'
   /aep/v1/admin/models:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1models'
   /aep/v1/admin/models/{modelId}:
