@@ -26,6 +26,7 @@ to use MCP.
 - [AEP v1 API guide](docs/api-v1.md)
 - [AEP M0 runbook and release checklist](docs/m0-runbook.md)
 - [AEP M1 Higress gateway runbook](docs/m1-gateway-runbook.md)
+- [Authentication-result cache component feasibility](docs/auth-result-cache-feasibility.md)
 - [AEP M1 Node Agent model runbook](docs/m1-client-runbook.md)
 - [AEP M2 Credential runbook](docs/m2-credential-runbook.md)
 - [AEP production runtime baseline](docs/production-runtime.md)
