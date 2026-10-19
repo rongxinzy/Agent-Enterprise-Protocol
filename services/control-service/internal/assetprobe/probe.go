@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -85,7 +86,13 @@ func ProbeSSH(ctx context.Context, host string, port float64, auth SSHAuth) Resu
 		return Result{State: StateUnreachable, Detail: fmt.Sprintf("probe cancelled: %v", ctx.Err())}
 	case outcome := <-clients:
 		if outcome.err != nil {
-			return Result{State: StateAuthFailed, Detail: boundDetail(fmt.Sprintf("ssh handshake: %v", outcome.err))}
+			// Only a completed handshake with rejected credentials means
+			// auth_failed; a protocol-level failure means the port is open
+			// but is not an SSH endpoint (a wrong port in FR-AS-04 terms).
+			if strings.Contains(outcome.err.Error(), "unable to authenticate") {
+				return Result{State: StateAuthFailed, Detail: boundDetail(fmt.Sprintf("ssh authentication: %v", outcome.err))}
+			}
+			return Result{State: StateUnreachable, Detail: boundDetail(fmt.Sprintf("ssh handshake failed, endpoint may not speak ssh: %v", outcome.err))}
 		}
 		return Result{State: StateReachable, Detail: "ssh handshake and authentication succeeded"}
 	}

@@ -168,3 +168,30 @@ func TestProbeSSHCancellation(t *testing.T) {
 		t.Fatalf("cancelled probe = %#v, want unreachable", result)
 	}
 }
+
+// An open port that does not speak SSH is a wrong-port case: unreachable,
+// not an authentication failure.
+func TestProbeSSHNonSSHPortIsUnreachable(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(connection net.Conn) {
+				_, _ = connection.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+				_ = connection.Close()
+			}(connection)
+		}
+	}()
+	address := listener.Addr().(*net.TCPAddr)
+	result := ProbeSSH(context.Background(), "127.0.0.1", float64(address.Port), SSHAuth{Method: "password", Username: "u", Password: "p"})
+	if result.State != StateUnreachable {
+		t.Fatalf("non-ssh port = %#v, want unreachable", result)
+	}
+}
