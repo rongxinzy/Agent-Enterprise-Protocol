@@ -44,12 +44,12 @@ type Capability struct {
 // shape of the type-specific connection parameters; the registry never
 // touches credentials or network endpoints.
 type Definition struct {
-	ID                 string        `json:"id"`
-	Category           string        `json:"category"`
-	DisplayName        string        `json:"displayName"`
-	Description        string        `json:"description"`
-	RequiresCredential bool          `json:"requiresCredential"`
-	Capabilities       []Capability  `json:"capabilities"`
+	ID                 string       `json:"id"`
+	Category           string       `json:"category"`
+	DisplayName        string       `json:"displayName"`
+	Description        string       `json:"description"`
+	RequiresCredential bool         `json:"requiresCredential"`
+	Capabilities       []Capability `json:"capabilities"`
 	validateSpec       func(spec map[string]any) error
 }
 

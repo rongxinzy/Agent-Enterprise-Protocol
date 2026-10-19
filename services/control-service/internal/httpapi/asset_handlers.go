@@ -397,7 +397,7 @@ func (s *Server) createAssetBinding(response http.ResponseWriter, request *http.
 			ID: uuid.NewString(), AssetID: assetID,
 			SubjectType: input.Subject.Type, SubjectID: input.Subject.ID,
 			CapabilityAllowlist: toStringArray(input.CapabilityAllowlist),
-			GrantedBy:          claims.Subject, ExpiresAt: input.ExpiresAt,
+			GrantedBy:           claims.Subject, ExpiresAt: input.ExpiresAt,
 		})
 		if err != nil {
 			return err
@@ -640,7 +640,7 @@ func assetBindingJSON(record repository.AssetBinding) map[string]any {
 	}
 	return map[string]any{
 		"id": record.ID, "assetId": record.AssetID,
-		"subject": map[string]any{"type": record.SubjectType, "id": record.SubjectID},
+		"subject":             map[string]any{"type": record.SubjectType, "id": record.SubjectID},
 		"capabilityAllowlist": allowlist, "grantedBy": record.GrantedBy,
 		"expiresAt": record.ExpiresAt, "createdAt": record.CreatedAt,
 	}

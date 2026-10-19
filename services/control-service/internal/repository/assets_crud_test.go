@@ -35,7 +35,7 @@ func TestAssetCreateGetUpdateDelete(t *testing.T) {
 	mock.ExpectCommit()
 	created, err := store.Deployment("deployment-a").CreateAsset(context.Background(), Asset{
 		ID: "asset-a", TypeID: "ssh_server", Name: "Bastion",
-		Spec: JSONObject{"host": "10.0.0.5", "username": "ops", "authMethod": "private_key"},
+		Spec:           JSONObject{"host": "10.0.0.5", "username": "ops", "authMethod": "private_key"},
 		CredentialRefs: JSONObject{"default": "credential-a"},
 		Status:         "active", Source: "manual",
 	})

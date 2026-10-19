@@ -86,25 +86,25 @@ func scanJSON[T any](src any, assign func(T)) error {
 // parameters live in spec as type-validated JSON; credentials are referenced
 // by ID only.
 type Asset struct {
-	DeploymentID         string     `gorm:"column:deployment_id;primaryKey"`
-	ID                   string     `gorm:"column:id;primaryKey"`
-	TypeID               string     `gorm:"column:type_id;not null"`
-	Name                 string     `gorm:"column:name;not null"`
+	DeploymentID         string      `gorm:"column:deployment_id;primaryKey"`
+	ID                   string      `gorm:"column:id;primaryKey"`
+	TypeID               string      `gorm:"column:type_id;not null"`
+	Name                 string      `gorm:"column:name;not null"`
 	Description          pgtype.Text `gorm:"column:description"`
 	OrgTeamID            pgtype.Text `gorm:"column:org_team_id"`
 	LocationID           pgtype.Text `gorm:"column:location_id"`
 	OwnerUserID          pgtype.Text `gorm:"column:owner_user_id"`
-	Undertakers          JSONArray `gorm:"column:undertakers"`
-	Spec                 JSONObject `gorm:"column:spec"`
-	CredentialRefs       JSONObject `gorm:"column:credential_refs"`
-	CapabilitiesOverride JSONObject `gorm:"column:capabilities_override"`
-	Status               string     `gorm:"column:status;not null"`
+	Undertakers          JSONArray   `gorm:"column:undertakers"`
+	Spec                 JSONObject  `gorm:"column:spec"`
+	CredentialRefs       JSONObject  `gorm:"column:credential_refs"`
+	CapabilitiesOverride JSONObject  `gorm:"column:capabilities_override"`
+	Status               string      `gorm:"column:status;not null"`
 	HealthState          pgtype.Text `gorm:"column:health_state"`
-	HealthCheckedAt      *time.Time `gorm:"column:health_checked_at"`
+	HealthCheckedAt      *time.Time  `gorm:"column:health_checked_at"`
 	HealthDetail         pgtype.Text `gorm:"column:health_detail"`
-	Source               string     `gorm:"column:source;not null"`
-	CreatedAt            time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt            time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	Source               string      `gorm:"column:source;not null"`
+	CreatedAt            time.Time   `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt            time.Time   `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (Asset) TableName() string { return "assets" }
@@ -112,15 +112,15 @@ func (Asset) TableName() string { return "assets" }
 // AssetBinding grants usage of an asset, optionally narrowed to specific
 // capabilities, to a digital employee, companion, user, or team.
 type AssetBinding struct {
-	DeploymentID        string    `gorm:"column:deployment_id;primaryKey"`
-	ID                  string    `gorm:"column:id;primaryKey"`
-	AssetID             string    `gorm:"column:asset_id;not null"`
-	SubjectType         string    `gorm:"column:subject_type;not null"`
-	SubjectID           string    `gorm:"column:subject_id;not null"`
-	CapabilityAllowlist JSONArray `gorm:"column:capability_allowlist"`
-	GrantedBy           string    `gorm:"column:granted_by;not null"`
+	DeploymentID        string     `gorm:"column:deployment_id;primaryKey"`
+	ID                  string     `gorm:"column:id;primaryKey"`
+	AssetID             string     `gorm:"column:asset_id;not null"`
+	SubjectType         string     `gorm:"column:subject_type;not null"`
+	SubjectID           string     `gorm:"column:subject_id;not null"`
+	CapabilityAllowlist JSONArray  `gorm:"column:capability_allowlist"`
+	GrantedBy           string     `gorm:"column:granted_by;not null"`
 	ExpiresAt           *time.Time `gorm:"column:expires_at"`
-	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime"`
+	CreatedAt           time.Time  `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (AssetBinding) TableName() string { return "asset_bindings" }
