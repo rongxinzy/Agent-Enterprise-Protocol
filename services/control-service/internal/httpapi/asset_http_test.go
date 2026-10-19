@@ -251,3 +251,44 @@ func TestAdminAssetPermissionDenied(t *testing.T) {
 		t.Fatalf("non-admin asset list = %d %s", response.Code, response.Body.String())
 	}
 }
+
+// A name-only patch must not touch the stored undertakers: the update
+// statement is matched against its exact column list, so an accidental
+// "undertakers" column fails the expectation.
+func TestAdminAssetPatchNameOnlyKeepsUndertakers(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	handler := New(application).Handler()
+
+	rows := sqlmock.NewRows(assetHTTPColumns()).
+		AddRow("deployment-a", "asset-a", "ssh_server", "Bastion", nil, nil, nil, nil,
+			`[{"type":"de_employee","id":"net-admin"}]`,
+			`{"host":"10.0.0.5","port":22,"username":"ops","authMethod":"private_key"}`,
+			`{"default":"credential-a"}`, `{}`, "draft", nil, nil, nil, "manual", time.Now(), time.Now())
+	mock.ExpectQuery(`SELECT \* FROM "assets" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "asset-a", 1).WillReturnRows(rows)
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "assets" SET "name"=\$1,"updated_at"=\$2 WHERE deployment_id = \$3 AND id = \$4`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT \* FROM "assets" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "asset-a", 1).WillReturnRows(assetHTTPRows("asset-a", "Renamed", "draft"))
+	expectAuditInsert(mock)
+	mock.ExpectCommit()
+	patched := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/assets/asset-a", `{"name":"Renamed"}`)
+	if patched.Code != http.StatusOK {
+		t.Fatalf("name-only patch = %d %s", patched.Code, patched.Body.String())
+	}
+}
+
+// Clearing the credential reference while the asset stays active must be
+// rejected for credential-requiring types.
+func TestAdminAssetPatchCannotClearCredentialWhileActive(t *testing.T) {
+	application, mock, adminToken := newStoreBackedHTTPApplication(t)
+	handler := New(application).Handler()
+
+	mock.ExpectQuery(`SELECT \* FROM "assets" WHERE deployment_id = \$1 AND id = \$2 LIMIT \$3`).
+		WithArgs("deployment-a", "asset-a", 1).WillReturnRows(assetHTTPRows("asset-a", "Bastion", "active"))
+	cleared := adminRequest(handler, adminToken, http.MethodPatch, "/aep/v1/admin/assets/asset-a", `{"credentialRefs":{}}`)
+	if cleared.Code != http.StatusBadRequest || !strings.Contains(cleared.Body.String(), "INVALID_ASSET") {
+		t.Fatalf("clear credential on active asset = %d %s", cleared.Code, cleared.Body.String())
+	}
+}

@@ -246,10 +246,14 @@ func (s *Server) updateAsset(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", problem)
 		return
 	}
-	undertakers, problem := normalizeUndertakers(input.Undertakers)
-	if problem != "" {
-		writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", problem)
-		return
+	var undertakers *repository.JSONArray
+	if input.Undertakers != nil {
+		normalized, problem := normalizeUndertakers(input.Undertakers)
+		if problem != "" {
+			writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", problem)
+			return
+		}
+		undertakers = &normalized
 	}
 	if input.Name != nil {
 		value := strings.TrimSpace(*input.Name)
@@ -263,16 +267,23 @@ func (s *Server) updateAsset(response http.ResponseWriter, request *http.Request
 		writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", "The asset status must be draft, active, or disabled.")
 		return
 	}
-	// Activating a credential-requiring type needs a default credential,
-	// whether it arrives in this request or is already stored.
-	if input.Status != nil && *input.Status == assetStatusActive && typeKnown && definition.RequiresCredential {
-		refs := input.CredentialRefs
-		if refs == nil {
-			refs = map[string]any(before.CredentialRefs)
+	// A credential-requiring asset must keep a default credential in every
+	// state the update can leave it in: activating, or staying active while
+	// the reference is replaced or cleared.
+	if typeKnown && definition.RequiresCredential {
+		status := before.Status
+		if input.Status != nil {
+			status = *input.Status
 		}
-		if credentialRefDefault(refs) == "" {
-			writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", "This asset type requires a default credential reference before it can become active.")
-			return
+		if status == assetStatusActive {
+			refs := input.CredentialRefs
+			if refs == nil {
+				refs = map[string]any(before.CredentialRefs)
+			}
+			if credentialRefDefault(refs) == "" {
+				writeProblem(response, request, http.StatusBadRequest, "INVALID_ASSET", "This asset type requires a default credential reference before it can become active.")
+				return
+			}
 		}
 	}
 	var record repository.Asset
@@ -280,7 +291,7 @@ func (s *Server) updateAsset(response http.ResponseWriter, request *http.Request
 		updated, err := tx.UpdateAsset(request.Context(), assetID, repository.UpdateAssetParams{
 			Name: input.Name, Description: pgTextPtr(input.Description), OrgTeamID: pgTextPtr(input.OrgTeamID),
 			LocationID: pgTextPtr(input.LocationID), OwnerUserID: pgTextPtr(input.OwnerUserID),
-			Undertakers:          &undertakers,
+			Undertakers:          undertakers,
 			Spec:                 jsonObjectPtr(toJSONObject(input.Spec)),
 			CredentialRefs:       jsonObjectPtr(toJSONObject(input.CredentialRefs)),
 			CapabilitiesOverride: jsonObjectPtr(toJSONObjectOfOverride(input.CapabilitiesOverride)),
