@@ -124,6 +124,39 @@ spec:
                   Expired publications must deny even when a complete result is cached.
                 format: date-time
                 type: string
+              licenses:
+                description: |-
+                  Licenses contains only current accepted ID/digest pairs for this deployment.
+                  A different active license must never satisfy an entitlement token's binding.
+                items:
+                  description: |-
+                    ModelAccessLicense is an exact accepted entitlement binding, not a signed
+                    license or private key. The verifier still checks JWT issuer/audience/use/time
+                    and matches BOTH license ID and digest. Empty/omitted bindings deny entitlement
+                    tokens; they do not opt out of deployment-wide entitlement requirements.
+                  properties:
+                    digest:
+                      pattern: ^sha256:[0-9a-f]{64}$
+                      type: string
+                    id:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    validUntil:
+                      description: |-
+                        ValidUntil is the existing license grace boundary; absent means perpetual.
+                        Check it per request even when a complete authorization result is cached.
+                      format: date-time
+                      type: string
+                  required:
+                  - digest
+                  - id
+                  type: object
+                maxItems: 64
+                type: array
+                x-kubernetes-list-map-keys:
+                - id
+                x-kubernetes-list-type: map
               models:
                 description: Models is the effective role-derived AEP model allow-set.
                   Empty denies all.
