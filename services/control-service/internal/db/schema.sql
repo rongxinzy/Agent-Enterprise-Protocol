@@ -177,7 +177,8 @@ CREATE TABLE IF NOT EXISTS credentials (
   id text NOT NULL,
   name text NOT NULL,
   service text NOT NULL,
-  type text NOT NULL CHECK (type = 'api_key'),
+  -- Constraint name kept in sync with migration 051.
+  type text NOT NULL CHECK (type IN ('api_key', 'ssh_private_key', 'password')),
   delivery_mode text NOT NULL CHECK (delivery_mode IN ('server_only', 'client')),
   encrypted_value bytea NOT NULL,
   nonce bytea NOT NULL,
