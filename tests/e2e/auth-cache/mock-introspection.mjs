@@ -12,6 +12,10 @@ const subjects = {
 http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.url === '/stats') return res.end(JSON.stringify({calls, expirations}));
+  if (req.url === '/echo' && req.method === 'POST') {
+    for await (const chunk of req) void chunk;
+    return res.end(JSON.stringify({witness: req.headers['x-probe-witness']}));
+  }
   if (req.url !== '/introspect' || req.method !== 'POST') {
     res.writeHead(404).end('{}');
     return;

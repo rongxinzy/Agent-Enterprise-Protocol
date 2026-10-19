@@ -9,6 +9,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {fileURLToPath} from 'node:url';
 import {namespace, sourceRevision, crdHash, image, resources, policy} from './auth-cache/resources.mjs';
+import {sharedGateway, gatewayImage} from './auth-cache/shared-gateway.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const kind = process.env.KIND ?? 'kind';
@@ -193,6 +194,10 @@ try {
   assert.equal((await call(ports[0], 'alice', 'model-a', 'probe-guarded-session')).status, 403);
   assert.equal((await stats()).calls['session-guarded'], guardedCalls);
   record('Uncached native expiration guard rejects cached expired result without introspection');
+  if (process.env.AEP_AUTH_CACHE_GATEWAY === '1') {
+    report.gatewayImage = gatewayImage;
+    await sharedGateway({apply, publish, kubectl, forward, stats, record, until});
+  }
   report.completed = true;
 } catch (error) {
   report.completed = false;

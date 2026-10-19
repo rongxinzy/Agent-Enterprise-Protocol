@@ -31,10 +31,13 @@ Optional environment variables:
 - `AEP_AUTH_CACHE_NODE_IMAGE`: Kind node image compatible with the installed Kind version.
 - `AEP_AUTH_CACHE_REPORT`: output JSON report path, outside the repository if desired.
 - `AEP_AUTH_CACHE_CRD_PATH`: local copy of the pinned upstream `install/crd/authorino.kuadrant.io_authconfigs.yaml`. The same SHA-256 integrity check applies; use this when raw GitHub is unavailable. LF and CRLF normalize to the same digest.
+- `AEP_AUTH_CACHE_GATEWAY=1`: also run the shared-host native Envoy `ext_authz` experiment described below; requires access to Docker Hub from the test cluster.
 
 The probe creates a randomly named `aep-auth-cache-*` cluster with its own kubeconfig, installs the pinned upstream CRD there, and runs two independent Authorino replicas plus a disposable RFC 7662 introspection fixture. It does not use an existing cluster, change the active kubeconfig, call a real model, read AEP credentials, or publish provider keys. The supporting Node image is exported for `linux/amd64` before Kind import; Docker must support `docker image save --platform`. Authorino is pulled by the test cluster using its pinned digest to avoid dangling OCI-index import references in Docker/containerd. The cluster and temporary archive are removed on normal success or failure. If the process is forcibly terminated, remove only the owned `aep-auth-cache-*` cluster identified in Docker/Kind; never delete unrelated clusters.
 
 The Authorino image is pinned to digest `sha256:67273e9a2619ba832e710cf3177aee2615c0c41ec49198ec17a9882aeac5d010`; source and CRD are pinned to `8232753b58bec6994f5d914d239cc410fcf5173f`. The CRD LF SHA-256 is `ccaf7e85c8e678d42dc87050f79e1cd2bd92fefe1a75511577c3f3513fb0b15c`. The Node mock contains disposable fixture credentials only and is not an AEP introspection API implementation.
+
+Kind is only the local test harness. It is not a new product component or a production prerequisite; production Kubernetes/k3s deployment remains independent of this script.
 
 ## What the probe distinguishes
 
@@ -55,10 +58,22 @@ Two limitations were reproduced: a shared CR also invalidates unrelated principa
 
 These observations support further integration research, not component adoption. In particular, the probe cannot yet bind per-principal configurations at the shared product gateway, acknowledge all serving replicas through the publication chain, or bound stale permissions after a watch outage.
 
+## Shared-host experiment
+
+The optional extension uses Envoy v1.36.4 pinned to image digest `sha256:08acc53db6f4ac46e77e36b203c5254b4a2549869314bb54cf97aab81baa4566`. Two proxy Pods accept the same `gateway.probe.invalid/v1/chat/completions` entry, with each mapped to a particular Authorino replica so neither serving path can be missed by load balancing. This is a deterministic fixture, not a proposed production availability topology or a Higress plugin compatibility test.
+
+Native per-route `ext_authz` context extensions select the principal AuthConfig from an **untrusted routing hint**. That hint cannot grant access: the selected config must bind the introspected principal and deployment, and caches are keyed by the entire bearer credential. The test tries Alice's credential against Bob's selector and forges identity headers. Actual AEP JWT verification, employee identity and product API/SDK changes remain outside this fixture.
+
+The cached decision carries the complete allowed model range, independent of the prompt. A subsequent native OPA guard checks the actual JSON request body's model against that range and the credential scope, plus expiry and a fixed publication validity cap. These are per-request range/validity checks; they do not repeat full principal/role resolution. It also tests an out-of-range body with a forged allowed-model header, a prompt change retaining both witnesses, an Alice-only publication with Bob retained, and expiry when renewal stops. The cap demonstrates rejection of a stale grant, not actual failure detection or renewal by the AEP publication system. The fixture's simple JSON parsing does not establish the product's duplicate-key, streaming or oversized-request contract.
+
+The opt-in extension was run on 2026-10-19: all four additional checks passed on both serving paths. Together with the original eight observations, the report recorded twelve checks, `completed: true`, `adoptionGate: false` and `cleaned: true`. The unknown-selector case returns Authorino's native 404 denial, not an allow or an upstream response. This confirms the fixture's request/config association and bounds enforcement; it does not solve the process-local cache and product integration gates below.
+
 ## Before integration
 
 Separate per-principal `AuthConfig` resources use synthetic test hosts. The product does not yet have a verified way to select and bind these configs from its shared gateway entry. A caller-controlled URL or header is not a workload identity. Per-principal CR/cache cardinality, cache eviction, capacity and update frequency require sizing; a shared CR cannot be presented as targeted invalidation based on this experiment.
 
 Authorino still receives an external authorization subrequest on each model call. Its cache hit avoids full evaluation inside that service; this is not gateway-local zero-hop enforcement. The probe does not establish latency or throughput benefits.
+
+Caches are process-local: the initial run performs a full authentication on each replica, and a cold or evicted cache repeats it. This does not prove a strict deployment-wide “authenticate exactly once until policy change” guarantee. Shared-cache support or acceptable cold-cache semantics must be resolved before adoption; the probe does not add a custom distributed cache to hide that limitation.
 
 The AEP integration must additionally prove DB role/team changes → outbox → publication relay → CR → Operator → all serving replicas, monotonic versions and replay protection, publication failure/freshness bounds, existing hashed Consumer/Redis key compatibility, license/account changes, real model-body routing, trusted-header sanitization, and human/employee binding. Existing JWT, issuer/audience/time/scope checks cannot be removed merely because this fixture uses opaque tokens. There is no new product policy interpreter or cache implementation here: caching, policy evaluation and configuration watches are supplied by Authorino; the test code only supplies fixtures and assertions.

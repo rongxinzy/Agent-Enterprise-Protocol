@@ -31,7 +31,7 @@ export function resources(mockSource) {
     {apiVersion: 'v1', kind: 'Service', metadata: metadata('introspection'),
       spec: {selector: {app: 'introspection'}, ports: [{port: 8080, targetPort: 8080}]}},
     ...['authorino-a', 'authorino-b'].map(name => deployment(name, {image,
-      args: ['--watch-namespace=' + namespace, '--oidc-http-port=0', '--ext-auth-grpc-port=0', '--evaluator-cache-size=1'],
+      args: ['--watch-namespace=' + namespace, '--oidc-http-port=0', '--evaluator-cache-size=1'],
       readinessProbe: {httpGet: {path: '/readyz', port: 8081}, initialDelaySeconds: 2, periodSeconds: 2},
       ports: [{containerPort: 5001}], securityContext: {runAsNonRoot: true, runAsUser: 1000,
         allowPrivilegeEscalation: false, capabilities: {drop: ['ALL']}},
