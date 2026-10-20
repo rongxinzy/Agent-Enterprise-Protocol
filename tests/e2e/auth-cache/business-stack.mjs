@@ -75,7 +75,9 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
     {apiVersion: 'v1', kind: 'ConfigMap', metadata: metadata('aep-business-control'), data: config},
     {apiVersion: 'v1', kind: 'ServiceAccount', metadata: metadata('aep-business-control')},
     {apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'Role', metadata: metadata('aep-business-control'), rules: [
-      {apiGroups: ['gateway.aep.zhiyuan.io'], resources: ['deploymentconfigs'], verbs: ['get']},
+      {apiGroups: ['gateway.aep.zhiyuan.io'], resources: process.env.AEP_NATIVE_ACCESS_MANAGED === 'true'
+        ? ['deploymentconfigs', 'modelroutes', 'modelpolicies'] : ['deploymentconfigs'],
+        verbs: process.env.AEP_NATIVE_ACCESS_MANAGED === 'true' ? ['get', 'list', 'create', 'update'] : ['get']},
       {apiGroups: ['gateway.aep.zhiyuan.io'], resources: ['modelaccessgrants'], verbs: ['get', 'create', 'update']},
     ]},
     {apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'RoleBinding', metadata: metadata('aep-business-control'),

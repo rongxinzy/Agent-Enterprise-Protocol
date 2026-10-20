@@ -6,11 +6,14 @@ import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import http from 'node:http';
+import {request} from './auth-cache/native-request.mjs';
 import {resources, image, crdHash} from './auth-cache/resources.mjs';
 import {httpsPolicySource, sourceFailureChecks} from './auth-cache/https-policy-source.mjs';
+import {readRuntimeProviderKey} from './auth-cache/real-provider.mjs';
+import {higressDiagnostics} from './auth-cache/higress-diagnostics.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+let realProviderKey = await readRuntimeProviderKey();
 const kind = process.env.KIND ?? 'kind';
 const cluster = 'aep-native-access-' + randomBytes(6).toString('hex');
 const work = await mkdtemp(path.join(tmpdir(), 'aep-native-access-'));
@@ -60,20 +63,6 @@ async function forward(target, remote, targetNamespace = namespace) {
     child.stderr.on('data', () => {});
     child.on('error', error => {clearTimeout(timer); reject(error);});
     child.on('exit', () => {clearTimeout(timer); reject(new Error('Port-forward ended'));});
-  });
-}
-function request(port, host, token, model = 'model-a', body) {
-  return new Promise((resolve, reject) => {
-    const req = http.request({host: '127.0.0.1', port, path: '/check', method: 'POST', timeout: 5000,
-      headers: {host, authorization: 'Bearer ' + token, 'content-type': 'application/json', 'x-aep-model-id': 'model-a'}}, res => {
-      res.resume();
-      res.on('end', () => {
-        try {resolve({status: res.statusCode, observation: JSON.parse(res.headers['x-aep-access-observation'] ?? '{}')});}
-        catch (error) {reject(error);}
-      });
-    });
-    req.on('error', reject); req.on('timeout', () => req.destroy(new Error('Native request timeout')));
-    req.end(body ?? JSON.stringify({model, messages: [{role: 'user', content: 'disposable probe'}]}));
   });
 }
 function record(name, details = {}) { report.checks.push({name, ...details}); console.log('PASS: ' + name); }
@@ -127,7 +116,8 @@ try {
   const httpsSource = sourceDirectory ? await httpsPolicySource({directory: sourceDirectory, command, kubectl, apply, work, cluster, namespace}) : undefined;
   if (process.env.AEP_NATIVE_ACCESS_BUSINESS === 'true') {
     const {businessAcceptance} = await import('./auth-cache/business-acceptance.mjs');
-    await businessAcceptance({command, kubectl, apply, forward, until, request, get, record, httpsSource, report, work, cluster});
+    await businessAcceptance({command, kubectl, apply, forward, until, request, get, record, httpsSource, report, work, cluster, realProviderKey});
+    realProviderKey = undefined;
   } else {
   await kubectl(['-n', namespace, 'set', 'env', 'deployment/aep-gateway-operator', 'AEP_GATEWAY_ACCESS_OPERATOR_ENABLED=true',
     'AEP_GATEWAY_ACCESS_ISSUER_URL=http://introspection:8080/oidc', 'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=' + (httpsSource?.baseURL ?? 'http://introspection:8082'),
@@ -255,6 +245,9 @@ try {
   if (owned) {
     try {report.fixturePods = await kubectl(['-n', namespace, 'get', 'pods', '-o', 'wide'], {timeout: 10_000});}
     catch {report.fixturePods = 'Unavailable';}
+    if (process.env.AEP_NATIVE_ACCESS_MANAGED === 'true') {
+      Object.assign(report, await higressDiagnostics(kubectl));
+    }
   }
   throw error;
 } finally {

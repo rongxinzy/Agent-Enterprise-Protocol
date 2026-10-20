@@ -6,11 +6,15 @@ import {AepClient, MemoryTokenStore} from '../../../packages/aep-sdk-node/dist/i
 import {resources} from './resources.mjs';
 import {businessStack} from './business-stack.mjs';
 import {businessFleet} from './business-fleet.mjs';
+import {higressAccess as unmanagedAccess} from './higress-access.mjs';
+import {higressAccess as managedAccess} from './managed-routes.mjs';
 
 export async function businessAcceptance(context) {
   const {command, kubectl, apply, forward, until, request, get, record, httpsSource, report} = context;
   assert(httpsSource, 'Business acceptance requires the actual HTTPS source deployment');
   assert.equal(report.requireEntitlement, false, 'Business acceptance currently covers model JWTs, not enterprise entitlements');
+  const managed = process.env.AEP_NATIVE_ACCESS_MANAGED === 'true';
+  assert(!managed || process.env.AEP_NATIVE_ACCESS_HIGRESS === 'true', 'Managed routes require real Higress');
   const stack = await businessStack(context);
   report.scope = 'real business API -> DB/outbox/relay -> CR/Operator -> enumerated native processes; no Higress/provider/workload';
   report.controlImage = stack.controlImage;
@@ -19,7 +23,8 @@ export async function businessAcceptance(context) {
   await kubectl(['-n', 'aep-system', 'set', 'env', 'deployment/aep-gateway-operator',
     'AEP_GATEWAY_ACCESS_OPERATOR_ENABLED=true', 'AEP_GATEWAY_ACCESS_ISSUER_URL=' + stack.issuer,
     'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=' + httpsSource.baseURL, 'AEP_GATEWAY_ACCESS_REFRESH_SECONDS=1',
-    'AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT=false']);
+    'AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT=false', ...(managed ? ['AEP_GATEWAY_ACCESS_INGRESS_HOST=shared.access.test'] : [])]);
+  if (managed) await kubectl(['apply', '-k', 'services/gateway-operator/config/access-ingress-rbac']);
   const objects = JSON.parse(JSON.stringify(resources('')).replaceAll('auth-cache-probe', 'aep-system'))
     .filter(o => ['ServiceAccount', 'Role', 'RoleBinding'].includes(o.kind) || o.kind === 'Deployment' && o.metadata.name.startsWith('authorino-'));
   for (const deployment of objects.filter(o => o.kind === 'Deployment')) {
@@ -31,6 +36,7 @@ export async function businessAcceptance(context) {
   for (const deployment of installed.filter(o => o.kind === 'Deployment')) {
     const pod = deployment.spec.template;
     pod.metadata.labels['aep-acceptance-authorino'] = 'true';
+    pod.metadata.labels['gateway.aep.zhiyuan.io/access-verifier'] = 'true';
     pod.spec.securityContext = {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000, seccompProfile: {type: 'RuntimeDefault'}};
     pod.spec.volumes.push({name: 'tmp', emptyDir: {}});
     pod.spec.containers[0].securityContext.readOnlyRootFilesystem = true;
@@ -40,15 +46,27 @@ export async function businessAcceptance(context) {
   for (const name of ['aep-gateway-operator', 'authorino-a', 'authorino-b']) {
     await kubectl(['-n', 'aep-system', 'rollout', 'status', 'deployment/' + name, '--timeout=150s']);
   }
-  const admin = new AepClient({baseUrl: stack.baseUrl, tokenStore: new MemoryTokenStore()});
+  const adminStore = new MemoryTokenStore();
+  let admin = new AepClient({baseUrl: stack.baseUrl, tokenStore: adminStore});
   await admin.loginWithPassword({deploymentId: 'probe', username: 'admin', password: stack.password});
   const aliceRole = await admin.createRole({name: 'Acceptance Alice', permissions: []});
   const bobRole = await admin.createRole({name: 'Acceptance Bob', permissions: []});
   const basicRole = await admin.createRole({name: 'Acceptance basic', permissions: []});
   const team = await admin.createTeam({name: 'Acceptance team', defaultRoleIds: [aliceRole.id]});
   const otherTeam = await admin.createTeam({name: 'Acceptance unrelated team', defaultRoleIds: []});
+  let credential;
+  if (managed) {
+    const providerKey = randomBytes(24).toString('hex');
+    credential = await admin.createCredential({name: 'Managed route mock', service: 'disposable', type: 'api_key', deliveryMode: 'server_only', value: providerKey, enabled: true});
+    await apply([
+      {apiVersion: 'v1', kind: 'Secret', metadata: {name: 'aep-credential-' + credential.id, namespace: 'aep-credentials'}, stringData: {'api-key': providerKey}},
+      {apiVersion: 'v1', kind: 'Secret', metadata: {name: 'access-upstream-credential', namespace: 'aep-system'}, stringData: {'api-key': providerKey}},
+    ]);
+  }
   const model = await admin.createModel({displayName: 'Acceptance model', sourceType: 'gateway', protocol: 'openai-compatible',
-    endpoint: 'https://disposable-provider.invalid/v1', upstreamModel: 'disposable-model', capabilities: ['text'], isDefault: false, enabled: true});
+    endpoint: managed ? 'http://access-upstream.aep-system.svc:8080/v1' : 'https://disposable-provider.invalid/v1',
+    ...(credential ? {credentialId: credential.id} : {}), upstreamModel: 'disposable-model', capabilities: ['text'], isDefault: false, enabled: true});
+  if (managed) await admin.createDataPlanePublication('managed-routes-one');
   await admin.createModelAssignment({modelId: model.id, subject: {type: 'role', id: aliceRole.id}});
   const bobAssignment = await admin.createModelAssignment({modelId: model.id, subject: {type: 'role', id: bobRole.id}});
   const people = {};
@@ -64,7 +82,7 @@ export async function businessAcceptance(context) {
     const tokens = await client.loginWithPassword({deploymentId: 'probe', username: account.user.username, password: account.password});
     const binding = createHash('sha256').update(JSON.stringify({deploymentId: 'probe', subject: {kind: 'human', id: account.user.id},
       binding: {kind: 'session', sessionId: tokens.sessionId}})).digest('hex');
-    return {tokens, binding, client, user: account.user};
+    return {tokens, binding, client, store, user: account.user};
   }
   const alice = await login(people.alice), bob = await login(people.bob);
   const fleet = await until(async () => businessFleet({kubectl, forward, request}));
@@ -84,8 +102,11 @@ export async function businessAcceptance(context) {
   const allowed = spec => !spec.disabled && spec.models.includes(model.id);
   await policy(alice, allowed); await policy(bob, allowed);
   if (process.env.AEP_NATIVE_ACCESS_HIGRESS === 'true') {
-    const {higressAccess} = await import('./higress-access.mjs');
-    gateway = await higressAccess(context, alice, bob, model);
+    gateway = await (managed ? managedAccess : unmanagedAccess)(context, alice, bob, model);
+    if (managed) {
+      const {trustedQuotaAcceptance} = await import('./trusted-quota.mjs');
+      await trustedQuotaAcceptance({...context, admin, gateway, alice, bob, model});
+    }
   }
   const initial = await enforcement(alice, 200); await enforcement(bob, 200);
   assert.deepEqual((await alice.client.listModels()).models.map(m => m.id), [model.id]);
@@ -182,6 +203,15 @@ WHERE s.deployment_id='probe'`;
   record('Stopping the actual control/relay process causes warm permissions to deny after their fixed publication deadline');
   await kubectl(['-n', 'aep-system', 'scale', 'deployment/aep-business-control', '--replicas=1']);
   await kubectl(['-n', 'aep-system', 'rollout', 'status', 'deployment/aep-business-control', '--timeout=180s']);
+  // Deployment port-forwards are bound to the old Pod and end on shutdown.
+  // Preserve sessions, but reconnect SDK clients to the replacement Pod before
+  // further business API calls. This is local test plumbing, not token renewal.
+  const resumedPort = await forward('deployment/aep-business-control', 8080);
+  stack.baseUrl = 'http://127.0.0.1:' + resumedPort;
+  admin = new AepClient({baseUrl: stack.baseUrl, tokenStore: adminStore});
+  for (const person of [alice, bob, secondAlice, activeAlice]) {
+    person.client = new AepClient({baseUrl: stack.baseUrl, tokenStore: person.store});
+  }
   await policy(bob, spec => allowed(spec) && Date.parse(spec.validUntil) > oldDeadline);
   await enforcement(bob, 200); await enforcement(activeAlice, 200); await enforcement(alice, 403);
   assert.equal((await get('authconfig', 'access-' + bob.binding)).metadata.resourceVersion, beforeOutage.metadata.resourceVersion);
@@ -200,4 +230,11 @@ WHERE s.deployment_id='probe'`;
   assert.equal(final.status?.replicas?.length ?? 0, 0);
   record('Rediscovery observes the new native process incarnation after restart; current allow/retired deny recover and no product Ready evidence is fabricated', {processes: fleet.identities()});
   if (gateway) await gateway.outage(bob);
+  if (context.realProviderKey) {
+    // The outage scenario replaces both verifier Pods. Capture their current
+    // process identities and port-forwards before checking the cloud grant.
+    await until(() => fleet.refresh());
+    const {realProviderAcceptance} = await import('./real-provider.mjs');
+    await realProviderAcceptance({...context, admin, gateway, fleet, person: bob, roleId: bobRole.id});
+  }
 }
