@@ -30,6 +30,7 @@ type Worker struct {
 	Store     Store
 	Projector Projection
 	Backoff   workqueue.TypedRateLimiter[string]
+	Access    *AccessRelay // Explicit opt-in; the default route worker is unchanged.
 }
 
 func New(store Store, projector Projection) *Worker {
@@ -52,6 +53,9 @@ func InClusterClient() (client.Client, error) {
 }
 
 func (w *Worker) Run(ctx context.Context) {
+	if w.Access != nil {
+		defer w.Access.Close()
+	}
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
 		if err := w.Step(ctx); err != nil && ctx.Err() == nil {
 			// SQL and API error strings may carry payloads. Keep them out of logs.
@@ -61,6 +65,18 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) Step(ctx context.Context) error {
+	if w.Access == nil {
+		return w.stepRoutes(ctx)
+	}
+	// Evaluate each domain even when another fails or has no work. In particular,
+	// invalid route snapshots must never prevent queued session withdrawals.
+	captureErr := w.Access.capture(ctx)
+	routeErr := w.stepRoutes(ctx)
+	deliveryErr := w.Access.deliver(ctx)
+	return errors.Join(captureErr, routeErr, deliveryErr)
+}
+
+func (w *Worker) stepRoutes(ctx context.Context) error {
 	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	if invalidations, ok := w.Store.(interface{ QueueReferenceInvalidations(context.Context) error }); ok {
 		if err := invalidations.QueueReferenceInvalidations(claimCtx); err != nil {

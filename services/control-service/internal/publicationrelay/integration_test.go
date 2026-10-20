@@ -68,6 +68,9 @@ func TestPublicationRelayWithEnvtest(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &Projector{Client: kube, Namespace: "aep-system"}
+	t.Run("access relay with real API admission and PostgreSQL", func(t *testing.T) {
+		testAccessRelayWithAPI(t, kube)
+	})
 	t.Run("read-only evidence survives CRD storage and rejects metadata-only stale status", func(t *testing.T) {
 		const ns = "publication-evidence"
 		if err := kube.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
