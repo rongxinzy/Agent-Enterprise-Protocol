@@ -82,12 +82,11 @@ func jsonValue(value any) string {
 	return string(data)
 }
 
-// Render compiles an admitted session grant into a stable AuthConfig and a
+// Render compiles an admitted grant into a stable AuthConfig and a
 // separately changing freshness file. Renewal MUST NOT update AuthConfig at all.
-// No Secret or provider value is needed. Workload identity is a separate stage.
+// No Secret or provider value is needed. Workload authentication is opt-in.
 func Render(grant *gateway.ModelAccessGrant, options Options) (*unstructured.Unstructured, *corev1.ConfigMap, error) {
-	if Validate(grant) != nil || options.Validate() != nil || grant.Spec.Binding.Kind != "session" ||
-		grant.Spec.Binding.SessionID == "" || grant.Spec.Binding.Workload != nil ||
+	if Validate(grant) != nil || options.Validate() != nil || !validNativeBinding(grant.Spec, options) ||
 		grant.Spec.Disabled && len(grant.Spec.Models) != 0 {
 		return nil, nil, ErrInput
 	}
@@ -135,6 +134,14 @@ func Render(grant *gateway.ModelAccessGrant, options Options) (*unstructured.Uns
 			}}}}}},
 	}
 	bounds := boundsRego(grant.Spec, hash)
+	if spec.Binding.Kind == "kubernetes" {
+		projection := config.Object["spec"].(map[string]any)
+		projection["authentication"] = map[string]any{"workload": map[string]any{
+			"kubernetesTokenReview": map[string]any{"audiences": []any{options.WorkloadAudience}},
+			"cache":                 cache, "priority": int64(0), "metrics": false}}
+		projection["authorization"].(map[string]any)["access"].(map[string]any)["opa"].(map[string]any)["rego"] = workloadAccessRego(spec, hash)
+		bounds = workloadBoundsRego(grant.Spec, hash)
+	}
 	if options.IngressHost != "" {
 		identity, err := ingressIdentity(spec)
 		if err != nil {

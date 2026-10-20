@@ -24,6 +24,7 @@ const requireEntitlement = process.env.AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT ===
 const sourceDirectory = process.env.AEP_NATIVE_ACCESS_POLICY_SOURCE_DIR;
 const forwards = [];
 const report = {scope: 'CR -> Operator -> native Authorino; not business DB/Higress adoption', requireEntitlement,
+  workload: process.env.AEP_NATIVE_ACCESS_WORKLOAD === 'true',
   httpsPolicySource: Boolean(sourceDirectory), checks: [], adoptionGate: false};
 let owned = false;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -118,6 +119,9 @@ try {
     const {businessAcceptance} = await import('./auth-cache/business-acceptance.mjs');
     await businessAcceptance({command, kubectl, apply, forward, until, request, get, record, httpsSource, report, work, cluster, realProviderKey});
     realProviderKey = undefined;
+  } else if (process.env.AEP_NATIVE_ACCESS_WORKLOAD === 'true') {
+    const {workloadAcceptance} = await import('./auth-cache/workload-acceptance.mjs');
+    await workloadAcceptance({command, kubectl, apply, forward, until, request, get, record, root});
   } else {
   await kubectl(['-n', namespace, 'set', 'env', 'deployment/aep-gateway-operator', 'AEP_GATEWAY_ACCESS_OPERATOR_ENABLED=true',
     'AEP_GATEWAY_ACCESS_ISSUER_URL=http://introspection:8080/oidc', 'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=' + (httpsSource?.baseURL ?? 'http://introspection:8082'),
