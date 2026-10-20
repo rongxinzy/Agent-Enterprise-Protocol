@@ -1,5 +1,6 @@
 // Real pinned Higress for the opt-in access acceptance, never a product overlay.
 import {readFile, writeFile, rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 
 export async function installAccessHigress({command, kubectl, work, cluster}) {
@@ -25,6 +26,17 @@ export async function installAccessHigress({command, kubectl, work, cluster}) {
     controller: {replicas: 1, automaticHttps: {enabled: false}, resources: {requests: {cpu: '100m', memory: '128Mi'}}}}));
   const crds = await command(helm, ['show', 'crds', chart]);
   if (crds.trim()) await kubectl(['apply', '-f', '-'], {input: crds});
+  if (process.env.AEP_NATIVE_ACCESS_QUOTA_PRIVATE_FIXTURE === 'true') {
+    // Real upstream Istio CRDs, installed before the controller discovers APIs.
+    // The fixture contains Gateway/VirtualService/AuthorizationPolicy from Istio 1.27.0,
+    // matching the native v1 APIs consumed by Higress 2.2.4 discovery.
+    const native = await readFile(process.env.AEP_NATIVE_ACCESS_ISTIO_CRDS, 'utf8');
+    if (createHash('sha256').update(native).digest('hex') !==
+        '7544518ef89715cc11c9f07d4f52cba5656b323ee4eace898f69448782ab96e4') {
+      throw new Error('Unexpected native listener CRD fixture');
+    }
+    await kubectl(['apply', '--server-side', '--field-manager=aep-native-access-fixture', '-f', '-'], {input: native});
+  }
   await kubectl(['wait', '--for=condition=Established', 'crds', '--all', '--timeout=60s']);
   const manifest = await command(helm, ['template', 'higress', chart, '--namespace', 'higress-system', '--include-crds', '-f', values]);
   await kubectl(['apply', '-f', '-'], {input: manifest});

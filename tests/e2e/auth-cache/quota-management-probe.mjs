@@ -20,6 +20,14 @@ export async function quotaManagementProbe(ctx) {
     admin = new AepClient({baseUrl, tokenStore: adminStore});
     person.client = new AepClient({baseUrl, tokenStore: person.store});
   }
+  async function configureQuota(endpoint) {
+    await kubectl([...patchControl, JSON.stringify({spec: {template: {spec: {containers: [{name: 'service', env: [
+      {name: 'AEP_GATEWAY_QUOTA_URL', value: endpoint},
+      {name: 'AEP_GATEWAY_QUOTA_TOKEN', valueFrom: {secretKeyRef: {name: 'access-quota-control-probe', key: 'token'}}},
+    ]}]}}}})]);
+    await reconnect();
+    return admin;
+  }
   const patchNative = reference => kubectl(['-n', 'aep-system', 'patch', 'deploymentconfig', 'deployment', '--type=merge', '-p',
     JSON.stringify({spec: {nativeGateway: {quotaAdminCredentialRef: reference}}})]);
   try {
@@ -84,11 +92,7 @@ export async function quotaManagementProbe(ctx) {
 
     await apply([{apiVersion: 'v1', kind: 'Secret', metadata: {name: 'access-quota-control-probe', namespace: 'aep-system'},
       stringData: {token: credential}}]);
-    await kubectl([...patchControl, JSON.stringify({spec: {template: {spec: {containers: [{name: 'service', env: [
-      {name: 'AEP_GATEWAY_QUOTA_URL', value: 'http://higress-gateway.higress-system.svc' + quota.path},
-      {name: 'AEP_GATEWAY_QUOTA_TOKEN', valueFrom: {secretKeyRef: {name: 'access-quota-control-probe', key: 'token'}}},
-    ]}]}}}})]);
-    await reconnect();
+    await configureQuota('http://higress-gateway.higress-system.svc' + quota.path);
     try {
       await admin.getGatewayQuota(person.user.id);
       findings.apiStatus = 200;
@@ -105,6 +109,10 @@ export async function quotaManagementProbe(ctx) {
     findings.completed = true;
     report.persistentQuotaAPIIntegrated = findings.listenerIsolationVerified;
     console.log('OBSERVATION: cumulative quota management ' + (findings.blocker ? 'is an adoption blocker' : 'is integrated'));
+    if (process.env.AEP_NATIVE_ACCESS_QUOTA_PRIVATE_FIXTURE === 'true') {
+      const {privateQuotaFixture} = await import('./quota-private-fixture.mjs');
+      await privateQuotaFixture(ctx, {quota, credential, configureQuota});
+    }
   } finally {
     if (configured) {
       await patchNative(null);
