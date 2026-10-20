@@ -11,8 +11,55 @@ Authorino v0.26.4 原生 TokenReview 与 OPA 配置。默认关闭，不切换�
 
 DB 中的角色授权仍是事实源。一个员工对应其 AEP `kind=agent` 主体和专属 SA；不能使用
 开启对话的用户或 owner 代替员工身份。可信发布者必须验证员工 CR UID、SA 名称及 UID
-的实际关联，再使用既有 outbox/relay 发布 Grant。本阶段只消费已发布的可信 Grant，
-不交付该生命周期写入者、业务发布器或 DeerFlow 的 token-file 消费。
+的实际关联，再使用既有 outbox/relay 发布 Grant。下面的可选生命周期观察器负责记录该
+证据，不发布 Grant。会话/工作负载混合发布、带企业许可证的员工推理仍是未完成的独立
+阶段；DeerFlow 可选 token-file 消费见 [deer-flow#34](https://github.com/rongxinzy/deer-flow/pull/34)。
+
+### 可选可信生命周期观察器
+
+`services/control-service/cmd/workload-observer` 是单独启用的进程，不是公开 HTTP 注册
+接口，也不在默认镜像/overlay 中。它依赖 [governance#149](https://github.com/rongxinzy/aep-deerflow-governance/pull/149)
+的无凭据 `status.modelIdentity` 契约，以及由正常 control-service 迁移流程安装的既有
+工作负载登记表；观察器自己不运行迁移。
+
+controller-runtime Manager 监听一个指定命名空间内的 DigitalEmployee 和 ServiceAccount。
+事件只调度工作队列；注册和续期必须用实时 APIReader 核对显式 `spec.modelAccess.agentId`、
+`spec.governance.deploymentID`、员工 CR UID、当前 observedGeneration、audience、
+专属 SA 的精确名称/UID、controller owner 和关闭自动挂载令牌。读取 SA 后再次读取员工，
+拒绝期间变化的对象。不会把 `defaultAEPUser` 或对话 owner 当作员工主体。
+
+既有 DB 登记事务继续验证 agent 类型、不可复活的身份历史及 CAS 替换。健康证据按新鲜度
+的一半续期；状态落后或 API 暂时失败只暂停续期，不永久注销仍存在的身份；当前登记即使
+已过期，也可由新的实时正向证据安全续期。确认员工/SA 删除、显式移除绑定或改为其他部署
+时，只注销精确的已观察 key。停机期间漏掉的删除仍由观察到期限制；Kubernetes 与 DB 并非
+原子事务，也不承诺删除 Pod 即刻撤权。
+
+先渲染可选清单，再通过交付 overlay 调整并显式安装：
+
+```bash
+kubectl kustomize deploy/kubernetes/workload-observer
+```
+
+| 设置 | 要求 |
+| --- | --- |
+| `AEP_ENVIRONMENT` | 显式 `production`、`development` 或 `test` |
+| `AEP_WORKLOAD_DATABASE_URL_FILE` | 从 `aep-workload-observer-config` 的 `database-url` 挂载 DSN；与 `AEP_WORKLOAD_DATABASE_URL` 互斥 |
+| `AEP_WORKLOAD_DEPLOYMENT_ID` | 与 AEP 部署及员工 governance 绑定精确一致 |
+| `AEP_WORKLOAD_NAMESPACE` | 单个命名空间，与 Role/RoleBinding 一致 |
+| `AEP_WORKLOAD_AUDIENCE` | 与投影令牌及 Grant 的 audience 精确一致 |
+| `AEP_WORKLOAD_FRESHNESS` | 显式整秒，范围 `2s` 至 `1h`；示例 `1m` |
+
+生产 DSN 必须验证 TLS，不能回退到不安全连接。交付方需提供访问登记表及其既有来源事件
+触发器所需的独立 DB 身份；示例不授予数据库权限。命名空间、部署和 audience 均需显式
+配置，不自动发现。先安装两个所需命名空间与 governance CRD，再按仓库 ko 流程解析
+`ko://` 镜像并固定 digest，按目标 CNI 收紧 API/DB 出站目的地址。观察器没有供应商
+密钥、keyring、Secret 读写或 TokenReview 权限；只读取/更新固定名称的
+`aep-workload-observer` Lease，使用原生丢租取消和有界 Reconcile context。
+
+8096 端口的 `/healthz` 仅检查进程存活；`/readyz` 在有界 context 内检查 DB 可达与
+informer 初始同步。两者都不能证明登记新鲜度、授权、发布或服务副本采用。
+停止观察器会暂停续期；不得通过删除登记历史强行回滚。本阶段不新增
+schema、公开 API 或 SDK，不切换生产链路，`adoptionGate=false` 继续保留。
 
 显式配置既有 [原生投影](model-access-operator.zh-CN.md)，并设置：
 

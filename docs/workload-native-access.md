@@ -13,8 +13,70 @@ and existing inference paths remain unchanged.
 DB role assignments remain authoritative. The trusted publisher must verify the
 employee CR UID, dedicated SA name/UID and explicit AEP agent identity before
 publishing through the existing outbox/relay. An employee is not its conversation
-owner. This stage consumes trusted grants; it supplies neither that lifecycle
-writer nor workload publication nor DeerFlow token-file consumption.
+owner. The optional lifecycle observer below records that evidence; it does not
+publish grants. Mixed session/workload publication and licensed employee
+inference remain separate, incomplete stages. DeerFlow's optional token-file
+consumer is tracked in [deer-flow#34](https://github.com/rongxinzy/deer-flow/pull/34).
+
+### Optional trusted lifecycle observer
+
+`services/control-service/cmd/workload-observer` is a separate, opt-in process,
+not an HTTP registration API or a component of the default images/overlays. It
+requires the credential-free `status.modelIdentity` contract from
+[governance#149](https://github.com/rongxinzy/aep-deerflow-governance/pull/149) and
+the existing workload registry migration, applied by the normal control-service
+migration path. It never migrates the database itself.
+
+The native controller-runtime Manager watches DigitalEmployees and their
+ServiceAccounts in one configured namespace. Events only schedule work. Live
+APIReader reads verify the explicit `spec.modelAccess.agentId`,
+`spec.governance.deploymentID`, CR UID/current observedGeneration, audience and
+the dedicated SA's exact name/UID, controller owner and disabled automatic token
+mount. The observer rereads the employee to fence changes during the SA read.
+It never substitutes `defaultAEPUser` or a conversation owner for the agent.
+
+The existing DB registry checks agent account kind, immutable identity history
+and compare-and-swap replacement. Healthy evidence renews at half the configured
+freshness; a stale status or transient API error pauses renewal without retiring
+the identity. Positive live evidence can renew an expired current observation.
+Confirmed employee/SA deletion, explicit binding removal or a foreign deployment
+retires exact previously observed keys. Deleted objects missed while the process
+was offline remain bounded by observation expiry; this is not an atomic
+Kubernetes/DB transaction or an immediate Pod-deletion revocation mechanism.
+
+Render the optional bundle before adapting and installing it:
+
+```bash
+kubectl kustomize deploy/kubernetes/workload-observer
+```
+
+Configure these explicit inputs in the deployment overlay:
+
+| Setting | Requirement |
+| --- | --- |
+| `AEP_ENVIRONMENT` | `production`, `development` or `test`; no implicit environment |
+| `AEP_WORKLOAD_DATABASE_URL_FILE` | Mounted DSN from `aep-workload-observer-config`, key `database-url`; mutually exclusive with `AEP_WORKLOAD_DATABASE_URL` |
+| `AEP_WORKLOAD_DEPLOYMENT_ID` | The exact AEP deployment and employee governance binding |
+| `AEP_WORKLOAD_NAMESPACE` | One namespace, matching the scoped Role/RoleBinding |
+| `AEP_WORKLOAD_AUDIENCE` | The exact projected-token/grant audience |
+| `AEP_WORKLOAD_FRESHNESS` | Explicit whole seconds, from `2s` to `1h`; sample `1m` |
+
+Production DSNs require verified TLS with no insecure fallback. Provision a
+dedicated DB identity for the registry and its existing source-event triggers;
+the sample does not grant DB privileges. Namespace/deployment/audience values
+are delivery inputs, not auto-discovery. Install the two prerequisite namespaces
+and governance CRD first; resolve the `ko://` image using the repository's ko
+workflow, pin the resulting digest, and narrow API/DB egress for the target CNI.
+No provider key, keyring, credential Secret read/write or TokenReview permission
+is granted to the observer. Only the fixed `aep-workload-observer` Lease is
+read/updated, with native leader cancellation and bounded reconcile contexts.
+
+Port 8096 `/healthz` is dependency-independent process liveness; `/readyz` checks
+DB reachability and initial informer synchronization with a bounded context.
+Neither proves registry freshness, publication, model permission or serving-replica adoption.
+Stopping the observer pauses renewals; retained history must not be deleted to
+force a rollback. This stage adds no schema, public API, SDK or production
+cutover, and leaves `adoptionGate=false`.
 
 Configure the existing [projection](model-access-operator.md), plus:
 
