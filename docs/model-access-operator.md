@@ -114,8 +114,11 @@ intervals wait for expiry instead of creating a busy loop. Unrelated subjects
 are not republished. This does not prove runtime cache survival or timely serving
 adoption under failure.
 
-Native workload entitlements, runtime configuration delivery and full employee
-model/quota/revocation acceptance remain separate stages under
+The producer now selects an exact eligible workload license and publishes its
+[entitlement attestation](workload-entitlement.md). Missing entitlement pauses
+the workload recoverably; unrelated licenses do not change its selection.
+Runtime configuration delivery and full employee model/quota/revocation
+acceptance remain separate stages under
 [#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338) and
 [governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131).
 Keep `adoptionGate=false`; default deployment and inference paths are unchanged.
