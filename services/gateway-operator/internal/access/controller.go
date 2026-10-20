@@ -62,7 +62,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		err = r.current(ctx, &grant)
 	}
 	if errors.Is(err, ErrSuperseded) {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 	if err != nil {
 		return ctrl.Result{}, errors.Join(err, r.status(ctx, &grant, true, false, "NativeProjectionFailed"))
