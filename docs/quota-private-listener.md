@@ -70,7 +70,8 @@ does not execute the subsequent full session mutation/recovery baseline.
 The final shared-renderer probe completed 22 recorded checks and cleaned its
 cluster. Two explicit control-service rollouts each preserved the first model
 request and exact Mock usage deduction without retrying inference or mutations.
-This integrated result requires the companion native control rollout settings:
+This integrated result requires the companion
+[native control rollout stage (PR #375)](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/375):
 two replicas, readiness stability, zero unavailable replicas and native preStop
 endpoint drain. Earlier single-control-Pod runs intermittently returned 401/403;
 one captured failure increased ext_authz.denied while the balance stayed seven,

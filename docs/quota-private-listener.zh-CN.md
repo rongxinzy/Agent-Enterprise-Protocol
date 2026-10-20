@@ -40,7 +40,8 @@ delta、缺失/错误/模型凭据及伪造 Consumer 拒绝、移除 key-auth �
 管理与推理；没有在 Operator 运行时启用新模式。
 
 两次显式控制服务滚动重启后的首次推理与精确 Mock usage 扣额均通过，未重试
-推理或余额变更。此联验依赖配套部署阶段的双副本、readiness 稳定期、零不可用
+推理或余额变更。此联验依赖[配套部署阶段 PR #375](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/375)
+的双副本、readiness 稳定期、零不可用
 与原生 preStop 排干配置。此前单控制 Pod 的探针曾偶发 401/403；捕获的失败
 中，JWT 未过期且主体/会话匹配，余额仍为 7，ext_authz 拒绝计数增加，Authorino
 记录 JWKS 连接/签名校验失败，不能归因为配额计算或私有 RBAC 策略。复现前先
