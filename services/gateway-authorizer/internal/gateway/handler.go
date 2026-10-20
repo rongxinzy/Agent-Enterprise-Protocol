@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -89,7 +91,20 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 	// callers post /v1/* while anthropic passthrough routes live under a
 	// per-model prefix (/<model-slug>/v1/*). The model token and body-model
 	// scope are the security boundary; unknown paths 404 at the gateway.
-	if request.Method != http.MethodPost {
+	//
+	// POST carries the model in the request body (JSON "model" field, or the
+	// "model" form field for multipart audio transcriptions). GET is only
+	// allowed for resource polling (e.g. OpenAI video jobs /v1/videos/{id})
+	// and must name the model via X-AEP-Model-ID: the header value is
+	// untrusted client input — it only selects a model, authorization still
+	// comes from the token's model scopes, and the header is overwritten with
+	// the validated value before proxying.
+	requestedModel := strings.TrimSpace(request.Header.Get("X-AEP-Model-ID"))
+	if request.Method == http.MethodGet && requestedModel == "" {
+		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model gateway route was not found.")
+		return
+	}
+	if request.Method != http.MethodPost && request.Method != http.MethodGet {
 		writeProblem(response, request, http.StatusNotFound, "RESOURCE_NOT_FOUND", "The model gateway route was not found.")
 		return
 	}
@@ -120,18 +135,27 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusForbidden, "ENTITLEMENT_REQUIRED", "An active enterprise entitlement token is required.")
 		return
 	}
-	body, model, err := readModelRequest(request.Body, h.limit)
-	if err != nil {
-		status := http.StatusBadRequest
-		code := "INVALID_REQUEST"
-		detail := "The inference request must be valid JSON with a non-empty model."
-		if errors.Is(err, errRequestTooLarge) {
-			status = http.StatusRequestEntityTooLarge
-			code = "REQUEST_TOO_LARGE"
-			detail = "The inference request exceeds the configured size limit."
+	var body []byte
+	var model string
+	if request.Method == http.MethodGet {
+		// Polling requests (video job status/content) carry no body; the model
+		// was captured from X-AEP-Model-ID above and validated below.
+		model = requestedModel
+	} else {
+		var err error
+		body, model, err = readModelRequest(request, h.limit)
+		if err != nil {
+			status := http.StatusBadRequest
+			code := "INVALID_REQUEST"
+			detail := "The inference request must be valid JSON with a non-empty model."
+			if errors.Is(err, errRequestTooLarge) {
+				status = http.StatusRequestEntityTooLarge
+				code = "REQUEST_TOO_LARGE"
+				detail = "The inference request exceeds the configured size limit."
+			}
+			writeProblem(response, request, status, code, detail)
+			return
 		}
-		writeProblem(response, request, status, code, detail)
-		return
 	}
 	model = strings.TrimSpace(model)
 	logModel = model
@@ -155,6 +179,7 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		}
 	}
 	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.ContentLength = int64(len(body))
 	identity, err := h.identity(request.Context(), claims, model)
 	if err != nil {
 		if errors.Is(err, ErrEntitlementInactive) {
@@ -171,7 +196,6 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 		writeProblem(response, request, http.StatusServiceUnavailable, "GATEWAY_IDENTITY_UNAVAILABLE", "The inference identity cannot be represented safely.")
 		return
 	}
-	request.ContentLength = int64(len(body))
 	request.Header.Del("Authorization")
 	removeUntrustedAEPHeaders(request.Header)
 	// Envoy may regenerate or modify X-Request-ID for tracing. Carry our validated
@@ -195,25 +219,81 @@ func (h *Handler) ServeHTTP(response http.ResponseWriter, request *http.Request)
 
 var errRequestTooLarge = errors.New("request body is too large")
 
-func readModelRequest(reader io.Reader, limit int64) ([]byte, string, error) {
-	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+// readModelRequest reads the request body within the configured limit and
+// extracts the requested model. JSON bodies name it in the "model" field;
+// multipart bodies (OpenAI audio transcriptions/translations) carry it as the
+// "model" form field. The raw body is returned untouched for proxying.
+func readModelRequest(request *http.Request, limit int64) ([]byte, string, error) {
+	body, err := io.ReadAll(io.LimitReader(request.Body, limit+1))
 	if err != nil {
 		return nil, "", err
 	}
 	if int64(len(body)) > limit {
 		return nil, "", errRequestTooLarge
 	}
+	var model string
+	if mediaType, _, params, parseErr := parseContentType(request.Header.Get("Content-Type")); parseErr == nil && mediaType == "multipart/form-data" {
+		model, err = multipartModelField(body, params["boundary"])
+	} else {
+		model, err = jsonModelField(body)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return body, model, nil
+}
+
+func parseContentType(value string) (string, string, map[string]string, error) {
+	mediaType, params, err := mime.ParseMediaType(value)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return mediaType, "", params, nil
+}
+
+func jsonModelField(body []byte) (string, error) {
 	var input struct {
 		Model string `json:"model"`
 	}
 	if err := json.Unmarshal(body, &input); err != nil || strings.TrimSpace(input.Model) == "" {
-		return nil, "", errors.New("model is required")
+		return "", errors.New("model is required")
 	}
 	model := strings.TrimSpace(input.Model)
 	if model == "" || len(model) > 256 || model != input.Model {
-		return nil, "", errors.New("model is invalid")
+		return "", errors.New("model is invalid")
 	}
-	return body, model, nil
+	return model, nil
+}
+
+// multipartModelField streams the multipart parts looking only for the
+// "model" form field, leaving the raw body bytes unchanged.
+func multipartModelField(body []byte, boundary string) (string, error) {
+	if boundary == "" {
+		return "", errors.New("multipart boundary is required")
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", errors.New("multipart body is malformed")
+		}
+		if part.FormName() != "model" {
+			continue
+		}
+		value, err := io.ReadAll(io.LimitReader(part, 257))
+		if err != nil {
+			return "", errors.New("multipart model field is unreadable")
+		}
+		model := strings.TrimSpace(string(value))
+		if model == "" || len(model) > 256 || string(value) != model {
+			return "", errors.New("model is invalid")
+		}
+		return model, nil
+	}
+	return "", errors.New("model is required")
 }
 
 func bearerToken(header string) (string, bool) {

@@ -80,7 +80,9 @@ func LoadConfig() (Config, error) {
 			return Config{}, err
 		}
 	}
-	if cfg.RequestLimit, err = integer64("AEP_GATEWAY_REQUEST_LIMIT", 2<<20); err != nil {
+	// 32 MiB accommodates audio transcription uploads (OpenAI caps them at
+	// 25 MiB) on top of JSON inference bodies; tune per deployment via env.
+	if cfg.RequestLimit, err = integer64("AEP_GATEWAY_REQUEST_LIMIT", 32<<20); err != nil {
 		return Config{}, err
 	}
 	if cfg.HTTPMaxHeaderBytes, err = integer("AEP_GATEWAY_HTTP_MAX_HEADER_BYTES", 1<<20); err != nil {
