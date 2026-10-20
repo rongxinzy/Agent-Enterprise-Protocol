@@ -36,6 +36,10 @@ WITH context AS MATERIALIZED (
     CASE WHEN l.expires_at IS NULL THEN NULL ELSE l.grace_ends_at END AS expires_at
   FROM context c JOIN licenses l ON l.deployment_id=c.deployment_id AND l.status='active'
   WHERE l.expires_at IS NULL OR c.observed_at<=l.grace_ends_at
+), live_workloads AS (
+  SELECT w.* FROM context c JOIN model_access_workloads w
+    ON w.deployment_id=c.deployment_id AND w.user_id=c.user_id
+  WHERE w.retired_at IS NULL AND w.verified_until>c.observed_at
 )
 SELECT jsonb_build_object(
   'deploymentId',c.deployment_id,'subjectId',c.user_id,'observedAt',c.observed_at,
@@ -50,6 +54,9 @@ SELECT jsonb_build_object(
   'teamIds',COALESCE((SELECT jsonb_agg(id ORDER BY id) FROM effective_teams),'[]'::jsonb),
   'models',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'expiresAt',expires_at) ORDER BY id) FROM role_models),'[]'::jsonb),
   'sessions',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'expiresAt',expires_at) ORDER BY id) FROM live_sessions),'[]'::jsonb),
+  'workloads',COALESCE((SELECT jsonb_agg(jsonb_build_object('employeeName',employee_name,'verifiedUntil',verified_until,
+    'identity',jsonb_build_object('namespace',namespace,'employeeUid',employee_uid,'serviceAccountName',service_account_name,
+      'serviceAccountUid',service_account_uid,'audience',audience)) ORDER BY binding_key) FROM live_workloads),'[]'::jsonb),
   'licenses',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'digest',digest,'features',features,'expiresAt',expires_at) ORDER BY id) FROM live_licenses),'[]'::jsonb),
   'legacyDirectGrants',EXISTS(
     SELECT 1 FROM model_assignments a JOIN models m ON m.deployment_id=a.deployment_id AND m.id=a.model_id AND m.enabled

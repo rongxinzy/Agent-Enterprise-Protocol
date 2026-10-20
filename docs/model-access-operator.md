@@ -52,6 +52,47 @@ must never be deployed as that service.
 
 ## Stable policy and changing freshness
 
+### Employee identity storage prerequisite
+
+Migration 055 adds an internal, credential-free registry for the explicit AEP
+agent ID, employee namespace/name/UID, dedicated ServiceAccount name/UID and
+gateway audience. It is **not** a public registration API or an authorization
+grant. A future trusted lifecycle writer must read the current employee and
+its controller-owned SA, verify both UIDs and the explicit agent mapping, then
+call the repository. Neither a caller header nor the human owner is evidence.
+
+Registration uses an expected-current binding key. Replacing an SA retires the
+old binding atomically; stale observations cannot overwrite its replacement.
+Historical SA identities cannot be reassigned or resurrected. Account deletion
+retires live observations while preserving history. Each agent has at most one
+current binding. Multiple replicas
+of that employee use its dedicated SA; this is not a per-conversation registry.
+Trusted observation freshness is bounded to 2 seconds–1 hour, using the database
+clock. This is an admission range, not a production propagation recommendation.
+Expired/retired observations are absent from the live business source.
+
+Binding changes, retirement, shorter verification bounds and recovery after
+expiry queue the existing targeted source signal in the same transaction.
+Continuous freshness extension does not invalidate authorization. Role-derived
+models and memberships remain unchanged. The source reports the observation's
+expiry as another natural deadline.
+
+This prerequisite does not start a Kubernetes watcher, issue/read tokens,
+publish workload grants, configure TokenReview, or make the runtime consume a
+token file. The session-only producer refuses live workload registrations and
+leaves their source signals unacknowledged; the native Operator still refuses
+workload grants. Do not enable employee model access based on registry storage.
+The trusted writer, combined binding producer and data-plane integration remain
+separate stages under [#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338)
+and [governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131).
+
+The existing administrative M2M token endpoint issues a model JWT for a target
+user; it does not prove an employee's Kubernetes identity. This registry does
+not change that endpoint or turn its caller-supplied conversation ID into a
+trusted workload binding.
+
+### Session projection
+
 Each session binding owns a stable AuthConfig plus one ConfigMap. The Operator
 hashes the actual semantic projection and trusted options independently of the
 source publication hash. Role/team/model/license/configuration changes alter

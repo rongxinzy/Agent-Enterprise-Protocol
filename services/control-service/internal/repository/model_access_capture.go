@@ -48,6 +48,11 @@ func (s *DeploymentStore) CaptureModelAccessSessions(ctx context.Context, userID
 	}
 	var capture *ModelAccessCapture
 	err := s.WithModelAccessSource(ctx, userID, func(tx *DeploymentStore, source ModelAccessSource) error {
+		// Workload registration alone must not acknowledge partial session-only
+		// delivery. A subsequent stage must capture both kinds atomically.
+		if len(source.Workloads) > 0 {
+			return ErrAccessBinding
+		}
 		var change struct {
 			Version, AcknowledgedVersion int64
 			NextCaptureAt                *time.Time
