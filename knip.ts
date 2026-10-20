@@ -18,6 +18,9 @@ const config: KnipConfig = {
         'tests/e2e/auth-result-cache.mjs',
         // ConfigMap-mounted disposable introspection service for the component probe.
         'tests/e2e/auth-cache/mock-introspection.mjs',
+        // Native CR -> Operator acceptance; static source is ConfigMap-mounted.
+        'tests/e2e/native-access-projection.mjs',
+        'tests/e2e/auth-cache/native-policy-source.mjs',
       ],
       project: [
         'scripts/**/*.{js,mjs,cjs}',

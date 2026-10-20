@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -67,6 +68,7 @@ func main() {
 		"missing-exp":     func(c *auth.Claims) { c.ExpiresAt = nil },
 		"future":          func(c *auth.Claims) { c.NotBefore = jwt.NewNumericDate(time.Now().Add(time.Hour)) },
 		"short":           func(c *auth.Claims) { c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(40 * time.Second)) },
+		"native-short":    func(c *auth.Claims) { c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(15 * time.Second)) },
 	}
 	for name, mutate := range mutations {
 		copy := *claims
@@ -78,6 +80,32 @@ func main() {
 		panic("cannot create disposable foreign signer")
 	}
 	tokens["signature"] = sign(*claims, foreign)
+	entitlement, _, err := signer.IssueEntitlement("alice", "probe", "session-a", "license-a", "sha256:"+strings.Repeat("a", 64),
+		[]string{"enterprise.models"}, []string{"model-a"}, nil)
+	if err != nil {
+		panic("cannot issue disposable entitlement")
+	}
+	entitlementClaims, err := signer.ParseEntitlement(entitlement)
+	if err != nil {
+		panic("cannot parse disposable entitlement")
+	}
+	tokens["entitlement"] = entitlement
+	for name, mutate := range mutations {
+		copy := *entitlementClaims
+		mutate(&copy)
+		tokens["entitlement-"+name] = sign(copy, ed25519.NewKeyFromSeed(seed))
+	}
+	tokens["entitlement-signature"] = sign(*entitlementClaims, foreign)
+	for name, mutate := range map[string]func(*auth.Claims){
+		"license-id":      func(c *auth.Claims) { c.LicenseID = "other-license" },
+		"license-digest":  func(c *auth.Claims) { c.LicenseDigest = "sha256:" + strings.Repeat("b", 64) },
+		"license-missing": func(c *auth.Claims) { c.LicenseID, c.LicenseDigest = "", "" },
+		"license-grace":   func(c *auth.Claims) { c.LicenseID = "license-grace" },
+	} {
+		copy := *entitlementClaims
+		mutate(&copy)
+		tokens[name] = sign(copy, ed25519.NewKeyFromSeed(seed))
+	}
 	result := map[string]any{"jwks": signer.JWKS(), "tokens": tokens}
 	if options.ProductDiscovery {
 		handler := httpapi.NewEnterpriseAPI(&app.App{Tokens: signer}).Handler()
