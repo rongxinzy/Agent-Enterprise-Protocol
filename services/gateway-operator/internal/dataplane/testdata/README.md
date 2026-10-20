@@ -13,3 +13,8 @@ prove that a new Higress version emits that shape. Keep the separate opt-in
 `TestLocalKindLoadedConfiguration` acceptance against actual Higress/Envoy before
 changing the supported gateway version. The existing generic Kind SSA scenario
 installs compatible CRDs, not a running Higress controller and Envoy gateway.
+
+The 2026-10-20 fixture review adds only the `ai-statistics` multimodal path
+suffixes introduced by #353 (embeddings, audio, images and videos). It retains
+the independent fixed snapshot, provider/route matching, plugin digest and
+privacy flags. No live multimodal gateway observation is implied by this update.
