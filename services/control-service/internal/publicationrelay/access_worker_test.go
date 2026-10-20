@@ -44,7 +44,7 @@ func (s *accessWorkerStore) PendingModelAccessSubjects(ctx context.Context, afte
 	return s.ids, s.discoverErr
 }
 
-func (s *accessWorkerStore) CaptureModelAccessSessions(ctx context.Context, id string, freshness time.Duration) (*repository.ModelAccessCapture, error) {
+func (s *accessWorkerStore) CaptureModelAccessBindings(ctx context.Context, id string, freshness time.Duration) (*repository.ModelAccessCapture, error) {
 	requireDeadline(ctx)
 	if freshness != 5*time.Minute {
 		panic("unexpected freshness")
