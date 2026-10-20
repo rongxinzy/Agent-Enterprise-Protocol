@@ -108,6 +108,13 @@ export async function businessAcceptance(context) {
       await trustedQuotaAcceptance({...context, admin, gateway, alice, bob, model});
     }
   }
+  if (process.env.AEP_NATIVE_ACCESS_QUOTA_ADMIN === 'true') {
+    assert(managed, 'Quota management acceptance requires the managed native path');
+    const {quotaManagementProbe} = await import('./quota-management-probe.mjs');
+    await quotaManagementProbe({...context, admin, adminStore, gateway, person: bob});
+    report.scope += '; focused native quota management probe, not the full session mutation/recovery baseline';
+    return;
+  }
   const initial = await enforcement(alice, 200); await enforcement(bob, 200);
   assert.deepEqual((await alice.client.listModels()).models.map(m => m.id), [model.id]);
   record('Real SDK/API role grants, team defaults and password sessions reach both independently enumerated native processes', {processes: fleet.identities(), observations: initial});
