@@ -83,7 +83,9 @@ fragment。HTTP 允许项用于隔离测试，不是生产传输安全方案。�
 续期当作权限变更，语义 hash 保持稳定；最后不足两秒时等待到期，避免忙循环。无关主体
 不会重发。这不证明运行时缓存必然存续，也不证明故障情况下服务副本会及时采用。
 
-原生工作负载许可证边界、运行时配置交付及完整员工模型/配额/撤权验收仍由
+producer 现在明确选择符合条件的工作负载许可证并发布
+[许可证声明](workload-entitlement.zh-CN.md)。缺失许可证时可恢复地暂停，无关许可证
+不改变既有选择。运行时配置交付及完整员工模型/配额/撤权验收仍由
 [#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338) 与
 [governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131) 分阶段跟踪。
 `adoptionGate=false` 保持，默认部署和推理入口不变。

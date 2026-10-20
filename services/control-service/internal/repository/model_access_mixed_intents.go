@@ -58,6 +58,7 @@ func workloadAccessIntents(source ModelAccessSource, prior []ModelAccessPublicat
 		old[publication.BindingKey] = publication
 		policy.Disabled, policy.Retired = true, true
 		policy.Models, policy.RoleIDs, policy.TeamIDs, policy.Licenses = []string{}, nil, nil, nil
+		policy.WorkloadEntitlement = nil
 		policies[publication.BindingKey] = policy
 		deadlines[publication.BindingKey] = issuedAt.Add(freshness)
 	}
@@ -80,12 +81,17 @@ func workloadAccessIntents(source ModelAccessSource, prior []ModelAccessPublicat
 			state.Disabled = state.Disabled || !current.verified
 			policy := modelAccessSnapshot(state, gateway.ModelAccessBinding{Kind: "kubernetes", Workload: &binding})
 			key := policy.BindingKey()
+			var preferred *gateway.ModelAccessWorkloadEntitlement
 			if previous, exists := old[key]; exists {
 				previousPolicy, err := gatewayaccess.Decode(previous.Payload, previous.ContentHash)
 				if err != nil || previousPolicy.Retired {
 					return nil, ErrAccessBinding
 				}
+				preferred = previousPolicy.WorkloadEntitlement
 			}
+			state, evidence := workloadLicenseSource(state, preferred)
+			policy = modelAccessSnapshot(state, policy.Binding)
+			policy.WorkloadEntitlement = evidence
 			deadline, err := modelAccessDeadline(state, workload.VerifiedUntil, freshness)
 			if err != nil {
 				return nil, err
