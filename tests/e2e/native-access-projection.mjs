@@ -47,8 +47,8 @@ async function until(check, timeout = 120_000) {
   }
   throw last ?? new Error('Native projection convergence timeout');
 }
-async function forward(target, remote) {
-  const child = spawn('kubectl', ['--kubeconfig', kubeconfig, '--context', 'kind-' + cluster, '-n', namespace,
+async function forward(target, remote, targetNamespace = namespace) {
+  const child = spawn('kubectl', ['--kubeconfig', kubeconfig, '--context', 'kind-' + cluster, '-n', targetNamespace,
     'port-forward', '--address', '127.0.0.1', target, ':' + remote], {shell: false});
   forwards.push(child);
   return new Promise((resolve, reject) => {
@@ -115,7 +115,11 @@ try {
   await kubectl(['apply', '-f', '-'], {input: crd});
   await kubectl(['apply', '-f', 'services/gateway-operator/config/default/namespaces.yaml']);
   await apply([{apiVersion: 'v1', kind: 'Namespace', metadata: {name: 'higress-system'}}]);
-  await kubectl(['apply', '-f', 'services/gateway-operator/internal/controller/testdata/higress-crds.yaml']);
+  if (process.env.AEP_NATIVE_ACCESS_HIGRESS === 'true') {
+    assert.equal(process.env.AEP_NATIVE_ACCESS_BUSINESS, 'true', 'Shared Higress acceptance requires real business mode');
+    const {installAccessHigress} = await import('./auth-cache/higress-install.mjs');
+    await installAccessHigress({command, kubectl, work, cluster});
+  } else await kubectl(['apply', '-f', 'services/gateway-operator/internal/controller/testdata/higress-crds.yaml']);
   let manifest = await command('kubectl', ['kustomize', 'services/gateway-operator/config/default']);
   manifest = manifest.replace('ko://github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/cmd', operatorImage);
   await kubectl(['apply', '-f', '-'], {input: manifest});
