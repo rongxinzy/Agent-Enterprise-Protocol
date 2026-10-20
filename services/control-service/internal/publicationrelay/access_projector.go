@@ -41,6 +41,7 @@ func desiredAccess(item repository.ModelAccessDelivery) (gateway.ModelAccessGran
 		IssuedAt: metav1.NewTime(item.IssuedAt.UTC()), ValidUntil: metav1.NewTime(item.ValidUntil.UTC()),
 		Disabled: policy.Disabled, Models: policy.Models, Licenses: policy.Licenses, RoleIDs: policy.RoleIDs, TeamIDs: policy.TeamIDs,
 		WorkloadEntitlement: policy.WorkloadEntitlement,
+		WorkloadPodUIDs:     policy.PodUIDs,
 	}, nil
 }
 

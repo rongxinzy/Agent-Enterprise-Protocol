@@ -93,6 +93,9 @@ func Render(grant *gateway.ModelAccessGrant, options Options) (*unstructured.Uns
 	}
 	spec := grant.DeepCopy().Spec
 	spec.Publication = gateway.PublicationReference{}
+	// Live Pod membership is checked only by the uncached, freshness-bounded
+	// native policy. Pod churn must not rebuild authentication/decision caches.
+	spec.WorkloadPodUIDs = nil
 	spec.IssuedAt, spec.ValidUntil = metav1.Time{}, metav1.Time{}
 	slices.Sort(spec.Models)
 	slices.Sort(spec.RoleIDs)

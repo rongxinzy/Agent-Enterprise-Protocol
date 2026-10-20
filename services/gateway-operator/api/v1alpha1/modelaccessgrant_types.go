@@ -77,6 +77,7 @@ type ModelAccessLicense struct {
 // +kubebuilder:validation:XValidation:rule="self.subject.kind == 'agent' || self.binding.kind == 'session'",message="human subjects require an AEP session binding"
 // +kubebuilder:validation:XValidation:rule="self.validUntil > self.issuedAt && self.validUntil <= self.issuedAt + duration('1h')",message="publication validity must be positive and at most one hour"
 // +kubebuilder:validation:XValidation:rule="!self.disabled || size(self.models) == 0",message="disabled tombstones cannot carry allowed models"
+// +kubebuilder:validation:XValidation:rule="!has(self.workloadPodUids) || self.binding.kind == 'kubernetes'",message="Pod observations require a Kubernetes workload binding"
 // +kubebuilder:validation:XValidation:rule="!has(self.workloadEntitlement) || (self.binding.kind == 'kubernetes' && has(self.licenses) && self.licenses.exists(l, l.id == self.workloadEntitlement.licenseId && l.digest == self.workloadEntitlement.licenseDigest))",message="workload entitlement requires its exact accepted license and a Kubernetes binding"
 type ModelAccessGrantSpec struct {
 	// +kubebuilder:validation:MinLength=1
@@ -97,6 +98,16 @@ type ModelAccessGrantSpec struct {
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9][a-z0-9-]*$`
 	// +listType=set
 	Models []string `json:"models"`
+	// WorkloadPodUIDs is mutable live-Pod evidence, outside the immutable binding.
+	// Missing/empty denies workload requests, including cached TokenReview results.
+	// It is not a model grant and must be supplied by a trusted lifecycle observer.
+	// +optional
+	// +kubebuilder:validation:MaxItems=512
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=128
+	// +kubebuilder:validation:items:Pattern=`^[A-Za-z0-9][A-Za-z0-9._:-]*$`
+	// +listType=set
+	WorkloadPodUIDs []string `json:"workloadPodUids,omitempty"`
 	// Licenses contains only current accepted ID/digest pairs for this deployment.
 	// A different active license must never satisfy an entitlement token's binding.
 	// +optional

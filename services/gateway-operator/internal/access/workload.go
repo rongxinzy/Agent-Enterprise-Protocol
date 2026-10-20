@@ -6,11 +6,15 @@ import (
 	"unicode"
 
 	gateway "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/internal/gatewayaccess"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func validNativeBinding(spec gateway.ModelAccessGrantSpec, options Options) bool {
 	b := spec.Binding
+	if !gatewayaccess.ValidWorkloadPods(b.Kind, spec.WorkloadPodUIDs) {
+		return false
+	}
 	if b.Kind == "session" {
 		return b.SessionID != "" && b.Workload == nil
 	}
@@ -54,6 +58,10 @@ policy_hash = %s
 // cryptography, business DB lookup or token lifetime arithmetic is implemented.
 func workloadBoundsRego(spec gateway.ModelAccessGrantSpec, hash string, options Options) string {
 	w := spec.Binding.Workload
+	pods := spec.WorkloadPodUIDs
+	if pods == nil {
+		pods = []string{}
+	}
 	return fmt.Sprintf(`allow {
 input.auth.authorization.access.policy_hash == %s
 workload_license_current
@@ -77,13 +85,15 @@ kubernetes.serviceaccount.name == %s
 kubernetes.serviceaccount.uid == %s
 is_string(kubernetes.pod.uid)
 kubernetes.pod.uid != ""
+workload_pod_uids[_] == kubernetes.pod.uid
 body := json.unmarshal(input.context.request.http.body)
 is_object(body)
 is_string(body.model)
 input.auth.authorization.access.models[_] == body.model
 }
+workload_pod_uids = %s
 publication = %s
 `, jsonValue(hash), spec.IssuedAt.Unix(), spec.ValidUntil.Unix(),
 		jsonValue("system:serviceaccount:"+w.Namespace+":"+w.ServiceAccountName), jsonValue(w.Audience), jsonValue(w.Namespace),
-		jsonValue(w.ServiceAccountName), jsonValue(w.ServiceAccountUID), jsonValue(spec.Publication)) + workloadLicenseRego(spec, options)
+		jsonValue(w.ServiceAccountName), jsonValue(w.ServiceAccountUID), jsonValue(pods), jsonValue(spec.Publication)) + workloadLicenseRego(spec, options)
 }
