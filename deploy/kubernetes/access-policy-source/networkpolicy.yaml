@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: aep-access-policy-source
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: aep-access-policy-source
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              gateway.aep.zhiyuan.io/policy-reader: 'true'
+      ports:
+        - protocol: TCP
+          port: 8443

@@ -6,6 +6,8 @@ const config: KnipConfig = {
       entry: [
         // Documented CLI; not wired through package.json scripts.
         'scripts/render-higress-dashboard.mjs',
+        // Explicit isolated static policy delivery acceptance; no default traffic.
+        'tests/e2e/access-policy-source.mjs',
         // Compose bind-mount mock provider (deploy/compose/gateway.yaml, offline bundle).
         'tests/e2e/mock-openai.mjs',
         // Sidecar entry for offline-license Compose (tests/e2e/offline-license.compose.yaml).
