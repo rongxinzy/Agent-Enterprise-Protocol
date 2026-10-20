@@ -169,6 +169,6 @@ export async function trustedQuotaAcceptance(ctx) {
   await until(async () => assert.equal((await gateway.call(bob)).status, 200));
   report.quotaIdentityVerified = true;
   report.persistentQuotaAPIIntegrated = false;
-  gateway.nativeRedis = {redis, publication, loaded, rulePlugin};
+  gateway.nativeRedis = {redis, publication, loaded, rulePlugin, adminPort};
   record('Deleting the native rule restores inference; membership restoration republishes the affected grant');
 }

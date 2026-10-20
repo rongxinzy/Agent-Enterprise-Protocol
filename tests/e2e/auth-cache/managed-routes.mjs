@@ -43,11 +43,12 @@ http.createServer(async(req,res)=>{
     // Each assertion targets the currently loaded listener. An existing HTTP/1
     // keep-alive connection can retain a draining listener's old filter chain
     // after adding a WasmPlugin. This does NOT prove adoption on old connections.
-    const req=http.request({agent:false,host:'127.0.0.1',port,path:'/v1/chat/completions',method:'POST',timeout:options.timeout??6000,headers:{
+    const req=http.request({agent:false,host:'127.0.0.1',port,path:options.path??'/v1/chat/completions',method:options.method??'POST',timeout:options.timeout??6000,headers:{
       host:options.host??'shared.access.test',authorization:'Bearer '+(options.token??person.tokens.modelAccessToken),
       'content-type':'application/json','x-aep-access-binding':options.binding??person.binding,...options.headers}},res=>{
       let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,
-        observation:res.headers['x-aep-access-observation'],body:res.statusCode===200?JSON.parse(body):body}));
+        observation:res.headers['x-aep-access-observation'],keyAuthChallenge:/^Key /.test(res.headers['www-authenticate']??''),
+        body:res.statusCode===200?JSON.parse(body):body}));
     });req.on('error',reject);req.on('timeout',()=>req.destroy(new Error('Higress timeout')));
     req.end(options.body??JSON.stringify({model:id,messages:[{role:'user',content:'probe'}]}));
   }).catch(async error=>{port=await forward('deployment/higress-gateway',80,'higress-system');throw error;});

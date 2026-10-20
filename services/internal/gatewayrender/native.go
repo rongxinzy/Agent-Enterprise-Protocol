@@ -28,6 +28,9 @@ type NativeGatewayConfig struct {
 	RedisDatabase           int
 	RedisPasswordRef        *SecretReference
 	QuotaAdminCredentialRef *SecretReference
+	// PrivateQuotaListener keeps quota management off the model listener.
+	// Callers must install the native Istio v1 APIs and opt in explicitly.
+	PrivateQuotaListener bool `json:"-"`
 }
 
 // RenderGatewayLimits renders one WasmPlugin per published limit rule,

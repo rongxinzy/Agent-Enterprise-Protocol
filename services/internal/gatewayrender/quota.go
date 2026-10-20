@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 )
 
 const (
@@ -18,10 +19,16 @@ func RenderGatewayQuota(input Input, cfg NativeGatewayConfig, password, adminCre
 	if adminCredential == "" || cfg.RedisService == "" {
 		return nil, errors.New("native quota secrets unavailable")
 	}
+	if cfg.PrivateQuotaListener && strings.ContainsAny(adminCredential, "*\r\n") {
+		return nil, errors.New("private quota credential must not contain native policy wildcards or line breaks")
+	}
 	suffix := ResourceSuffix(input.Deployment)
 	name := "aep-quota-" + suffix
 	path := "/" + name + "/v1/chat/completions/quota"
-	ingresses := []string{name}
+	ingresses := []string{}
+	if !cfg.PrivateQuotaListener {
+		ingresses = append(ingresses, name)
+	}
 	for _, route := range input.Routes {
 		if !route.Enabled {
 			continue
@@ -46,6 +53,9 @@ func RenderGatewayQuota(input Input, cfg NativeGatewayConfig, password, adminCre
 	}
 	quota := map[string]any{"admin_consumer": name, "admin_path": "/quota", "redis_key_prefix": "aep_quota:", "redis": redis, "enable_path_suffixes": []string{"/chat/completions", "/completions", "/responses", "/messages"}}
 	auth := map[string]any{"global_auth": false, "in_header": true, "in_query": false, "keys": []string{"authorization"}, "consumers": []any{map[string]any{"name": name, "credential": "Bearer " + adminCredential}}}
+	if cfg.PrivateQuotaListener {
+		return renderPrivateQuota(name, suffix, path, ingresses, quota, auth, adminCredential), nil
+	}
 	quotaPlugin := nativePlugin(name, quotaURL, "UNSPECIFIED_PHASE", 750, ingresses, quota)
 	authPlugin := nativePlugin("aep-quota-auth-"+suffix, quotaAuthURL, "AUTHN", 310, []string{name}, auth)
 	ingress := map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": name, "namespace": "higress-system"}, "spec": map[string]any{"ingressClassName": "higress", "rules": []any{map[string]any{"http": map[string]any{"paths": []any{map[string]any{"path": path, "pathType": "Prefix", "backend": map[string]any{"service": map[string]any{"name": "aep-model-gateway", "port": map[string]int{"number": 80}}}}}}}}}}
@@ -54,6 +64,10 @@ func RenderGatewayQuota(input Input, cfg NativeGatewayConfig, password, adminCre
 }
 
 func nativePlugin(name, plugin, phase string, priority int, ingresses []string, config map[string]any) RenderedResource {
-	body, _ := json.Marshal(map[string]any{"apiVersion": "extensions.higress.io/v1alpha1", "kind": "WasmPlugin", "metadata": map[string]any{"name": name, "namespace": "higress-system"}, "spec": map[string]any{"url": plugin, "failStrategy": "FAIL_CLOSE", "phase": phase, "priority": priority, "defaultConfigDisable": true, "matchRules": []any{map[string]any{"ingress": ingresses, "config": config, "configDisable": false}}}})
+	return nativeMatchedPlugin(name, plugin, phase, priority, []any{map[string]any{"ingress": ingresses, "config": config, "configDisable": false}})
+}
+
+func nativeMatchedPlugin(name, plugin, phase string, priority int, rules []any) RenderedResource {
+	body, _ := json.Marshal(map[string]any{"apiVersion": "extensions.higress.io/v1alpha1", "kind": "WasmPlugin", "metadata": map[string]any{"name": name, "namespace": "higress-system"}, "spec": map[string]any{"url": plugin, "failStrategy": "FAIL_CLOSE", "phase": phase, "priority": priority, "defaultConfigDisable": true, "matchRules": rules}})
 	return RenderedResource{Kind: ResourceGatewayNative, APIPath: "/apis/extensions.higress.io/v1alpha1/namespaces/higress-system/wasmplugins/" + name, Body: string(body) + "\n"}
 }
