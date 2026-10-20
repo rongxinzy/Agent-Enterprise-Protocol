@@ -7,7 +7,7 @@ adds an actual controller to the existing Kubebuilder Operator. It consumes
 admitted [ModelAccessGrant](model-access-grants.md) session bindings and writes
 owned Authorino v0.26.4 `AuthConfig` and freshness ConfigMap resources. It does
 not replace the default authorizer, connect shared Higress ingress, implement
-workload authentication or establish business acceptance. Adoption remains gated.
+workload authentication or establish complete product acceptance. Adoption remains gated.
 
 ## Ownership and configuration
 
@@ -130,10 +130,51 @@ AuthConfig rewrites. This is still CR-based component integration, not a
 business DB/Higress/employee acceptance or NetworkPolicy enforcement test.
 Private files and the owned cluster are cleaned in `finally`.
 
+### Business mode starting from real management APIs
+
+With the HTTPS parameters above, add these settings and run the same entry:
+
+```powershell
+npm run build --workspace @aep/sdk-node
+$env:AEP_NATIVE_ACCESS_BUSINESS = 'true'
+$env:AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT = 'false'
+node tests/e2e/native-access-projection.mjs
+```
+
+Docker must also cache `postgres:17.6-alpine` and `rustfs/rustfs:1.0.0`. The
+probe builds the current Control Service with ko and deploys disposable
+PostgreSQL, object storage and the real server in its owned Kind cluster.
+Random administrator/storage passwords, signing seed and Credential key enter
+runtime Secrets only, never images, repository files or reports. The fixture
+retains restricted Pod Security and never accesses an existing local or
+production database.
+
+Business mutations use the SDK/public management API exclusively: models are
+assigned only to roles, inherited by users directly or through team default
+roles. Checks cover team-default, direct-role and team-membership changes,
+role/team disable/restore, role model-assignment deletion/recreation, individual
+session revocation,
+account disable/re-enable, model disable/restore, actual Control/relay outage
+expiry/recovery and rediscovery after an authorization process replacement.
+Read-only SQL correlates the latest DB publication's operation ID, sequence,
+hash and phase with the CR and process observations. Neither SQL writes nor
+manual CR edits simulate authorization changes.
+
+The acceptance observer independently enumerates the two current Ready Pods,
+addresses each Pod directly, captures UID/containerID/restart count and checks
+the instance set before and after requests. This is test instrumentation, not
+a production all-process observer, and never sets `Ready=True`. Internal
+execution responses are still not cache-hit witnesses. Business mode uses real
+service-issued human-session model JWTs; enterprise entitlements, trusted
+employee workloads, shared Higress ingress, provider inference, quota and
+NetworkPolicy enforcement remain outside its scope. `adoptionGate` stays false.
+
 Remaining adoption gates include:
 
-- Real business mutations through DB→outbox→relay→CR→Operator and recovery;
-  per-process fleet discovery/observation and safe shared Higress ingress.
+- Broader DB→outbox→relay→CR→Operator business coverage, including licenses,
+  scheduled expiry and agent bindings; a production all-serving-process
+  discovery/adoption observer and safe shared Higress ingress. The human-session
+  probe above does not complete these gates.
 - Trusted workload binding, existing Consumer/Redis quota identity and
   multimodal request extraction. No new quota accounting is supplied here.
 - Secure dynamic static-file delivery, watch interruption, expiry/recovery and

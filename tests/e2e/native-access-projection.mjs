@@ -121,6 +121,10 @@ try {
   await kubectl(['apply', '-f', '-'], {input: manifest});
   await kubectl(['apply', '-k', 'services/gateway-operator/config/access-rbac']);
   const httpsSource = sourceDirectory ? await httpsPolicySource({directory: sourceDirectory, command, kubectl, apply, work, cluster, namespace}) : undefined;
+  if (process.env.AEP_NATIVE_ACCESS_BUSINESS === 'true') {
+    const {businessAcceptance} = await import('./auth-cache/business-acceptance.mjs');
+    await businessAcceptance({command, kubectl, apply, forward, until, request, get, record, httpsSource, report, work, cluster});
+  } else {
   await kubectl(['-n', namespace, 'set', 'env', 'deployment/aep-gateway-operator', 'AEP_GATEWAY_ACCESS_OPERATOR_ENABLED=true',
     'AEP_GATEWAY_ACCESS_ISSUER_URL=http://introspection:8080/oidc', 'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=' + (httpsSource?.baseURL ?? 'http://introspection:8082'),
     'AEP_GATEWAY_ACCESS_REFRESH_SECONDS=1', 'AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT=' + requireEntitlement]);
@@ -240,6 +244,7 @@ try {
   assert.notEqual(observed.status?.conditions?.find(c => c.type === 'Ready')?.status, 'True');
   assert.equal(observed.status?.replicas?.length ?? 0, 0);
   record('Disabled CR revokes previously allowed JWTs on both replicas; resource status never fabricates all-process adoption');
+  }
   report.completed = true;
 } catch (error) {
   report.completed = false; report.error = error.message;

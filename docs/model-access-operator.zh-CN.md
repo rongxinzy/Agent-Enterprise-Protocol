@@ -99,10 +99,40 @@ Docker 需已缓存 `node:24-alpine`、固定 Authorino v0.26.4 tag 和脚本指
 AuthConfig。这仍是 CR 起点的组件联验，不是业务 DB/Higress/员工或 NetworkPolicy
 执行验收。临时私钥文件及自有集群均在 `finally` 清理。
 
+### 从真实管理 API 开始的业务模式
+
+在上述 HTTPS 参数基础上，增加以下配置后运行同一入口：
+
+```powershell
+npm run build --workspace @aep/sdk-node
+$env:AEP_NATIVE_ACCESS_BUSINESS = 'true'
+$env:AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT = 'false'
+node tests/e2e/native-access-projection.mjs
+```
+
+Docker 还需缓存 `postgres:17.6-alpine` 与 `rustfs/rustfs:1.0.0`。脚本用 ko 构建当前
+Control Service，在自有 Kind 内部署一次性 PostgreSQL、对象存储和真实服务。随机
+管理员/存储密码、签名 seed 和 Credential key 只作为运行时 Secret 注入，不进入镜像、
+仓库或报告。整个夹具保留 restricted Pod Security；不访问现有本地或生产数据库。
+
+业务写入只通过 SDK/公开管理 API：模型仅赋予角色，用户通过直接角色或团队默认角色
+获取模型。验证团队默认角色、用户直接角色及团队成员变化，角色/团队停用与恢复、
+角色模型授权删除与重建、单会话撤销、账号停用/重新启用、模型禁用/恢复、
+真实 Control/relay 中断后的到期拒绝和恢复，以及一个鉴权进程重建后的重新发现。
+只读 SQL 将最新 DB publication 的操作 ID、序号、摘要和阶段与 CR 及执行观察关联；
+不通过 SQL 或手改 CR 模拟授权变更。
+
+验收观察器独立枚举当前两个 Ready Pod，逐 Pod 直连采集 UID、containerID 和重启
+次数，并在请求前后核对实例集合。此观察器只属于测试，既不是产品级全进程 observer，
+也不写 `Ready=True`；内部执行响应同样不是缓存命中见证。业务模式使用真实服务签发的
+人类会话 model JWT，仍不覆盖企业 entitlement、可信员工 workload、共享 Higress
+入口、供应商推理、配额或 NetworkPolicy 执行。`adoptionGate` 继续为 false。
+
 正式采用前还需完成：
 
-- 真实业务变更 DB→outbox→relay→CR→Operator 与故障恢复；独立发现服务进程并逐进程
-  确认发布，以及安全共享 Higress 入口。
+- 更广业务场景的 DB→outbox→relay→CR→Operator 覆盖，包括许可证、计划到期与 agent
+  绑定；产品级全服务进程发现/采用确认，以及安全共享 Higress 入口。上述人类会话
+  probe 不能替代这些门禁。
 - 可信员工 workload 绑定，兼容原有 Consumer/Redis 配额身份与多模态请求模型提取；
   本阶段不增加配额记账。
 - 安全动态静态文件交付、watch 中断、到期恢复及部署配置变更。软件/选项升级可能在同
