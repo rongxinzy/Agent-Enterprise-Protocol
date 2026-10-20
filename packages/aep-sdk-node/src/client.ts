@@ -1,11 +1,16 @@
-import {AEP_PROTOCOL_VERSION, AepCapability, HttpMethod} from './constants.js';
-import {AepProblem} from './problem.js';
-import {FetchTransport} from './transport.js';
+import {HttpMethod} from './constants.js';
+import {AepResourceClient} from './client-resources.js';
+import {asJson, query, segment} from './client-values.js';
 import type {
-  GatewayCapabilities, GatewayNativeResult, GatewayHealth,
-  GatewayMetricResult, GatewayMetricQuery, GatewayRequestQuery,
+  GatewayCapabilities,
+  GatewayNativeResult,
+  GatewayHealth,
+  GatewayMetricResult,
+  GatewayMetricQuery,
+  GatewayRequestQuery,
   GatewayLimitWrite,
-  ModelPricing, ModelPricingWrite, JwtVerifierConfiguration,
+  ModelPricing,
+  ModelPricingWrite,
   GatewayLimit,
   GatewayLimitPage,
   GatewayLimitPublication,
@@ -14,53 +19,11 @@ import type {
   GatewayTestAccess,
   GatewayModelToken,
   GatewayModelTokenRequest,
-  AdminModel,
-  AdminModelList,
-  AdminModelPatch,
-  AdminModelWrite,
-  AgentModelList,
-  AgentDirectoryPage,
-  AgentResponse,
-  CreateAgentRequest,
-  UpdateAgentProfileRequest,
-  UpdateAgentProfileResponse,
-  CreateIdentitySourceRequest,
-  IdentityMapping,
-  IdentityMappingPage,
-  IdentityMappingResult,
-  IdentitySource,
-  IdentitySourcePage,
-  UpsertIdentityMappingRequest,
-  CreateDataScopeRuleRequest,
-  DataScopeRule,
-  DataScopeRulePage,
-  RetrievalContext,
   AdminControlEvent,
   AdminControlEventPage,
-  AepClientOptions,
-  AepRequest,
-  AepResponse,
-  AepSessionState,
-  AepTokens,
-  AepTransport,
-  UserModelList,
-  AuthenticationMethods,
-  ClientIdentity,
-  ControlEventPage,
-  CredentialAssignment,
-  Asset, AssetCreate, AssetPatch, AssetList, AssetSubject, AssetRuntimeList, AssetExecute, AssetExecuteResult,
-  AssetBinding, AssetBindingCreate, AssetBindingList, AssetTypeList,
-  CredentialAssignmentList,
-  CredentialAssignmentWrite,
-  CredentialCreate,
-  CredentialList,
-  CredentialMetadata,
-  CredentialPatch,
-  CredentialRotate,
   ComputeAssignment,
   ComputeAssignmentList,
   ComputeTierCatalog,
-  CurrentIdentity,
   DataPlaneDesiredState,
   DataPlaneDesiredStateWrite,
   DataPlanePublishRequest,
@@ -69,899 +32,91 @@ import type {
   DataPlaneStatus,
   DeploymentSettings,
   DeploymentSettingsUpdate,
-  EntitlementTokenResponse,
-  HeartbeatResponse,
   JsonObject,
-  JsonValue,
-  LicenseActivationRequest,
   License,
   LicenseImportRequest,
   LicensePage,
   LicenseRevocation,
-  ModelAssignment,
-  ModelAssignmentList,
-  ModelAssignmentWrite,
-  ModelConnection,
-  PlatformUser,
-  Page,
   Query,
-  PermissionPage,
-  Role,
-  RolePage,
-  CreateRoleRequest,
-  UpdateRoleRequest,
-  Team,
-  TeamPage,
-  CreateTeamRequest,
-  UpdateTeamRequest,
-  ReplaceUserRBACRequest,
-  UserRBAC,
-  ResolvedCredential,
-  ServiceMetadata,
-  SkillManifest,
-  SkillManifestResult,
   TelemetrySearchFilters,
   TelemetryEventPage,
 } from './types.js';
 
-export class AepClient {
-  readonly #baseUrl: string;
-  readonly #agentControlBaseUrl: string | undefined;
-  #sessionId?: string;
-  readonly #tokenStore: AepClientOptions['tokenStore'];
-  readonly #transport: AepTransport;
-  #refreshPromise: Promise<AepTokens> | null = null;
-
-  constructor(options: AepClientOptions) {
-    this.#baseUrl = options.baseUrl;
-    this.#agentControlBaseUrl = options.agentControlBaseUrl;
-    this.#sessionId = options.sessionId;
-    this.#tokenStore = options.tokenStore;
-    this.#transport = options.transport ?? new FetchTransport();
-  }
-
-  /**
-   * Split deployments serve the agent control protocol (auth sessions and
-   * the /aep/v1/user runtime surface) from its own process; discovery and
-   * management endpoints stay on the API base. Unset agentControlBaseUrl
-   * keeps everything on one host.
-   */
-  #baseFor(path: string): string {
-    const isAgentSurface = path.startsWith('/aep/v1/user/') || path.startsWith('/aep/v1/auth/');
-    return isAgentSurface && this.#agentControlBaseUrl ? this.#agentControlBaseUrl : this.#baseUrl;
-  }
-
-  getMetadata(): Promise<ServiceMetadata> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/metadata'}, false);
-  }
-
-  getJwks(): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Get, path: '/.well-known/jwks.json'}, false);
-  }
-
-  getJwtVerifierConfiguration(): Promise<JwtVerifierConfiguration> {
-    return this.#send({method: HttpMethod.Get, path: '/.well-known/openid-configuration'}, false);
-  }
-
-  getAuthenticationMethods(deploymentHint: string): Promise<AuthenticationMethods> {
-    return this.#send(
-      {method: HttpMethod.Get, path: `/aep/v1/auth/methods?${query({deploymentHint})}`},
-      false,
-    );
-  }
-
-  async loginWithPassword(input: {
-    deploymentId?: string;
-    /** @deprecated Use deploymentId. */
-    enterpriseId?: string;
-    sessionId?: string;
-    username: string;
-    password: string;
-    /**
-     * Optional client identity recorded on the issued session. Servers that
-     * predate the field reject the unknown key, so only send it to
-     * deployments that advertise session client identity support.
-     */
-    client?: ClientIdentity;
-  }): Promise<AepTokens> {
-    const tokens = await this.#send<AepTokens>(
-      {
-        method: HttpMethod.Post,
-        path: '/aep/v1/auth/password/login',
-        body: asJson({
-          deploymentId: input.deploymentId ?? input.enterpriseId,
-          username: input.username,
-          password: input.password,
-          sessionId: input.sessionId ?? this.#sessionId,
-          ...(input.client ? {client: input.client} : {}),
-        }),
-      },
-      false,
-    );
-    await this.#tokenStore.set(tokens);
-    this.#sessionId = tokens.sessionId ?? this.#sessionId;
-    return tokens;
-  }
-
-  startFederatedLogin(input: {
-    deploymentId: string;
-    methodId: string;
-    redirectUri: string;
-    codeChallenge: string;
-    codeChallengeMethod?: 'S256';
-  }): Promise<JsonObject> {
-    return this.#send(
-      {method: HttpMethod.Post, path: '/aep/v1/auth/federated/start', body: asJson(input)},
-      false,
-    );
-  }
-
-  async exchangeFederatedAuthorizationCode(input: {
-    transactionId: string;
-    authorizationCode: string;
-    redirectUri: string;
-    codeVerifier: string;
-  }): Promise<AepTokens> {
-    const tokens = await this.#send<AepTokens>(
-      {
-        method: HttpMethod.Post,
-        path: '/aep/v1/auth/exchange',
-        body: asJson({...input, sessionId: this.#sessionId}),
-      },
-      false,
-    );
-    await this.#tokenStore.set(tokens);
-    this.#sessionId = tokens.sessionId ?? this.#sessionId;
-    return tokens;
-  }
-
-  async changePassword(input: {newPassword: string; currentPassword?: string}): Promise<AepTokens> {
-    const tokens = await this.#send<AepTokens>({
-      method: HttpMethod.Post,
-      path: '/aep/v1/auth/password/change',
-      body: asJson({
-        newPassword: input.newPassword,
-        ...(input.currentPassword ? {currentPassword: input.currentPassword} : {}),
-      }),
-    });
-    await this.#tokenStore.set(tokens);
-    this.#sessionId = tokens.sessionId ?? this.#sessionId;
-    return tokens;
-  }
-
-  async refreshSession(): Promise<AepTokens> {
-    return this.#refresh();
-  }
-
-  async getSessionState(): Promise<AepSessionState> {
-    const tokens = await this.#tokenStore.get();
-    if (tokens) {
-      return {status: 'authenticated', passwordChangeRequired: tokens.passwordChangeRequired};
-    }
-    const refreshToken = await this.#tokenStore.getRefreshToken?.();
-    return refreshToken ? {status: 'recoverable'} : {status: 'signed-out'};
-  }
-
-  async restoreSession(): Promise<AepTokens | null> {
-    const tokens = await this.#tokenStore.get();
-    if (tokens) return tokens;
-    const refreshToken = await this.#tokenStore.getRefreshToken?.();
-    if (!refreshToken) return null;
-    return this.#refresh(refreshToken);
-  }
-
-  async logout(): Promise<void> {
-    let tokens = await this.#tokenStore.get();
-    try {
-      tokens ??= await this.restoreSession();
-      if (!tokens) return;
-      await this.#send<void>({
-        method: HttpMethod.Post,
-        path: '/aep/v1/auth/logout',
-        body: {refreshToken: tokens.refreshToken},
-        responseType: 'empty',
-      });
-    } finally {
-      await this.#tokenStore.clear();
-    }
-  }
-
-  async getCurrentIdentity(): Promise<CurrentIdentity> {
-    const identity = await this.#send<CurrentIdentity>({method: HttpMethod.Get, path: '/aep/v1/user/me'});
-    const deployment = identity.deployment ?? identity.enterprise;
-    return {...identity, deployment, deploymentId: identity.deploymentId ?? deployment.id, enterprise: identity.enterprise ?? deployment};
-  }
-
-  /** Canonical user-session identity method. */
-  getCurrentUser(): Promise<CurrentIdentity> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/me'});
-  }
-
-  activateEnterpriseLicense(input: LicenseActivationRequest = {}): Promise<EntitlementTokenResponse> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/user/activation',
-      body: asJson(input),
-    });
-  }
-
-  listCredentialsForUser(): Promise<CredentialList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/credentials'});
-  }
-
-  async resolveCredentialForUser(credentialId: string, purpose: string): Promise<ResolvedCredential> {
-    const response = await this.#request<ResolvedCredential>({
-      method: HttpMethod.Post,
-      path: '/aep/v1/user/credentials/' + segment(credentialId) + '/resolve',
-      body: {purpose},
-      retry: false,
-    });
-    this.#assertSuccess(response);
-    if (!hasNoStore(response.headers)) {
-      throw new AepProblem({
-        type: 'https://aep.example/problems/credential-response-cacheable',
-        title: 'Credential response is missing Cache-Control: no-store',
-        status: 502,
-        code: 'CREDENTIAL_RESPONSE_CACHEABLE',
-      });
-    }
-    return response.data;
-  }
-
-  listModels(): Promise<UserModelList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/user/models'});
-  }
-
-  /** @deprecated Use listModels. */
-  listAgentModels(): Promise<AgentModelList> {
-    return this.listModels();
-  }
-
-  listUserSessions(filters: Query = {}): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/sessions?${query(filters)}`});
-  }
-
-  revokeUserSession(sessionId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/admin/sessions/${segment(sessionId)}/revoke`,
-      responseType: 'empty',
-      retry: false,
-    });
-  }
-
-  async getModelConnection(): Promise<ModelConnection> {
-    const [metadata, tokens] = await Promise.all([this.getMetadata(), this.#loadOrRestoreTokens()]);
-    if (!metadata.capabilities.includes(AepCapability.ModelGateway) || !metadata.modelGateway) {
-      throw new AepProblem({
-        type: 'https://aep.example/problems/capability-not-supported',
-        title: 'Model gateway is not supported',
-        status: 501,
-        code: 'CAPABILITY_NOT_SUPPORTED',
-      });
-    }
-    if (!tokens) {
-      throw new AepProblem({
-        type: 'https://aep.example/problems/no-session',
-        title: 'No active AEP session',
-        status: 401,
-        code: 'NO_SESSION',
-      });
-    }
-    return {
-      ...metadata.modelGateway,
-      baseUrl: new URL(metadata.modelGateway.baseUrl, this.#baseUrl).toString(),
-      apiKey: tokens.modelAccessToken,
-      expiresIn: tokens.modelAccessExpiresIn,
-    };
-  }
-
-  async getSkillManifest(etag?: string): Promise<SkillManifestResult> {
-    const response = await this.#request<SkillManifest>({
-      method: HttpMethod.Get,
-      path: '/aep/v1/user/skills/manifest',
-      headers: etag ? {'If-None-Match': etag} : undefined,
-    });
-    const responseEtag = response.headers.get('ETag');
-    if (response.status === 304) return {notModified: true, etag: responseEtag ?? etag ?? null};
-    this.#assertSuccess(response);
-    return {notModified: false, etag: responseEtag, manifest: response.data};
-  }
-
-  getUserSkillManifest(etag?: string): Promise<SkillManifestResult> {
-    return this.#getSkillManifestAt('/aep/v1/user/skills/manifest', etag);
-  }
-
-  downloadSkillPackage(skillId: string, version: string): Promise<Uint8Array> {
-    return this.#send({
-      method: HttpMethod.Get,
-      path: `/aep/v1/user/skills/${segment(skillId)}/versions/${segment(version)}/package`,
-      responseType: 'bytes',
-    });
-  }
-
-  downloadUserSkillPackage(skillId: string, version: string): Promise<Uint8Array> {
-    return this.#send({
-      method: HttpMethod.Get,
-      path: `/aep/v1/user/skills/${segment(skillId)}/versions/${segment(version)}/package`,
-      responseType: 'bytes',
-    });
-  }
-
-  reportSkillSyncResult(result: JsonObject): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/user/skills/sync-results',
-      body: result,
-      responseType: 'empty',
-    });
-  }
-
-  uploadEventBatch(events: JsonObject[]): Promise<JsonObject> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/user/events/batch',
-      body: {events},
-    });
-  }
-
-  uploadUserEventBatch(events: JsonObject[]): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/user/events/batch', body: {events}});
-  }
-
-  heartbeat(input: JsonObject): Promise<HeartbeatResponse> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/user/heartbeat', body: input});
-  }
-
-  heartbeatUser(input: JsonObject): Promise<HeartbeatResponse> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/user/heartbeat', body: input});
-  }
-
-  listControlEvents(afterCursor?: string, limit = 50): Promise<ControlEventPage> {
-    return this.#send({
-      method: HttpMethod.Get,
-      path: `/aep/v1/user/control-events?${query({afterCursor, limit})}`,
-    });
-  }
-
-  listUserControlEvents(afterCursor?: string, limit = 50): Promise<ControlEventPage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/user/control-events?${query({afterCursor, limit})}`});
-  }
-
-  acknowledgeControlEvent(deliveryId: string, receivedAt: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/user/control-events/${segment(deliveryId)}/acknowledge`,
-      body: {status: 'received', receivedAt},
-      responseType: 'empty',
-    });
-  }
-
-  acknowledgeUserControlEvent(deliveryId: string, receivedAt: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/user/control-events/${segment(deliveryId)}/acknowledge`,
-      body: {status: 'received', receivedAt}, responseType: 'empty',
-    });
-  }
-
-  reportControlEventResult(deliveryId: string, result: JsonObject): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/user/control-events/${segment(deliveryId)}/result`,
-      body: result,
-      responseType: 'empty',
-    });
-  }
-
-  reportUserControlEventResult(deliveryId: string, result: JsonObject): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/user/control-events/${segment(deliveryId)}/result`,
-      body: result, responseType: 'empty',
-    });
-  }
-
-  listUsers(cursor?: string, limit = 50): Promise<Page<PlatformUser>> {
-    return this.#send({
-      method: HttpMethod.Get,
-      path: `/aep/v1/admin/users?${query({cursor, limit})}`,
-    });
-  }
-
-  createUser(input: JsonObject): Promise<PlatformUser> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/users', body: input});
-  }
-
-  importAdminUsers(input: JsonObject): Promise<JsonObject> {
-    return this.importUsers(input);
-  }
-
-  importUsers(input: JsonObject): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/users/import', body: input});
-  }
-
-  updateUser(userId: string, input: JsonObject): Promise<PlatformUser> {
-    return this.#send({
-      method: HttpMethod.Patch,
-      path: `/aep/v1/admin/users/${segment(userId)}`,
-      body: input,
-    });
-  }
-
-  resetUserPassword(userId: string, input: JsonObject): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/admin/users/${segment(userId)}/reset-password`,
-      body: input,
-      responseType: 'empty',
-    });
-  }
-
-  listPermissions(): Promise<PermissionPage> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/permissions'});
-  }
-
-  listRoles(filters: Query = {}): Promise<RolePage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/roles?${query(filters)}`});
-  }
-
-  createRole(input: CreateRoleRequest): Promise<Role> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/roles', body: asJson(input)});
-  }
-
-  getRole(roleId: string): Promise<Role> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/roles/${segment(roleId)}`});
-  }
-
-  updateRole(roleId: string, input: UpdateRoleRequest): Promise<Role> {
-    return this.#send({method: HttpMethod.Patch, path: `/aep/v1/admin/roles/${segment(roleId)}`, body: asJson(input)});
-  }
-
-  deleteRole(roleId: string): Promise<void> {
-    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/roles/${segment(roleId)}`, responseType: 'empty'});
-  }
-
-  listTeams(filters: Query = {}): Promise<TeamPage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/teams?${query(filters)}`});
-  }
-
-  createTeam(input: CreateTeamRequest): Promise<Team> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/teams', body: asJson(input)});
-  }
-
-  getTeam(teamId: string): Promise<Team> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/teams/${segment(teamId)}`});
-  }
-
-  updateTeam(teamId: string, input: UpdateTeamRequest): Promise<Team> {
-    return this.#send({method: HttpMethod.Patch, path: `/aep/v1/admin/teams/${segment(teamId)}`, body: asJson(input)});
-  }
-
-  deleteTeam(teamId: string): Promise<void> {
-    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/teams/${segment(teamId)}`, responseType: 'empty'});
-  }
-
-  replaceUserRBAC(userId: string, input: ReplaceUserRBACRequest): Promise<UserRBAC> {
-    return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/users/${segment(userId)}/rbac`, body: asJson(input)});
-  }
-
-  listAgents(filters: {cursor?: string; limit?: number; includeEphemeral?: boolean} = {}): Promise<AgentDirectoryPage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/agents?${query(filters)}`});
-  }
-
-  createAgent(input: CreateAgentRequest): Promise<AgentResponse> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/agents', body: asJson(input)});
-  }
-
-  deleteAgent(agentId: string): Promise<void> {
-    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/agents/${segment(agentId)}`, responseType: 'empty'});
-  }
-
-  updateAgentProfile(agentId: string, input: UpdateAgentProfileRequest): Promise<UpdateAgentProfileResponse> {
-    return this.#send({
-      method: HttpMethod.Put,
-      path: `/aep/v1/admin/agents/${segment(agentId)}/profile`,
-      body: asJson(input),
-    });
-  }
-
-  listIdentitySources(filters: {cursor?: string; limit?: number} = {}): Promise<IdentitySourcePage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/identity-sources?${query(filters)}`});
-  }
-
-  createIdentitySource(input: CreateIdentitySourceRequest): Promise<IdentitySource> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/identity-sources', body: asJson(input)});
-  }
-
-  listIdentityMappings(
-    sourceId: string,
-    filters: {subjectType?: IdentityMapping['externalSubjectType']; cursor?: string; limit?: number} = {},
-  ): Promise<IdentityMappingPage> {
-    return this.#send({
-      method: HttpMethod.Get,
-      path: `/aep/v1/admin/identity-sources/${segment(sourceId)}/mappings?${query(filters)}`,
-    });
-  }
-
-  upsertIdentityMapping(sourceId: string, input: UpsertIdentityMappingRequest): Promise<IdentityMappingResult> {
-    return this.#send({
-      method: HttpMethod.Put,
-      path: `/aep/v1/admin/identity-sources/${segment(sourceId)}/mappings`,
-      body: asJson(input),
-    });
-  }
-
-  deleteIdentityMapping(
-    sourceId: string,
-    subjectType: IdentityMapping['externalSubjectType'],
-    externalId: string,
-  ): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/identity-sources/${segment(sourceId)}/mappings/${segment(subjectType)}/${segment(externalId)}`,
-      responseType: 'empty',
-    });
-  }
-
-  listDataScopeRules(filters: {cursor?: string; limit?: number} = {}): Promise<DataScopeRulePage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-scope-rules?${query(filters)}`});
-  }
-
-  createDataScopeRule(input: CreateDataScopeRuleRequest): Promise<DataScopeRule> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/data-scope-rules', body: asJson(input)});
-  }
-
-  getDataScopeRule(ruleId: string): Promise<DataScopeRule> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-scope-rules/${segment(ruleId)}`});
-  }
-
-  deleteDataScopeRule(ruleId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/data-scope-rules/${segment(ruleId)}`,
-      responseType: 'empty',
-    });
-  }
-
-  getDataScopeContext(userId: string): Promise<RetrievalContext> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-scope/context?${query({userId})}`});
-  }
-
-  listSkills(filters: Query = {}): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/skills?${query(filters)}`});
-  }
-
-  createSkill(input: JsonObject): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/skills', body: input});
-  }
-
-  updateSkill(skillId: string, input: JsonObject): Promise<JsonObject> {
-    return this.#send({
-      method: HttpMethod.Patch,
-      path: `/aep/v1/admin/skills/${segment(skillId)}`,
-      body: input,
-    });
-  }
-
-  deleteSkill(skillId: string, options: {force?: boolean} = {}): Promise<void> {
-    const search = query({force: options.force || undefined});
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/skills/${segment(skillId)}${search ? `?${search}` : ''}`,
-      responseType: 'empty',
-    });
-  }
-
-  uploadSkillVersion(skillId: string, version: string, archive: Uint8Array): Promise<JsonObject> {
-    const form = new FormData();
-    form.set('version', version);
-    const archiveBuffer = archive.buffer.slice(
-      archive.byteOffset,
-      archive.byteOffset + archive.byteLength,
-    ) as ArrayBuffer;
-    form.set('package', new Blob([archiveBuffer], {type: 'application/zip'}), skillId + '-' + version + '.zip');
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/admin/skills/${segment(skillId)}/versions`,
-      body: form,
-    });
-  }
-
-  publishSkillVersion(skillId: string, version: string): Promise<JsonObject> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: `/aep/v1/admin/skills/${segment(skillId)}/versions/${segment(version)}/publish`,
-    });
-  }
-
-  deleteSkillVersion(skillId: string, version: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/skills/${segment(skillId)}/versions/${segment(version)}`,
-      responseType: 'empty',
-    });
-  }
-
-  listSkillAssignments(filters: Query = {}): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/skill-assignments?${query(filters)}`});
-  }
-
-  createSkillAssignment(input: JsonObject): Promise<JsonObject> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/admin/skill-assignments',
-      body: input,
-    });
-  }
-
-  updateSkillAssignment(assignmentId: string, input: JsonObject): Promise<JsonObject> {
-    return this.#send({
-      method: HttpMethod.Patch,
-      path: `/aep/v1/admin/skill-assignments/${segment(assignmentId)}`,
-      body: input,
-    });
-  }
-  deleteSkillAssignment(assignmentId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/skill-assignments/${segment(assignmentId)}`,
-      responseType: 'empty',
-    });
-  }
-
-  listCredentials(filters: Query = {}): Promise<CredentialList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/credentials?${query(filters)}`});
-  }
-
-  createCredential(input: CredentialCreate): Promise<CredentialMetadata> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/credentials', body: asJson(input)});
-  }
-
-  getCredential(credentialId: string): Promise<CredentialMetadata> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/credentials/' + segment(credentialId)});
-  }
-
-  updateCredential(credentialId: string, input: CredentialPatch): Promise<CredentialMetadata> {
-    return this.#send({
-      method: HttpMethod.Patch,
-      path: '/aep/v1/admin/credentials/' + segment(credentialId),
-      body: asJson(input),
-    });
-  }
-
-  rotateCredential(credentialId: string, input: CredentialRotate): Promise<CredentialMetadata> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/admin/credentials/' + segment(credentialId) + '/rotate',
-      body: asJson(input),
-      retry: false,
-    });
-  }
-
-  deleteCredential(credentialId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: '/aep/v1/admin/credentials/' + segment(credentialId),
-      responseType: 'empty',
-    });
-  }
-
-  listCredentialAssignments(filters: Query = {}): Promise<CredentialAssignmentList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/credential-assignments?${query(filters)}`});
-  }
-
-  createCredentialAssignment(input: CredentialAssignmentWrite): Promise<CredentialAssignment> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/admin/credential-assignments',
-      body: asJson(input),
-    });
-  }
-
-  listAssetTypes(): Promise<AssetTypeList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/asset-types'});
-  }
-
-  listAssets(filters: Query = {}): Promise<AssetList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/assets?${query(filters)}`});
-  }
-
-  createAsset(input: AssetCreate): Promise<Asset> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/assets', body: asJson(input)});
-  }
-
-  getAsset(assetId: string): Promise<Asset> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/assets/' + segment(assetId)});
-  }
-
-  updateAsset(assetId: string, input: AssetPatch): Promise<Asset> {
-    return this.#send({
-      method: HttpMethod.Patch,
-      path: '/aep/v1/admin/assets/' + segment(assetId),
-      body: asJson(input),
-    });
-  }
-
-  listRuntimeAssets(subjectType: string, subjectId: string): Promise<AssetRuntimeList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/assets/runtime?${query({subjectType, subjectId})}`});
-  }
-
-  executeAsset(assetId: string, input: AssetExecute): Promise<AssetExecuteResult> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/admin/assets/' + segment(assetId) + '/execute',
-      body: asJson(input),
-      retry: false,
-    });
-  }
-
-  detectAsset(assetId: string): Promise<Asset> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/assets/' + segment(assetId) + '/detect'});
-  }
-
-  deleteAsset(assetId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: '/aep/v1/admin/assets/' + segment(assetId),
-      responseType: 'empty',
-    });
-  }
-
-  listAssetBindings(assetId: string, filters: Query = {}): Promise<AssetBindingList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/assets/${segment(assetId)}/bindings?${query(filters)}`});
-  }
-
-  createAssetBinding(assetId: string, input: AssetBindingCreate): Promise<AssetBinding> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/admin/assets/' + segment(assetId) + '/bindings',
-      body: asJson(input),
-    });
-  }
-
-  deleteAssetBinding(assetId: string, bindingId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: '/aep/v1/admin/assets/' + segment(assetId) + '/bindings/' + segment(bindingId),
-      responseType: 'empty',
-    });
-  }
-
-  deleteCredentialAssignment(assignmentId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: '/aep/v1/admin/credential-assignments/' + segment(assignmentId),
-      responseType: 'empty',
-    });
-  }
-
-  listAdminModels(filters: Query = {}): Promise<AdminModelList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/models?${query(filters)}`});
-  }
-
-  createModel(input: AdminModelWrite): Promise<AdminModel> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/models', body: asJson(input)});
-  }
-
-  getModel(modelId: string): Promise<AdminModel> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/models/${segment(modelId)}`});
-  }
-
-  updateModel(modelId: string, input: AdminModelPatch): Promise<AdminModel> {
-    return this.#send({
-      method: HttpMethod.Patch,
-      path: `/aep/v1/admin/models/${segment(modelId)}`,
-      body: asJson(input),
-    });
-  }
-
-  deleteModel(modelId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/models/${segment(modelId)}`,
-      responseType: 'empty',
-    });
-  }
-
-  listModelAssignments(filters: Query = {}): Promise<ModelAssignmentList> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-assignments?${query(filters)}`});
-  }
-
-  createModelAssignment(input: ModelAssignmentWrite): Promise<ModelAssignment> {
-    return this.#send({
-      method: HttpMethod.Post,
-      path: '/aep/v1/admin/model-assignments',
-      body: asJson(input),
-    });
-  }
-
-  deleteModelAssignment(assignmentId: string): Promise<void> {
-    return this.#send({
-      method: HttpMethod.Delete,
-      path: `/aep/v1/admin/model-assignments/${segment(assignmentId)}`,
-      responseType: 'empty',
-    });
-  }
-
-  getDataPlaneDesiredState(): Promise<DataPlaneDesiredState> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/desired-state'});
-  }
-
+export class AepClient extends AepResourceClient {
   getGatewayCapabilities(): Promise<GatewayCapabilities> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/capabilities'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/capabilities'});
   }
 
   queryGatewayMetrics(filters: GatewayMetricQuery): Promise<GatewayMetricResult> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/metrics?${query(filters)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/metrics?${query(filters)}`});
   }
 
   getGatewayMonitoringHealth(): Promise<GatewayHealth> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/health'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/health'});
   }
 
   searchGatewayRequests(filters: GatewayRequestQuery): Promise<GatewayNativeResult> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests?${query(filters)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests?${query(filters)}`});
   }
 
   getGatewayRequest(requestId: string, filters: GatewayRequestQuery): Promise<GatewayNativeResult> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests/${segment(requestId)}?${query(filters)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/requests/${segment(requestId)}?${query(filters)}`});
   }
 
   getModelPricing(modelId: string): Promise<ModelPricing> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/models/${segment(modelId)}/pricing`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/models/${segment(modelId)}/pricing`});
   }
 
   putModelPricing(modelId: string, input: ModelPricingWrite): Promise<ModelPricing> {
-    return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/models/${segment(modelId)}/pricing`, body: asJson(input), retry: false});
+    return this.send({method: HttpMethod.Put, path: `/aep/v1/admin/models/${segment(modelId)}/pricing`, body: asJson(input), retry: false});
   }
 
   listGatewayLimits(): Promise<GatewayLimitPage> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/limits'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/limits'});
   }
 
   getGatewayLimit(ruleId: string): Promise<GatewayLimit> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}`});
   }
 
   putGatewayLimit(ruleId: string, input: GatewayLimitWrite): Promise<GatewayLimit> {
-    return this.#send({method: HttpMethod.Put, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}`, body: asJson(input), retry: false});
+    return this.send({method: HttpMethod.Put, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}`, body: asJson(input), retry: false});
   }
 
   deleteGatewayLimit(ruleId: string, expectedVersion: number): Promise<void> {
-    return this.#send({method: HttpMethod.Delete, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}?${query({expectedVersion})}`, responseType: 'empty', retry: false});
+    return this.send({method: HttpMethod.Delete, path: `/aep/v1/admin/model-gateway/limits/${segment(ruleId)}?${query({expectedVersion})}`, responseType: 'empty', retry: false});
   }
 
   publishGatewayLimits(): Promise<GatewayLimitPublication> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/model-gateway/limits/publish', retry: false});
+    return this.send({method: HttpMethod.Post, path: '/aep/v1/admin/model-gateway/limits/publish', retry: false});
   }
 
   getGatewayLimitsStatus(): Promise<GatewayLimitStatus> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/limits/status'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/model-gateway/limits/status'});
   }
 
   getGatewayQuota(userId: string): Promise<GatewayQuota> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}`});
   }
 
   refreshGatewayQuota(userId: string, quota: number): Promise<GatewayQuota> {
-    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}/refresh`, body: {quota}, retry: false});
+    return this.send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}/refresh`, body: {quota}, retry: false});
   }
 
   changeGatewayQuota(userId: string, value: number): Promise<GatewayQuota> {
-    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}/delta`, body: {value}, retry: false});
+    return this.send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/quotas/${segment(userId)}/delta`, body: {value}, retry: false});
   }
 
   createGatewayTestAccess(modelId: string): Promise<GatewayTestAccess> {
-    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/models/${segment(modelId)}/test-access`, retry: false});
+    return this.send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/models/${segment(modelId)}/test-access`, retry: false});
   }
 
   issueModelGatewayToken(input: GatewayModelTokenRequest): Promise<GatewayModelToken> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/model-gateway/tokens', body: asJson(input), retry: false});
+    return this.send({method: HttpMethod.Post, path: '/aep/v1/admin/model-gateway/tokens', body: asJson(input), retry: false});
   }
 
   putDataPlaneDesiredState(input: DataPlaneDesiredStateWrite): Promise<DataPlaneDesiredState> {
-    return this.#send({
+    return this.send({
       method: HttpMethod.Put,
       path: '/aep/v1/admin/data-plane/desired-state',
       body: asJson(input),
@@ -969,7 +124,7 @@ export class AepClient {
   }
 
   publishDataPlaneRoutes(input: DataPlanePublishRequest = {}): Promise<DataPlaneDesiredState> {
-    return this.#send({
+    return this.send({
       method: HttpMethod.Post,
       path: '/aep/v1/admin/data-plane/publish',
       body: asJson(input),
@@ -977,7 +132,7 @@ export class AepClient {
   }
 
   getDataPlaneStatus(): Promise<DataPlaneStatus> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/status'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/data-plane/status'});
   }
 
   /** Requires the async publication service. Save/reuse the key across retries; 202 is not Ready. */
@@ -986,7 +141,7 @@ export class AepClient {
       || /[^A-Za-z0-9._:-]/.test(idempotencyKey)) {
       throw new TypeError('Idempotency-Key must contain 1-128 ASCII letters, digits or ._:-');
     }
-    return this.#send({
+    return this.send({
       method: HttpMethod.Post,
       path: '/aep/v1/admin/data-plane/publications',
       headers: {'Idempotency-Key': idempotencyKey},
@@ -996,7 +151,7 @@ export class AepClient {
   }
 
   getDataPlanePublication(operationId: string): Promise<DataPlanePublication> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/data-plane/publications/${segment(operationId)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/data-plane/publications/${segment(operationId)}`});
   }
 
   /** Replay selected immutable intent; never recapture drafts or roll back older intent. */
@@ -1005,7 +160,7 @@ export class AepClient {
       || /[^A-Za-z0-9._:-]/.test(idempotencyKey)) {
       throw new TypeError('Idempotency-Key must contain 1-128 ASCII letters, digits or ._:-');
     }
-    return this.#send({
+    return this.send({
       method: HttpMethod.Post,
       path: `/aep/v1/admin/data-plane/publications/${segment(operationId)}/replay`,
       headers: {'Idempotency-Key': idempotencyKey},
@@ -1015,11 +170,11 @@ export class AepClient {
   }
 
   getDeploymentSettings(): Promise<DeploymentSettings> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/deployment/settings'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/deployment/settings'});
   }
 
   updateDeploymentSettings(input: DeploymentSettingsUpdate): Promise<DeploymentSettings> {
-    return this.#send({
+    return this.send({
       method: HttpMethod.Put,
       path: '/aep/v1/admin/deployment/settings',
       body: asJson(input),
@@ -1027,15 +182,15 @@ export class AepClient {
   }
 
   getComputeTierCatalog(): Promise<ComputeTierCatalog> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/compute/tiers'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/compute/tiers'});
   }
 
   listComputeAssignments(): Promise<ComputeAssignmentList> {
-    return this.#send({method: HttpMethod.Get, path: '/aep/v1/admin/compute/assignments'});
+    return this.send({method: HttpMethod.Get, path: '/aep/v1/admin/compute/assignments'});
   }
 
   updateComputeAssignment(agentId: string, tier: string | null): Promise<ComputeAssignment> {
-    return this.#send({
+    return this.send({
       method: HttpMethod.Put,
       path: `/aep/v1/admin/compute/assignments/${segment(agentId)}`,
       body: asJson({tier}),
@@ -1043,184 +198,46 @@ export class AepClient {
   }
 
   createControlEvent(input: JsonObject): Promise<JsonObject> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/control-events', body: input});
+    return this.send({method: HttpMethod.Post, path: '/aep/v1/admin/control-events', body: input});
   }
 
   listAdminControlEvents(filters: Query = {}): Promise<AdminControlEventPage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/control-events?${query(filters)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/control-events?${query(filters)}`});
   }
 
   getAdminControlEvent(eventId: string): Promise<AdminControlEvent> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/control-events/${segment(eventId)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/control-events/${segment(eventId)}`});
   }
 
   cancelControlEvent(eventId: string): Promise<AdminControlEvent> {
-    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/control-events/${segment(eventId)}/cancel`});
+    return this.send({method: HttpMethod.Post, path: `/aep/v1/admin/control-events/${segment(eventId)}/cancel`});
   }
 
   listControlEventDeliveries(eventId: string, filters: Query = {}): Promise<JsonObject> {
-    return this.#send({
+    return this.send({
       method: HttpMethod.Get,
       path: `/aep/v1/admin/control-events/${segment(eventId)}/deliveries?${query(filters)}`,
     });
   }
 
   searchEvents(filters: TelemetrySearchFilters = {}): Promise<TelemetryEventPage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/events?${query(filters)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/events?${query(filters)}`});
   }
 
   listLicenses(filters: Query = {}): Promise<LicensePage> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/licenses?${query(filters)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/licenses?${query(filters)}`});
   }
 
   getLicense(licenseId: string): Promise<License> {
-    return this.#send({method: HttpMethod.Get, path: `/aep/v1/admin/licenses/${segment(licenseId)}`});
+    return this.send({method: HttpMethod.Get, path: `/aep/v1/admin/licenses/${segment(licenseId)}`});
   }
 
   importLicense(input: LicenseImportRequest): Promise<License> {
-    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/licenses/import', body: asJson(input), retry: false});
+    return this.send({method: HttpMethod.Post, path: '/aep/v1/admin/licenses/import', body: asJson(input), retry: false});
   }
 
   revokeLicense(licenseId: string): Promise<LicenseRevocation> {
-    return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/licenses/${segment(licenseId)}/revoke`, retry: false});
+    return this.send({method: HttpMethod.Post, path: `/aep/v1/admin/licenses/${segment(licenseId)}/revoke`, retry: false});
   }
 
-  async #send<T>(request: AepRequest, authenticated = true): Promise<T> {
-    const response = await this.#request<T>(request, authenticated);
-    this.#assertSuccess(response);
-    return response.data;
-  }
-
-  async #getSkillManifestAt(path: string, etag?: string): Promise<SkillManifestResult> {
-    const response = await this.#request<SkillManifest>({
-      method: HttpMethod.Get,
-      path,
-      headers: etag ? {'If-None-Match': etag} : undefined,
-    });
-    const responseEtag = response.headers.get('ETag');
-    if (response.status === 304) return {notModified: true, etag: responseEtag ?? etag ?? null};
-    this.#assertSuccess(response);
-    return {notModified: false, etag: responseEtag, manifest: response.data};
-  }
-
-  async #request<T>(request: AepRequest, authenticated = true): Promise<AepResponse<T>> {
-    const headers = {...request.headers, ...this.#sessionHeaders()};
-    let usedAccessToken: string | null = null;
-    if (authenticated) {
-      const tokens = await this.#loadOrRestoreTokens();
-      if (tokens) {
-        usedAccessToken = tokens.accessToken;
-        headers.Authorization = `Bearer ${tokens.accessToken}`;
-      }
-    }
-
-    const baseUrl = this.#baseFor(request.path);
-    let response = await this.#transport.request<T>(baseUrl, {...request, headers});
-    if (authenticated && response.status === 401 && request.path !== '/aep/v1/auth/refresh') {
-      const tokens = await this.#tokenStore.get();
-      if (tokens) {
-        const retryTokens = tokens.accessToken === usedAccessToken ? await this.#refresh() : tokens;
-        headers.Authorization = `Bearer ${retryTokens.accessToken}`;
-        response = await this.#transport.request<T>(baseUrl, {...request, headers});
-      }
-    }
-    return response;
-  }
-
-  async #loadOrRestoreTokens(): Promise<AepTokens | null> {
-    const tokens = await this.#tokenStore.get();
-    if (tokens) return tokens;
-    const refreshToken = await this.#tokenStore.getRefreshToken?.();
-    return refreshToken ? this.#refresh(refreshToken) : null;
-  }
-
-  async #refresh(storedRefreshToken?: string): Promise<AepTokens> {
-    if (this.#refreshPromise) return this.#refreshPromise;
-    this.#refreshPromise = (async () => {
-      const current = await this.#tokenStore.get();
-      const refreshToken = current?.refreshToken ?? storedRefreshToken ?? await this.#tokenStore.getRefreshToken?.();
-      if (!refreshToken) throw new AepProblem({type: 'about:blank', title: 'No session', status: 401, code: 'NO_SESSION'});
-      const response = await this.#transport.request<AepTokens>(this.#baseFor('/aep/v1/auth/refresh'), {
-        method: HttpMethod.Post,
-        path: '/aep/v1/auth/refresh',
-        headers: this.#sessionHeaders(),
-        body: this.#sessionBody({refreshToken}),
-      });
-      if (response.status < 200 || response.status >= 300) {
-        await this.#tokenStore.clear();
-        throw AepProblem.from(response.status, response.data, response.headers.get('X-Request-ID'));
-      }
-      await this.#tokenStore.set(response.data);
-      this.#sessionId = response.data.sessionId ?? this.#sessionId;
-      return response.data;
-    })();
-    try {
-      return await this.#refreshPromise;
-    } finally {
-      this.#refreshPromise = null;
-    }
-  }
-
-  #assertSuccess<T>(response: AepResponse<T>): void {
-    if (response.status >= 200 && response.status < 300) return;
-    throw AepProblem.from(response.status, response.data, response.headers.get('X-Request-ID'));
-  }
-
-  #sessionHeaders(): Record<string, string> {
-    return {
-      'X-AEP-Protocol-Version': AEP_PROTOCOL_VERSION,
-      'X-Request-ID': requestId(),
-    };
-  }
-
-  #sessionBody(body: Record<string, string>): Record<string, string> {
-    return this.#sessionId ? {...body, sessionId: this.#sessionId} : body;
-  }
-}
-
-// Some embedded Electron/webview contexts do not expose Web Crypto. Request
-// correlation must still work there, so keep a non-cryptographic fallback.
-function requestId(): string {
-  const cryptoApi = (globalThis as typeof globalThis & {
-    readonly crypto?: {
-      randomUUID?: () => string;
-      getRandomValues?: (array: Uint8Array) => Uint8Array;
-    };
-  }).crypto;
-  const randomUUID = cryptoApi?.randomUUID;
-  if (typeof randomUUID === 'function') return randomUUID.call(cryptoApi);
-
-  const bytes = new Uint8Array(16);
-  const getRandomValues = cryptoApi?.getRandomValues;
-  if (typeof getRandomValues === 'function') {
-    getRandomValues.call(cryptoApi, bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
-  }
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0'));
-  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`;
-}
-
-function hasNoStore(headers: Headers): boolean {
-  return (headers.get('Cache-Control') ?? '')
-    .split(',')
-    .some(value => value.trim().toLowerCase() === 'no-store');
-}
-
-function segment(value: string): string {
-  return encodeURIComponent(value);
-}
-
-function query(values: Query): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(values)) {
-    if (value !== undefined && value !== null) search.set(key, String(value));
-  }
-  return search.toString();
-}
-
-function asJson(value: unknown): JsonValue {
-  return value as JsonValue;
 }
