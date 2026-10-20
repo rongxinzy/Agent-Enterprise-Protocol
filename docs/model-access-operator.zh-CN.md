@@ -40,6 +40,34 @@ fragment。HTTP 允许项用于隔离测试，不是生产传输安全方案。�
 
 ## 稳定语义与独立续期
 
+### 员工身份存储前置阶段
+
+迁移 055 新增内部、无凭据的绑定登记：明确关联 AEP agent ID、员工 namespace/name/UID、
+专属 ServiceAccount name/UID 与网关 audience。它不是公开注册 API，也不授予模型权限。
+后续可信生命周期写入者须读取当前员工及其控制器拥有的 SA，核对双方 UID 和明确的 agent
+映射后调用 repository；调用方 header 或人类 owner 均不构成身份依据。
+
+登记须携带预期的当前 binding key。替换 SA 与退役旧绑定在同一事务完成，旧观察不能覆盖
+新身份。历史 SA 身份不能转移或复活；账号删除会退役存活观察并保留历史。每个 agent 最多一个当前绑定。
+该员工的多个副本使用其专属 SA，并非每个对话单独登记身份。可信观察的新鲜度限于
+2 秒至 1 小时，使用 DB 时钟；这是准入范围，不是生产传播时限建议。过期或退役观察不会
+进入实时业务源。
+
+绑定变更、退役、新鲜度缩短和过期后恢复会在同一事务触发既有的定向源信号；连续延长观察
+期限不会使授权失效。模型与成员关系仍来自既有有效角色，观察期限参与自然到期计算。
+
+本阶段不启动 Kubernetes watcher，不签发或读取令牌，不发布 workload grant，不配置
+TokenReview，也不让运行时消费令牌文件。会话专用 producer 遇到存活的 workload 登记会拒绝
+并保留未确认信号；原生 Operator 仍拒绝 workload grant。不能据此启用员工模型访问。
+可信 writer、两类绑定的共同发布和数据面接入仍由
+[#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338) 与
+[governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131) 分阶段跟踪。
+
+既有管理侧 M2M 令牌接口签发指定用户的模型 JWT，不证明员工的 Kubernetes 身份。
+本登记不改变该接口，也不把调用方提供的对话 ID 当作可信的工作负载绑定。
+
+### 会话投影
+
 每个会话绑定拥有一个稳定 AuthConfig 与一个 ConfigMap。Operator 根据实际语义及可信
 部署选项独立计算 hash，不直接信任源 publication 的 contentHash。角色、团队、模型、
 许可证、配置变化会改变语义；签发时间、有效期和 publication 标记不改变语义。
