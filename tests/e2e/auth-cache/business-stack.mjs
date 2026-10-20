@@ -4,7 +4,8 @@ import {randomBytes} from 'node:crypto';
 import {readFile, rm} from 'node:fs/promises';
 import path from 'node:path';
 
-export async function businessStack({command, kubectl, apply, forward, until, work, cluster}) {
+export async function businessStack({command, kubectl, apply, forward, until, work, cluster,
+  deploymentId = 'probe', licenseFixture = false}) {
   const namespace = 'aep-system';
   const issuer = 'http://aep-business-control.aep-system.svc:8080';
   const password = randomBytes(24).toString('hex');
@@ -47,7 +48,7 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
   10001, ['data', 'tmp'].map(name => ({name, emptyDir: {}})));
   const config = {
     AEP_ENVIRONMENT: 'test', AEP_LOG_LEVEL: 'warn', AEP_ADDRESS: ':8080', AEP_ISSUER: issuer,
-    AEP_DEPLOYMENT_ID: 'probe', AEP_BOOTSTRAP_ENTERPRISE_ID: 'probe', AEP_BOOTSTRAP_ADMIN_USERNAME: 'admin',
+    AEP_DEPLOYMENT_ID: deploymentId, AEP_BOOTSTRAP_ENTERPRISE_ID: deploymentId, AEP_BOOTSTRAP_ADMIN_USERNAME: 'admin',
     AEP_MINIO_ENDPOINT: 'aep-business-object:9000', AEP_MINIO_BUCKET: 'access-acceptance',
     AEP_GATEWAY_PUBLICATIONS_ENABLED: 'true', AEP_GATEWAY_OPERATOR_MODE: 'true',
     AEP_GATEWAY_PUBLICATION_RELAY_ENABLED: 'true', AEP_GATEWAY_PUBLICATION_NAMESPACE: namespace,
@@ -64,6 +65,18 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
     {downwardAPI: {items: [{path: 'namespace', fieldRef: {fieldPath: 'metadata.namespace'}}]}},
   ]}}]);
   control.spec.template.spec.serviceAccountName = 'aep-business-control';
+  if (licenseFixture) {
+    const fixtures = {};
+    for (const name of ['offline-license.json', 'offline-license-trusted-keys.json']) {
+      fixtures[name] = await readFile(path.join('tests/e2e/fixtures', name), 'utf8');
+    }
+    assert.equal(JSON.parse(fixtures['offline-license.json']).payload.deploymentId, deploymentId);
+    await apply([{apiVersion: 'v1', kind: 'ConfigMap', metadata: metadata('access-license-fixture'), data: fixtures}]);
+    Object.assign(config, {AEP_LICENSE_TRUSTED_KEYS_FILE: '/run/access-license/offline-license-trusted-keys.json',
+      AEP_LICENSE_FILE: '/run/access-license/offline-license.json', AEP_LICENSE_DEPLOYMENT_ID: deploymentId});
+    control.spec.template.spec.volumes.push({name: 'license-fixture', configMap: {name: 'access-license-fixture'}});
+    control.spec.template.spec.containers[0].volumeMounts.push({name: 'license-fixture', mountPath: '/run/access-license', readOnly: true});
+  }
   await apply([
     {apiVersion: 'v1', kind: 'Secret', metadata: metadata('aep-business-db'), stringData: {POSTGRES_DB: 'aep', POSTGRES_USER: 'aep', POSTGRES_PASSWORD: dbPassword}},
     {apiVersion: 'v1', kind: 'Secret', metadata: metadata('aep-business-object'), stringData: {RUSTFS_ACCESS_KEY: 'access-acceptance', RUSTFS_SECRET_KEY: objectPassword}},
@@ -83,7 +96,7 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
     {apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'RoleBinding', metadata: metadata('aep-business-control'),
       subjects: [{kind: 'ServiceAccount', name: 'aep-business-control', namespace}],
       roleRef: {apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: 'aep-business-control'}},
-    {apiVersion: 'gateway.aep.zhiyuan.io/v1alpha1', kind: 'DeploymentConfig', metadata: metadata('deployment'), spec: {deploymentId: 'probe'}},
+    {apiVersion: 'gateway.aep.zhiyuan.io/v1alpha1', kind: 'DeploymentConfig', metadata: metadata('deployment'), spec: {deploymentId}},
     db, object, control, ...['aep-business-db', 'aep-business-object', 'aep-business-control'].map(service),
   ]);
   for (const name of ['aep-business-db', 'aep-business-control']) {
@@ -91,5 +104,5 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
   }
   const port = await forward('deployment/aep-business-control', 8080);
   await until(async () => assert.equal((await fetch('http://127.0.0.1:' + port + '/readyz', {signal: AbortSignal.timeout(5000)})).status, 200));
-  return {issuer, baseUrl: 'http://127.0.0.1:' + port, password, controlImage};
+  return {issuer, baseUrl: 'http://127.0.0.1:' + port, password, controlImage, deploymentId};
 }
