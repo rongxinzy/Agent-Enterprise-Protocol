@@ -247,7 +247,7 @@ func renderAIStatistics(deployment string, openAI, anthropic []Route) string {
 	}
 	// Never enable full default attributes: they include prompts, answers,
 	// tool arguments and reasoning. Observation must not capture model content.
-	document.WriteString("  matchRules:\n    - config:\n        use_default_attributes: false\n        use_default_response_attributes: true\n        enable_path_suffixes:\n          - /chat/completions\n          - /completions\n          - /responses\n          - /messages\n      configDisable: false\n      ingress:\n")
+	document.WriteString("  matchRules:\n    - config:\n        use_default_attributes: false\n        use_default_response_attributes: true\n        enable_path_suffixes:\n          - /chat/completions\n          - /completions\n          - /responses\n          - /messages\n          - /embeddings\n          - /audio/speech\n          - /audio/transcriptions\n          - /audio/translations\n          - /images/generations\n          - /images/edits\n          - /images/variations\n          - /videos\n      configDisable: false\n      ingress:\n")
 	for _, route := range openAI {
 		document.WriteString("        - " + yamlScalar(OpenAIResourceName(deployment, route.ModelID)) + "\n")
 	}

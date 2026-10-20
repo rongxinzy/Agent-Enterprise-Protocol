@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -236,5 +238,155 @@ func TestHandlerSeparatesLivenessAndReadiness(t *testing.T) {
 		if response.Code != test.status {
 			t.Fatalf("%s status = %d, want %d", test.path, response.Code, test.status)
 		}
+	}
+}
+
+// multipartBody builds an audio-transcription-shaped multipart payload with
+// the given form model and a fake audio file part. modelLast puts the model
+// field after the file part — the OpenAI curl form (-F file=@... -F model=)
+// uses that order and extraction must not depend on part order.
+func multipartBody(t *testing.T, model string, modelLast bool) (string, []byte) {
+	t.Helper()
+	writeModel := func(writer *multipart.Writer) {
+		if model == "" {
+			return
+		}
+		if err := writer.WriteField("model", model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile := func(writer *multipart.Writer) {
+		part, err := writer.CreateFormFile("file", "audio.wav")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("RIFF-fake-audio-bytes")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	if modelLast {
+		writeFile(writer)
+		writeModel(writer)
+	} else {
+		writeModel(writer)
+		writeFile(writer)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return writer.FormDataContentType(), buffer.Bytes()
+}
+
+func TestHandlerForwardsMultipartTranscriptionWithFormModel(t *testing.T) {
+	var upstreamBody []byte
+	var upstreamModelHeader, upstreamContentType string
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		upstreamBody, _ = io.ReadAll(request.Body)
+		upstreamModelHeader = request.Header.Get("X-AEP-Model-ID")
+		upstreamContentType = request.Header.Get("Content-Type")
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	handler, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 4096}, verifierStub{claims: &ModelClaims{
+		DeploymentID: "deployment-a", ModelScopes: []string{"model-a"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentType, body := multipartBody(t, "model-a", false)
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer model-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("multipart POST = %d %s", response.Code, response.Body.String())
+	}
+	if upstreamModelHeader != "model-a" {
+		t.Fatalf("X-AEP-Model-ID = %q, want model-a", upstreamModelHeader)
+	}
+	if !strings.HasPrefix(upstreamContentType, "multipart/form-data") {
+		t.Fatalf("content type lost: %q", upstreamContentType)
+	}
+	if !bytes.Equal(upstreamBody, body) {
+		t.Fatalf("multipart body was modified: %q", upstreamBody)
+	}
+}
+
+func TestHandlerRejectsMultipartWithoutModelField(t *testing.T) {
+	handler, err := NewHandler(Config{UpstreamURL: "http://example.test", RequestLimit: 4096}, verifierStub{claims: &ModelClaims{
+		ModelScopes: []string{"model-a"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentType, body := multipartBody(t, "", false)
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Authorization", "Bearer model-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_REQUEST") {
+		t.Fatalf("model-less multipart = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHandlerPollingGetRequiresModelHeaderInScope(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-AEP-Model-ID") != "model-a" {
+			t.Errorf("polling model header = %q", request.Header.Get("X-AEP-Model-ID"))
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	handler, err := NewHandler(Config{UpstreamURL: upstream.URL, RequestLimit: 1024}, verifierStub{claims: &ModelClaims{
+		DeploymentID: "deployment-a", ModelScopes: []string{"model-a"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inScope := httptest.NewRequest(http.MethodGet, "/v1/videos/vid-123", nil)
+	inScope.Header.Set("Authorization", "Bearer model-token")
+	inScope.Header.Set("X-AEP-Model-ID", "model-a")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, inScope)
+	if response.Code != http.StatusOK {
+		t.Fatalf("scoped polling GET = %d %s", response.Code, response.Body.String())
+	}
+
+	outOfScope := httptest.NewRequest(http.MethodGet, "/v1/videos/vid-123", nil)
+	outOfScope.Header.Set("Authorization", "Bearer model-token")
+	outOfScope.Header.Set("X-AEP-Model-ID", "model-b")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, outOfScope)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "MODEL_NOT_ALLOWED") {
+		t.Fatalf("out-of-scope polling GET = %d %s", response.Code, response.Body.String())
+	}
+
+	missing := httptest.NewRequest(http.MethodGet, "/v1/videos/vid-123", nil)
+	missing.Header.Set("Authorization", "Bearer model-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, missing)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("header-less GET = %d, want 404", response.Code)
+	}
+}
+
+func TestHandlerReadsMultipartModelRegardlessOfPartOrder(t *testing.T) {
+	contentType, body := multipartBody(t, "model-a", true)
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	returnedBody, model, err := readModelRequest(request, 4096)
+	if err != nil {
+		t.Fatalf("model-after-file multipart = %v", err)
+	}
+	if model != "model-a" {
+		t.Fatalf("model = %q, want model-a", model)
+	}
+	if !bytes.Equal(returnedBody, body) {
+		t.Fatalf("multipart body was modified: %q", returnedBody)
 	}
 }

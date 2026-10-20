@@ -336,7 +336,7 @@
               "config": {
                 "configuration": {
                   "@type": "type.googleapis.com/google.protobuf.StringValue",
-                  "value": "{\"_rules_\":[{\"_match_route_\":[\"aep-openai-test-chat-d25702d8\",\"aep-anthropic-claude-c857d09d\"],\"enable_path_suffixes\":[\"/chat/completions\",\"/completions\",\"/responses\",\"/messages\"],\"use_default_attributes\":false,\"use_default_response_attributes\":true}]}"
+                  "value": "{\"_rules_\":[{\"_match_route_\":[\"aep-openai-test-chat-d25702d8\",\"aep-anthropic-claude-c857d09d\"],\"enable_path_suffixes\":[\"/chat/completions\",\"/completions\",\"/responses\",\"/messages\",\"/embeddings\",\"/audio/speech\",\"/audio/transcriptions\",\"/audio/translations\",\"/images/generations\",\"/images/edits\",\"/images/variations\",\"/videos\"],\"use_default_attributes\":false,\"use_default_response_attributes\":true}]}"
                 },
                 "fail_open": true,
                 "vm_config": {
