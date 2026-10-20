@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 
 export async function higressAccess(ctx, alice, bob, model) {
   const {kubectl, apply, forward, until, report, record} = ctx;
+  const gatewayHost = ctx.gatewayHost ?? 'shared.access.test';
   const metadata = name => ({name, namespace: 'aep-system'});
   const code = `import http from 'node:http';
 let calls=0;
@@ -44,7 +45,7 @@ http.createServer(async(req,res)=>{
     // keep-alive connection can retain a draining listener's old filter chain
     // after adding a WasmPlugin. This does NOT prove adoption on old connections.
     const req=http.request({agent:false,host:'127.0.0.1',port,path:'/v1/chat/completions',method:'POST',timeout:options.timeout??6000,headers:{
-      host:options.host??'shared.access.test',authorization:'Bearer '+(options.token??person.tokens.modelAccessToken),
+      host:options.host??gatewayHost,authorization:'Bearer '+(options.token??person.tokens.modelAccessToken),
       'content-type':'application/json','x-aep-access-binding':options.binding??person.binding,...options.headers}},res=>{
       let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,
         observation:res.headers['x-aep-access-observation'],body:res.statusCode===200?JSON.parse(body):body}));
@@ -80,7 +81,7 @@ http.createServer(async(req,res)=>{
   await until(async()=>assert((await source()).spec.publication.sequence>sourceSequence));
   assert.equal((await route(alice)).metadata.resourceVersion,stable.metadata.resourceVersion);
   await check(alice,200);
-  record('Real business relay renewal advances publication without rewriting the stable session selection route');
+  record('Real business relay renewal advances publication without rewriting the stable binding selection route');
   const before=await stats();
   const attacks=[{binding:bob.binding},{binding:''},{binding:'unknown'},{binding:'authorized'},
     {token:'unknown'},{token:''},{host:'other.access.test'},
@@ -96,11 +97,11 @@ http.createServer(async(req,res)=>{
   await check(alice,200);
   const rewritten=await call(alice,model.id,{headers:{'x-aep-model-id':'forged-model'}});
   assert.equal(rewritten.status,200);assert.equal(rewritten.body.model,'disposable-model');
-  record('Missing/cross-user/authorized binding, invalid JWT, wrong Host, malformed/oversized body and actual-model escalation deny; forged model header cannot select a different route');
+  record('Missing/cross-subject/authorized binding, invalid bearer, wrong Host, malformed/oversized body and actual-model escalation deny; forged model header cannot select a different route');
   const spec=JSON.parse(await kubectl(['-n','aep-system','get','modelaccessgrant','access-'+alice.binding,'-o','json'])).spec;
   const expected={
     'x-mse-consumer':'aep.'+Buffer.from(spec.deploymentId).toString('base64url')+'.'+Buffer.from(spec.subject.id).toString('base64url'),
-    'x-aep-deployment-id':spec.deploymentId,'x-aep-user-id':spec.subject.id,'x-aep-session-id':spec.binding.sessionId,
+    'x-aep-deployment-id':spec.deploymentId,'x-aep-user-id':spec.subject.id,'x-aep-session-id':spec.binding.sessionId??'',
     'x-aep-model-id':model.id,
     ...Object.fromEntries([['team',spec.teamIds??[]],['role',spec.roleIds??[]]].map(([kind,ids])=>[
       'x-aep-'+kind+'-ids',ids.length?'|'+[...new Set(ids)].sort().map(id=>Buffer.from(id).toString('base64url')).join('|')+'|':''])),

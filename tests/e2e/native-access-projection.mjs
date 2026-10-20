@@ -1,4 +1,4 @@
-// Opt-in CR -> real Operator -> native Authorino acceptance, never default traffic.
+// Opt-in native access acceptance; never default traffic.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createHash, randomBytes} from 'node:crypto';
@@ -115,9 +115,9 @@ try {
   await kubectl(['apply', '-f', '-'], {input: manifest});
   await kubectl(['apply', '-k', 'services/gateway-operator/config/access-rbac']);
   const httpsSource = sourceDirectory ? await httpsPolicySource({directory: sourceDirectory, command, kubectl, apply, work, cluster, namespace}) : undefined;
-  if (process.env.AEP_NATIVE_ACCESS_BUSINESS === 'true') {
-    const {businessAcceptance} = await import('./auth-cache/business-acceptance.mjs');
-    await businessAcceptance({command, kubectl, apply, forward, until, request, get, record, httpsSource, report, work, cluster, realProviderKey});
+  if (process.env.AEP_NATIVE_ACCESS_BUSINESS === 'true' || process.env.AEP_NATIVE_ACCESS_EMPLOYEE_BUSINESS === 'true') {
+    const {businessMode} = await import('./auth-cache/business-mode.mjs');
+    await businessMode({command, kubectl, apply, forward, until, request, get, record, httpsSource, report, work, cluster, root, realProviderKey});
     realProviderKey = undefined;
   } else if (process.env.AEP_NATIVE_ACCESS_WORKLOAD === 'true') {
     const {workloadAcceptance} = await import('./auth-cache/workload-acceptance.mjs');
@@ -251,6 +251,10 @@ try {
     catch {report.fixturePods = 'Unavailable';}
     if (process.env.AEP_NATIVE_ACCESS_MANAGED === 'true') {
       Object.assign(report, await higressDiagnostics(kubectl));
+    }
+    if (process.env.AEP_NATIVE_ACCESS_EMPLOYEE_BUSINESS === 'true') {
+      const {employeeDiagnostics} = await import('./auth-cache/employee-diagnostics.mjs');
+      Object.assign(report, await employeeDiagnostics(kubectl));
     }
   }
   throw error;

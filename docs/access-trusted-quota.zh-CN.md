@@ -110,3 +110,51 @@ Token 计数严格等于 10，下一次携带伪造 Consumer/用户头的请求�
 员工 Kubernetes 工作负载身份、生产全实例采用观测、容量、多模态与默认入口
 切换仍不在本阶段。`Ready`、`adoptionGate` 不因此变为 true。回退按会话路由
 手册先隔离流量、撤销实验授权并等路由回收，再撤销组件及权限。
+
+## 员工业务链路的独立验收模式
+
+`AEP_NATIVE_ACCESS_EMPLOYEE_BUSINESS=true` 选择单独的合成数据场景。它需要当前
+AEP workload observer、混合发布、许可证约束 producer，以及支持原生模型运行时
+的员工 Operator 和含 `TokenFileChatOpenAI` 的 DeerFlow 镜像。仅安装 CRD 不足。
+镜像从显式指定的本地源码构建；Go Operator 使用 `ko build --platform linux/amd64 ./cmd`，
+Python 运行时沿用治理仓的源码刷新构建方式。镜像构建不接受模型密钥。
+
+沿用前述固定镜像、Authorino CRD、Kind、ko、Helm 和 OpenSSL 前置配置，先构建
+SDK，再提供员工组件的真实源码目录和已构建镜像：
+
+```bash
+npm run build --workspace @aep/sdk-node
+export AEP_NATIVE_ACCESS_BUSINESS=true AEP_NATIVE_ACCESS_MANAGED=true
+export AEP_NATIVE_ACCESS_HIGRESS=true AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT=true
+export AEP_NATIVE_ACCESS_EMPLOYEE_BUSINESS=true
+export AEP_NATIVE_ACCESS_POLICY_SOURCE_DIR=deploy/kubernetes/access-policy-source
+export AEP_EMPLOYEE_GOVERNANCE_DIR=/path/to/current/governance
+export AEP_EMPLOYEE_OPERATOR_IMAGE=ko.local/current-employee-operator:verified-build
+export AEP_EMPLOYEE_RUNTIME_IMAGE=local/current-employee-runtime:verified-build
+export AEP_EMPLOYEE_KEDA_CRD_DIR=/path/to/pinned/keda-crds
+export AEP_NATIVE_ACCESS_REPORT=/path/to/employee-business-report.json
+node tests/e2e/native-access-projection.mjs
+```
+
+KEDA 目录需提供 `keda-scaledobjects.yaml` 和 `keda-triggerauthentications.yaml`；仅用于
+员工 Operator 的资源发现，本模式不安装或验收 KEDA 自动伸缩。测试通过正式 API
+创建角色、团队、员工账号、模型和授权；员工身份 status/SA 由真实 Operator 生成，
+由可信 observer 登记后经 DB/outbox/relay 发布，不直接修改业务数据库或授权 CR。
+治理中间件使用独立的无模型授权控制账号，不借用管理员或所有者的模型身份。
+
+员工 Pod 内用实际配置和模型工厂读取 kubelet 投射令牌，通过原生网关访问 Mock
+提供商；验证角色撤权/恢复、无关员工配置不变、所有者停用隔离、请求/Token 限流
+和原生 Redis usage 计数。许可证使用仓库已有的公开已签名夹具及可信公钥，保留
+`enterprise.models` 校验，不创建签名私钥，也不把 SA 身份当作许可证。
+
+读取报告中的 `employeeBusinessVerified`、`employeePodQuotaVerified`、
+`employeeWarmTokenReviewReuseVerified`、`completed` 和 `cleaned` 判断本次结果。
+TokenReview 计数只能证明身份认证缓存的复用，不替代完整授权决策缓存及生产
+全副本采用的证据。该模式不接受真实云端密钥，不包含 Portal 发起完整对话、
+凭据发布器、运行时模型列表动态同步、累计余额、Redis 故障关闭或旧连接采用；
+前述故障阻塞仍有效，`adoptionGate=false`。
+
+2026-10-20 本地集成模式连续两次完整运行通过 19 项检查，均清理自建集群。
+最后一次角色变更前 TokenReview 总计为 10，变更后为 12；随后重复调用未受影响
+员工的两个验证进程，计数保持 12。它证明本次被修改员工在两个进程重做身份
+认证、无关员工保留热身份结果；不扩大为所有进程、所有连接或完整决策缓存证明。
