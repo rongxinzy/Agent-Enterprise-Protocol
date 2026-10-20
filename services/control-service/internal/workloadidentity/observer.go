@@ -144,5 +144,9 @@ func (o *Observer) evidence(ctx context.Context, employee *unstructured.Unstruct
 	w.Identity.ServiceAccountName = sa.Name
 	w.Identity.ServiceAccountUID = sa.UID
 	w.Identity.Audience = o.audience
+	w.PodUIDs, err = o.livePods(ctx, employee, sa)
+	if err != nil {
+		return "", w, errUnverified
+	}
 	return agent, w, nil
 }

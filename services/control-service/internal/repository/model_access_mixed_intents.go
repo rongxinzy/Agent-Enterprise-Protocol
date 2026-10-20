@@ -59,6 +59,7 @@ func workloadAccessIntents(source ModelAccessSource, prior []ModelAccessPublicat
 		policy.Disabled, policy.Retired = true, true
 		policy.Models, policy.RoleIDs, policy.TeamIDs, policy.Licenses = []string{}, nil, nil, nil
 		policy.WorkloadEntitlement = nil
+		policy.PodUIDs = nil
 		policies[publication.BindingKey] = policy
 		deadlines[publication.BindingKey] = issuedAt.Add(freshness)
 	}
@@ -78,6 +79,9 @@ func workloadAccessIntents(source ModelAccessSource, prior []ModelAccessPublicat
 			}
 			binding := workload.Identity
 			state := source
+			// Empty live membership is denied by the uncached native Pod guard.
+			// Preserve model/identity semantics across a temporary zero-Pod rollout
+			// so replacing a Pod never rebuilds the employee authentication cache.
 			state.Disabled = state.Disabled || !current.verified
 			policy := modelAccessSnapshot(state, gateway.ModelAccessBinding{Kind: "kubernetes", Workload: &binding})
 			key := policy.BindingKey()
@@ -92,6 +96,8 @@ func workloadAccessIntents(source ModelAccessSource, prior []ModelAccessPublicat
 			state, evidence := workloadLicenseSource(state, preferred)
 			policy = modelAccessSnapshot(state, policy.Binding)
 			policy.WorkloadEntitlement = evidence
+			policy.PodUIDs = slices.Clone(workload.PodUIDs)
+			slices.Sort(policy.PodUIDs)
 			deadline, err := modelAccessDeadline(state, workload.VerifiedUntil, freshness)
 			if err != nil {
 				return nil, err

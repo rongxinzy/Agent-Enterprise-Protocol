@@ -27,8 +27,8 @@ requires the credential-free `status.modelIdentity` contract from
 the existing workload registry migration, applied by the normal control-service
 migration path. It never migrates the database itself.
 
-The native controller-runtime Manager watches DigitalEmployees and their
-ServiceAccounts in one configured namespace. Events only schedule work. Live
+The native controller-runtime Manager watches DigitalEmployees, their
+ServiceAccounts and Pods in one configured namespace. Events only schedule work. Live
 APIReader reads verify the explicit `spec.modelAccess.agentId`,
 `spec.governance.deploymentID`, CR UID/current observedGeneration, audience and
 the dedicated SA's exact name/UID, controller owner and disabled automatic token
@@ -75,8 +75,9 @@ Port 8096 `/healthz` is dependency-independent process liveness; `/readyz` check
 DB reachability and initial informer synchronization with a bounded context.
 Neither proves registry freshness, publication, model permission or serving-replica adoption.
 Stopping the observer pauses renewals; retained history must not be deleted to
-force a rollback. This stage adds no schema, public API, SDK or production
-cutover, and leaves `adoptionGate=false`.
+force a rollback. Live Pod evidence requires migration 057 through the normal
+control-service migration path. No public API, SDK or production cutover is
+introduced; `adoptionGate=false` remains required.
 
 Configure the existing [projection](model-access-operator.md), plus:
 
@@ -114,8 +115,9 @@ preserves AuthConfig and its caches. Existing role/team/Consumer quota identity
 is reused, never a Pod name or owner identity.
 
 Cached TokenReview does not watch Pod/SA deletion. A trusted lifecycle publisher
-must publish disabled tombstones on deletion/replacement; publication deadlines
-bound stale state. This stage does not promise immediate Pod-deletion revocation
+must remove deleted Pods from current membership and publish disabled tombstones
+for retired employee/SA bindings; publication deadlines bound stale state.
+This stage does not promise immediate Pod-deletion revocation
 or zero propagation delay. Recreated SA names cannot satisfy an old SA UID. The
 employee CR UID is a trusted publication association, not a claim in an SA JWT.
 No mTLS, opaque-token or non-Pod-bound token support is supplied.
@@ -165,10 +167,34 @@ without rewriting AuthConfig or evicting identity/decision caches. A new Pod's n
 bearer still needs its first TokenReview. Missing/empty evidence denies workload
 requests; there is no fallback to merely checking a nonempty Pod UID.
 
-This stage supplies the contract, relay and native guard, not database evidence,
-trusted Pod watches or complete deletion/replacement business acceptance. It does
-not close #370 or enable adoption. Install the CRD first, then the verifier and
-evidence-producing components. Old publications without the field will deny;
-keep experimental traffic isolated. Publication deadlines, bounded propagation
-and `adoptionGate=false` remain required. Test-written isolated Grants do not
-prove production lifecycle publication is connected.
+Install the CRD first, then the verifier and evidence-producing components.
+Old publications without the field will deny; keep experimental traffic isolated.
+Publication deadlines, bounded propagation and `adoptionGate=false` remain
+required. Test-written isolated Grants do not prove lifecycle publication.
+
+### Trusted live Pod evidence (local integration)
+
+Migration 057 adds `model_access_workloads.pod_uids`, initially empty for existing
+rows, and queues only affected employees for reevaluation. No positive evidence
+is fabricated during upgrade. The observer uses uncached reads of the actual
+CR -> Deployment -> ReplicaSet -> Pod controller ownership chain, exact UIDs and
+the dedicated SA. Deleting, terminal and foreign Pods are excluded. API failure,
+ambiguous ownership, or a changed Deployment/SA during observation stops renewal.
+More than 512 live Pods stops renewal instead of silently truncating the set.
+The scoped RBAC adds Pod reads/watches and Deployment/ReplicaSet `get` only;
+it grants no Pod writes, Secret access or TokenReview permission.
+
+Canonical membership changes trigger the existing source/outbox/relay pipeline;
+renewal of the same set does not. An empty set denies in the native Pod guard
+while preserving model/identity semantics and the binding. A subsequent live Pod
+can therefore restore access without resurrecting retired identity history or
+rebuilding AuthConfig caches. A changed role, model or retired binding still
+changes access semantics normally. Observation/publication freshness bounds API
+outages and offline observers; there is no zero-delay revocation guarantee.
+
+The employee Pod-lifecycle acceptance mode waits for the trusted publication to
+exclude the deleted UID and include the replacement. It then checks every
+enumerated verifier process denies the old unexpired bearer while the replacement
+runtime and peer remain usable. Repeated denial must issue no more TokenReviews;
+employee and peer AuthConfig resource versions must stay unchanged. This is a
+separate run from the full role/quota business baseline, not production adoption.

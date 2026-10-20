@@ -130,7 +130,7 @@ export async function employeeBusinessAcceptance(ctx) {
   if (process.env.AEP_NATIVE_ACCESS_EMPLOYEE_POD_LIFECYCLE === 'true') {
     const {employeePodLifecycle} = await import('./employee-pod-lifecycle.mjs');
     report.scope = 'Employee Pod replacement: API-server TokenReview negative control versus warmed native verifiers';
-    await employeePodLifecycle({...ctx, fleet, runtime, alice, bob, model});
+    await employeePodLifecycle({...ctx, fleet, runtime, alice, bob, model, reviews});
     return;
   }
   const policy = (person, allowed) => until(async () => {

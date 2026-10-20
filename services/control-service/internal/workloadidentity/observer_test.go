@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -57,6 +58,9 @@ func accountFixture() *corev1.ServiceAccount {
 func observerFixture(t *testing.T, employee *unstructured.Unstructured, account *corev1.ServiceAccount) (*Observer, *recordedRegistry) {
 	t.Helper()
 	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}

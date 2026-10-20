@@ -22,7 +22,7 @@ DB 中的角色授权仍是事实源。一个员工对应其 AEP `kind=agent` �
 的无凭据 `status.modelIdentity` 契约，以及由正常 control-service 迁移流程安装的既有
 工作负载登记表；观察器自己不运行迁移。
 
-controller-runtime Manager 监听一个指定命名空间内的 DigitalEmployee 和 ServiceAccount。
+controller-runtime Manager 监听一个指定命名空间内的 DigitalEmployee、ServiceAccount 和 Pod。
 事件只调度工作队列；注册和续期必须用实时 APIReader 核对显式 `spec.modelAccess.agentId`、
 `spec.governance.deploymentID`、员工 CR UID、当前 observedGeneration、audience、
 专属 SA 的精确名称/UID、controller owner 和关闭自动挂载令牌。读取 SA 后再次读取员工，
@@ -58,8 +58,9 @@ kubectl kustomize deploy/kubernetes/workload-observer
 
 8096 端口的 `/healthz` 仅检查进程存活；`/readyz` 在有界 context 内检查 DB 可达与
 informer 初始同步。两者都不能证明登记新鲜度、授权、发布或服务副本采用。
-停止观察器会暂停续期；不得通过删除登记历史强行回滚。本阶段不新增
-schema、公开 API 或 SDK，不切换生产链路，`adoptionGate=false` 继续保留。
+停止观察器会暂停续期；不得通过删除登记历史强行回滚。有效 Pod 证据需要通过正常
+control-service 迁移流程安装 migration 057。不新增公开 API 或 SDK，不切换生产链路，
+`adoptionGate=false` 继续保留。
 
 显式配置既有 [原生投影](model-access-operator.zh-CN.md)，并设置：
 
@@ -89,8 +90,9 @@ API，不能用 namespaced Role 替代。验证服务必须信任签发员工令
    沿用原有 Consumer、角色/团队及配额身份，不用 Pod 名称或 owner 作为配额主体。
 
 TokenReview 成功缓存中没有 token 的 `exp`，所以必须执行步骤 3。它也不会主动监听
-Pod/SA 删除：热缓存的 Kubernetes 撤销状态可能滞后，**必须**由可信生命周期发布者对
-删除/替换发布停用 tombstone，并保留发布绝对期限。此阶段不能承诺删除 Pod 即刻撤权，
+Pod/SA 删除：热缓存的 Kubernetes 撤销状态可能滞后，**必须**由可信生命周期发布者移除
+已删除 Pod 的有效成员资格，对已注销员工/SA 身份发布停用 tombstone，并保留发布绝对期限。
+此阶段不能承诺删除 Pod 即刻撤权，
 也不能承诺没有传播窗口。SA 名称复用不能绕过 UID 比对；员工 CR UID 由可信发布关联
 保证，SA JWT 本身不证明员工 CR UID。没有提供 mTLS、非 JWT/非 Pod-bound token 支持。
 
@@ -132,7 +134,25 @@ node tests/e2e/native-access-projection.mjs
 只更新有绝对期限的外部策略，不重写 AuthConfig，也不清除身份或决策缓存；新 Pod 的新
 令牌仍需首次 TokenReview。缺失/空集合拒绝所有工作负载请求，不能回落到“非空 UID”。
 
-这是契约、relay 和执行器阶段；DB 证据登记、可信 Pod watch 及完整删除/替换业务验收
-仍需后续实现，不能据此关闭 #370 或开启采用。先更新 CRD，再更新执行器和证据生产链路；
+先更新 CRD，再更新执行器和证据生产链路；
 旧发布缺少该集合时会拒绝，实验入口应保持隔离。继续保留发布绝对期限、有界传播窗口及
 `adoptionGate=false`。隔离场景的人工 Grant 夹具不等于生产生命周期证据已接通。
+
+### 可信有效 Pod 证据（本地集成）
+
+Migration 057 新增 `model_access_workloads.pod_uids`，既有登记初始为空，只排队重新评估
+对应员工，不在升级时伪造有效证据。观察器通过非缓存 APIReader 验证真实的
+CR → Deployment → ReplicaSet → Pod controller 归属链、精确 UID 与专属 SA，排除删除中、
+已结束或外来 Pod。API 失败、归属不可信，或观察期间 Deployment/SA 变化时停止续期。
+有效 Pod 超过 512 个时停止续期，不静默截断。命名空间 RBAC 仅增加 Pod 读取/监听及
+Deployment/ReplicaSet 的 `get`，不授予 Pod 写入、Secret 或 TokenReview 权限。
+
+规范化后的成员集合变化触发既有来源事件/outbox/relay；相同集合续期不触发。
+空集合由原生 Pod 边界拒绝，但保留模型/身份语义及 binding，后续出现有效 Pod 即可恢复，
+不复活已注销身份历史，也不重建 AuthConfig 缓存。角色、模型及身份注销仍按真实语义变化
+更新。观察与发布的新鲜度限制 API/观察器中断后的旧状态窗口，不承诺零延迟撤销。
+
+员工 Pod 生命周期验收模式等待可信发布移除旧 UID 并包含替代 UID，再检查枚举出的所有
+鉴权进程拒绝旧的未过期 bearer，同时替代 Pod 的真实运行时与另一员工仍可调用。
+重复拒绝不得新增 TokenReview，员工与对照员工的 AuthConfig resourceVersion 保持不变。
+此模式与完整角色/配额业务基线分别运行，不等于生产采用验收。

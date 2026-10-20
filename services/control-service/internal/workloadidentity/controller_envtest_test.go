@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/repository"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -96,6 +97,9 @@ func TestObserverControllerWithAPIServer(t *testing.T) {
 		}
 	})
 	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +161,7 @@ func TestObserverControllerWithAPIServer(t *testing.T) {
 	if err := c.Get(ctx, client.ObjectKeyFromObject(e), e); err != nil || text(e.Object, "spec", "modelAccess", "agentId") != "agent-1" {
 		t.Fatal("status update clobbered employee spec", err)
 	}
+	verifyControllerPodWatches(t, c, e, sa, r.events)
 	// SA deletion is a separate watch; no employee write is needed to retire.
 	if err := c.Delete(ctx, sa); err != nil {
 		t.Fatal(err)

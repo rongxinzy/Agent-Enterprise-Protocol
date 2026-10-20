@@ -20,25 +20,25 @@ func TestWorkloadObserverIsOptInWithReadOnlyEmployeeScope(t *testing.T) {
 		}
 	}
 	rules, _, _ := unstructured.NestedSlice(role.Object, "rules")
-	if len(rules) != 2 {
+	if len(rules) != 3 {
 		t.Fatal("unexpected employee observer privileges")
 	}
+	seen := map[string]bool{}
 	for _, raw := range rules {
 		rule := raw.(map[string]any)
 		resources, _, _ := unstructured.NestedStringSlice(rule, "resources")
 		groups, _, _ := unstructured.NestedStringSlice(rule, "apiGroups")
 		verbs, _, _ := unstructured.NestedStringSlice(rule, "verbs")
-		if len(resources) != 1 || len(groups) != 1 {
+		if len(groups) != 1 || seen[groups[0]] {
 			t.Fatal("observer must have exact resource and API group scope")
 		}
-		readable := resources[0] == "digitalemployees" && groups[0] == "digitalemployee.zhiyuan.io" || resources[0] == "serviceaccounts" && groups[0] == ""
+		seen[groups[0]] = true
+		watchVerbs := []string{"get", "list", "watch"}
+		readable := groups[0] == "digitalemployee.zhiyuan.io" && slices.Equal(resources, []string{"digitalemployees"}) && slices.Equal(verbs, watchVerbs) ||
+			groups[0] == "" && slices.Equal(resources, []string{"serviceaccounts", "pods"}) && slices.Equal(verbs, watchVerbs) ||
+			groups[0] == "apps" && slices.Equal(resources, []string{"deployments", "replicasets"}) && slices.Equal(verbs, []string{"get"})
 		if !readable {
 			t.Fatal("observer gained access to credentials, token reviews or unrelated resources")
-		}
-		for _, verb := range verbs {
-			if !slices.Contains([]string{"get", "list", "watch"}, verb) {
-				t.Fatal("observer gained employee mutation privilege")
-			}
 		}
 	}
 	leader := objects["Role/aep-system/aep-workload-observer-leader"]

@@ -10,7 +10,7 @@ import (
 )
 
 func workloadObservation() ObservedModelWorkload {
-	return ObservedModelWorkload{EmployeeName: "sales-helper", Identity: gateway.ModelAccessWorkload{
+	return ObservedModelWorkload{EmployeeName: "sales-helper", PodUIDs: []string{"pod-first"}, Identity: gateway.ModelAccessWorkload{
 		Namespace: "digital-employees", EmployeeUID: "employee-uid", ServiceAccountName: "de-model-employee",
 		ServiceAccountUID: "sa-first-uid", Audience: "urn:zhiyuan:model-gateway"}}
 }

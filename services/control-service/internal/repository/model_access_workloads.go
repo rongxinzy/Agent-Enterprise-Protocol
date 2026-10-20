@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -22,6 +24,7 @@ var ErrAccessWorkloadConflict = errors.New("workload identity lifecycle conflict
 type ObservedModelWorkload struct {
 	EmployeeName string                      `json:"employeeName"`
 	Identity     gateway.ModelAccessWorkload `json:"identity"`
+	PodUIDs      []string                    `json:"podUids"`
 	// DB-derived source output; registration computes it from validFor and the
 	// database clock, never from a caller-supplied timestamp in this field.
 	VerifiedUntil time.Time `json:"verifiedUntil"`
@@ -33,6 +36,7 @@ type modelAccessWorkload struct {
 	ServiceAccountName, ServiceAccountUID, Audience string
 	VerifiedAt, VerifiedUntil                       time.Time
 	RetiredAt                                       *time.Time
+	PodUIDs                                         json.RawMessage `gorm:"column:pod_uids;type:jsonb"`
 }
 
 func (modelAccessWorkload) TableName() string { return "model_access_workloads" }
@@ -43,6 +47,7 @@ func validObservedWorkload(w ObservedModelWorkload) bool {
 		return s != "" && len(s) <= max && strings.IndexFunc(s, unicode.IsSpace) == -1 && strings.IndexFunc(s, unicode.IsControl) == -1
 	}
 	return len(validation.IsDNS1123Label(i.Namespace)) == 0 &&
+		gatewayaccess.ValidWorkloadPods("kubernetes", w.PodUIDs) &&
 		len(validation.IsDNS1123Subdomain(i.ServiceAccountName)) == 0 && len(validation.IsDNS1123Subdomain(w.EmployeeName)) == 0 &&
 		bounded(string(i.EmployeeUID), 128) && bounded(string(i.ServiceAccountUID), 128) && bounded(i.Audience, 256)
 }
@@ -50,8 +55,9 @@ func validObservedWorkload(w ObservedModelWorkload) bool {
 // RegisterModelAccessWorkload atomically retires the previous identity and
 // registers its replacement, guarded by the caller's expected current binding.
 // Empty expected means first registration, not an unconditional upsert. Passing
-// the same current binding renews only observation freshness; no tokens or
-// requested model IDs enter this storage surface. There is no public endpoint.
+// the same current binding updates mutable live-Pod evidence and freshness;
+// an unchanged set does not queue a new policy. No tokens or requested model
+// IDs enter this storage surface. There is no public endpoint.
 func (s *DeploymentStore) RegisterModelAccessWorkload(ctx context.Context, agentID, expected string, w ObservedModelWorkload, validFor time.Duration) (string, error) {
 	if agentID == "" || len(agentID) > 256 || !validObservedWorkload(w) || validFor < 2*time.Second || validFor > time.Hour {
 		return "", ErrAccessBinding
@@ -59,7 +65,16 @@ func (s *DeploymentStore) RegisterModelAccessWorkload(ctx context.Context, agent
 	policy := gatewayaccess.Snapshot{DeploymentID: s.deploymentID, Subject: gateway.ModelAccessSubject{Kind: "agent", ID: agentID},
 		Binding: gateway.ModelAccessBinding{Kind: "kubernetes", Workload: &w.Identity}}
 	key := policy.BindingKey()
-	err := s.transaction(ctx, func(tx *DeploymentStore) error {
+	pods := slices.Clone(w.PodUIDs)
+	slices.Sort(pods)
+	if pods == nil {
+		pods = []string{}
+	}
+	podData, err := json.Marshal(pods)
+	if err != nil {
+		return "", ErrAccessBinding
+	}
+	err = s.transaction(ctx, func(tx *DeploymentStore) error {
 		if err := tx.lockWorkload(ctx); err != nil {
 			return err
 		}
@@ -98,7 +113,7 @@ AND (deployment_id<>? OR user_id<>? OR namespace<>? OR employee_name<>?))`,
 		}
 		if current.BindingKey == key {
 			return tx.db.Model(&current).Where("deployment_id=? AND binding_key=?", s.deploymentID, key).
-				Updates(map[string]any{"verified_at": now, "verified_until": now.Add(validFor)}).Error
+				Updates(map[string]any{"verified_at": now, "verified_until": now.Add(validFor), "pod_uids": string(podData)}).Error
 		}
 		if current.BindingKey != "" {
 			if err := tx.db.Model(&current).Where("deployment_id=? AND binding_key=?", s.deploymentID, current.BindingKey).Update("retired_at", now).Error; err != nil {
@@ -107,7 +122,7 @@ AND (deployment_id<>? OR user_id<>? OR namespace<>? OR employee_name<>?))`,
 		}
 		row := modelAccessWorkload{DeploymentID: s.deploymentID, BindingKey: key, UserID: agentID, Namespace: w.Identity.Namespace,
 			EmployeeName: w.EmployeeName, EmployeeUID: string(w.Identity.EmployeeUID), ServiceAccountName: w.Identity.ServiceAccountName,
-			ServiceAccountUID: string(w.Identity.ServiceAccountUID), Audience: w.Identity.Audience, VerifiedAt: now, VerifiedUntil: now.Add(validFor)}
+			ServiceAccountUID: string(w.Identity.ServiceAccountUID), Audience: w.Identity.Audience, VerifiedAt: now, VerifiedUntil: now.Add(validFor), PodUIDs: podData}
 		return tx.db.Create(&row).Error
 	})
 	var pg *pgconn.PgError

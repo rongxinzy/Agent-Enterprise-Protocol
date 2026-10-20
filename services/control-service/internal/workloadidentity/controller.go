@@ -25,6 +25,7 @@ func Setup(mgr ctrl.Manager, registry Registry, deployment, namespace, audience 
 	employee.SetGroupVersionKind(employeeGVK)
 	return ctrl.NewControllerManagedBy(mgr).Named("employee-workload-identity").For(employee).
 		Watches(&corev1.ServiceAccount{}, handler.EnqueueRequestsFromMapFunc(accountOwnerRequest(namespace))).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(observer.podOwnerRequest(namespace))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1, ReconciliationTimeout: 20 * time.Second}).Complete(observer)
 }
 
