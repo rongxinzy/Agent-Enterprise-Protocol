@@ -78,6 +78,25 @@ func (s *Service) ParseModel(raw string) (*Claims, error) {
 	return s.parse(raw, "model-gateway", "model")
 }
 
+// IssueModelToken signs a data-plane model token carrying the caller-derived
+// scopes with the standard model TTL. It exists for governed runtimes acting
+// on behalf of a resolved user; scopes must come from ModelScopes so the
+// token is never wider than the user's own assignments.
+func (s *Service) IssueModelToken(userID, deploymentID, sessionID string, modelScopes []string) (string, time.Time, error) {
+	if userID == "" || deploymentID == "" || sessionID == "" {
+		return "", time.Time{}, errors.New("invalid model token session")
+	}
+	raw, err := s.sign(userID, deploymentID, sessionID, false, false, nil, modelScopes, "model", "model-gateway", s.modelTTL)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	claims, err := s.ParseModel(raw)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return raw, claims.ExpiresAt.Time, nil
+}
+
 // IssueModelTestAccess uses the existing model JWT protocol with one scope and
 // a hard two-minute lifetime. It cannot create administrator or access tokens.
 func (s *Service) IssueModelTestAccess(userID, deploymentID, sessionID, modelID string) (string, time.Time, error) {

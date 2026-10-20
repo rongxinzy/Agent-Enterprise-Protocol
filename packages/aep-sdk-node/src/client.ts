@@ -12,6 +12,8 @@ import type {
   GatewayLimitStatus,
   GatewayQuota,
   GatewayTestAccess,
+  GatewayModelToken,
+  GatewayModelTokenRequest,
   AdminModel,
   AdminModelList,
   AdminModelPatch,
@@ -952,6 +954,10 @@ export class AepClient {
 
   createGatewayTestAccess(modelId: string): Promise<GatewayTestAccess> {
     return this.#send({method: HttpMethod.Post, path: `/aep/v1/admin/model-gateway/models/${segment(modelId)}/test-access`, retry: false});
+  }
+
+  issueModelGatewayToken(input: GatewayModelTokenRequest): Promise<GatewayModelToken> {
+    return this.#send({method: HttpMethod.Post, path: '/aep/v1/admin/model-gateway/tokens', body: asJson(input), retry: false});
   }
 
   putDataPlaneDesiredState(input: DataPlaneDesiredStateWrite): Promise<DataPlaneDesiredState> {

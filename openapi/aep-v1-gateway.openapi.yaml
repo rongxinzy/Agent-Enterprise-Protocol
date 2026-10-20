@@ -716,6 +716,44 @@
           "application/json":
             "schema":
               "$ref": "#/components/schemas/GatewayQuotaDelta"
+  "/aep/v1/admin/model-gateway/tokens":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "issueModelGatewayToken"
+      "summary": "issue a data-plane model token on behalf of a user"
+      "description": >-
+        Machine-to-machine issuance for governed runtimes: a service account
+        with models.read obtains a short-lived data-plane token whose model
+        scopes are derived from the target user's assignments (never wider).
+        The sessionId is caller-supplied conversation context used for gateway
+        log correlation; when omitted an m2m-prefixed synthetic session id is
+        minted. Every issuance is audited.
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayModelTokenRequest"
+      "responses":
+        "200":
+          "description": "Issued model token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayModelToken"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
   "/aep/v1/admin/model-gateway/models/{modelId}/test-access":
     "post":
       "tags":
@@ -1087,6 +1125,47 @@
           "type": "integer"
           "minimum": -1000000000000
           "maximum": 1000000000000
+    "GatewayModelTokenRequest":
+      "type": "object"
+      "required":
+        - "userId"
+      "additionalProperties": false
+      "properties":
+        "userId":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "sessionId":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+          "description": >-
+            Caller-supplied conversation correlation id for gateway logs;
+            an m2m-prefixed synthetic id is minted when omitted.
+    "GatewayModelToken":
+      "type": "object"
+      "required":
+        - "userId"
+        - "modelAccessToken"
+        - "expiresIn"
+        - "sessionId"
+        - "modelScopes"
+      "additionalProperties": false
+      "properties":
+        "userId":
+          "type": "string"
+        "modelAccessToken":
+          "type": "string"
+        "expiresIn":
+          "type": "integer"
+          "format": "int64"
+          "description": "Seconds until expiry."
+        "sessionId":
+          "type": "string"
+        "modelScopes":
+          "type": "array"
+          "items":
+            "type": "string"
     "GatewayTestAccess":
       "type": "object"
       "required":
