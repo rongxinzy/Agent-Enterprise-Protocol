@@ -6,8 +6,9 @@ This opt-in stage of [#338](https://github.com/rongxinzy/Agent-Enterprise-Protoc
 adds an actual controller to the existing Kubebuilder Operator. It consumes
 admitted [ModelAccessGrant](model-access-grants.md) session bindings and writes
 owned Authorino v0.26.4 `AuthConfig` and freshness ConfigMap resources. It does
-not replace the default authorizer, connect shared Higress ingress, implement
-workload authentication or establish complete product acceptance. Adoption remains gated.
+not replace the default authorizer, connect shared Higress ingress or establish
+complete product acceptance. Workloads require the [opt-in native verifier](workload-native-access.md).
+Adoption remains gated.
 
 ## Ownership and configuration
 
@@ -16,7 +17,8 @@ publication relay; this controller has no DB or Secret access of its own and
 adds no alternate publisher. Grants must carry the exact binding name, relay
 markers, deployment label and current DeploymentConfig identity. Human and
 agent **session** bindings are supported; Kubernetes workload bindings fail
-closed pending a separate trusted-verifier stage.
+closed by default. The separate [native workload verifier stage](workload-native-access.md)
+requires an explicit audience and TokenReview RBAC; unconfigured deployments keep the original behavior.
 
 Both the default deployment and its RBAC remain unchanged. Explicitly rendering
 `kubectl kustomize services/gateway-operator/config/access-rbac` produces only

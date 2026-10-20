@@ -15,9 +15,17 @@ func TestAccessOptions(t *testing.T) {
 	if err != nil || value == nil || !value.RequireEntitlement {
 		t.Fatalf("unsafe enabled defaults: %#v %v", value, err)
 	}
+	if value.WorkloadAudience != "" {
+		t.Fatal("workload authentication enabled by default")
+	}
+	good["AEP_GATEWAY_ACCESS_WORKLOAD_AUDIENCE"] = "zhiyuan-model-access"
+	value, err = accessOptions(func(key string) string { return good[key] })
+	if err != nil || value.WorkloadAudience != "zhiyuan-model-access" || !value.RequireEntitlement {
+		t.Fatal("workload opt-in changed entitlement gate")
+	}
 	for key, bad := range map[string]string{"AEP_GATEWAY_ACCESS_OPERATOR_ENABLED": "maybe", "AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT": "maybe",
 		"AEP_GATEWAY_ACCESS_REFRESH_SECONDS": "0", "AEP_GATEWAY_ACCESS_ISSUER_URL": "file:///tmp/issuer", "AEP_GATEWAY_ACCESS_POLICY_BASE_URL": "http://example.test?token=secret",
-		"AEP_GATEWAY_ACCESS_INGRESS_HOST": "*.access.test"} {
+		"AEP_GATEWAY_ACCESS_INGRESS_HOST": "*.access.test", "AEP_GATEWAY_ACCESS_WORKLOAD_AUDIENCE": "audience\n"} {
 		input := map[string]string{}
 		for key, value := range good {
 			input[key] = value

@@ -1,4 +1,4 @@
-// Package access projects session grants into native Authorino configuration.
+// Package access projects grants into native Authorino configuration.
 // It implements no request evaluator, credential verifier or result cache.
 package access
 
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -26,9 +27,16 @@ type Options struct {
 	// IngressHost opts into session selection routes on a dedicated Higress
 	// listener. It is deployment configuration, never a caller-provided host.
 	IngressHost string `json:",omitempty"`
+	// Empty keeps workload grants disabled. The trusted deployment audience
+	// must match the employee's projected token and the native TokenReview.
+	WorkloadAudience string `json:",omitempty"`
 }
 
 func (o Options) Validate() error {
+	if len(o.WorkloadAudience) > 256 || strings.IndexFunc(o.WorkloadAudience, unicode.IsSpace) != -1 ||
+		strings.IndexFunc(o.WorkloadAudience, unicode.IsControl) != -1 {
+		return ErrInput
+	}
 	if o.IngressHost != "" && len(validation.IsDNS1123Subdomain(o.IngressHost)) != 0 {
 		return ErrInput
 	}

@@ -1,0 +1,5 @@
+# Opt-in native verifier privilege. Not part of any default overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rbac.yaml

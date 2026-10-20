@@ -6,14 +6,16 @@
 在既有 Kubebuilder Operator 中添加真实控制器，消费已准入的
 [ModelAccessGrant](model-access-grants.zh-CN.md) 会话绑定，生成自有的 Authorino v0.26.4
 AuthConfig 与新鲜度 ConfigMap。本阶段不替换默认 authorizer，不接通共享 Higress 入口，
-不实现员工工作负载鉴权，不代表完整业务验收；正式采用门禁仍未通过。
+不代表完整业务验收；员工工作负载另有[显式启用的原生验证阶段](workload-native-access.zh-CN.md)，
+正式采用门禁仍未通过。
 
 ## 所有权与配置
 
 DB 授权仍是事实源，继续使用已有事务 outbox 与 publication relay。此控制器没有自己的
 DB 或 Secret 访问，不增加第二条发布链路。Grant 必须准确匹配绑定摘要名称、relay 标记、
 部署标签及当前 DeploymentConfig。支持人类与 agent 的 **session** 绑定；Kubernetes
-workload 绑定仍拒绝，等待独立可信身份验证阶段。
+workload 绑定默认仍拒绝；独立的[原生工作负载验证阶段](workload-native-access.zh-CN.md)
+增加显式 audience 与 TokenReview RBAC，未启用时保持原行为。
 
 默认部署和默认 RBAC 不变。显式渲染
 `kubectl kustomize services/gateway-operator/config/access-rbac` 只生成额外的
