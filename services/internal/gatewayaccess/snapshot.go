@@ -35,6 +35,7 @@ type Snapshot struct {
 	Disabled            bool                                    `json:"disabled"`
 	Retired             bool                                    `json:"retired"`
 	Models              []string                                `json:"models"`
+	PodUIDs             []string                                `json:"workloadPodUids,omitempty"`
 	RoleIDs             []string                                `json:"roleIds,omitempty"`
 	TeamIDs             []string                                `json:"teamIds,omitempty"`
 	Licenses            []gateway.ModelAccessLicense            `json:"licenses,omitempty"`
@@ -58,6 +59,7 @@ func canonicalIDs(ids []string, maxCount, maxLength int) bool {
 func (s Snapshot) valid() bool {
 	if s.Schema != "aep-model-access/v1" || !bounded(s.DeploymentID, 80) || !bounded(s.Subject.ID, 256) ||
 		(s.Subject.Kind != "human" && s.Subject.Kind != "agent") || s.Models == nil ||
+		!ValidWorkloadPods(s.Binding.Kind, s.PodUIDs) || !canonicalIDs(s.PodUIDs, 512, 128) ||
 		!canonicalIDs(s.Models, 512, 40) || !canonicalIDs(s.RoleIDs, 256, 256) || !canonicalIDs(s.TeamIDs, 256, 256) ||
 		len(s.Licenses) > 64 || s.Disabled && len(s.Models) != 0 || s.Retired && !s.Disabled {
 		return false

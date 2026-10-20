@@ -260,6 +260,19 @@ spec:
                 - licenseDigest
                 - licenseId
                 type: object
+              workloadPodUids:
+                description: |-
+                  WorkloadPodUIDs is mutable live-Pod evidence, outside the immutable binding.
+                  Missing/empty denies workload requests, including cached TokenReview results.
+                  It is not a model grant and must be supplied by a trusted lifecycle observer.
+                items:
+                  maxLength: 128
+                  minLength: 1
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  type: string
+                maxItems: 512
+                type: array
+                x-kubernetes-list-type: set
             required:
             - binding
             - deploymentId
@@ -285,6 +298,8 @@ spec:
                 + duration('1h')
             - message: disabled tombstones cannot carry allowed models
               rule: '!self.disabled || size(self.models) == 0'
+            - message: Pod observations require a Kubernetes workload binding
+              rule: '!has(self.workloadPodUids) || self.binding.kind == ''kubernetes'''
             - message: workload entitlement requires its exact accepted license and
                 a Kubernetes binding
               rule: '!has(self.workloadEntitlement) || (self.binding.kind == ''kubernetes''
