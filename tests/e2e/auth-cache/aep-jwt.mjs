@@ -38,10 +38,19 @@ input.auth.identity.model_scopes[_] == model
 
 export async function aepJwt({command, publish, request, ports, statsPort, record, until}) {
   // The actual AEP issuer generates keys in memory. Capture, never log its output.
-  const fixture = JSON.parse(await command('go', ['run', './services/control-service/testdata/auth-cache-tokens']));
+  const productDiscovery = process.env.AEP_AUTH_CACHE_PRODUCT_DISCOVERY === '1';
+  const fixture = JSON.parse(await command('go', ['run', './services/control-service/testdata/auth-cache-tokens'],
+    {input: JSON.stringify({productDiscovery})}));
   const upload = await fetch('http://127.0.0.1:' + statsPort + '/jwks', {method: 'POST',
     headers: {'content-type': 'application/json'}, body: JSON.stringify(fixture.jwks), signal: AbortSignal.timeout(5000)});
   assert.equal(upload.status, 200);
+  if (productDiscovery) {
+    assert.equal(fixture.discovery?.issuer, 'http://introspection:8080/oidc');
+    assert.equal(fixture.discovery.jwks_uri, 'http://introspection:8080/oidc/.well-known/jwks.json');
+    const metadata = await fetch('http://127.0.0.1:' + statsPort + '/metadata', {method: 'POST',
+      headers: {'content-type': 'application/json'}, body: JSON.stringify(fixture.discovery), signal: AbortSignal.timeout(5000)});
+    assert.equal(metadata.status, 200);
+  }
   const call = (port, name = 'model', model = 'model-a') => request(port, 'jwt-alice.probe.invalid', fixture.tokens[name], model);
   await publish([jwtPolicy()]);
   for (const port of ports) assert.equal((await call(port)).status, 401);
@@ -88,4 +97,6 @@ export async function aepJwt({command, publish, request, ports, statsPort, recor
   await publish([jwtPolicy({discovery: true, revision: '4', enabled: false})]);
   for (const port of ports) await until(async () => assert.equal((await call(port)).status, 403));
   record('Disabled-principal projection remains deny with a cryptographically valid model JWT');
+  if (productDiscovery) record('Both native replicas consume unchanged discovery and JWKS emitted by actual AEP HTTP handlers',
+    {metadataSource: 'AEP-HTTP-handler-capture', servingTransport: 'disposable-Node-relay', liveProductDeployment: false});
 }

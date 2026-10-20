@@ -24,6 +24,8 @@ node tests/e2e/auth-result-cache.mjs
 
 设置 `AEP_AUTH_CACHE_GATEWAY=1` 可增加下述同一入口的原生 Envoy 外部鉴权验证；测试集群需要能从 Docker Hub 拉取镜像。Kind 仅用于本地临时测试，不是新增产品组件或生产依赖；生产 Kubernetes/k3s 的部署不依赖本脚本。
 
+配合 JWT 扩展设置 `AEP_AUTH_CACHE_PRODUCT_DISCOVERY=1`，可把实际 AEP 公共 HTTP handler 输出的 discovery 与 JWKS 原样提供给组件，替代合成元数据。工作区须包含 [#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342) 的服务实现，缺少端点会拒绝继续；集群仅接收公开元数据。
+
 程序使用独立 kubeconfig，新建随机 `aep-auth-cache-*` 集群，只在该集群安装上游 CRD、两个 Authorino 副本及模拟 introspection 服务。副本启用原生 `--enable-leader-election`，以命名空间内 Lease 选出状态写入者，两个副本仍独立监听配置并服务。Node 辅助镜像使用当前平台归档导入，要求 Docker 支持 `docker image save --platform`；Authorino 由集群按固定 digest 拉取，避免 Docker/containerd 的 OCI 索引导入悬空引用问题。正常成功或失败均删除自建集群与临时文件；进程被强制结束时，按 Kind/Docker 名称清理本次自建集群，不删除其他集群。不调用云端模型、不读取 AEP 密钥、不更新既有预览集群。
 
 ## 检查与判读
@@ -96,6 +98,12 @@ JWT `jti` 不变只证明绑定，不证明跳过验签；原生授权时间戳�
 2026-10-19 同时启用两项可选扩展，完整运行十九项观察，含三项刻意复现的限制。直接 JWKS 在两副本均以 401 拒绝正式 AEP 模型令牌；声明 EdDSA 的 discovery 接受该令牌，每副本随后三次调用的完整允许范围决策时间戳不变。十四类错误令牌及实际请求模型越界均被拒绝，有效热决策不受影响。短令牌先成功预热，过期后拒绝；发布会话撤销和主体禁用后，两副本均拒绝有效模型令牌。报告 `completed: true`、`adoptionGate: false`、`cleaned: true`。
 
 首轮 JWT 测试因 access 配置漏写原生 `allValues`，下一层无法读取完整模型集合而正确返回 403；修正夹具后完整重跑，未删减拒绝断言。此为测试配置错误，不是产品缺陷。经 discovery 的 AEP JWT 兼容现已取得组件证据，但直接 JWKS 不兼容、产品没有 discovery 仍需解决；未修改公共 API、业务发布器或默认链路。
+
+## 实际公共 handler 联验
+
+产品 discovery 模式在 Go 夹具中调用实际 enterprise API HTTP handler，捕获成功的 discovery/JWKS JSON，再由临时 Node 服务原样转发公开内容，Authorino 自行访问文档声明的发现与公钥路径。它验证产品 handler 输出与原生验证器的兼容性，没有启动真实 AEP Deployment、数据库、外部反向代理或业务发布链路。前文合成 discovery 的结果保留为历史组件证据，正式契约和服务分别见 [#341](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/341)、[#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342)。
+
+2026-10-19 将服务实现与本探针组合后完整运行二十项观察，包含三项刻意复现的限制。两个副本均消费实际 handler 元数据，真实 JWT 复用、十四类错误令牌、模型越界、预热后到期、会话撤销及主体禁用检查完成；原缓存、重启和同入口检查保留。报告 `completed: true`、`adoptionGate: false`、`cleaned: true`。此前一次因 Docker Hub 拉取 Node 时返回 EOF，在功能检查前停止，临时集群也已清理；网络恢复后重试成功，未放宽断言或改变固定组件镜像。
 
 ## 尚未完成
 
