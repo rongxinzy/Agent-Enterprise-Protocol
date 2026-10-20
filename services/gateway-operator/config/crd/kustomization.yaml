@@ -4,3 +4,4 @@ resources:
   - bases/gateway.aep.zhiyuan.io_modelroutes.yaml
   - bases/gateway.aep.zhiyuan.io_modelpolicies.yaml
   - bases/gateway.aep.zhiyuan.io_deploymentconfigs.yaml
+  - bases/gateway.aep.zhiyuan.io_modelaccessgrants.yaml
