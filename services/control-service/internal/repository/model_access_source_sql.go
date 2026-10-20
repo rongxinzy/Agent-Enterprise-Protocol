@@ -34,7 +34,7 @@ WITH context AS MATERIALIZED (
   SELECT l.license_id AS id,l.digest,
     ARRAY(SELECT DISTINCT f FROM unnest(l.features) f ORDER BY f) AS features,
     CASE WHEN l.expires_at IS NULL THEN NULL ELSE l.grace_ends_at END AS expires_at
-  FROM context c JOIN licenses l ON l.deployment_id=c.deployment_id AND l.status='active'
+  FROM context c JOIN licenses l ON l.deployment_id=c.deployment_id AND l.status='active' AND l.revoked_at IS NULL
   WHERE l.expires_at IS NULL OR c.observed_at<=l.grace_ends_at
 ), current_workloads AS (
   SELECT w.* FROM context c JOIN model_access_workloads w
