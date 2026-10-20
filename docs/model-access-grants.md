@@ -9,6 +9,10 @@ project. It does **not** enable a controller, publish business authorization,
 install Authorino or change the default gateway path. Public HTTP/SDK APIs are
 unchanged; new public APIs, if needed, must follow OpenAPI-first development.
 
+The subsequent [opt-in native Operator stage](model-access-operator.md) adds a
+session-grant consumer. Resource projection is separate from all-process
+adoption and does not enable the default traffic path.
+
 ## Source and scope
 
 PostgreSQL remains the business source. Permissions, models and plugins are

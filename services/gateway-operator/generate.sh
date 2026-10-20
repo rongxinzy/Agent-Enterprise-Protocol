@@ -14,3 +14,4 @@ run() {
 run object paths=./api/v1alpha1
 run crd paths=./api/v1alpha1 output:crd:artifacts:config=config/crd/bases
 run rbac:roleName=gateway-operator-role paths=./internal/controller output:rbac:artifacts:config=config/rbac
+run rbac:roleName=gateway-access-operator-role paths=./internal/access output:rbac:artifacts:config=config/access-rbac

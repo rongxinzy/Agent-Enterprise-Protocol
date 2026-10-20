@@ -1,0 +1,43 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gateway-access-operator-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - authorino.kuadrant.io
+  resources:
+  - authconfigs
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - deploymentconfigs
+  - modelaccessgrants
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
+  - modelaccessgrants/status
+  verbs:
+  - get
+  - patch
+  - update

@@ -7,6 +7,9 @@
 `gateway.aep.zhiyuan.io/v1alpha1 ModelAccessGrant` 契约；不启用控制器、发布业务授权、
 部署 Authorino 或切换默认网关。HTTP/SDK 不变，后续如有公开接口按 OpenAPI 优先实施。
 
+后续[原生 Operator 显式启用阶段](model-access-operator.zh-CN.md)增加会话投影消费者，
+资源投影与所有服务进程采用确认仍是不同阶段，不启用默认流量链路。
+
 ## 事实源和范围
 
 业务关系继续存 PostgreSQL；权限、模型、插件只赋予角色，人类和 agent 账号通过有效角色

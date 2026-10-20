@@ -20,6 +20,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	gatewayv1alpha1 "github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/api/v1alpha1"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/internal/access"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/internal/controller"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/internal/dataplane"
 )
@@ -52,6 +53,10 @@ func main() {
 // wireManager registers the controllers and health checks; split out so the
 // wiring is testable without a live cluster.
 func wireManager(mgr ctrl.Manager) error {
+	options, err := accessOptions(os.Getenv)
+	if err != nil {
+		return err
+	}
 	runtime := &controller.Runtime{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(),
 		CredentialNamespace: "aep-credentials", NativeSecretNamespace: "higress-system"}
 	if name := strings.TrimSpace(os.Getenv("AEP_GATEWAY_OBSERVATION_DEPLOYMENT")); name != "" {
@@ -71,6 +76,11 @@ func wireManager(mgr ctrl.Manager) error {
 	}
 	if err := (&controller.DeploymentConfigReconciler{Runtime: runtime}).SetupWithManager(mgr); err != nil {
 		return err
+	}
+	if options != nil {
+		if err := (&access.Reconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Options: *options}).SetupWithManager(mgr); err != nil {
+			return err
+		}
 	}
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return err
