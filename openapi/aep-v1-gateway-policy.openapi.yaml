@@ -1,0 +1,455 @@
+"openapi": "3.1.0"
+"info":
+  "title": "AEP native model gateway policy operations"
+  "version": "1.0.0"
+  "description": "Native Higress and monitoring integration. AEP performs authorization and source queries, never calculates usage or costs. P95/P99 and cost are excluded. Optional sources return explicit unavailable/unsupported problems rather than fabricated values."
+  "license":
+    "name": "Apache 2.0"
+    "identifier": "Apache-2.0"
+"servers":
+  -
+    "url": "http://localhost:8080"
+"security":
+  -
+    "bearerAuth": []
+"tags":
+  -
+    "name": "Admin Model Gateway"
+    "description": "Read source results and manage native plugins within the authenticated deployment."
+"paths":
+  "/aep/v1/admin/model-gateway/limits":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "listGatewayLimits"
+      "summary": "list Gateway Limits"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimitPage"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/limits/{ruleId}":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayLimit"
+      "summary": "get Gateway Limit"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimit"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "ruleId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+    "put":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "putGatewayLimit"
+      "summary": "put Gateway Limit"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimit"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "ruleId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayLimitWrite"
+    "delete":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "deleteGatewayLimit"
+      "summary": "delete Gateway Limit"
+      "responses":
+        "204":
+          "description": "Deleted"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "ruleId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+        -
+          "name": "expectedVersion"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "integer"
+            "minimum": 1
+  "/aep/v1/admin/model-gateway/limits/publish":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "publishGatewayLimits"
+      "description": "Legacy synchronous publication. Operator mode returns 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; use asynchronous data-plane publications with includeGatewayLimits."
+      "summary": "publish Gateway Limits"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimitPublication"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/limits/status":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayLimitsStatus"
+      "description": "Legacy status. Operator mode returns 503 LEGACY_GATEWAY_PUBLICATION_DISABLED; read revision-specific data-plane publication conditions instead."
+      "summary": "get Gateway Limits Status"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayLimitStatus"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/quotas/{userId}":
+    "get":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "getGatewayQuota"
+      "summary": "get Gateway Quota"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayQuota"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "userId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+  "/aep/v1/admin/model-gateway/quotas/{userId}/refresh":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "refreshGatewayQuota"
+      "summary": "refresh Gateway Quota"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayQuota"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "userId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayQuotaRefresh"
+  "/aep/v1/admin/model-gateway/quotas/{userId}/delta":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "changeGatewayQuota"
+      "summary": "change Gateway Quota"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayQuota"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "userId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayQuotaDelta"
+  "/aep/v1/admin/model-gateway/tokens":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "issueModelGatewayToken"
+      "summary": "issue a data-plane model token on behalf of a user"
+      "description": >-
+        Machine-to-machine issuance for governed runtimes: a service account
+        with models.read obtains a short-lived data-plane token whose model
+        scopes are derived from the target user's assignments (never wider).
+        The sessionId is caller-supplied conversation context used for gateway
+        log correlation; when omitted an m2m-prefixed synthetic session id is
+        minted. Every issuance is audited.
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GatewayModelTokenRequest"
+      "responses":
+        "200":
+          "description": "Issued model token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayModelToken"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+  "/aep/v1/admin/model-gateway/models/{modelId}/test-access":
+    "post":
+      "tags":
+        - "Admin Model Gateway"
+      "operationId": "createGatewayTestAccess"
+      "summary": "create Gateway Test Access"
+      "responses":
+        "200":
+          "description": "Native source result or managed configuration"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GatewayTestAccess"
+        "400":
+          "$ref": "#/components/responses/Problem"
+        "401":
+          "$ref": "#/components/responses/Problem"
+        "403":
+          "$ref": "#/components/responses/Problem"
+        "404":
+          "$ref": "#/components/responses/Problem"
+        "409":
+          "$ref": "#/components/responses/Problem"
+        "422":
+          "$ref": "#/components/responses/Problem"
+        "503":
+          "$ref": "#/components/responses/Problem"
+      "parameters":
+        -
+          "name": "modelId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 200
+"components":
+  "securitySchemes":
+    "bearerAuth":
+      "type": "http"
+      "scheme": "bearer"
+      "bearerFormat": "JWT"
+  "responses":
+    "Problem":
+      "$ref": "./aep-v1-authentication.openapi.yaml#/components/responses/Problem"
+  "schemas":
+    "GatewayCapabilities":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayCapabilities"
+    "GatewayMetricDefinitionId":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayMetricDefinitionId"
+    "GatewayMetricDefinition":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayMetricDefinition"
+    "GatewayMetricResult":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayMetricResult"
+    "GatewayNativeResult":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayNativeResult"
+    "GatewayHealth":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayHealth"
+    "GatewayLimitWrite":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayLimitWrite"
+    "GatewayLimit":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayLimit"
+    "GatewayLimitPage":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayLimitPage"
+    "GatewayLimitPublication":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayLimitPublication"
+    "GatewayLimitStatus":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayLimitStatus"
+    "GatewayQuota":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayQuota"
+    "GatewayQuotaRefresh":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayQuotaRefresh"
+    "GatewayQuotaDelta":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayQuotaDelta"
+    "GatewayModelTokenRequest":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayModelTokenRequest"
+    "GatewayModelToken":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayModelToken"
+    "GatewayTestAccess":
+      "$ref": "./aep-v1-gateway-schemas.openapi.yaml#/components/schemas/GatewayTestAccess"
