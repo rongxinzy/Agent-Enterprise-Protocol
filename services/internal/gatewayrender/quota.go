@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 )
 
 const (
@@ -17,6 +18,9 @@ const (
 func RenderGatewayQuota(input Input, cfg NativeGatewayConfig, password, adminCredential string) ([]RenderedResource, error) {
 	if adminCredential == "" || cfg.RedisService == "" {
 		return nil, errors.New("native quota secrets unavailable")
+	}
+	if cfg.PrivateQuotaListener && strings.ContainsAny(adminCredential, "*\r\n") {
+		return nil, errors.New("private quota credential must not contain native policy wildcards or line breaks")
 	}
 	suffix := ResourceSuffix(input.Deployment)
 	name := "aep-quota-" + suffix

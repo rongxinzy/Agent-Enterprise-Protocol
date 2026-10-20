@@ -20,11 +20,12 @@ export async function quotaManagementProbe(ctx) {
     admin = new AepClient({baseUrl, tokenStore: adminStore});
     person.client = new AepClient({baseUrl, tokenStore: person.store});
   }
-  async function configureQuota(endpoint) {
+  async function configureQuota(endpoint, restart = false) {
     await kubectl([...patchControl, JSON.stringify({spec: {template: {spec: {containers: [{name: 'service', env: [
       {name: 'AEP_GATEWAY_QUOTA_URL', value: endpoint},
       {name: 'AEP_GATEWAY_QUOTA_TOKEN', valueFrom: {secretKeyRef: {name: 'access-quota-control-probe', key: 'token'}}},
     ]}]}}}})]);
+    if (restart) await kubectl(['-n', 'aep-system', 'rollout', 'restart', 'deployment/aep-business-control']);
     await reconnect();
     return admin;
   }
@@ -111,7 +112,19 @@ export async function quotaManagementProbe(ctx) {
     console.log('OBSERVATION: cumulative quota management ' + (findings.blocker ? 'is an adoption blocker' : 'is integrated'));
     if (process.env.AEP_NATIVE_ACCESS_QUOTA_PRIVATE_FIXTURE === 'true') {
       const {privateQuotaFixture} = await import('./quota-private-fixture.mjs');
-      await privateQuotaFixture(ctx, {quota, credential, configureQuota});
+      await privateQuotaFixture(ctx, {quota, credential, configureQuota,
+        desired: await admin.getDataPlaneDesiredState(),
+        async retireLegacyQuota() {
+          await patchNative(null);
+          await publication(admin);
+          await until(async () => {
+            for (const [kind, name] of [['wasmplugin', quota.name], ['wasmplugin', quota.name.replace('aep-quota-', 'aep-quota-auth-')],
+              ['ingress', quota.name]]) {
+              assert.equal(await kubectl(['-n', 'higress-system', 'get', kind, name, '--ignore-not-found', '-o', 'name']), '',
+                'Legacy quota resource still owns the management or inference path');
+            }
+          });
+        }});
     }
   } finally {
     if (configured) {

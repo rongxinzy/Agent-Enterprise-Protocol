@@ -24,6 +24,10 @@ handle a request before the router. The native DENY is essential, including
 when key-auth disappears. AEP does not implement another authenticator, quota
 counter, balance calculation or cache.
 
+Private-mode management keys cannot contain `*` or line breaks: Istio policy
+values interpret wildcards, whereas key-auth compares its credential literally.
+Invalid private keys fail rendering before any resource is returned.
+
 ## Reproduce the isolated native capability probe
 
 Prepare the tools/images and Authorino schema from
@@ -35,7 +39,7 @@ Download the official [Istio 1.27.0 CRD bundle](https://github.com/istio/istio/b
 and select its actual schemas, without creating substitute definitions:
 
 ```sh
-node scripts/prepare-private-quota-crds.mjs /tmp/crd-all.gen.yaml /tmp/private-quota-crds.json
+npm run fixture:quota-crds -- /tmp/crd-all.gen.yaml /tmp/private-quota-crds.json
 AEP_NATIVE_ACCESS_BUSINESS=true \
 AEP_NATIVE_ACCESS_HIGRESS=true \
 AEP_NATIVE_ACCESS_MANAGED=true \
@@ -53,17 +57,30 @@ objects while discovery generates no listener. Both source and selected CRD
 hashes are checked. This does not establish the API versions currently
 installed in any production cluster.
 
-The capability fixture is explicit test-side assembly, **not** the Operator
-runtime applying the new renderer. It checks legitimate native and AEP
+The capability fixture reads actual desired routes through the SDK, retires the
+legacy quota resources, then invokes the shared production renderer through the
+existing test-only Go entry point and applies its complete output. One native
+quota plugin serves management and inference. It does **not** enable the new
+mode in the Operator runtime. It checks legitimate native and AEP
 GET/refresh/delta, forged/missing/model credentials, alternate authorities,
 key-auth removal, unchanged rejected balances, inference usage deduction,
 zero-balance rejection and public-port isolation. The focused quota mode
 does not execute the subsequent full session mutation/recovery baseline.
 
-The local 21-check run completed and cleaned its cluster, with the missing
-key-auth forgery rejected at 403. `productRendererImplemented` and
-`networkPolicyEnforcementVerified` remain false in that capability report,
-and `adoptionGate` remains false. These results do not prove production
+The final shared-renderer probe completed 22 recorded checks and cleaned its
+cluster. Two explicit control-service rollouts each preserved the first model
+request and exact Mock usage deduction without retrying inference or mutations.
+This integrated result requires the companion native control rollout settings:
+two replicas, readiness stability, zero unavailable replicas and native preStop
+endpoint drain. Earlier single-control-Pod runs intermittently returned 401/403;
+one captured failure increased ext_authz.denied while the balance stayed seven,
+with a live matching JWT and Authorino reporting JWKS connection/signature
+verification failure. This is distinct from quota calculation or the private
+RBAC policy. Apply the companion deployment stage before reproducing this probe.
+
+`productRendererImplemented=true`, `operatorPrivateRuntimeIntegrated=false`,
+`networkPolicyEnforcementVerified=false` and `adoptionGate=false`. These results
+do not prove production
 network isolation, old-connection adoption, Redis-outage behavior, credential
 publisher integration or full-fleet readiness. Envoy may retain unused ECDS
 entries: removal checks target references in the active listener.

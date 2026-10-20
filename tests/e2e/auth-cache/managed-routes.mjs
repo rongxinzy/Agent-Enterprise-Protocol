@@ -47,7 +47,8 @@ http.createServer(async(req,res)=>{
       host:options.host??'shared.access.test',authorization:'Bearer '+(options.token??person.tokens.modelAccessToken),
       'content-type':'application/json','x-aep-access-binding':options.binding??person.binding,...options.headers}},res=>{
       let body='';res.on('data',chunk=>body+=chunk);res.on('end',()=>resolve({status:res.statusCode,
-        observation:res.headers['x-aep-access-observation'],body:res.statusCode===200?JSON.parse(body):body}));
+        observation:res.headers['x-aep-access-observation'],keyAuthChallenge:/^Key /.test(res.headers['www-authenticate']??''),
+        body:res.statusCode===200?JSON.parse(body):body}));
     });req.on('error',reject);req.on('timeout',()=>req.destroy(new Error('Higress timeout')));
     req.end(options.body??JSON.stringify({model:id,messages:[{role:'user',content:'probe'}]}));
   }).catch(async error=>{port=await forward('deployment/higress-gateway',80,'higress-system');throw error;});

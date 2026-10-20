@@ -2,6 +2,7 @@
 // The original management probe/result remains unchanged and adoption stays off.
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import {quotaInferenceDiagnostics} from './quota-inference-diagnostics.mjs';
 
 // Node's fetch does not preserve an explicit Host on this runtime. Native
 // domain-scoped routing requires the actual service Host, including when the
@@ -20,15 +21,19 @@ function managementRequest(port, path, {method, headers, body}) {
   });
 }
 
-export async function privateQuotaFixture(ctx, {quota, credential, configureQuota}) {
+export async function privateQuotaFixture(ctx, {quota, credential, configureQuota, desired, retireLegacyQuota}) {
   const {command, kubectl, apply, forward, until, gateway, person, record, report} = ctx;
   const list = JSON.parse(await kubectl(['-n', 'higress-system', 'get', 'wasmplugins', '-o', 'json'])).items;
   const source = list.find(p => p.metadata.name === quota.name);
   const auth = list.find(p => p.metadata.name.startsWith('aep-quota-auth-'));
   assert(source && auth, 'Existing native quota/key-auth configuration is required');
   const redis = source.spec.matchRules[0].config.redis;
+  // Exercise the complete replacement, not a second admin-only plugin beside
+  // the legacy inference plugin. The shared renderer receives actual desired
+  // routes from the API, and owns both admin and inference quota configuration.
+  await retireLegacyQuota();
   const rendered = JSON.parse(await command('go', ['run', './services/gateway-reconciler/internal/reconciler/testdata/render-native'], {
-    input: JSON.stringify({desired: {deploymentId: 'quota-private-fixture'}, privateQuota: true, adminCredential: credential,
+    input: JSON.stringify({desired, privateQuota: true, adminCredential: credential,
       native: {Enabled: true, RedisService: redis.service_name, RedisPort: redis.service_port,
         RedisDatabase: redis.database, RedisUsername: redis.username ?? ''}}),
   }));
@@ -150,13 +155,41 @@ export async function privateQuotaFixture(ctx, {quota, credential, configureQuot
     assert.equal((await call('/delta', {method: 'POST', body: new URLSearchParams({consumer, value: '-3'}).toString()})).status, 200);
     assert.equal((await query()).quota, 7);
     record('Native private fixture GET/refresh/delta read Redis balances without AEP arithmetic');
-    const admin = await configureQuota('http://' + host + ':' + port + managementPath);
+    const endpoint = 'http://' + host + ':' + port + managementPath;
+    let admin = await configureQuota(endpoint);
     assert.equal((await admin.getGatewayQuota(person.user.id)).quota, 7);
     assert.equal((await admin.refreshGatewayQuota(person.user.id, 10)).quota, 10);
     assert.equal((await admin.changeGatewayQuota(person.user.id, -3)).quota, 7);
     record('Real AEP quota GET/refresh/delta reach the native private fixture');
-    assert.equal((await gateway.call(person)).status, 200);
-    await until(async () => assert.equal((await admin.getGatewayQuota(person.user.id)).quota, 5));
+    // Exercise control restarts without retrying inference or an uncertain
+    // mutation. A single successful run must not hide an intermittent denial.
+    for (let restart = 0; restart < 3; restart++) {
+      if (restart) {
+        admin = await configureQuota(endpoint, true);
+        assert.equal((await admin.refreshGatewayQuota(person.user.id, 7)).quota, 7);
+      }
+      const beforeAuthorization = await (await fetch('http://127.0.0.1:' + adminPort + '/stats?filter=ext_authz|rbac',
+        {signal: AbortSignal.timeout(5000)})).text();
+      const inference = await gateway.call(person);
+      if (inference.status !== 200) {
+        const body = typeof inference.body === 'string' ? inference.body : '';
+        findings.modelAfterManagement = {restart, status: inference.status, keyAuthChallenge: inference.keyAuthChallenge,
+          nativeRbacDenied: body === 'RBAC: access denied',
+          quotaDenial: /quota/i.test(body), authorizationDenied: body === 'Forbidden'};
+        findings.modelAuthorizationStatsBefore = beforeAuthorization;
+        try {
+          findings.modelAfterManagement.nativeBalance = (await query()).quota;
+          findings.modelAuthorizationStats = await (await fetch('http://127.0.0.1:' + adminPort + '/stats?filter=ext_authz|rbac',
+            {signal: AbortSignal.timeout(5000)})).text();
+          findings.modelDiagnostics = await quotaInferenceDiagnostics({kubectl, person, adminPort});
+        } catch {
+          findings.modelDiagnosticsUnavailable = true;
+        }
+      }
+      assert.equal(inference.status, 200, 'Inference did not resume after native quota management');
+      await until(async () => assert.equal((await admin.getGatewayQuota(person.user.id)).quota, 5));
+    }
+    record('Native management and exact Mock usage deduction survive repeated control-service restarts');
     await admin.refreshGatewayQuota(person.user.id, 0);
     const limitedBefore = await gateway.stats();
     assert.equal((await gateway.call(person)).status, 403);

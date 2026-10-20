@@ -92,3 +92,17 @@ func TestPrivateQuotaListenerIsNotAConfigFileSetting(t *testing.T) {
 		t.Fatal("renderer-only stage was enabled through a runtime config file")
 	}
 }
+
+func TestPrivateQuotaRejectsNativePolicyWildcards(t *testing.T) {
+	in, _, cfg := nativeFixture()
+	cfg.PrivateQuotaListener = true
+	for _, credential := range []string{"disposable-*", "*", "disposable\r\nheader"} {
+		if resources, err := RenderGatewayQuota(in, cfg, "", credential); err == nil || len(resources) != 0 {
+			t.Fatal("invalid credential weakened the native policy or produced partial resources")
+		}
+	}
+	cfg.PrivateQuotaListener = false
+	if _, err := RenderGatewayQuota(in, cfg, "", "disposable-*"); err != nil {
+		t.Fatal("private policy validation changed legacy credential handling")
+	}
+}
