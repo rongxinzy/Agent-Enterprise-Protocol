@@ -28,6 +28,9 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelaccessgrants/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=authorino.kuadrant.io,resources=authconfigs,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups=gateway.aep.zhiyuan.io,resources=modelaccessgrants,verbs=patch
+// EnvoyFilter privileges live in the separately enabled, Higress-namespaced
+// config/access-ingress-rbac overlay; never add them to access-rbac.
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var grant gateway.ModelAccessGrant
@@ -35,9 +38,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !grant.DeletionTimestamp.IsZero() {
-		// Same-namespace owner references collect native resources. Missing files
-		// cannot renew the last compiled absolute deadline during GC propagation.
-		return ctrl.Result{}, nil
+		done, err := r.finalizeRoute(ctx, &grant)
+		if !done && err == nil {
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
+		return ctrl.Result{}, err
 	}
 	config, policy, err := Render(&grant, r.Options)
 	if err != nil {
@@ -53,16 +58,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if deployment.Spec.DeploymentID != grant.Spec.DeploymentID || !deployment.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.status(ctx, &grant, false, false, "DeploymentMismatch")
 	}
+	if changed, err := r.ensureRouteFinalizer(ctx, &grant); err != nil {
+		return ctrl.Result{}, err
+	} else if changed {
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+	}
 	// Write new bounds before semantic policy. A partial rollout with different
 	// semantic hashes denies rather than letting new freshness bless old access.
 	if err = r.writePolicy(ctx, &grant, policy); err == nil {
 		err = r.writeConfig(ctx, &grant, config)
 	}
 	if err == nil {
+		err = r.writeBindingRoute(ctx, &grant)
+	}
+	if err == nil {
 		err = r.current(ctx, &grant)
 	}
 	if errors.Is(err, ErrSuperseded) {
 		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+	}
+	if errors.Is(err, ErrRoutePending) {
+		return ctrl.Result{RequeueAfter: time.Second}, r.status(ctx, &grant, true, false, "RouteCleanupPending")
 	}
 	if err != nil {
 		return ctrl.Result{}, errors.Join(err, r.status(ctx, &grant, true, false, "NativeProjectionFailed"))
@@ -123,8 +139,18 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Options.Validate() != nil {
 		return ErrInput
 	}
-	return ctrl.NewControllerManagedBy(mgr).For(&gateway.ModelAccessGrant{}).
-		Owns(&corev1.ConfigMap{}).Owns(authConfig()).
+	builder := ctrl.NewControllerManagedBy(mgr).For(&gateway.ModelAccessGrant{}).
+		Owns(&corev1.ConfigMap{}).Owns(authConfig())
+	if r.Options.IngressHost != "" {
+		builder = builder.Watches(bindingRoute(), handler.EnqueueRequestsFromMapFunc(func(_ context.Context, object client.Object) []ctrl.Request {
+			var requests []ctrl.Request
+			for _, key := range routeSource(object) {
+				requests = append(requests, ctrl.Request{NamespacedName: key})
+			}
+			return requests
+		}))
+	}
+	return builder.
 		Watches(&gateway.DeploymentConfig{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []ctrl.Request {
 			var grants gateway.ModelAccessGrantList
 			if err := r.List(ctx, &grants, client.InNamespace(object.GetNamespace())); err != nil {

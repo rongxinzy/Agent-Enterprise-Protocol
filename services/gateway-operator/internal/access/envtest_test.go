@@ -53,7 +53,8 @@ func TestNativeProjectionWithAPIServer(t *testing.T) {
 		t.Log("using pinned native Authorino admission, including defaults")
 	}
 	env := &envtest.Environment{BinaryAssetsDirectory: assets, CRDs: []*apiextensionsv1.CustomResourceDefinition{&crd},
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")}}
+		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases"),
+			filepath.Join("..", "controller", "testdata")}}
 	cfg, err := env.Start()
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +77,9 @@ func TestNativeProjectionWithAPIServer(t *testing.T) {
 	}
 	ctx := context.Background()
 	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "aep-system"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "higress-system"}}); err != nil {
 		t.Fatal(err)
 	}
 	deployment := &gateway.DeploymentConfig{ObjectMeta: metav1.ObjectMeta{Name: "deployment", Namespace: "aep-system"}, Spec: gateway.DeploymentConfigSpec{DeploymentID: "probe"}}
@@ -146,4 +150,15 @@ func TestNativeProjectionWithAPIServer(t *testing.T) {
 			t.Fatal("native API writes fabricated serving adoption")
 		}
 	}
+	// A fresh grant avoids changing the policy-render options at an already
+	// published sequence; deployment option upgrades require a new publication.
+	g = fixture()
+	g.Spec.Binding.SessionID = "managed-route-session"
+	g.Name = "access-" + bindingKey(g.Spec)
+	markFixture(g)
+	g.UID, g.Generation = "", 0
+	if err := c.Create(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	checkRouteLifecycle(t, c, g)
 }

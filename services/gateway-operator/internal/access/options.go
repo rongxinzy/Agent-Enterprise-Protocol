@@ -6,11 +6,14 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var ErrInput = errors.New("invalid native access projection")
 var ErrOwnership = errors.New("native access ownership or publication conflict")
 var ErrSuperseded = errors.New("access projection superseded")
+var ErrRoutePending = errors.New("native access route cleanup pending")
 
 // Options are trusted operator deployment configuration, never request input.
 // PolicyBaseURL must serve the projected ConfigMap files using a reviewed
@@ -20,9 +23,15 @@ type Options struct {
 	PolicyBaseURL      string
 	RequireEntitlement bool
 	RefreshSeconds     int64
+	// IngressHost opts into session selection routes on a dedicated Higress
+	// listener. It is deployment configuration, never a caller-provided host.
+	IngressHost string `json:",omitempty"`
 }
 
 func (o Options) Validate() error {
+	if o.IngressHost != "" && len(validation.IsDNS1123Subdomain(o.IngressHost)) != 0 {
+		return ErrInput
+	}
 	if o.RefreshSeconds < 1 || o.RefreshSeconds > 60 {
 		return ErrInput
 	}
