@@ -14,7 +14,7 @@ import (
 
 type AccessStore interface {
 	PendingModelAccessSubjects(context.Context, string, int) ([]string, error)
-	CaptureModelAccessSessions(context.Context, string, time.Duration) (*repository.ModelAccessCapture, error)
+	CaptureModelAccessBindings(context.Context, string, time.Duration) (*repository.ModelAccessCapture, error)
 	ClaimModelAccessPublication(context.Context) (*repository.ModelAccessDelivery, error)
 	CheckModelAccessDelivery(context.Context, repository.ModelAccessDelivery) error
 	FinishModelAccessPublication(context.Context, string, string, string, string, time.Duration) error
@@ -73,7 +73,7 @@ func (a *AccessRelay) capture(ctx context.Context) error {
 	}
 	defer a.queue.Done(id)
 	captureCtx, stop := context.WithTimeout(ctx, 5*time.Second)
-	_, captureErr := a.store.CaptureModelAccessSessions(captureCtx, id, a.freshness)
+	_, captureErr := a.store.CaptureModelAccessBindings(captureCtx, id, a.freshness)
 	stop()
 	if captureErr != nil {
 		a.queue.AddRateLimited(id)

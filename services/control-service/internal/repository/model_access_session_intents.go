@@ -2,7 +2,6 @@ package repository
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -12,9 +11,13 @@ import (
 )
 
 func sessionSnapshot(source ModelAccessSource, session ModelAccessSession) gatewayaccess.Snapshot {
+	return modelAccessSnapshot(source, gateway.ModelAccessBinding{Kind: "session", SessionID: session.ID})
+}
+
+func modelAccessSnapshot(source ModelAccessSource, binding gateway.ModelAccessBinding) gatewayaccess.Snapshot {
 	policy := gatewayaccess.Snapshot{Schema: "aep-model-access/v1", DeploymentID: source.DeploymentID,
 		Subject:  gateway.ModelAccessSubject{Kind: source.Kind, ID: source.SubjectID},
-		Binding:  gateway.ModelAccessBinding{Kind: "session", SessionID: session.ID},
+		Binding:  binding,
 		Disabled: source.Disabled, Models: []string{}}
 	if source.Disabled {
 		return policy
@@ -39,6 +42,10 @@ func sessionSnapshot(source ModelAccessSource, session ModelAccessSession) gatew
 }
 
 func sessionDeadline(source ModelAccessSource, session ModelAccessSession, freshness time.Duration) (time.Time, error) {
+	return modelAccessDeadline(source, session.ExpiresAt, freshness)
+}
+
+func modelAccessDeadline(source ModelAccessSource, bindingExpiry time.Time, freshness time.Duration) (time.Time, error) {
 	// metav1.Time's JSON contract has second precision. Never round a security
 	// deadline up; too-close boundaries are retried after expiry, not extended.
 	deadline := source.ObservedAt.UTC().Truncate(time.Second).Add(freshness).Truncate(time.Second)
@@ -48,7 +55,7 @@ func sessionDeadline(source ModelAccessSource, session ModelAccessSession, fresh
 		}
 	}
 	if !source.Disabled {
-		consider(&session.ExpiresAt)
+		consider(&bindingExpiry)
 		consider(source.SubjectExpiresAt)
 		for _, model := range source.Models {
 			consider(model.ExpiresAt)
@@ -107,24 +114,5 @@ func sessionAccessIntents(source ModelAccessSource, prior []ModelAccessPublicati
 		}
 		policies[key], deadlines[key] = policy, deadline
 	}
-	intents := make([]ModelAccessIntent, 0, len(policies))
-	for _, key := range sortedAccessKeys(policies) {
-		policy := policies[key]
-		payload, hash, err := policy.Canonical()
-		if err != nil {
-			return nil, err
-		}
-		issue, deadline := issuedAt, deadlines[key]
-		previous, exists := old[key]
-		if exists && previous.ContentHash == hash && previous.ValidUntil.After(source.ObservedAt) &&
-			!previous.ValidUntil.After(deadline) && (!renewal || policy.Disabled || len(policy.Models) == 0) {
-			// Advance the source fence without resending unchanged effective policy.
-			// Neither metadata/token rotation nor a redundant role write is a flush.
-			issue, deadline = previous.IssuedAt, previous.ValidUntil
-		}
-		intents = append(intents, ModelAccessIntent{BindingKey: key, SubjectID: source.SubjectID, SourceVersion: version,
-			IssuedAt: issue, ValidUntil: deadline, Snapshot: PublicationSnapshot{DeploymentID: source.DeploymentID,
-				Revision: "source-" + strconv.FormatInt(version, 10), ContentHash: hash, Payload: payload}})
-	}
-	return intents, nil
+	return canonicalAccessIntents(source, policies, old, deadlines, version, renewal)
 }
