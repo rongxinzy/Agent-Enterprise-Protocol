@@ -57,7 +57,7 @@ must never be deployed as that service.
 Migration 055 adds an internal, credential-free registry for the explicit AEP
 agent ID, employee namespace/name/UID, dedicated ServiceAccount name/UID and
 gateway audience. It is **not** a public registration API or an authorization
-grant. A future trusted lifecycle writer must read the current employee and
+grant. A trusted lifecycle writer must read the current employee and
 its controller-owned SA, verify both UIDs and the explicit agent mapping, then
 call the repository. Neither a caller header nor the human owner is evidence.
 
@@ -69,7 +69,9 @@ current binding. Multiple replicas
 of that employee use its dedicated SA; this is not a per-conversation registry.
 Trusted observation freshness is bounded to 2 seconds–1 hour, using the database
 clock. This is an admission range, not a production propagation recommendation.
-Expired/retired observations are absent from the live business source.
+Expired/retired observations are absent from the source's live `workloads`.
+Expired current identities are separately exposed as `unverifiedWorkloads` for
+temporary deny; retired identities remain only in immutable registry/history.
 
 Binding changes, retirement, shorter verification bounds and recovery after
 expiry queue the existing targeted source signal in the same transaction.
@@ -77,14 +79,46 @@ Continuous freshness extension does not invalidate authorization. Role-derived
 models and memberships remain unchanged. The source reports the observation's
 expiry as another natural deadline.
 
-This prerequisite does not start a Kubernetes watcher, issue/read tokens,
-publish workload grants, configure TokenReview, or make the runtime consume a
-token file. The session-only producer refuses live workload registrations and
-leaves their source signals unacknowledged; the native Operator still refuses
-workload grants. Do not enable employee model access based on registry storage.
-The trusted writer, combined binding producer and data-plane integration remain
-separate stages under [#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338)
-and [governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131).
+The optional trusted watcher is delivered separately in
+[#365](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/365). Registry
+storage does not issue/read tokens, configure TokenReview or make the runtime
+consume a token file. Workload verification remains separately opt-in, and the
+default entitlement requirement still rejects unlicensed workload rendering.
+Do not enable employee model access based on registry storage alone.
+
+### Atomic session/workload publication
+
+When the existing `AEP_GATEWAY_ACCESS_RELAY_ENABLED` opt-in is configured, its
+single access worker calls `CaptureModelAccessBindings`. Under the existing
+configuration lock and one MVCC business snapshot, it derives all current/prior
+session and trusted workload streams, queues immutable snapshots/outbox, then
+acknowledges exactly the source version in the same transaction. A failure in
+any binding or acknowledgement rolls everything back. No network I/O runs in
+that transaction; no new writer or public API is introduced. The narrow legacy
+`CaptureModelAccessSessions` method continues to reject workload coverage.
+
+Workload identity remains the agent's registered CR/SA UID tuple. Models, roles,
+teams and license references use the same role-derived business source as human
+sessions; an owner or conversation does not become the employee identity.
+Unknown/malformed bindings, legacy direct grants and retired-identity replay
+remain fail-closed. Removing/replacing an SA or deleting the agent emits terminal
+tombstones for the old streams alongside any current replacement.
+
+An expired but current lifecycle observation emits disabled **nonretired** state;
+new trusted evidence can recover that same immutable identity. It never grants
+models while unverified. Every allow is capped by observation, account, model,
+license and explicit publication freshness deadlines, truncated down to seconds.
+Durable pre-deadline recapture observes healthy registry renewal without treating
+each renewal as a permission change; semantic hashes remain stable. Short final
+intervals wait for expiry instead of creating a busy loop. Unrelated subjects
+are not republished. This does not prove runtime cache survival or timely serving
+adoption under failure.
+
+Native workload entitlements, runtime configuration delivery and full employee
+model/quota/revocation acceptance remain separate stages under
+[#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338) and
+[governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131).
+Keep `adoptionGate=false`; default deployment and inference paths are unchanged.
 
 The existing administrative M2M token endpoint issues a model JWT for a target
 user; it does not prove an employee's Kubernetes identity. This registry does

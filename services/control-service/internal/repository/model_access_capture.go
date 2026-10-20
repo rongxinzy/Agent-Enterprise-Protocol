@@ -43,14 +43,25 @@ ORDER BY user_id LIMIT ?`, s.deploymentID, after, limit).Scan(&ids).Error
 // the whole capture, rather than acknowledging incomplete binding coverage.
 // Freshness is an explicit reviewed bound, not a cache TTL or a cache flush.
 func (s *DeploymentStore) CaptureModelAccessSessions(ctx context.Context, userID string, freshness time.Duration) (*ModelAccessCapture, error) {
+	return s.captureModelAccess(ctx, userID, freshness, false)
+}
+
+// CaptureModelAccessBindings captures all current/prior session AND trusted
+// workload bindings with their source acknowledgement in one transaction.
+// It does not register identities, issue credentials or enable a default path.
+func (s *DeploymentStore) CaptureModelAccessBindings(ctx context.Context, userID string, freshness time.Duration) (*ModelAccessCapture, error) {
+	return s.captureModelAccess(ctx, userID, freshness, true)
+}
+
+func (s *DeploymentStore) captureModelAccess(ctx context.Context, userID string, freshness time.Duration, includeWorkloads bool) (*ModelAccessCapture, error) {
 	if freshness < 2*time.Second || freshness > time.Hour || freshness%time.Second != 0 {
 		return nil, ErrAccessPublicationInput
 	}
 	var capture *ModelAccessCapture
 	err := s.WithModelAccessSource(ctx, userID, func(tx *DeploymentStore, source ModelAccessSource) error {
-		// Workload registration alone must not acknowledge partial session-only
-		// delivery. A subsequent stage must capture both kinds atomically.
-		if len(source.Workloads) > 0 {
+		// Preserve the narrow legacy API's fail-closed behavior. Only the mixed
+		// producer may acknowledge complete session/workload binding coverage.
+		if !includeWorkloads && (len(source.Workloads) > 0 || len(source.UnverifiedWorkloads) > 0) {
 			return ErrAccessBinding
 		}
 		var change struct {
@@ -84,7 +95,11 @@ ON p.deployment_id=s.deployment_id AND p.binding_key=s.binding_key AND p.sequenc
 WHERE s.deployment_id=? AND s.subject_id=? ORDER BY s.binding_key`, s.deploymentID, userID).Scan(&prior).Error; err != nil {
 			return err
 		}
-		intents, err := sessionAccessIntents(source, prior, change.Version, freshness, due)
+		derive := sessionAccessIntents
+		if includeWorkloads {
+			derive = mixedAccessIntents
+		}
+		intents, err := derive(source, prior, change.Version, freshness, due)
 		if err != nil {
 			return err
 		}
@@ -105,6 +120,18 @@ WHERE s.deployment_id=? AND s.subject_id=? ORDER BY s.binding_key`, s.deployment
 				next := publication.ValidUntil
 				if publication.ValidUntil.Equal(publication.IssuedAt.Add(freshness)) {
 					next = publication.IssuedAt.Add(freshness / 2)
+				}
+				if policy.Binding.Kind == "kubernetes" {
+					// Registry renewals deliberately do not invalidate permissions.
+					// Re-read before the current observation bound so a healthy
+					// renewed identity can extend delivery without an expiry gap.
+					// A short remaining interval waits for expiry, never busy-loops.
+					remaining := publication.ValidUntil.Sub(source.ObservedAt)
+					if remaining >= 2*time.Second {
+						next = source.ObservedAt.Add(remaining / 2)
+					} else {
+						next = publication.ValidUntil
+					}
 				}
 				if value.NextCaptureAt == nil || next.Before(*value.NextCaptureAt) {
 					value.NextCaptureAt = &next

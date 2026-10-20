@@ -12,21 +12,24 @@ import (
 // derived through effective roles only. LegacyDirectGrants makes the existing
 // user/team grant compatibility gap explicit; it must be resolved before cutover.
 type ModelAccessSource struct {
-	DeploymentID       string                  `json:"deploymentId"`
-	SubjectID          string                  `json:"subjectId"`
-	ObservedAt         time.Time               `json:"observedAt"`
-	Exists             bool                    `json:"exists"`
-	Kind               string                  `json:"kind"`
-	Disabled           bool                    `json:"disabled"`
-	ProfileMissing     bool                    `json:"profileMissing"`
-	SubjectExpiresAt   *time.Time              `json:"subjectExpiresAt"`
-	RoleIDs            []string                `json:"roleIds"`
-	TeamIDs            []string                `json:"teamIds"`
-	Models             []ModelAccessModel      `json:"models"`
-	Sessions           []ModelAccessSession    `json:"sessions"`
-	Workloads          []ObservedModelWorkload `json:"workloads"`
-	Licenses           []ModelAccessLicense    `json:"licenses"`
-	LegacyDirectGrants bool                    `json:"legacyDirectGrants"`
+	DeploymentID     string                  `json:"deploymentId"`
+	SubjectID        string                  `json:"subjectId"`
+	ObservedAt       time.Time               `json:"observedAt"`
+	Exists           bool                    `json:"exists"`
+	Kind             string                  `json:"kind"`
+	Disabled         bool                    `json:"disabled"`
+	ProfileMissing   bool                    `json:"profileMissing"`
+	SubjectExpiresAt *time.Time              `json:"subjectExpiresAt"`
+	RoleIDs          []string                `json:"roleIds"`
+	TeamIDs          []string                `json:"teamIds"`
+	Models           []ModelAccessModel      `json:"models"`
+	Sessions         []ModelAccessSession    `json:"sessions"`
+	Workloads        []ObservedModelWorkload `json:"workloads"`
+	// Expired but nonretired identities are recoverable pauses, not terminal
+	// tombstones. Keep them separate from the live positive-evidence surface.
+	UnverifiedWorkloads []ObservedModelWorkload `json:"unverifiedWorkloads"`
+	Licenses            []ModelAccessLicense    `json:"licenses"`
+	LegacyDirectGrants  bool                    `json:"legacyDirectGrants"`
 }
 
 // ExpiresAt is the last applicable role grant's deadline, or nil if any role

@@ -46,24 +46,47 @@ fragment。HTTP 允许项用于隔离测试，不是生产传输安全方案。�
 
 迁移 055 新增内部、无凭据的绑定登记：明确关联 AEP agent ID、员工 namespace/name/UID、
 专属 ServiceAccount name/UID 与网关 audience。它不是公开注册 API，也不授予模型权限。
-后续可信生命周期写入者须读取当前员工及其控制器拥有的 SA，核对双方 UID 和明确的 agent
+可信生命周期写入者须读取当前员工及其控制器拥有的 SA，核对双方 UID 和明确的 agent
 映射后调用 repository；调用方 header 或人类 owner 均不构成身份依据。
 
 登记须携带预期的当前 binding key。替换 SA 与退役旧绑定在同一事务完成，旧观察不能覆盖
 新身份。历史 SA 身份不能转移或复活；账号删除会退役存活观察并保留历史。每个 agent 最多一个当前绑定。
 该员工的多个副本使用其专属 SA，并非每个对话单独登记身份。可信观察的新鲜度限于
 2 秒至 1 小时，使用 DB 时钟；这是准入范围，不是生产传播时限建议。过期或退役观察不会
-进入实时业务源。
+进入业务源的实时 `workloads`。过期但仍为当前身份的记录单独放在
+`unverifiedWorkloads` 中，用于临时拒绝；已退役身份只保留在不可变历史中。
 
 绑定变更、退役、新鲜度缩短和过期后恢复会在同一事务触发既有的定向源信号；连续延长观察
 期限不会使授权失效。模型与成员关系仍来自既有有效角色，观察期限参与自然到期计算。
 
-本阶段不启动 Kubernetes watcher，不签发或读取令牌，不发布 workload grant，不配置
-TokenReview，也不让运行时消费令牌文件。会话专用 producer 遇到存活的 workload 登记会拒绝
-并保留未确认信号；原生 Operator 仍拒绝 workload grant。不能据此启用员工模型访问。
-可信 writer、两类绑定的共同发布和数据面接入仍由
+可选可信 watcher 由 [#365](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/365)
+单独交付。身份登记不签发或读取令牌，不配置 TokenReview，也不让运行时消费令牌文件。
+原生工作负载验证仍须单独启用，默认 entitlement 要求仍拒绝不具备许可证实现的工作负载
+渲染。不能仅凭登记表启用员工模型访问。
+
+### 会话/工作负载原子发布
+
+配置既有 `AEP_GATEWAY_ACCESS_RELAY_ENABLED` opt-in 后，原 access worker 改用
+`CaptureModelAccessBindings`：在既有配置锁和同一 MVCC 业务快照下，推导当前及历史
+会话、可信工作负载的全部流，在同一事务写入不可变快照/outbox 并精确确认来源版本。
+任一绑定或确认失败均整体回滚，事务内没有网络操作，不增加 writer 或公开 API。
+旧的窄接口 `CaptureModelAccessSessions` 继续拒绝不完整的工作负载覆盖。
+
+员工身份仍为已核实的 agent/CR/SA UID 组合；模型、角色、团队和许可证引用复用人类会话
+的角色派生业务源，不把 owner 或对话身份当成员工。未知/畸形绑定、历史直接授权和已退役
+身份重放仍失败关闭。移除/替换 SA 或删除员工时，在同一捕获中为旧流发布不可复活的
+终止记录，并包含当前替换身份（如有）。
+
+观察到期但登记仍为当前身份时，发布 disabled、**非 retired** 状态，新的可信证据仍可
+恢复相同身份，未核实时不会放行模型。允许期限同时受观察、账号、模型、许可证与显式
+发布新鲜度约束，整秒向下截断。持久定时任务在到期前重新捕获健康观察续期，不把每次
+续期当作权限变更，语义 hash 保持稳定；最后不足两秒时等待到期，避免忙循环。无关主体
+不会重发。这不证明运行时缓存必然存续，也不证明故障情况下服务副本会及时采用。
+
+原生工作负载许可证边界、运行时配置交付及完整员工模型/配额/撤权验收仍由
 [#338](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/338) 与
 [governance #131](https://github.com/rongxinzy/aep-deerflow-governance/issues/131) 分阶段跟踪。
+`adoptionGate=false` 保持，默认部署和推理入口不变。
 
 既有管理侧 M2M 令牌接口签发指定用户的模型 JWT，不证明员工的 Kubernetes 身份。
 本登记不改变该接口，也不把调用方提供的对话 ID 当作可信的工作负载绑定。
