@@ -5,6 +5,14 @@ race/vet/build, reference-Agent tests and the coverage ratchet remain required.
 CodeQL and the security baseline keep their existing triggers and checks.
 Only the expensive Compose, Kubernetes and backup E2E jobs use scoped selection.
 
+The existing Go job also provisions an isolated PostgreSQL 17.6 service on the
+runner's loopback interface and explicitly sets `AEP_REFERENCE_TEST_DATABASE_URL`
+for `go test ./... -race`. Repository integration tests create/drop only randomly
+named databases there. This enables real trigger, transaction and outbox
+regressions rather than silently skipping them when the environment is absent.
+The disposable password varies by run/attempt; no production database or customer
+credential is used. Job dependencies, permissions and E2E selection are unchanged.
+
 ## Selection policy
 
 `.github/devops-ci.json` records the scenario inventory and dependency mapping.

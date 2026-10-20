@@ -222,3 +222,20 @@ test('workflow graph keeps mandatory checks, consumes the plan and always valida
   assert.equal(status.env.AEP_CI_NEEDS, '${{ toJSON(needs) }}');
   assert.equal(status.env.GITHUB_EVENT_NAME, '${{ github.event_name }}');
 });
+
+test('Go job explicitly enables isolated PostgreSQL repository regressions', () => {
+  const workflow = require('js-yaml').load(readFileSync(path.join(__dirname, 'workflows/m0.yml'), 'utf8'));
+  const go = workflow.jobs['control-service'];
+  const postgres = go.services.postgres;
+  assert.equal(postgres.image, 'postgres:17.6-alpine');
+  assert.deepEqual(postgres.ports, ['127.0.0.1:5432:5432']);
+  assert.equal(postgres.env.POSTGRES_USER, 'aep_ci');
+  assert.equal(postgres.env.POSTGRES_PASSWORD, 'ci-${{ github.run_id }}-${{ github.run_attempt }}');
+  assert.match(postgres.options, /pg_isready -U aep_ci -d postgres/);
+  const tests = go.steps.find(step => step.name === 'Go test (race), vet, build');
+  assert.equal(tests.env.AEP_REFERENCE_TEST_DATABASE_URL,
+    'postgres://aep_ci:' + postgres.env.POSTGRES_PASSWORD + '@127.0.0.1:5432/postgres?sslmode=disable');
+  assert.match(tests.run, /go test \.\/\.\.\. -race/);
+  assert.equal(tests['continue-on-error'], undefined);
+  assert.equal(go['continue-on-error'], undefined);
+});
