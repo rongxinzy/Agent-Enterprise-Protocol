@@ -168,6 +168,7 @@ func (s *Server) mountAdmin(router chi.Router) {
 			admin.Use(s.requireAdmin)
 			admin.Get("/aep/v1/admin/permissions", s.listPermissions)
 			admin.Get("/aep/v1/admin/model-gateway/capabilities", s.gatewayCapabilities)
+			admin.Post("/aep/v1/admin/model-gateway/tokens", s.issueModelGatewayToken)
 			admin.Post("/aep/v1/admin/model-gateway/models/{modelId}/test-access", s.gatewayTestAccess)
 			admin.Get("/aep/v1/admin/model-gateway/limits", s.gatewayLimits)
 			admin.Get("/aep/v1/admin/model-gateway/quotas/{userId}", s.gatewayQuota)
@@ -455,6 +456,11 @@ func requiredAdminPermission(method, path string) []string {
 	switch {
 	case strings.HasPrefix(path, "/aep/v1/admin/model-gateway"):
 		if strings.HasSuffix(path, "/test-access") {
+			return []string{"models.read"}
+		}
+		if strings.HasSuffix(path, "/model-gateway/tokens") {
+			// M2M issuance on behalf of a resolved user: scopes are derived
+			// from the target's assignments, so models.read suffices.
 			return []string{"models.read"}
 		}
 		if strings.Contains(path, "/requests") {

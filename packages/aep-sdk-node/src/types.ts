@@ -17,6 +17,8 @@ export type GatewayLimitPublication = components['schemas']['GatewayLimitPublica
 export type GatewayLimitStatus = components['schemas']['GatewayLimitStatus'];
 export type GatewayQuota = components['schemas']['GatewayQuota'];
 export type GatewayTestAccess = components['schemas']['GatewayTestAccess'];
+export type GatewayModelTokenRequest = components['schemas']['GatewayModelTokenRequest'];
+export type GatewayModelToken = components['schemas']['GatewayModelToken'];
 export type GatewayMetricQuery = {
   start: string; end: string; step?: number;
   expectedDefinition?: GatewayMetricDefinition['id'];

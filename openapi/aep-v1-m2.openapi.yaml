@@ -279,6 +279,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments'
   /aep/v1/admin/model-assignments/{assignmentId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments~1{assignmentId}'
+  /aep/v1/admin/model-gateway/tokens:
+    $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1tokens'
   /aep/v1/admin/model-gateway/capabilities:
     $ref: './aep-v1-gateway.openapi.yaml#/paths/~1aep~1v1~1admin~1model-gateway~1capabilities'
   /aep/v1/admin/model-gateway/metrics:

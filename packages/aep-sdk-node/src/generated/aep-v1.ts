@@ -1335,6 +1335,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aep/v1/admin/model-gateway/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * issue a data-plane model token on behalf of a user
+         * @description Machine-to-machine issuance for governed runtimes: a service account with models.read obtains a short-lived data-plane token whose model scopes are derived from the target user's assignments (never wider). The sessionId is caller-supplied conversation context used for gateway log correlation; when omitted an m2m-prefixed synthetic session id is minted. Every issuance is audited.
+         */
+        post: operations["issueModelGatewayToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aep/v1/admin/model-gateway/capabilities": {
         parameters: {
             query?: never;
@@ -3412,6 +3432,22 @@ export interface components {
              * @description Temporary grant that stops authorizing at this time.
              */
             expiresAt?: string | null;
+        };
+        GatewayModelTokenRequest: {
+            userId: string;
+            /** @description Caller-supplied conversation correlation id for gateway logs; an m2m-prefixed synthetic id is minted when omitted. */
+            sessionId?: string;
+        };
+        GatewayModelToken: {
+            userId: string;
+            modelAccessToken: string;
+            /**
+             * Format: int64
+             * @description Seconds until expiry.
+             */
+            expiresIn: number;
+            sessionId: string;
+            modelScopes: string[];
         };
         /** @enum {string} */
         GatewayMetricDefinitionId: "ai_input_tokens" | "ai_output_tokens" | "ai_usage_completed_calls" | "ai_detected_failures" | "ai_usage_mean_first_token_duration" | "ai_usage_mean_service_duration" | "gateway_log_input_tokens" | "gateway_log_output_tokens" | "gateway_access_requests" | "gateway_http_errors" | "gateway_log_mean_first_token_duration" | "gateway_log_mean_service_duration" | "envoy_downstream_qps" | "envoy_upstream_qps" | "envoy_downstream_non_5xx_ratio" | "envoy_upstream_non_5xx_ratio" | "authorizer_http_requests";
@@ -6402,6 +6438,36 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    issueModelGatewayToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayModelTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Issued model token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayModelToken"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getGatewayCapabilities: {
