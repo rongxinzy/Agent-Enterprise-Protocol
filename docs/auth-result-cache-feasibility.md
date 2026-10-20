@@ -115,7 +115,6 @@ The full run on 2026-10-19 with both optional extensions completed nineteen obse
 
 The first JWT run failed because its access evaluator omitted native `allValues`: the following bounds evaluator could not read the complete model range and correctly denied with 403. The fixture was corrected and the entire probe rerun; no rejection assertion was removed. This was a test configuration error, not a product defect. Actual AEP JWT compatibility is now component evidence through discovery, but direct JWKS incompatibility and the absence of product discovery remain integration work. No AEP public API, business publisher or default path was changed.
 
-<<<<<<< HEAD
 ## Freshness renewal without cache reconstruction
 
 The opt-in [renewal extension](../tests/e2e/auth-cache/renewal.mjs) separates a stable per-binding AuthConfig from a changing external freshness policy. Authorino's pinned [OPA evaluator](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/authorization/opa.go) supports `externalPolicy.url` with a native TTL refresher. It recompiles an updated external module in place, without reconciling the AuthConfig or reconstructing its identity and access evaluator caches. The external bounds evaluator must **not** itself be result-cached, or a cached allow would bypass its new module and absolute deadline.
@@ -125,13 +124,12 @@ The fixture caches the full allowed model range plus a semantic policy hash. The
 The assertions require successful warming before the original deadline, renewal adoption on both replicas, continued access past that original deadline with unchanged identity/decision witnesses and no additional Alice introspections, plus an unchanged AuthConfig resourceVersion/spec. Requests to another allowed model reuse the full range; out-of-range and cross-subject requests deny. HTTP 503 and invalid Rego each must leave the last good absolute deadline effective: a warm allow expires, then a fresh same-hash module recovers without rebuilding either cached result. Native source-refresh reads are counted separately from introspection calls.
 
 This is a component mechanism, not the product publication system. The fixture's mutable Node endpoint is disposable test infrastructure and must not be deployed as a policy registry. Product serving, protected delivery, monotonic source/rollback handling, all-process publication observations and DB→CR→Operator integration remain open. Native external refresh **polls** per configured evaluator per process; the one-second experiment interval is not a production sizing recommendation or a claim of watch-driven propagation. A source outage retains the last compiled module, so fail-closed behavior depends on the module's absolute validity guard. No latency, capacity or adoption claim follows from this test.
-=======
+
 ## Actual public-handler interoperability
 
 The optional product-discovery mode calls the actual enterprise API HTTP handler in the Go fixture, captures successful discovery and JWKS JSON, and relays that public JSON unchanged through the disposable Node service. Authorino retrieves the advertised discovery and JWKS paths itself. This checks native verifier compatibility with product-handler output; it does not run a live AEP Deployment, database, public reverse proxy or business publication pipeline. The preceding synthetic-discovery observations remain historical component evidence. The formal contract and service are tracked in [#341](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/341) and [#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342).
 
 On 2026-10-19, the checkout combining the service implementation and this probe completed twenty observations, including the three intentionally reproduced limitations. Both replicas consumed the captured metadata and passed the real-JWT reuse, fourteen negative-token cases, model-boundary, warm-expiry, session-withdrawal and principal-disablement checks. The original cache, restart and shared-entry checks remained intact. The report recorded `completed: true`, `adoptionGate: false`, `cleaned: true`. A preceding attempt stopped before functional checks because Docker Hub returned EOF when pulling Node; its isolated cluster was also cleaned. Retrying after registry recovery passed without relaxing assertions or changing pinned component images.
->>>>>>> origin/main
 
 ## Before integration
 
