@@ -82,6 +82,12 @@ export class MockAepServer {
     if (path === '/.well-known/jwks.json') {
       return json(response, 200, {keys: [{kty: 'OKP', kid: 'm0', use: 'sig', alg: 'EdDSA', crv: 'Ed25519', x: 'AA'}]});
     }
+    if (path === '/.well-known/openid-configuration') {
+      return json(response, 200, {
+        issuer: this.baseUrl, jwks_uri: this.baseUrl + '/.well-known/jwks.json',
+        id_token_signing_alg_values_supported: ['EdDSA'],
+      });
+    }
     if (path === '/aep/v1/auth/methods') {
       return json(response, 200, {
         deployment: {id: 'ent-1', name: 'Demo'},

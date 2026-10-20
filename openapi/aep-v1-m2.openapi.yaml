@@ -423,10 +423,14 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1assignments'
   /aep/v1/admin/compute/assignments/{agentId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1compute~1assignments~1{agentId}'
+  /.well-known/openid-configuration:
+    $ref: './aep-v1-jwt-discovery.openapi.yaml#/paths/~1.well-known~1openid-configuration'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
   schemas:
+    JwtVerifierConfiguration:
+      $ref: './aep-v1-jwt-discovery.openapi.yaml#/components/schemas/JwtVerifierConfiguration'
     ServiceMetadata:
       type: object
       required: [service, supportedProtocolVersions, capabilities, jwksUri]

@@ -158,6 +158,8 @@ paths:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments'
   /aep/v1/admin/model-assignments/{assignmentId}:
     $ref: './aep-v1.openapi.yaml#/paths/~1admin~1model-assignments~1{assignmentId}'
+  /.well-known/openid-configuration:
+    $ref: './aep-v1-jwt-discovery.openapi.yaml#/paths/~1.well-known~1openid-configuration'
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}

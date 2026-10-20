@@ -36,6 +36,7 @@ Service metadata may be queried without a protocol-version header so a client ca
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/.well-known/jwks.json` | Public keys for AEP and model-token verification |
+| GET | `/.well-known/openid-configuration` | Verification-only JWT issuer, keys and algorithm discovery |
 | GET | `/metadata` | Supported AEP versions and features |
 | GET | `/auth/methods` | Discover login methods for a deployment |
 | POST | `/auth/password/login` | Sign in with an administrator-provisioned ZhiYuan account |
@@ -70,6 +71,40 @@ Served by the agent control protocol service in split deployments (`openapi/aep-
 | GET | `/user/models` | List visible models |
 
 ## 3. Metadata and Authentication
+
+### `GET /.well-known/openid-configuration`
+
+This public, protocol-header-free endpoint is shared by the all-in-one,
+enterprise API and agent-control services. Its [contract](../openapi/aep-v1-jwt-discovery.openapi.yaml)
+provides the minimal discovery fields consumed by JWT verifiers such as
+Authorino; it is not a complete OIDC Provider configuration or a login service.
+It does not publish authorization/token/UserInfo endpoints, issue ID tokens,
+or enable `federated_auth`. The standard discovery property names below are an
+exception to AEP's camelCase convention.
+
+```json
+{
+  "issuer": "https://control.example.com",
+  "jwks_uri": "https://control.example.com/.well-known/jwks.json",
+  "id_token_signing_alg_values_supported": ["EdDSA"]
+}
+```
+
+`issuer` equals configured `AEP_ISSUER` exactly; Host, Forwarded and
+X-Forwarded-* cannot select it or the JWKS address. `jwks_uri` appends the
+existing well-known JWKS path after trimming issuer trailing slashes. A proxy
+must route the issuer's discovery/JWKS paths, including any configured prefix,
+to this common surface. An issuer with query, fragment or userinfo yields a
+generic 503 problem instead of publishing a misleading or sensitive URL.
+
+The response contains only public metadata. It neither changes token lifetime
+nor authenticates a caller. Verifiers must retain issuer/audience/token_use,
+required expiry/not-before, deployment/principal/session/model checks and current
+authorization/license state. In particular, Authorino v0.26.4's discovery
+algorithm selection does not itself enforce all these claims. SDK consumers can
+use `AepClient.getJwtVerifierConfiguration()` without an operator/user session;
+this is independent of an `agentControlBaseUrl` override. This contract does not
+adopt Authorino or switch the model request path.
 
 ### `GET /metadata`
 

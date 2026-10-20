@@ -461,6 +461,26 @@ paths:
           $ref: '#/components/responses/Problem-2'
         '413':
           $ref: '#/components/responses/Problem-2'
+  /.well-known/openid-configuration:
+    get:
+      tags:
+        - Service
+      operationId: getJwtVerifierConfiguration
+      security: []
+      description: 'A minimal discovery document for JWT verifiers such as Authorino. Requires no bearer or protocol-version header. This is not a complete OpenID Provider configuration and does not advertise OIDC login, authorization, token exchange, UserInfo, or the federated_auth capability. The issuer is the exact configured AEP_ISSUER, never inferred from Host or forwarded headers. The JWKS URL appends /.well-known/jwks.json to that issuer after removing trailing slashes; issuer path prefixes must be routed by the deployment proxy. Query, fragment and userinfo issuer components cannot be published and yield a generic unavailable response. Discovery identifies keys and algorithms, not current authorization: verifiers must still enforce issuer, audience, token_use, time, subject, session, model scope and current account/license/policy state.'
+      responses:
+        '200':
+          description: Public JWT verification metadata; contains no credentials or private key material
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JwtVerifierConfiguration'
+        '503':
+          description: Verification discovery cannot be published for the configured issuer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem-2'
 components:
   securitySchemes:
     bearerAuth:
@@ -1576,6 +1596,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RejectedEvent'
+    JwtVerifierConfiguration:
+      type: object
+      required:
+        - issuer
+        - jwks_uri
+        - id_token_signing_alg_values_supported
+      additionalProperties: false
+      properties:
+        issuer:
+          type: string
+          format: uri
+          description: Exact issuer claim of AEP-signed JWTs, shared by all API surfaces.
+        jwks_uri:
+          type: string
+          format: uri
+          description: Absolute URL of the existing public verification keys.
+        id_token_signing_alg_values_supported:
+          description: Discovery algorithm hint for verifiers; does not add OIDC ID-token issuance.
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: string
+            const: EdDSA
   responses:
     Problem:
       description: AEP Problem Details
