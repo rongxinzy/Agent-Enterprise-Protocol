@@ -73,6 +73,8 @@ type Config struct {
 	GatewayRelayEnabled         bool
 	GatewayOperatorMode         bool
 	GatewayRelayNamespace       string
+	GatewayAccessRelayEnabled   bool
+	GatewayAccessFreshness      time.Duration
 	MaxResidentAgents           int
 	CredentialMasterKeyBase64   string
 	CredentialMasterKeyFile     string
@@ -259,6 +261,12 @@ func Load() (Config, error) {
 	if cfg.GatewayOperatorMode, err = boolean("AEP_GATEWAY_OPERATOR_MODE", false); err != nil {
 		return Config{}, err
 	}
+	if cfg.GatewayAccessRelayEnabled, err = boolean("AEP_GATEWAY_ACCESS_RELAY_ENABLED", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.GatewayAccessFreshness, err = duration("AEP_GATEWAY_ACCESS_FRESHNESS", 0, true); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -266,6 +274,10 @@ func Load() (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if cfg.GatewayAccessRelayEnabled && (!cfg.GatewayRelayEnabled || cfg.GatewayAccessFreshness < 2*time.Second ||
+		cfg.GatewayAccessFreshness > time.Hour || cfg.GatewayAccessFreshness%time.Second != 0) {
+		return errors.New("access relay requires the publication relay and explicit whole-second freshness from 2s to 1h")
+	}
 	if cfg.UsesGatewayOperator() && (!cfg.GatewayPublicationsEnabled || cfg.GatewayRelayNamespace != "aep-system") {
 		return errors.New("publication relay requires publications enabled and the operator namespace aep-system")
 	}

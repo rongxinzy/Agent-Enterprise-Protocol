@@ -310,7 +310,17 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 		if cfg.GatewayRelayEnabled {
-			application.PublicationRelay = publicationrelay.New(application.Store.Deployment(cfg.DeploymentID), &publicationrelay.Projector{Client: kube, Namespace: cfg.GatewayRelayNamespace})
+			store := application.Store.Deployment(cfg.DeploymentID)
+			projector := &publicationrelay.Projector{Client: kube, Namespace: cfg.GatewayRelayNamespace}
+			application.PublicationRelay = publicationrelay.New(store, projector)
+			if cfg.GatewayAccessRelayEnabled {
+				access, err := publicationrelay.NewAccessRelay(store, projector, cfg.GatewayAccessFreshness)
+				if err != nil {
+					application.Close()
+					return nil, err
+				}
+				application.PublicationRelay.Access = access
+			}
 		}
 		application.PublicationObserver = &publicationrelay.Observer{Reader: kube, Namespace: cfg.GatewayRelayNamespace}
 	}
@@ -318,6 +328,9 @@ func Open(ctx context.Context, cfg config.Config) (*App, error) {
 }
 
 func (a *App) Close() {
+	if a.PublicationRelay != nil && a.PublicationRelay.Access != nil {
+		a.PublicationRelay.Access.Close()
+	}
 	if a.SQLDB != nil {
 		_ = a.SQLDB.Close()
 	}
