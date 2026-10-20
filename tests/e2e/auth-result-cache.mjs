@@ -11,6 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {namespace, sourceRevision, crdHash, image, resources, policy} from './auth-cache/resources.mjs';
 import {sharedGateway, gatewayImage} from './auth-cache/shared-gateway.mjs';
 import {aepJwt} from './auth-cache/aep-jwt.mjs';
+import {renewal} from './auth-cache/renewal.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const kind = process.env.KIND ?? 'kind';
@@ -236,6 +237,9 @@ try {
   }
   if (process.env.AEP_AUTH_CACHE_JWT === '1') {
     await aepJwt({command, publish, request, ports, statsPort, record, until});
+  }
+  if (process.env.AEP_AUTH_CACHE_RENEWAL === '1') {
+    await renewal({publish, request, ports, statsPort, stats, kubectl, record, until});
   }
   report.completed = true;
 } catch (error) {
