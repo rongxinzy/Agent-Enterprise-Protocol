@@ -1,0 +1,52 @@
+# Not included in default overlays. Configure deployment/namespace/audience and
+# provision a separate verified-TLS database DSN before explicit installation.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: aep-workload-observer, namespace: aep-system}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: aep-workload-observer}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: aep-workload-observer}
+    spec:
+      serviceAccountName: aep-workload-observer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: observer
+          image: ko://github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/cmd/workload-observer
+          env:
+            - {name: AEP_ENVIRONMENT, value: production}
+            - {name: AEP_WORKLOAD_DEPLOYMENT_ID, value: deployment-enterprise-001}
+            - {name: AEP_WORKLOAD_NAMESPACE, value: digital-employees}
+            - {name: AEP_WORKLOAD_AUDIENCE, value: "urn:zhiyuan:model-gateway"}
+            - {name: AEP_WORKLOAD_FRESHNESS, value: 1m}
+            - {name: AEP_WORKLOAD_DATABASE_URL_FILE, value: /var/run/workload-observer/database-url}
+          ports: [{name: health, containerPort: 8096}]
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: database, mountPath: /var/run/workload-observer, readOnly: true}
+      volumes:
+        - name: database
+          secret:
+            secretName: aep-workload-observer-config
+            defaultMode: 0440
+            items: [{key: database-url, path: database-url}]

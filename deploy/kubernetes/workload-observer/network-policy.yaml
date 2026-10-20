@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: aep-workload-observer, namespace: aep-system}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: aep-workload-observer}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{namespaceSelector: {}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    # Operator overlays must narrow destinations to their API server/DB using
+    # the service/CNI's actual routing model; this is not an egress allowlist.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 443}, {protocol: TCP, port: 5432}]

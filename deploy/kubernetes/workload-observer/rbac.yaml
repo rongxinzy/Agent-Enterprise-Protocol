@@ -1,0 +1,44 @@
+# Optional, separately installed. Prerequisites: aep-system and digital-employees.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: aep-workload-observer, namespace: aep-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: aep-workload-observer, namespace: digital-employees}
+rules:
+  - apiGroups: [digitalemployee.zhiyuan.io]
+    resources: [digitalemployees]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: aep-workload-observer, namespace: digital-employees}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: aep-workload-observer}
+subjects:
+  - {kind: ServiceAccount, name: aep-workload-observer, namespace: aep-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: aep-workload-observer-leader, namespace: aep-system}
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [aep-workload-observer]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: aep-workload-observer-leader, namespace: aep-system}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: aep-workload-observer-leader}
+subjects:
+  - {kind: ServiceAccount, name: aep-workload-observer, namespace: aep-system}
