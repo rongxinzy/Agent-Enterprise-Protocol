@@ -1744,10 +1744,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/.well-known/openid-configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description A minimal discovery document for JWT verifiers such as Authorino. Requires no bearer or protocol-version header. This is not a complete OpenID Provider configuration and does not advertise OIDC login, authorization, token exchange, UserInfo, or the federated_auth capability. The issuer is the exact configured AEP_ISSUER, never inferred from Host or forwarded headers. The JWKS URL appends /.well-known/jwks.json to that issuer after removing trailing slashes; issuer path prefixes must be routed by the deployment proxy. Query, fragment and userinfo issuer components cannot be published and yield a generic unavailable response. Discovery identifies keys and algorithms, not current authorization: verifiers must still enforce issuer, audience, token_use, time, subject, session, model scope and current account/license/policy state. */
+        get: operations["getJwtVerifierConfiguration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        JwtVerifierConfiguration: {
+            /**
+             * Format: uri
+             * @description Exact issuer claim of AEP-signed JWTs, shared by all API surfaces.
+             */
+            issuer: string;
+            /**
+             * Format: uri
+             * @description Absolute URL of the existing public verification keys.
+             */
+            jwks_uri: string;
+            /** @description Discovery algorithm hint for verifiers; does not add OIDC ID-token issuance. */
+            id_token_signing_alg_values_supported: "EdDSA"[];
+        };
         ServiceMetadata: {
             service: string;
             supportedProtocolVersions: string[];
@@ -7174,6 +7205,35 @@ export interface operations {
             403: components["responses"]["Problem-2"];
             404: components["responses"]["Problem-2"];
             422: components["responses"]["Problem-2"];
+        };
+    };
+    getJwtVerifierConfiguration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Public JWT verification metadata; contains no credentials or private key material */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JwtVerifierConfiguration"];
+                };
+            };
+            /** @description Verification discovery cannot be published for the configured issuer */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem-2"];
+                };
+            };
         };
     };
 }

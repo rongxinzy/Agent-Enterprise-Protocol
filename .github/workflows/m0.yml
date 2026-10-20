@@ -71,6 +71,19 @@ jobs:
   control-service:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: aep_ci
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aep_ci -d postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -96,6 +109,8 @@ jobs:
       - name: Install envtest binaries for the operator suite
         run: bash .github/ci-envtest-setup.sh
       - name: Go test (race), vet, build
+        env:
+          AEP_REFERENCE_TEST_DATABASE_URL: postgres://aep_ci:ci-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           go test ./... -race
           go vet ./...

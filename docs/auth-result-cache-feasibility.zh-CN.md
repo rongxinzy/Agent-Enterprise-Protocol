@@ -26,6 +26,8 @@ node tests/e2e/auth-result-cache.mjs
 
 设置 `AEP_AUTH_CACHE_RENEWAL=1` 可追加原生外部策略刷新验证，覆盖续期保留热结果、语义哈希隔离，以及 HTTP/策略编译失败后的到期拒绝与恢复。
 
+配合 JWT 扩展设置 `AEP_AUTH_CACHE_PRODUCT_DISCOVERY=1`，可把实际 AEP 公共 HTTP handler 输出的 discovery 与 JWKS 原样提供给组件，替代合成元数据。工作区须包含 [#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342) 的服务实现，缺少端点会拒绝继续；集群仅接收公开元数据。
+
 程序使用独立 kubeconfig，新建随机 `aep-auth-cache-*` 集群，只在该集群安装上游 CRD、两个 Authorino 副本及模拟 introspection 服务。副本启用原生 `--enable-leader-election`，以命名空间内 Lease 选出状态写入者，两个副本仍独立监听配置并服务。Node 辅助镜像使用当前平台归档导入，要求 Docker 支持 `docker image save --platform`；Authorino 由集群按固定 digest 拉取，避免 Docker/containerd 的 OCI 索引导入悬空引用问题。正常成功或失败均删除自建集群与临时文件；进程被强制结束时，按 Kind/Docker 名称清理本次自建集群，不删除其他集群。不调用云端模型、不读取 AEP 密钥、不更新既有预览集群。
 
 ## 检查与判读
@@ -108,6 +110,12 @@ JWT `jti` 不变只证明绑定，不证明跳过验签；原生授权时间戳�
 断言要求原有效期内成功预热，两副本采用续期，超过原期限后身份和授权见证值仍不变、Alice introspection 不增加、AuthConfig resourceVersion/spec 不变。切换到另一个已允许模型仍复用完整范围，越界模型与跨主体请求拒绝。HTTP 503 与非法 Rego 各自验证：上游保留的最后良好模块仍按原绝对期限拒绝热许可，恢复新鲜的相同哈希后复用两类热结果。策略源拉取次数与 introspection 次数分别记录。
 
 这是组件机制实验，尚未接入业务发布系统。Node 可变策略端点仅为临时夹具，不能作为产品策略注册中心部署。产品静态内容交付、安全边界、单调版本/回放保护、全进程发布确认及 DB→CR→Operator 仍待实现。原生外部刷新按每个进程的每个 evaluator 定期拉取，一秒仅为实验参数，不代表生产建议或 watch 驱动。源故障会保留旧编译模块，必须靠模块中的绝对期限保证到期拒绝；本实验不证明吞吐、容量或采用门槛已完成。
+
+## 实际公共 handler 联验
+
+产品 discovery 模式在 Go 夹具中调用实际 enterprise API HTTP handler，捕获成功的 discovery/JWKS JSON，再由临时 Node 服务原样转发公开内容，Authorino 自行访问文档声明的发现与公钥路径。它验证产品 handler 输出与原生验证器的兼容性，没有启动真实 AEP Deployment、数据库、外部反向代理或业务发布链路。前文合成 discovery 的结果保留为历史组件证据，正式契约和服务分别见 [#341](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/341)、[#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342)。
+
+2026-10-19 将服务实现与本探针组合后完整运行二十项观察，包含三项刻意复现的限制。两个副本均消费实际 handler 元数据，真实 JWT 复用、十四类错误令牌、模型越界、预热后到期、会话撤销及主体禁用检查完成；原缓存、重启和同入口检查保留。报告 `completed: true`、`adoptionGate: false`、`cleaned: true`。此前一次因 Docker Hub 拉取 Node 时返回 EOF，在功能检查前停止，临时集群也已清理；网络恢复后重试成功，未放宽断言或改变固定组件镜像。
 
 ## 尚未完成
 

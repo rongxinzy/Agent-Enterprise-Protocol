@@ -7,14 +7,25 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/app"
 	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/auth"
+	"github.com/rongxinzy/Agent-Enterprise-Protocol/services/control-service/internal/httpapi"
 )
 
 func main() {
+	var options struct {
+		ProductDiscovery bool `json:"productDiscovery"`
+	}
+	if err := json.NewDecoder(os.Stdin).Decode(&options); err != nil && err != io.EOF {
+		panic("invalid disposable probe options")
+	}
 	seed := make([]byte, ed25519.SeedSize)
 	if _, err := rand.Read(seed); err != nil {
 		panic("cannot create disposable signing material")
@@ -67,7 +78,20 @@ func main() {
 		panic("cannot create disposable foreign signer")
 	}
 	tokens["signature"] = sign(*claims, foreign)
-	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"jwks": signer.JWKS(), "tokens": tokens}); err != nil {
+	result := map[string]any{"jwks": signer.JWKS(), "tokens": tokens}
+	if options.ProductDiscovery {
+		handler := httpapi.NewEnterpriseAPI(&app.App{Tokens: signer}).Handler()
+		for name, route := range map[string]string{"discovery": "/.well-known/openid-configuration", "jwks": "/.well-known/jwks.json"} {
+			var resultValue any
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, route, nil))
+			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &resultValue) != nil {
+				panic("required public verification endpoint unavailable")
+			}
+			result[name] = resultValue
+		}
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 		panic("cannot deliver private fixture")
 	}
 }

@@ -116,6 +116,8 @@ export interface ServiceMetadata {
 	modelGateway?: ModelGatewayMetadata;
 }
 
+export type JwtVerifierConfiguration = components['schemas']['JwtVerifierConfiguration'];
+
 export type CredentialMetadata = components['schemas']['CredentialMetadata'];
 export type CredentialList = components['schemas']['CredentialList'];
 export type ResolveCredentialRequest = components['schemas']['ResolveCredentialRequest'];

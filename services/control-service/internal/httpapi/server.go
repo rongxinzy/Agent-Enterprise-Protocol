@@ -94,10 +94,11 @@ func newServer(application *app.App, runtimeMiddleware []func(http.Handler) http
 }
 
 // mountCommon registers the discovery and health surface shared by every
-// API shape: JWKS (the only public verification surface), service metadata,
+// API shape: public verification keys and discovery metadata, service metadata,
 // and probes.
 func (s *Server) mountCommon(router chi.Router) {
 	router.Get("/.well-known/jwks.json", s.getJWKS)
+	router.Get("/.well-known/openid-configuration", s.jwtVerifierConfiguration)
 	router.Get("/livez", s.liveness)
 	router.Get("/readyz", s.readiness)
 	router.Get("/healthz", s.readiness)

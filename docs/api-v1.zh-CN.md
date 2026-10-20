@@ -35,6 +35,7 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/.well-known/jwks.json` | 获取用于校验 AEP 与模型 token 的公钥 |
+| GET | `/.well-known/openid-configuration` | 仅供 JWT 验证的 issuer、公钥地址及算法发现 |
 | GET | `/metadata` | 查询 AEP 版本和服务能力 |
 | GET | `/auth/methods` | 查询部署可用登录方式 |
 | POST | `/auth/password/login` | 使用管理员创建的知远平台账号登录 |
@@ -66,6 +67,33 @@ JSON 字段使用 `camelCase`，时间使用 RFC 3339 UTC，错误使用 RFC 945
 | GET | `/user/models` | 查询当前用户可见模型 |
 
 ## 3. 元数据与认证
+
+### `GET /.well-known/openid-configuration`
+
+该公共端点不要求 bearer 或协议版本头，由一体服务、企业 API 和 agent-control
+共同提供。[契约](../openapi/aep-v1-jwt-discovery.openapi.yaml)只提供 Authorino 等
+JWT 验证器消费的最小发现字段，不是完整的 OIDC Provider 配置或登录服务；不会公布
+authorization/token/UserInfo 端点、签发 ID token 或启用 `federated_auth`。
+下列标准发现字段名属于 AEP camelCase 规则的例外。
+
+```json
+{
+  "issuer": "https://control.example.com",
+  "jwks_uri": "https://control.example.com/.well-known/jwks.json",
+  "id_token_signing_alg_values_supported": ["EdDSA"]
+}
+```
+
+`issuer` 与 `AEP_ISSUER` 完全一致，不从 Host、Forwarded 或 X-Forwarded-* 推导。
+`jwks_uri` 在 issuer 去除尾部斜线后拼接现有公钥路径。反向代理须将该 issuer 下的
+discovery/JWKS 路径（包括配置的前缀）转发到公共服务面。issuer 含 query、fragment
+或 userinfo 时返回通用 503 problem，不公布可能误导或包含敏感信息的 URL。
+
+响应仅含公开元数据，不改变令牌有效期，也不完成身份认证。验证器仍须检查 issuer、
+audience、token_use、必须存在的到期/not-before、部署/主体/会话/模型及当前授权与
+许可证状态；Authorino v0.26.4 的 discovery 算法选择并不自动覆盖这些边界。
+SDK 可在未登录时调用 `AepClient.getJwtVerifierConfiguration()`；该发现保持走 API
+base，不受 `agentControlBaseUrl` 覆盖影响。本契约不代表选用 Authorino或切换模型链路。
 
 ### `GET /metadata`
 

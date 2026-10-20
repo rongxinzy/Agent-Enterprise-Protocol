@@ -6,6 +6,8 @@ const expirations = {};
 const policies = new Map();
 const policyReads = {};
 let jwks = {keys: []};
+let discovery = {issuer: 'http://introspection:8080/oidc', jwks_uri: 'http://introspection:8080/jwks',
+  id_token_signing_alg_values_supported: ['EdDSA']};
 const subjects = {
   'probe-alice-session': ['alice', 'session-a'],
   'probe-bob-session': ['bob', 'session-b'],
@@ -36,11 +38,14 @@ http.createServer(async (req, res) => {
     jwks = JSON.parse(body); // Public keys only; disposable private keys never enter the cluster.
     return res.end('{}');
   }
-  if (req.url === '/jwks') return res.end(JSON.stringify(jwks));
-  if (req.url === '/oidc/.well-known/openid-configuration') return res.end(JSON.stringify({
-    issuer: 'http://introspection:8080/oidc', jwks_uri: 'http://introspection:8080/jwks',
-    id_token_signing_alg_values_supported: ['EdDSA'],
-  }));
+  if (req.url === '/metadata' && req.method === 'POST') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    discovery = JSON.parse(body); // Captured public product-handler output, never tokens.
+    return res.end('{}');
+  }
+  if (req.url === '/jwks' || req.url === '/oidc/.well-known/jwks.json') return res.end(JSON.stringify(jwks));
+  if (req.url === '/oidc/.well-known/openid-configuration') return res.end(JSON.stringify(discovery));
   if (req.url === '/echo' && req.method === 'POST') {
     for await (const chunk of req) void chunk;
     return res.end(JSON.stringify({witness: req.headers['x-probe-witness']}));
