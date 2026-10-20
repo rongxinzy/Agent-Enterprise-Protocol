@@ -111,6 +111,8 @@ JWT `jti` 不变只证明绑定，不证明跳过验签；原生授权时间戳�
 
 这是组件机制实验，尚未接入业务发布系统。Node 可变策略端点仅为临时夹具，不能作为产品策略注册中心部署。产品静态内容交付、安全边界、单调版本/回放保护、全进程发布确认及 DB→CR→Operator 仍待实现。原生外部刷新按每个进程的每个 evaluator 定期拉取，一秒仅为实验参数，不代表生产建议或 watch 驱动。源故障会保留旧编译模块，必须靠模块中的绝对期限保证到期拒绝；本实验不证明吞吐、容量或采用门槛已完成。
 
+2026-10-20 同时启用网关、JWT、产品 discovery 与续期扩展，完整运行 **24 项观察**，含三项已记录的目标限制。两副本超过原有效期仍复用原身份和授权结果，Alice 语义哈希变化仅让 Alice 重新鉴权，Bob 保持热结果。HTTP 故障和非法 Rego 均不能延长最后良好期限，恢复相同哈希的新鲜模块后继续复用缓存。报告为 `completed: true`、`adoptionGate: false`、`cleaned: true`。此前一次启动在断言前超时并已清理；成功运行遇到镜像仓延迟/EOF，将已有的相同平台镜像导入本次独立集群以预载内容，固定引用与断言均保留，原三个本地集群未改动。
+
 ## 实际公共 handler 联验
 
 产品 discovery 模式在 Go 夹具中调用实际 enterprise API HTTP handler，捕获成功的 discovery/JWKS JSON，再由临时 Node 服务原样转发公开内容，Authorino 自行访问文档声明的发现与公钥路径。它验证产品 handler 输出与原生验证器的兼容性，没有启动真实 AEP Deployment、数据库、外部反向代理或业务发布链路。前文合成 discovery 的结果保留为历史组件证据，正式契约和服务分别见 [#341](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/341)、[#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342)。

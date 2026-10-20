@@ -107,6 +107,7 @@ try {
   await apply(resources(mock));
   console.log('Waiting for two independent component replicas');
   for (const name of ['introspection', 'authorino-a', 'authorino-b']) {
+    console.log('Waiting for deployment/' + name);
     await kubectl(['-n', namespace, 'rollout', 'status', 'deployment/' + name, '--timeout=120s']);
   }
   const ports = await Promise.all(['authorino-a', 'authorino-b'].map(name => forward('deployment/' + name, 5001)));
@@ -245,6 +246,12 @@ try {
 } catch (error) {
   report.completed = false;
   report.error = error.message;
+  if (owned) {
+    // Only inspect the owned fixture namespace, never another cluster's logs
+    // or Secret data. Keep startup/pull failures distinguishable from assertions.
+    try {report.fixturePods = await kubectl(['-n', namespace, 'get', 'pods', '-o', 'wide'], {timeout: 10_000});}
+    catch {report.fixturePods = 'Unavailable';}
+  }
   throw error;
 } finally {
   for (const child of forwards) child.kill();
