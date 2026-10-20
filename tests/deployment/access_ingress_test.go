@@ -1,6 +1,8 @@
 package deployment_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -39,6 +41,7 @@ func TestAccessIngressPrivilegesAndBootstrap(t *testing.T) {
 	patches, _, _ := unstructured.NestedSlice(filter.Object, "spec", "configPatches")
 	found := false
 	scrub := false
+	adapter := false
 	for _, raw := range patches {
 		patch := raw.(map[string]any)
 		if patch["applyTo"] != "HTTP_FILTER" {
@@ -58,6 +61,18 @@ func TestAccessIngressPrivilegesAndBootstrap(t *testing.T) {
 					scrub = true
 				}
 			}
+			data, _ := json.Marshal(config)
+			if !strings.Contains(string(data), "remove_on_match") {
+				t.Fatal("reserved prefix sanitation is missing")
+			}
+			continue
+		}
+		if name == "envoy.filters.http.lua" {
+			after, _, _ := unstructured.NestedString(patch, "match", "listener", "filterChain", "filter", "subFilter", "name")
+			if op != "INSERT_AFTER" || after != "envoy.filters.http.header_mutation" {
+				t.Fatal("trusted identity must be installed after untrusted headers are removed")
+			}
+			adapter = true
 			continue
 		}
 		found = true
@@ -65,7 +80,7 @@ func TestAccessIngressPrivilegesAndBootstrap(t *testing.T) {
 			t.Fatal("authorization must run before business filters, fail closed and recalculate the authenticated route")
 		}
 	}
-	if !found || !scrub {
+	if !found || !scrub || !adapter {
 		t.Fatal("missing authorization filter or pre-provider bearer cleanup")
 	}
 }

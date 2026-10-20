@@ -54,9 +54,9 @@ spec:
               envoy_grpc:
                 cluster_name: aep-access-authorization
               timeout: 2s
-    # Remove the caller bearer after authorization but before ai-proxy can
-    # inject a DIFFERENT provider credential. Router-level authorization
-    # removal would also erase that legitimate provider credential.
+    # Drop ALL caller AEP/Consumer headers after authorization, before native
+    # plugins. Trusted identity lives in ext_authz metadata, not caller headers.
+    # Provider authorization is injected LATER by ai-proxy, so is preserved.
     - applyTo: HTTP_FILTER
       match:
         context: GATEWAY
@@ -76,8 +76,56 @@ spec:
             mutations:
               request_mutations:
                 - remove: authorization
-                - remove: x-aep-access-binding
-                - remove: x-aep-access-observation
+                - remove_on_match:
+                    key_matcher:
+                      prefix: x-aep-
+                - remove: x-mse-consumer
+                - remove: x-consumer-id
+                - remove: x-ext-auth-host
+                - remove: connection
+                - remove: proxy-connection
+              response_mutations:
+                - remove_on_match:
+                    key_matcher:
+                      prefix: x-aep-
+                - remove: x-mse-consumer
+                - remove: x-consumer-id
+                - remove: x-ext-auth-host
+    # Native Lua is only a dynamic-header adapter: no identity evaluation,
+    # policy decisions, credential reads, DB calls, counters or result cache.
+    # Authorino's response header names are static; its dynamic metadata can
+    # carry the bounded per-model map required by existing native limit rules.
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          portNumber: 80
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.header_mutation
+      patch:
+        operation: INSERT_AFTER
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            default_source_code:
+              inline_string: |
+                function envoy_on_request(handle)
+                  local metadata = handle:streamInfo():dynamicMetadata():get("envoy.filters.http.ext_authz")
+                  local identity = metadata and metadata.aep_trusted_headers
+                  if type(identity) ~= "table" or not identity["x-mse-consumer"] or not identity["x-aep-model-id"] then
+                    -- ext_authz can skip requests without a matching route.
+                    -- An unverified request must never enter a native plugin.
+                    handle:respond({[":status"] = "403"}, "Forbidden")
+                    return
+                  end
+                  for name, value in pairs(identity) do
+                    handle:headers():replace(name, value)
+                  end
+                end
     - applyTo: VIRTUAL_HOST
       match:
         context: GATEWAY
