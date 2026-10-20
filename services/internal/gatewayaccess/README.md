@@ -14,6 +14,13 @@ the exact ledger publication reference and issued/valid timestamps to the CR.
 It must never reconstruct intent from the mutable catalog or treat a CR write
 as adoption by all serving processes.
 
+Optional `workloadEntitlement` attests one exact accepted license ID/digest and
+`enterprise.models` feature for a Kubernetes binding only. Canonical validation
+rejects a missing/mismatched accepted license, another feature or session use.
+It participates in the immutable content hash, never the binding key. The relay
+must preserve the attestation and fail on pruned or conflicting read-back; it
+must not infer or generate it. See the [trusted workload license contract](../../../docs/workload-entitlement.md).
+
 `CaptureModelAccessSessions` uses the shared configuration transaction lock
 before the source/signal/stream locks. It captures the union of current and
 previous session bindings, queues every immutable snapshot/outbox entry, and

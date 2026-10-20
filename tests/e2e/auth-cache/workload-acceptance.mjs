@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {resources} from './resources.mjs';
+import {workloadEntitlementChecks} from './workload-entitlement.mjs';
 
 const namespace = 'aep-system';
 const audience = 'zhiyuan-model-access';
@@ -28,11 +29,11 @@ function accessGrant(account, uid, subject) {
 }
 
 export async function workloadAcceptance({kubectl, apply, forward, until, request, get, record, root}) {
-  assert.notEqual(process.env.AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT, 'true', 'Workload entitlement contract is not implemented');
+  const requireEntitlement = process.env.AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT === 'true';
   assert(!process.env.AEP_NATIVE_ACCESS_POLICY_SOURCE_DIR, 'This probe uses only the disposable mounted file source');
   await kubectl(['-n', namespace, 'set', 'env', 'deployment/aep-gateway-operator', 'AEP_GATEWAY_ACCESS_OPERATOR_ENABLED=true',
     'AEP_GATEWAY_ACCESS_ISSUER_URL=http://introspection:8080/oidc', 'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=http://introspection:8082',
-    'AEP_GATEWAY_ACCESS_REFRESH_SECONDS=1', 'AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT=false',
+    'AEP_GATEWAY_ACCESS_REFRESH_SECONDS=1', 'AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT=' + requireEntitlement,
     'AEP_GATEWAY_ACCESS_WORKLOAD_AUDIENCE=' + audience]);
   for (const name of ['employee-a', 'employee-b']) {
     await apply([{apiVersion: 'v1', kind: 'ServiceAccount', metadata: {name, namespace}, automountServiceAccountToken: false},
@@ -46,6 +47,10 @@ export async function workloadAcceptance({kubectl, apply, forward, until, reques
   const b = accessGrant('employee-b', (await get('serviceaccount', 'employee-b')).metadata.uid, 'agent-b');
   const stale = accessGrant('employee-a', 'replaced-service-account-uid', 'agent-a');
   const grants = [a, b, stale];
+  if (requireEntitlement) for (const g of grants) {
+    g.spec.licenses = [{id: 'license-' + g.spec.subject.id, digest: 'sha256:' + 'a'.repeat(64)}];
+    g.spec.workloadEntitlement = {licenseId: g.spec.licenses[0].id, licenseDigest: g.spec.licenses[0].digest, feature: 'enterprise.models'};
+  }
   await apply([{apiVersion: 'gateway.aep.zhiyuan.io/v1alpha1', kind: 'DeploymentConfig', metadata: {name: 'deployment', namespace},
     spec: {deploymentId: 'probe'}}, ...grants.map(g => g.grant())]);
   for (const g of grants) await until(() => get('configmap', 'access-' + g.binding));
@@ -114,7 +119,7 @@ export async function workloadAcceptance({kubectl, apply, forward, until, reques
   a.spec.publication.sequence++; a.spec.publication.revision = 'workload-renewed';
   a.spec.validUntil = new Date(Date.now() + 1900_000).toISOString(); await apply([a.grant()]);
   for (const port of ports) await until(async () => {
-    const r = await call(port); assert.equal(r.status, 200); assert.equal(r.observation.publication.sequence, 2);
+    const r = await call(port); assert.equal(r.status, 200); assert.equal(r.observation.publication.sequence, a.spec.publication.sequence);
   });
   assert.equal((await get('authconfig', 'access-' + a.binding)).metadata.resourceVersion, initial.metadata.resourceVersion);
   record('Workload renewal reaches both replicas without rewriting AuthConfig');
@@ -149,6 +154,19 @@ export async function workloadAcceptance({kubectl, apply, forward, until, reques
     for (const port of ports) assert.equal((await call(port, a, fresh)).status, 200);
     current = fresh;
     record('Newly issued valid token still works under the same live policy after the previous token expires');
+  }
+  if (requireEntitlement) {
+    // License lifecycle assertions can span multiple kubelet ConfigMap refresh
+    // intervals. Start with fresh real credentials so token expiry cannot falsely
+    // satisfy a license-denial assertion or break the unaffected-peer control.
+    current = await token('employee-a');
+    const licensedPeer = await token('employee-b');
+    const licensedCall = (port, g = a, credential = current, ...rest) => call(port, g, credential, ...rest);
+    for (const port of ports) {
+      assert.equal((await licensedCall(port)).status, 200);
+      assert.equal((await licensedCall(port, b, licensedPeer)).status, 200);
+    }
+    await workloadEntitlementChecks({a, b, ports, call: licensedCall, peer: licensedPeer, apply, until, get, record, reviewCount});
   }
   a.spec.publication.sequence++; a.spec.publication.revision = 'workload-retired'; a.spec.disabled = true; a.spec.models = [];
   await apply([a.grant()]);

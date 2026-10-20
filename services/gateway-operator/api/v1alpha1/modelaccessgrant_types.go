@@ -54,9 +54,9 @@ type ModelAccessBinding struct {
 }
 
 // ModelAccessLicense is an exact accepted entitlement binding, not a signed
-// license or private key. The verifier still checks JWT issuer/audience/use/time
-// and matches BOTH license ID and digest. Empty/omitted bindings deny entitlement
-// tokens; they do not opt out of deployment-wide entitlement requirements.
+// license or private key. Human verification checks JWT issuer/audience/use/time
+// and matches BOTH license ID and digest; workload attestations reference the
+// same exact pair. Empty/omitted bindings never waive deployment entitlement.
 type ModelAccessLicense struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=256
@@ -77,6 +77,7 @@ type ModelAccessLicense struct {
 // +kubebuilder:validation:XValidation:rule="self.subject.kind == 'agent' || self.binding.kind == 'session'",message="human subjects require an AEP session binding"
 // +kubebuilder:validation:XValidation:rule="self.validUntil > self.issuedAt && self.validUntil <= self.issuedAt + duration('1h')",message="publication validity must be positive and at most one hour"
 // +kubebuilder:validation:XValidation:rule="!self.disabled || size(self.models) == 0",message="disabled tombstones cannot carry allowed models"
+// +kubebuilder:validation:XValidation:rule="!has(self.workloadEntitlement) || (self.binding.kind == 'kubernetes' && has(self.licenses) && self.licenses.exists(l, l.id == self.workloadEntitlement.licenseId && l.digest == self.workloadEntitlement.licenseDigest))",message="workload entitlement requires its exact accepted license and a Kubernetes binding"
 type ModelAccessGrantSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=80
@@ -103,6 +104,10 @@ type ModelAccessGrantSpec struct {
 	// +listType=map
 	// +listMapKey=id
 	Licenses []ModelAccessLicense `json:"licenses,omitempty"`
+	// WorkloadEntitlement is an explicit trusted license-feature attestation.
+	// Its absence never waives a deployment-wide entitlement requirement.
+	// +optional
+	WorkloadEntitlement *ModelAccessWorkloadEntitlement `json:"workloadEntitlement,omitempty"`
 	// RoleIDs and TeamIDs preserve trusted quota/observability membership only.
 	// +optional
 	// +kubebuilder:validation:MaxItems=256

@@ -86,8 +86,9 @@ func jsonValue(value any) string {
 // separately changing freshness file. Renewal MUST NOT update AuthConfig at all.
 // No Secret or provider value is needed. Workload authentication is opt-in.
 func Render(grant *gateway.ModelAccessGrant, options Options) (*unstructured.Unstructured, *corev1.ConfigMap, error) {
+	_, validLicense := workloadLicense(grant.Spec)
 	if Validate(grant) != nil || options.Validate() != nil || !validNativeBinding(grant.Spec, options) ||
-		grant.Spec.Disabled && len(grant.Spec.Models) != 0 {
+		!validLicense || grant.Spec.Disabled && len(grant.Spec.Models) != 0 {
 		return nil, nil, ErrInput
 	}
 	spec := grant.DeepCopy().Spec
@@ -140,7 +141,7 @@ func Render(grant *gateway.ModelAccessGrant, options Options) (*unstructured.Uns
 			"kubernetesTokenReview": map[string]any{"audiences": []any{options.WorkloadAudience}},
 			"cache":                 cache, "priority": int64(0), "metrics": false}}
 		projection["authorization"].(map[string]any)["access"].(map[string]any)["opa"].(map[string]any)["rego"] = workloadAccessRego(spec, hash)
-		bounds = workloadBoundsRego(grant.Spec, hash)
+		bounds = workloadBoundsRego(grant.Spec, hash, options)
 	}
 	if options.IngressHost != "" {
 		identity, err := ingressIdentity(spec)
