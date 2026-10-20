@@ -81,6 +81,10 @@ metadata:
   namespace: aep-system
 spec:
   replicas: 2
+  minReadySeconds: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
     matchLabels:
       app.kubernetes.io/name: aep-control-service
@@ -90,6 +94,7 @@ spec:
         app.kubernetes.io/name: aep-control-service
     spec:
       serviceAccountName: aep-control-service
+      terminationGracePeriodSeconds: 45
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       topologySpreadConstraints:
@@ -102,6 +107,9 @@ spec:
         - name: control-service
           image: aep-control-service:0.1.0
           imagePullPolicy: IfNotPresent
+          lifecycle:
+            preStop:
+              sleep: {seconds: 5}
           envFrom:
             - configMapRef: {name: aep-control-service-config}
           ports:
