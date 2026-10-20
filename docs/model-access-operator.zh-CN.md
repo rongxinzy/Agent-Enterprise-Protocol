@@ -35,7 +35,8 @@ field manager 与 owner reference 不能阻止另一个高权限写入者。
 非法布尔值、时间间隔与 URL 均拒绝启动。URL 只允许 HTTP(S)，禁止 userinfo、query、
 fragment。HTTP 允许项用于隔离测试，不是生产传输安全方案。策略源可以改变授权边界，
 必须限制写入者与网络调用者，审查 TLS/NetworkPolicy 部署。本阶段没有交付这项生产静态
-服务或 overlay；Node 文件源只是一次性测试夹具，不得作为产品部署。
+服务或 overlay；独立评审的 [HTTPS 文件源 #357](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/357)
+提供此组件。Node 文件源只是一次性测试夹具，不得作为产品部署。
 
 ## 稳定语义与独立续期
 
@@ -89,6 +90,14 @@ node tests/e2e/native-access-projection.mjs
 Docker 需已缓存 `node:24-alpine`、固定 Authorino v0.26.4 tag 和脚本指定的固定 Kind
 节点镜像。导入 Authorino 时保留原始 OCI index/digest；单平台导出会改写 index，可能
 留下 containerd 悬空 import 引用。报告不保存凭据。
+
+与 #357 实际双副本 HTTPS 清单联验时，额外将 `AEP_NATIVE_ACCESS_POLICY_SOURCE_DIR`
+指向其 `deploy/kubernetes/access-policy-source` 目录，并设置 `OPENSSL` 可执行文件。
+测试在仓库外创建临时 PKI，将临时 CA 追加到固定 Authorino 镜像的完整公共信任包。
+两个授权进程消费文件源；第三个冷启动负向对照不信任该 CA，必须因 x509 校验拒绝。
+进一步检查源中断、绝对到期、离线续期不能延长旧许可、恢复后采用新版本，且不改写
+AuthConfig。这仍是 CR 起点的组件联验，不是业务 DB/Higress/员工或 NetworkPolicy
+执行验收。临时私钥文件及自有集群均在 `finally` 清理。
 
 正式采用前还需完成：
 

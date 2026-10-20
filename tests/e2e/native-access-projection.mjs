@@ -8,6 +8,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import http from 'node:http';
 import {resources, image, crdHash} from './auth-cache/resources.mjs';
+import {httpsPolicySource, sourceFailureChecks} from './auth-cache/https-policy-source.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const kind = process.env.KIND ?? 'kind';
@@ -17,8 +18,10 @@ const kubeconfig = path.join(work, 'kubeconfig');
 const env = {...process.env, KUBECONFIG: kubeconfig};
 const namespace = 'aep-system';
 const requireEntitlement = process.env.AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT === 'true';
+const sourceDirectory = process.env.AEP_NATIVE_ACCESS_POLICY_SOURCE_DIR;
 const forwards = [];
-const report = {scope: 'CR -> Operator -> native Authorino; not business DB/Higress adoption', requireEntitlement, checks: [], adoptionGate: false};
+const report = {scope: 'CR -> Operator -> native Authorino; not business DB/Higress adoption', requireEntitlement,
+  httpsPolicySource: Boolean(sourceDirectory), checks: [], adoptionGate: false};
 let owned = false;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function command(binary, args, {input, timeout = 240_000, commandEnv = env} = {}) {
@@ -117,8 +120,9 @@ try {
   manifest = manifest.replace('ko://github.com/rongxinzy/Agent-Enterprise-Protocol/services/gateway-operator/cmd', operatorImage);
   await kubectl(['apply', '-f', '-'], {input: manifest});
   await kubectl(['apply', '-k', 'services/gateway-operator/config/access-rbac']);
+  const httpsSource = sourceDirectory ? await httpsPolicySource({directory: sourceDirectory, command, kubectl, apply, work, cluster, namespace}) : undefined;
   await kubectl(['-n', namespace, 'set', 'env', 'deployment/aep-gateway-operator', 'AEP_GATEWAY_ACCESS_OPERATOR_ENABLED=true',
-    'AEP_GATEWAY_ACCESS_ISSUER_URL=http://introspection:8080/oidc', 'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=http://introspection:8082',
+    'AEP_GATEWAY_ACCESS_ISSUER_URL=http://introspection:8080/oidc', 'AEP_GATEWAY_ACCESS_POLICY_BASE_URL=' + (httpsSource?.baseURL ?? 'http://introspection:8082'),
     'AEP_GATEWAY_ACCESS_REFRESH_SECONDS=1', 'AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT=' + requireEntitlement]);
   const spec = {deploymentId: 'probe', subject: {kind: 'human', id: 'alice'}, binding: {kind: 'session', sessionId: 'session-a'},
     publication: {sequence: 1, operationId: '11111111-1111-1111-1111-111111111111', revision: 'native-one', contentHash: 'a'.repeat(64)},
@@ -139,7 +143,7 @@ try {
   await apply([{apiVersion: 'gateway.aep.zhiyuan.io/v1alpha1', kind: 'DeploymentConfig', metadata: {name: 'deployment', namespace}, spec: {deploymentId: 'probe'}}, grant()]);
   const mockSource = await readFile(path.join(root, 'tests/e2e/auth-cache/mock-introspection.mjs'), 'utf8');
   const policySource = await readFile(path.join(root, 'tests/e2e/auth-cache/native-policy-source.mjs'), 'utf8');
-  const objects = JSON.parse(JSON.stringify(resources(mockSource + '\n' + policySource)).replaceAll('auth-cache-probe', namespace));
+  const objects = JSON.parse(JSON.stringify(resources(mockSource + (httpsSource ? '' : '\n' + policySource))).replaceAll('auth-cache-probe', namespace));
   // freecache rejects individual entries larger than 1/1024 of its store.
   // Raw enterprise JWT keys plus claims exceed the upstream 1 MB default.
   // Four MB covers this fixture, NOT the maximum public scopes or fleet size.
@@ -147,11 +151,14 @@ try {
     const container = object.spec.template.spec.containers[0];
     container.args = container.args.map(arg => arg === '--evaluator-cache-size=1' ? '--evaluator-cache-size=4' : arg);
   }
-  const mockDeployment = objects.find(o => o.kind === 'Deployment' && o.metadata.name === 'introspection');
-  mockDeployment.spec.template.spec.volumes.push({name: 'policies', configMap: {name}});
-  mockDeployment.spec.template.spec.containers[0].volumeMounts.push({name: 'policies', mountPath: '/policies', readOnly: true});
-  objects.find(o => o.kind === 'Service' && o.metadata.name === 'introspection').spec.ports.push({name: 'policies', port: 8082});
-  objects.find(o => o.kind === 'Service' && o.metadata.name === 'introspection').spec.ports[0].name = 'metadata';
+  if (httpsSource) httpsSource.configure(objects);
+  else {
+    const mockDeployment = objects.find(o => o.kind === 'Deployment' && o.metadata.name === 'introspection');
+    mockDeployment.spec.template.spec.volumes.push({name: 'policies', configMap: {name}});
+    mockDeployment.spec.template.spec.containers[0].volumeMounts.push({name: 'policies', mountPath: '/policies', readOnly: true});
+    objects.find(o => o.kind === 'Service' && o.metadata.name === 'introspection').spec.ports.push({name: 'policies', port: 8082});
+    objects.find(o => o.kind === 'Service' && o.metadata.name === 'introspection').spec.ports[0].name = 'metadata';
+  }
   await apply(objects);
   for (const name of ['aep-gateway-operator', 'introspection', 'authorino-a', 'authorino-b']) {
     console.log('Waiting for ' + name);
@@ -172,6 +179,16 @@ try {
     assert.equal(result.status, 200); assert.equal(result.observation.publication.sequence, 1);
   });
   record('Actual Operator projection is accepted by pinned native replicas using real AEP JWTs');
+  if (httpsSource) {
+    const untrustedPort = await forward('deployment/authorino-no-ca', 5001);
+    await until(async () => {
+      const result = await request(untrustedPort, binding + '.access.aep.invalid', activeToken);
+      assert(result.status >= 400 && result.status < 600);
+      const logs = await kubectl(['-n', namespace, 'logs', 'deployment/authorino-no-ca', '--tail=100']);
+      assert(logs.includes('certificate signed by unknown authority'), 'Negative control must fail specifically on CA verification');
+    });
+    record('Native Authorino trusts the explicitly mounted CA; the otherwise identical cold process without it denies on x509 verification');
+  }
   for (const port of ports) {
     for (const name of ['signature', 'access', 'issuer', 'audience', 'use', 'deployment', 'subject', 'session', 'missing-session', 'scope', 'password', 'expired', 'missing-exp', 'future']) {
       assert([401, 403].includes((await request(port, binding + '.access.aep.invalid', tokenFor(name))).status), 'Invalid token must deny: ' + name);
@@ -205,7 +222,7 @@ try {
     assert.equal(result.status, 200); assert.equal(result.observation.publication.sequence, 2);
   });
   assert.equal((await get('authconfig', name)).metadata.resourceVersion, initial.metadata.resourceVersion);
-  record('CR renewal reaches both replicas through real ConfigMap file projection without rewriting AuthConfig', {propagationMs: Date.now() - started});
+  record('CR renewal reaches both replicas through ' + (httpsSource ? 'native watch and HTTPS' : 'real ConfigMap file projection') + ' without rewriting AuthConfig', {propagationMs: Date.now() - started});
   spec.publication.sequence++; spec.publication.revision = 'native-license-expiry';
   spec.licenses[1].validUntil = new Date(Date.now() - 1000).toISOString();
   await apply([grant()]);
@@ -214,6 +231,8 @@ try {
     assert.equal((await request(port, binding + '.access.aep.invalid', fixture.tokens.entitlement)).status, 200);
   });
   record('An expired grace license denies its warm entitlement without accepting a different active license as a substitute');
+  if (httpsSource) await sourceFailureChecks({kubectl, apply, get, grant, spec, name, ports, binding,
+    token: activeToken, request, until, record});
   spec.publication.sequence++; spec.publication.revision = 'native-revoke'; spec.publication.contentHash = 'b'.repeat(64);
   spec.disabled = true; spec.models = []; await apply([grant()]);
   for (const port of ports) await until(async () => assert.equal((await request(port, binding + '.access.aep.invalid', activeToken)).status, 403));

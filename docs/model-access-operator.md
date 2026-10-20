@@ -43,8 +43,10 @@ userinfo, query or fragment. HTTP allowance supports isolated tests and is not
 a production transport-security policy. The policy endpoint can change
 authorization bounds: restrict its writers and network callers and use a
 reviewed TLS/NetworkPolicy deployment. No such production static delivery
-service or overlay is delivered here. The Node file source is a disposable
-test fixture and must never be deployed as that service.
+service or overlay is delivered here. The independently reviewed
+[HTTPS source in #357](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/357)
+supplies this component. The Node file source is a disposable test fixture and
+must never be deployed as that service.
 
 ## Stable policy and changing freshness
 
@@ -115,6 +117,18 @@ Docker must already have `node:24-alpine`, the pinned Authorino v0.26.4 tag and
 the fixed Kind node image used by the script. The Authorino archive retains its
 original OCI index/digest; single-platform export can rewrite the index and
 leave dangling containerd import references. Reports never contain credentials.
+
+For an explicit integration with #357's actual dual-replica HTTPS manifests,
+also set `AEP_NATIVE_ACCESS_POLICY_SOURCE_DIR` to its
+`deploy/kubernetes/access-policy-source` directory and `OPENSSL` to an OpenSSL
+executable. The test creates disposable PKI outside the repository and appends
+its CA to the pinned Authorino image's full public trust bundle. Two authorized
+processes consume the source; a third cold negative control lacks that private
+CA and must deny specifically on x509 verification. Source interruption,
+absolute expiry, offline renewal denial and recovery are checked without
+AuthConfig rewrites. This is still CR-based component integration, not a
+business DB/Higress/employee acceptance or NetworkPolicy enforcement test.
+Private files and the owned cluster are cleaned in `finally`.
 
 Remaining adoption gates include:
 
