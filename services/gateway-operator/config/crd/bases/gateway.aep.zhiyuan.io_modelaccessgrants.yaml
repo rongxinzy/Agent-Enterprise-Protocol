@@ -131,9 +131,9 @@ spec:
                 items:
                   description: |-
                     ModelAccessLicense is an exact accepted entitlement binding, not a signed
-                    license or private key. The verifier still checks JWT issuer/audience/use/time
-                    and matches BOTH license ID and digest. Empty/omitted bindings deny entitlement
-                    tokens; they do not opt out of deployment-wide entitlement requirements.
+                    license or private key. Human verification checks JWT issuer/audience/use/time
+                    and matches BOTH license ID and digest; workload attestations reference the
+                    same exact pair. Empty/omitted bindings never waive deployment entitlement.
                   properties:
                     digest:
                       pattern: ^sha256:[0-9a-f]{64}$
@@ -234,6 +234,32 @@ spec:
               validUntil:
                 format: date-time
                 type: string
+              workloadEntitlement:
+                description: |-
+                  WorkloadEntitlement is an explicit trusted license-feature attestation.
+                  Its absence never waives a deployment-wide entitlement requirement.
+                properties:
+                  feature:
+                    description: |-
+                      The writer must derive this from verified license features, never infer it
+                      from the existence of an active license or from the ServiceAccount token.
+                    enum:
+                    - enterprise.models
+                    maxLength: 17
+                    type: string
+                  licenseDigest:
+                    maxLength: 71
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
+                  licenseId:
+                    maxLength: 256
+                    minLength: 1
+                    type: string
+                required:
+                - feature
+                - licenseDigest
+                - licenseId
+                type: object
             required:
             - binding
             - deploymentId
@@ -259,6 +285,11 @@ spec:
                 + duration('1h')
             - message: disabled tombstones cannot carry allowed models
               rule: '!self.disabled || size(self.models) == 0'
+            - message: workload entitlement requires its exact accepted license and
+                a Kubernetes binding
+              rule: '!has(self.workloadEntitlement) || (self.binding.kind == ''kubernetes''
+                && has(self.licenses) && self.licenses.exists(l, l.id == self.workloadEntitlement.licenseId
+                && l.digest == self.workloadEntitlement.licenseDigest))'
           status:
             description: |-
               ModelAccessGrantStatus separates spec acceptance, resource writes and serving

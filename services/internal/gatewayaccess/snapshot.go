@@ -28,16 +28,17 @@ var (
 // Retired records a terminal binding tombstone; its identifier must never be
 // reused to reactivate an old signed session. It is not a new grant condition.
 type Snapshot struct {
-	Schema       string                       `json:"schema"`
-	DeploymentID string                       `json:"deploymentId"`
-	Subject      gateway.ModelAccessSubject   `json:"subject"`
-	Binding      gateway.ModelAccessBinding   `json:"binding"`
-	Disabled     bool                         `json:"disabled"`
-	Retired      bool                         `json:"retired"`
-	Models       []string                     `json:"models"`
-	RoleIDs      []string                     `json:"roleIds,omitempty"`
-	TeamIDs      []string                     `json:"teamIds,omitempty"`
-	Licenses     []gateway.ModelAccessLicense `json:"licenses,omitempty"`
+	Schema              string                                  `json:"schema"`
+	DeploymentID        string                                  `json:"deploymentId"`
+	Subject             gateway.ModelAccessSubject              `json:"subject"`
+	Binding             gateway.ModelAccessBinding              `json:"binding"`
+	Disabled            bool                                    `json:"disabled"`
+	Retired             bool                                    `json:"retired"`
+	Models              []string                                `json:"models"`
+	RoleIDs             []string                                `json:"roleIds,omitempty"`
+	TeamIDs             []string                                `json:"teamIds,omitempty"`
+	Licenses            []gateway.ModelAccessLicense            `json:"licenses,omitempty"`
+	WorkloadEntitlement *gateway.ModelAccessWorkloadEntitlement `json:"workloadEntitlement,omitempty"`
 }
 
 func bounded(value string, max int) bool { return len(value) > 0 && len(value) <= max }
@@ -71,6 +72,9 @@ func (s Snapshot) valid() bool {
 			license.ValidUntil != nil && license.ValidUntil.IsZero() {
 			return false
 		}
+	}
+	if _, valid := SelectedWorkloadLicense(s.Binding.Kind, s.WorkloadEntitlement, s.Licenses); !valid {
+		return false
 	}
 	switch s.Binding.Kind {
 	case "session":

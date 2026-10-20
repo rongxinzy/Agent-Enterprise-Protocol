@@ -15,10 +15,12 @@ func validNativeBinding(spec gateway.ModelAccessGrantSpec, options Options) bool
 		return b.SessionID != "" && b.Workload == nil
 	}
 	w := b.Workload
+	license, validLicense := workloadLicense(spec)
 	if b.Kind != "kubernetes" || spec.Subject.Kind != "agent" || b.SessionID != "" || w == nil ||
-		options.WorkloadAudience == "" || w.Audience != options.WorkloadAudience || options.RequireEntitlement {
-		// A Kubernetes identity is not an AEP entitlement credential. Keep the
-		// existing enterprise gate closed until its workload contract is supplied.
+		options.WorkloadAudience == "" || w.Audience != options.WorkloadAudience || !validLicense ||
+		options.RequireEntitlement && !spec.Disabled && license == nil {
+		// SA identity alone is never enterprise entitlement. Explicit, exact
+		// trusted license evidence is required; disabled tombstones still apply.
 		return false
 	}
 	uid := func(s string) bool {
@@ -50,10 +52,11 @@ policy_hash = %s
 // The exact bearer has already passed native TokenReview. Parsing its claims
 // here prevents a cached successful review from outliving exp. No result cache,
 // cryptography, business DB lookup or token lifetime arithmetic is implemented.
-func workloadBoundsRego(spec gateway.ModelAccessGrantSpec, hash string) string {
+func workloadBoundsRego(spec gateway.ModelAccessGrantSpec, hash string, options Options) string {
 	w := spec.Binding.Workload
 	return fmt.Sprintf(`allow {
 input.auth.authorization.access.policy_hash == %s
+workload_license_current
 now := time.now_ns() / 1000000000
 %d <= now
 %d > now
@@ -82,5 +85,5 @@ input.auth.authorization.access.models[_] == body.model
 publication = %s
 `, jsonValue(hash), spec.IssuedAt.Unix(), spec.ValidUntil.Unix(),
 		jsonValue("system:serviceaccount:"+w.Namespace+":"+w.ServiceAccountName), jsonValue(w.Audience), jsonValue(w.Namespace),
-		jsonValue(w.ServiceAccountName), jsonValue(w.ServiceAccountUID), jsonValue(spec.Publication))
+		jsonValue(w.ServiceAccountName), jsonValue(w.ServiceAccountUID), jsonValue(spec.Publication)) + workloadLicenseRego(spec, options)
 }

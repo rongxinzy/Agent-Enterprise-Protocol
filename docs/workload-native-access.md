@@ -82,9 +82,10 @@ Configure the existing [projection](model-access-operator.md), plus:
 
 - `AEP_GATEWAY_ACCESS_WORKLOAD_AUDIENCE`: explicit trusted audience matching both
   grant and projected token; at most 256 bytes, with no whitespace/control characters.
-- `AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT`: defaults to true. Workload grants are
-  rejected in that mode because SA identity is not an enterprise entitlement.
-  This opt-in probe is not a licensed workload implementation.
+- `AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT`: defaults to true. Enabled workload
+  grants need an explicit, exact [published workload entitlement](workload-entitlement.md).
+  SA identity alone is not enterprise entitlement. Disabled tombstones can
+  always remove access, including after their license evidence is removed.
 - `deploy/kubernetes/access-workload-review`: separately applied RBAC, absent from
   default overlays. It grants only `create` on cluster-scoped TokenReviews to
   `aep-system/authorino`. It does not install Authorino/create its SA or grant
@@ -138,6 +139,8 @@ real ten-minute Kubernetes token expiry without changing clocks or signatures,
 then verifies warm denial without another TokenReview.
 
 This is verifier/Operator acceptance, not employee product acceptance. Lifecycle
-writing, business role-to-grant publication, DeerFlow calls, enterprise
-entitlements, Higress provider inference and Redis quota debit are not covered.
+writing, business role-to-grant publication, DeerFlow calls, verified-license DB
+publication, Higress provider inference and Redis quota debit are not covered.
+Add `AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT=true` to test the native workload
+license grace, exact selection, replacement and removal boundaries.
 Ready does not fabricate all-replica adoption; `adoptionGate` remains false.

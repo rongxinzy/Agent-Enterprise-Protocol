@@ -161,4 +161,5 @@ func TestModelAccessGrantContractAdmission(t *testing.T) {
 			}
 		})
 	}
+	checkWorkloadEntitlementAdmission(t, c, workload)
 }

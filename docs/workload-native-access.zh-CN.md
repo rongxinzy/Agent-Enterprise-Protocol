@@ -66,7 +66,7 @@ schema、公开 API 或 SDK，不切换生产链路，`adoptionGate=false` 继�
 | 设置 | 行为 |
 | --- | --- |
 | `AEP_GATEWAY_ACCESS_WORKLOAD_AUDIENCE` | 非空可信 audience；必须与 Grant 及投影令牌一致，不能有空白/控制字符，最多 256 字节 |
-| `AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT` | 默认 true；本阶段工作负载遇到 true 会拒绝渲染，不以 SA 替代企业许可证凭据 |
+| `AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT` | 默认 true；启用的工作负载须携带[精确许可证声明](workload-entitlement.zh-CN.md)，不以 SA 身份替代企业授权；拒绝 tombstone 在许可证移除后仍可下发 |
 | `deploy/kubernetes/access-workload-review` | 单独启用的 Authorino TokenReview RBAC，默认 overlay 不引用 |
 
 该 RBAC 只给 `aep-system/authorino` 对 `authentication.k8s.io/tokenreviews` 的 `create`
@@ -112,5 +112,7 @@ node tests/e2e/native-access-projection.mjs
 不改时钟、不伪造签名，并验证热结果在不发起新 TokenReview 时拒绝过期令牌。
 
 这是原生验证器/Operator 的隔离验收，不是完整业务验收：尚未覆盖员工生命周期写入、
-业务角色变更到该 Grant 的发布、DeerFlow 实际模型请求、企业许可证、Higress provider
+业务角色变更到该 Grant 的发布、DeerFlow 实际模型请求、DB 已验签许可证发布、Higress provider
 推理或 Redis 配额扣减。`Ready` 不伪造全副本采用结果，正式 `adoptionGate` 仍为 false。
+增加 `AEP_NATIVE_ACCESS_REQUIRE_ENTITLEMENT=true` 可验证原生工作负载许可证宽限到期、
+精确选择、明确替换及移除后的拒绝边界。
