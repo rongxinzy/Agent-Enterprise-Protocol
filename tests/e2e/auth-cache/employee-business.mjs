@@ -9,6 +9,7 @@ import {resources} from './resources.mjs';
 import {higressAccess} from './managed-routes.mjs';
 import {employeeBusinessStack, employeeAudience, employeeGatewayHost} from './employee-business-stack.mjs';
 import {trustedQuotaAcceptance} from './trusted-quota.mjs';
+import {employeeCacheWitness} from './employee-cache-witness.mjs';
 
 export async function employeeBusinessAcceptance(ctx) {
   const {kubectl, apply, until, get, forward, request, record, report, httpsSource} = ctx;
@@ -114,16 +115,7 @@ export async function employeeBusinessAcceptance(ctx) {
   const fleet = await until(() => businessFleet({kubectl, forward, request}));
   await until(() => fleet.check(alice, model.id, 200));
   await until(() => fleet.check(bob, model.id, 200));
-  const reviews = async () => (await kubectl(['get', '--raw', '/metrics'])).split('\n')
-    .filter(line => line.startsWith('apiserver_request_total{') && line.includes('resource="tokenreviews"') &&
-      /verb="(?:CREATE|POST)"/.test(line))
-    .reduce((total, line) => total + Number(line.slice(line.lastIndexOf(' ') + 1)), 0);
-  const coldReviews = await reviews();
-  assert(coldReviews >= 4, 'Both employee credentials must have been reviewed on both serving processes');
-  for (let i = 0; i < 3; i++) {
-    await fleet.check(alice, model.id, 200); await fleet.check(bob, model.id, 200);
-  }
-  assert.equal(await reviews(), coldReviews, 'Warm employee calls repeated TokenReview');
+  const {reviews, coldReviews} = await employeeCacheWitness({kubectl, fleet, alice, bob, model});
   report.workload = true;
   report.employeeWarmTokenReviewReuseVerified = true;
   record('Kubernetes API metrics witness cold employee/process authentication and zero additional reviews for repeated warm calls');
@@ -135,6 +127,12 @@ export async function employeeBusinessAcceptance(ctx) {
     assert.equal(result.status, 200); assert.equal(result.content, 'probe'); assert.equal(result.usage.total_tokens, 2);
   }
   record('Actual employee runtime factory consumes Operator-generated config and projected Pod tokens; both employees infer through native Higress');
+  if (process.env.AEP_NATIVE_ACCESS_EMPLOYEE_POD_LIFECYCLE === 'true') {
+    const {employeePodLifecycle} = await import('./employee-pod-lifecycle.mjs');
+    report.scope = 'Employee Pod replacement: API-server TokenReview negative control versus warmed native verifiers';
+    await employeePodLifecycle({...ctx, fleet, runtime, alice, bob, model});
+    return;
+  }
   const policy = (person, allowed) => until(async () => {
     const grant = await get('modelaccessgrant', 'access-' + person.binding);
     assert.equal(!grant.spec.disabled && grant.spec.models.includes(model.id), allowed);
