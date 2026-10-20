@@ -3,6 +3,8 @@ import http from 'node:http';
 
 const calls = {};
 const expirations = {};
+const policies = new Map();
+const policyReads = {};
 let jwks = {keys: []};
 let discovery = {issuer: 'http://introspection:8080/oidc', jwks_uri: 'http://introspection:8080/jwks',
   id_token_signing_alg_values_supported: ['EdDSA']};
@@ -14,7 +16,22 @@ const subjects = {
 };
 http.createServer(async (req, res) => {
   res.setHeader('content-type', 'application/json');
-  if (req.url === '/stats') return res.end(JSON.stringify({calls, expirations}));
+  if (req.url === '/stats') return res.end(JSON.stringify({calls, expirations, policyReads}));
+  // Disposable external Rego source for native refresher tests, not a product registry.
+  if (/^\/policies\/[a-z-]+\.rego$/.test(req.url)) {
+    if (req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      policies.set(req.url, JSON.parse(body));
+      return res.end('{}');
+    }
+    if (req.method === 'GET') {
+      const value = policies.get(req.url);
+      policyReads[req.url] = (policyReads[req.url] ?? 0) + 1;
+      res.writeHead(value?.status ?? 404, {'content-type': 'text/plain'});
+      return res.end(value?.rego ?? 'unavailable');
+    }
+  }
   if (req.url === '/jwks' && req.method === 'POST') {
     let body = '';
     for await (const chunk of req) body += chunk;
