@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,8 @@ func workloadSourceFixture() ModelAccessSource {
 	w := workloadObservation()
 	w.VerifiedUntil = now.Add(30 * time.Second)
 	return ModelAccessSource{DeploymentID: "source", SubjectID: "employee", Kind: "agent", Exists: true,
-		ObservedAt: now, Models: []ModelAccessModel{{ID: "chat"}}, Workloads: []ObservedModelWorkload{w}}
+		ObservedAt: now, Models: []ModelAccessModel{{ID: "chat"}}, Workloads: []ObservedModelWorkload{w},
+		Licenses: []ModelAccessLicense{{ID: "fixture-model-license", Digest: "sha256:" + strings.Repeat("a", 64), Features: []string{"enterprise.models"}}}}
 }
 
 func priorWorkload(t *testing.T, source ModelAccessSource) ModelAccessPublication {

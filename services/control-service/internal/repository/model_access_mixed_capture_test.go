@@ -32,6 +32,7 @@ func workloadPolicy(t *testing.T, capture *ModelAccessCapture) (ModelAccessPubli
 func TestMixedCaptureAllBindingsAndObservationRecoveryWithPostgres(t *testing.T) {
 	store, pool := sourceCaptureTestStore(t)
 	seedSource(t, pool)
+	seedWorkloadLicense(t, pool)
 	sourceExec(t, pool, `INSERT INTO user_sessions(session_id,deployment_id,user_id,topic) VALUES('employee-session','source','employee','fixture')`)
 	sourceExec(t, pool, `INSERT INTO user_session_tokens(token_hash,session_id,expires_at) VALUES('fixture-employee-token','employee-session',now()+interval '1 hour')`)
 	w := workloadObservation()
@@ -42,7 +43,7 @@ func TestMixedCaptureAllBindingsAndObservationRecoveryWithPostgres(t *testing.T)
 	first := captureBindings(t, store, "employee")
 	p, policy := workloadPolicy(t, first)
 	if len(first.Publications) != 2 || policy.Disabled || policy.Subject.Kind != "agent" || policy.Subject.ID != "employee" ||
-		p.BindingKey != key || len(policy.Models) != 2 || len(policy.Licenses) != 2 || time.Until(p.ValidUntil) > time.Minute || first.NextCaptureAt == nil {
+		p.BindingKey != key || len(policy.Models) != 2 || len(policy.Licenses) != 1 || policy.WorkloadEntitlement == nil || time.Until(p.ValidUntil) > time.Minute || first.NextCaptureAt == nil {
 		t.Fatal("mixed capture lost workload identity, role-derived resources or natural verification bound")
 	}
 	if v, a := captureAcknowledgement(t, pool, "employee"); v != a || v != first.SourceVersion {
@@ -78,6 +79,7 @@ func TestMixedCaptureAllBindingsAndObservationRecoveryWithPostgres(t *testing.T)
 func TestMixedCaptureRollbackAndUnrelatedSubjectWithPostgres(t *testing.T) {
 	store, pool := sourceCaptureTestStore(t)
 	seedSource(t, pool)
+	seedWorkloadLicense(t, pool)
 	alice := captureBindings(t, store, "alice")
 	if _, err := store.RegisterModelAccessWorkload(t.Context(), "employee", "", workloadObservation(), time.Minute); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 func TestMixedCaptureNaturalObservationExpiryWithoutWriteWithPostgres(t *testing.T) {
 	store, pool := sourceCaptureTestStore(t)
 	seedSource(t, pool)
+	seedWorkloadLicense(t, pool)
 	if _, err := store.RegisterModelAccessWorkload(t.Context(), "employee", "", workloadObservation(), 3*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -36,6 +37,7 @@ func TestMixedCaptureNaturalObservationExpiryWithoutWriteWithPostgres(t *testing
 func TestMixedCaptureSAReplacementAndBindingDeletionWithPostgres(t *testing.T) {
 	store, pool := sourceCaptureTestStore(t)
 	seedSource(t, pool)
+	seedWorkloadLicense(t, pool)
 	w := workloadObservation()
 	key, err := store.RegisterModelAccessWorkload(t.Context(), "employee", "", w, time.Minute)
 	if err != nil {
@@ -73,6 +75,7 @@ func TestMixedCaptureSAReplacementAndBindingDeletionWithPostgres(t *testing.T) {
 func TestMixedCaptureContinuousRenewalPreservesPolicyWithPostgres(t *testing.T) {
 	store, pool := sourceCaptureTestStore(t)
 	seedSource(t, pool)
+	seedWorkloadLicense(t, pool)
 	w := workloadObservation()
 	key, err := store.RegisterModelAccessWorkload(t.Context(), "employee", "", w, time.Minute)
 	if err != nil {
