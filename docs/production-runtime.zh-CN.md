@@ -99,6 +99,36 @@ reconciler 不提供旧版 `/healthz` 别名。它的 `/livez` 不受 control-pl
 
 ## 模型路由异步发布入队（默认关闭）
 
+### 会话授权投递（独立实验开关，默认关闭）
+
+在已有 publication relay 中设置 `AEP_GATEWAY_ACCESS_RELAY_ENABLED=true`，并显式
+设置 `AEP_GATEWAY_ACCESS_FRESHNESS`（2 秒至 1 小时、整秒，无默认窗口），可启用会话
+授权生产与逐绑定投递；还必须启用 publications 与 publication relay，保持现有
+operator 独占写护栏。此开关不切换默认 authorizer，不代表原生鉴权方案已通过采用门槛。
+默认 operator 部署覆盖也不打开此开关。先安装 ModelAccessGrant CRD 与匹配窄 RBAC；
+relay 只获该资源的 get/create/update，不读 Secret、不写 status 或 Higress 资源。
+
+业务 DB 仍是事实源。已有事务变更信号和持久到期任务触发一致快照读取，将角色派生的
+模型范围、精确许可证 ID/摘要、会话绑定写入逐绑定 outbox，再由同一 worker 写为 CR。
+已删除会话保留拒绝墓碑；会话 ID 复用、遗留直接用户/团队授权、尚未支持的 Kubernetes
+工作负载绑定拒绝捕获并保留源任务。此阶段仅覆盖会话，不能据此声明员工 Pod 可信身份
+已接通。源任务按原生 client-go 工作队列退避，分页扫描继续推进其他主体；源捕获、
+路由投递及授权投递彼此失败时仍独立尝试，但数据库或 API 整体故障仍会影响吞吐。
+
+每次授权投递前后均核对当前 DB 意图、精确不可变字段和存活 claim；Kubernetes 的
+resourceVersion、CRD 不可变身份及单调序号约束防止晚到写覆盖较新 CR。资源名称使用
+完整部署/主体/绑定摘要，权限与时间变更不改变名称。响应丢失可读回重试；新意图取代
+旧 claim，终态非法快照/归属冲突保留失败记录，不接管外部资源。安全删除墓碑与回收
+历史记录尚未实现，禁止通过手动删除来解除序号护栏。
+
+`projected` 只表示精确 CR 投递完成，不表示 Operator 已转换策略或所有服务进程已生效。
+不同绑定最终收敛，不提供跨绑定原子切换；并发旧写在新 CR 落地之前仍可能短暂出现，
+但不能覆盖已经落地的新序号。授权续期能可靠产生新发布，却尚未证明 Authorino 更新
+时保留有效热缓存；全副本确认、容量/传播时延、watch 故障新鲜度与原生执行验收仍是
+默认链路切换的前置门槛，不得把此实验投递开关直接作为生产授权切换步骤。
+
+### 路由与配额投递
+
 `AEP_GATEWAY_PUBLICATIONS_ENABLED` 默认 `false`，提供快照、operation、审计与 outbox
 的事务入队。`AEP_GATEWAY_PUBLICATION_RELAY_ENABLED` 独立默认关闭；同时开启后，
 Control Service 启动集群内 relay，把当前 `AEP_DEPLOYMENT_ID` 的意图投影为
