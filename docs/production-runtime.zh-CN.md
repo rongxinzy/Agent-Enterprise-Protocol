@@ -44,6 +44,26 @@ control-service 默认每 15 分钟（`AEP_RETENTION_CLEANUP_INTERVAL`）执行�
 
 ## 运行端点
 
+### JWT 验证发现
+
+三个 API 服务面共同提供 `GET /.well-known/openid-configuration`，无需 bearer 或协议版本头，
+只返回当前签发器的 issuer、既有 JWKS 的绝对地址和 `EdDSA`。这是一份供 JWT 验证器使用的
+最小发现文档，不是完整 OIDC Provider 配置，不启用联合登录或 ID token 签发。公开响应不含
+私钥或凭据；Host、Forwarded、X-Forwarded-* 不参与地址推导。
+
+`AEP_ISSUER` 必须与已签发令牌中的 issuer 及验证器期望值一致。反向代理需要将 issuer 下的
+`/.well-known/openid-configuration` 和 `/.well-known/jwks.json` 转发到共同服务面；issuer
+含路径前缀时也必须保留对外地址并正确移除代理前缀。以实际可信地址检查响应，不使用请求头
+来修正错误配置。issuer 含 userinfo、query 或 fragment 时该新端点返回通用 503 problem，
+不会公布可疑 URL；现有签发和 JWKS 行为保持兼容。
+
+Authorino v0.26.4 的 `jwt.issuerUrl` 可从该文档发现 EdDSA；其直接 `jwksUrl` 模式默认算法
+限制不能据此视为已修复。必须继续配置 issuer、audience、token_use、部署/主体/会话/模型、
+有效期及当前账号/许可证/授权检查。该公共端点不切换网关流量，也不代表 Authorino 已采用、
+员工可信身份已接通或 DB→outbox→relay→CR→Operator 发布已验收。
+
+### 探针和指标
+
 | 端点 | 语义 | 编排用途 |
 | --- | --- | --- |
 | `/livez` | 进程仍能提供 HTTP，不检查依赖 | Liveness probe |
