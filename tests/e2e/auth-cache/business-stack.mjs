@@ -64,6 +64,14 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
     {downwardAPI: {items: [{path: 'namespace', fieldRef: {fieldPath: 'metadata.namespace'}}]}},
   ]}}]);
   control.spec.template.spec.serviceAccountName = 'aep-business-control';
+  // Keep the issuer/JWKS reachable while cached and cold native evaluators
+  // coexist during rollouts. Let Kubernetes drain terminating endpoints before
+  // SIGTERM; no custom JWT cache, retry loop or application sleep is involved.
+  control.spec.replicas = 2;
+  control.spec.minReadySeconds = 5;
+  control.spec.strategy = {type: 'RollingUpdate', rollingUpdate: {maxUnavailable: 0, maxSurge: 1}};
+  control.spec.template.spec.terminationGracePeriodSeconds = 45;
+  control.spec.template.spec.containers[0].lifecycle = {preStop: {sleep: {seconds: 5}}};
   await apply([
     {apiVersion: 'v1', kind: 'Secret', metadata: metadata('aep-business-db'), stringData: {POSTGRES_DB: 'aep', POSTGRES_USER: 'aep', POSTGRES_PASSWORD: dbPassword}},
     {apiVersion: 'v1', kind: 'Secret', metadata: metadata('aep-business-object'), stringData: {RUSTFS_ACCESS_KEY: 'access-acceptance', RUSTFS_SECRET_KEY: objectPassword}},
@@ -91,5 +99,5 @@ export async function businessStack({command, kubectl, apply, forward, until, wo
   }
   const port = await forward('deployment/aep-business-control', 8080);
   await until(async () => assert.equal((await fetch('http://127.0.0.1:' + port + '/readyz', {signal: AbortSignal.timeout(5000)})).status, 200));
-  return {issuer, baseUrl: 'http://127.0.0.1:' + port, password, controlImage};
+  return {issuer, baseUrl: 'http://127.0.0.1:' + port, password, controlImage, replicas: control.spec.replicas};
 }

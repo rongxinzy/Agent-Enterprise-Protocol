@@ -201,7 +201,7 @@ WHERE s.deployment_id='probe'`;
   await until(async () => assert(Date.now() > oldDeadline + 1500));
   await enforcement(bob, 403); await enforcement(activeAlice, 403);
   record('Stopping the actual control/relay process causes warm permissions to deny after their fixed publication deadline');
-  await kubectl(['-n', 'aep-system', 'scale', 'deployment/aep-business-control', '--replicas=1']);
+  await kubectl(['-n', 'aep-system', 'scale', 'deployment/aep-business-control', '--replicas=' + stack.replicas]);
   await kubectl(['-n', 'aep-system', 'rollout', 'status', 'deployment/aep-business-control', '--timeout=180s']);
   // Deployment port-forwards are bound to the old Pod and end on shutdown.
   // Preserve sessions, but reconnect SDK clients to the replacement Pod before
