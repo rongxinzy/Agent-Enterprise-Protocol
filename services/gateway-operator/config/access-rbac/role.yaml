@@ -28,10 +28,18 @@ rules:
   - gateway.aep.zhiyuan.io
   resources:
   - deploymentconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.aep.zhiyuan.io
+  resources:
   - modelaccessgrants
   verbs:
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - gateway.aep.zhiyuan.io

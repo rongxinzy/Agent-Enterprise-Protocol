@@ -31,7 +31,8 @@ func accessOptions(getenv func(string) string) (*access.Options, error) {
 		return nil, fmt.Errorf("invalid AEP_GATEWAY_ACCESS_REFRESH_SECONDS")
 	}
 	options := &access.Options{IssuerURL: getenv("AEP_GATEWAY_ACCESS_ISSUER_URL"),
-		PolicyBaseURL: getenv("AEP_GATEWAY_ACCESS_POLICY_BASE_URL"), RequireEntitlement: require, RefreshSeconds: refresh}
+		PolicyBaseURL: getenv("AEP_GATEWAY_ACCESS_POLICY_BASE_URL"), RequireEntitlement: require, RefreshSeconds: refresh,
+		IngressHost: getenv("AEP_GATEWAY_ACCESS_INGRESS_HOST")}
 	if options.Validate() != nil {
 		return nil, fmt.Errorf("invalid gateway access operator options")
 	}

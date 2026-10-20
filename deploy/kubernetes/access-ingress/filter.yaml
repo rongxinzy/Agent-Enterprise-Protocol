@@ -1,0 +1,92 @@
+# A dedicated Higress listener is required. Missing/unknown session selection
+# reaches no AuthConfig and denies. No route/filter disables authorization.
+# The operator owns separate per-binding EnvoyFilters, never this bootstrap.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: aep-access-ingress
+  namespace: higress-system
+spec:
+  workloadSelector:
+    labels:
+      app: higress-gateway
+  configPatches:
+    - applyTo: CLUSTER
+      match:
+        context: GATEWAY
+      patch:
+        operation: ADD
+        value:
+          name: aep-access-authorization
+          type: STRICT_DNS
+          connect_timeout: 2s
+          http2_protocol_options: {}
+          load_assignment:
+            cluster_name: aep-access-authorization
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: aep-access-authorino.aep-system.svc.cluster.local
+                          port_value: 50051
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          portNumber: 80
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+      patch:
+        operation: INSERT_FIRST
+        value:
+          name: envoy.filters.http.ext_authz
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+            failure_mode_allow: false
+            clear_route_cache: true
+            transport_api_version: V3
+            with_request_body:
+              max_request_bytes: 8192
+              allow_partial_message: false
+            grpc_service:
+              envoy_grpc:
+                cluster_name: aep-access-authorization
+              timeout: 2s
+    # Remove the caller bearer after authorization but before ai-proxy can
+    # inject a DIFFERENT provider credential. Router-level authorization
+    # removal would also erase that legitimate provider credential.
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          portNumber: 80
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.ext_authz
+      patch:
+        operation: INSERT_AFTER
+        value:
+          name: envoy.filters.http.header_mutation
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+            mutations:
+              request_mutations:
+                - remove: authorization
+                - remove: x-aep-access-binding
+                - remove: x-aep-access-observation
+    - applyTo: VIRTUAL_HOST
+      match:
+        context: GATEWAY
+        routeConfiguration:
+          # Higress 2.2.4 RDS name; unlike listener matching, its route
+          # patch context does not supply Istio's portNumber field.
+          name: higress-rds-80.*
+      patch:
+        operation: MERGE
+        value:
+          response_headers_to_remove:
+            - x-aep-access-observation

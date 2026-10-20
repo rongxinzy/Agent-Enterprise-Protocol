@@ -16,7 +16,8 @@ func TestAccessOptions(t *testing.T) {
 		t.Fatalf("unsafe enabled defaults: %#v %v", value, err)
 	}
 	for key, bad := range map[string]string{"AEP_GATEWAY_ACCESS_OPERATOR_ENABLED": "maybe", "AEP_GATEWAY_ACCESS_REQUIRE_ENTITLEMENT": "maybe",
-		"AEP_GATEWAY_ACCESS_REFRESH_SECONDS": "0", "AEP_GATEWAY_ACCESS_ISSUER_URL": "file:///tmp/issuer", "AEP_GATEWAY_ACCESS_POLICY_BASE_URL": "http://example.test?token=secret"} {
+		"AEP_GATEWAY_ACCESS_REFRESH_SECONDS": "0", "AEP_GATEWAY_ACCESS_ISSUER_URL": "file:///tmp/issuer", "AEP_GATEWAY_ACCESS_POLICY_BASE_URL": "http://example.test?token=secret",
+		"AEP_GATEWAY_ACCESS_INGRESS_HOST": "*.access.test"} {
 		input := map[string]string{}
 		for key, value := range good {
 			input[key] = value

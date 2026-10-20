@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -95,10 +96,18 @@ func wireManager(mgr ctrl.Manager) error {
 // election on by default so only one replica applies resources, with a clean handoff on
 // shutdown instead of holding the lease to expiry.
 func managerOptions() ctrl.Options {
+	byObject := map[client.Object]cache.ByObject{&corev1.Secret{}: {Namespaces: map[string]cache.Config{"aep-credentials": {}}}}
+	// Native routes live with Higress; do not expand all other informer scopes.
+	if os.Getenv("AEP_GATEWAY_ACCESS_INGRESS_HOST") != "" {
+		routes := &unstructured.Unstructured{}
+		routes.SetAPIVersion("networking.istio.io/v1alpha3")
+		routes.SetKind("EnvoyFilter")
+		byObject[routes] = cache.ByObject{Namespaces: map[string]cache.Config{"higress-system": {}}}
+	}
 	return ctrl.Options{
 		Scheme: scheme,
 		Cache: cache.Options{DefaultNamespaces: map[string]cache.Config{"aep-system": {}},
-			ByObject: map[client.Object]cache.ByObject{&corev1.Secret{}: {Namespaces: map[string]cache.Config{"aep-credentials": {}}}}},
+			ByObject: byObject},
 		Metrics: metricsserver.Options{
 			BindAddress: ":8092",
 		},

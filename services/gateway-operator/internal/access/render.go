@@ -134,7 +134,16 @@ func Render(grant *gateway.ModelAccessGrant, options Options) (*unstructured.Uns
 				"publication":  map[string]any{"selector": "auth.authorization.bounds.publication"},
 			}}}}}},
 	}
-	cm := &corev1.ConfigMap{ObjectMeta: *meta.DeepCopy(), Data: map[string]string{name + ".rego": boundsRego(grant.Spec, hash)}}
+	bounds := boundsRego(grant.Spec, hash)
+	if options.IngressHost != "" {
+		headers := config.Object["spec"].(map[string]any)["response"].(map[string]any)["success"].(map[string]any)["headers"].(map[string]any)
+		// Both fields overwrite caller input. Re-routing is safe only after the
+		// actual body model has passed scope, current-policy and expiry checks.
+		headers["x-aep-access-binding"] = map[string]any{"plain": map[string]any{"value": "authorized"}, "metrics": false, "priority": int64(0)}
+		headers["x-aep-model-id"] = map[string]any{"plain": map[string]any{"selector": "auth.authorization.bounds.requested_model"}, "metrics": false, "priority": int64(0)}
+		bounds += "\nrequested_model = body.model { body := json.unmarshal(input.context.request.http.body) }\n"
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: *meta.DeepCopy(), Data: map[string]string{name + ".rego": bounds}}
 	// Native metadata carries the sequence of the last semantic write. The
 	// reconciler preserves it on renewal, avoiding upstream cache reconstruction.
 	return config, cm, nil
