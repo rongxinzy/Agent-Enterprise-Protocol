@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aep-access-policy-source
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: aep-access-policy-source
+  ports:
+    - name: https
+      port: 443
+      targetPort: https

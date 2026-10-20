@@ -1,0 +1,177 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aep-access-policy-source
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aep-access-policy-source
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aep-access-policy-source
+    spec:
+      serviceAccountName: aep-access-policy-source
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: aep-access-policy-source
+      containers:
+        - name: sync
+          image: ghcr.io/kiwigrid/k8s-sidecar:2.14.1@sha256:092dbe0c335fba9af414a27630ca68f34df6185784fa847d9954187e69dbfdd7
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 2000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: RESOURCE
+              value: configmap
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LABEL
+              value: gateway.aep.zhiyuan.io/access-policy
+            - name: LABEL_VALUE
+              value: 'true'
+            - name: FOLDER
+              value: /policies
+            # Empty is supported by the pinned sidecar and disables annotation
+            # overrides: Kubernetes cannot admit an empty annotation key.
+            - name: FOLDER_ANNOTATION
+              value: ''
+            - name: METHOD
+              value: WATCH
+            - name: IGNORE_ALREADY_PROCESSED
+              value: 'true'
+            - name: DEFAULT_FILE_MODE
+              value: '0640'
+            - name: HEALTH_HOST
+              value: '0.0.0.0'
+            - name: HEALTH_PORT
+              value: '8080'
+            - name: WATCH_SERVER_TIMEOUT
+              value: '30'
+            - name: WATCH_CLIENT_TIMEOUT
+              value: '40'
+            - name: PYTHONDONTWRITEBYTECODE
+              value: '1'
+            - name: LOG_LEVEL
+              value: WARN
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+            - name: api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            - name: sync-tmp
+              mountPath: /tmp
+        - name: serve
+          image: nginxinc/nginx-unprivileged:1.30.2-alpine@sha256:de3e40ec8b7debd7194fc798d4bbfb102c7f8b012b2c73032816b5f72393acdd
+          command: [nginx]
+          args: [-g, 'daemon off;', -c, /etc/aep-nginx/nginx.conf]
+          securityContext:
+            runAsUser: 101
+            runAsGroup: 2000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+            - name: nginx-config
+              mountPath: /etc/aep-nginx
+              readOnly: true
+            - name: tls
+              mountPath: /etc/aep-tls
+              readOnly: true
+            - name: nginx-tmp
+              mountPath: /tmp
+      volumes:
+        - name: policies
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: sync-tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: nginx-tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: nginx-config
+          configMap:
+            name: aep-access-policy-nginx
+        - name: tls
+          secret:
+            secretName: aep-access-policy-tls
+            defaultMode: 0440
+        - name: api-access
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
