@@ -269,6 +269,11 @@ func (in *ModelAccessGrantSpec) DeepCopyInto(out *ModelAccessGrantSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.WorkloadPodUIDs != nil {
+		in, out := &in.WorkloadPodUIDs, &out.WorkloadPodUIDs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Licenses != nil {
 		in, out := &in.Licenses, &out.Licenses
 		*out = make([]ModelAccessLicense, len(*in))

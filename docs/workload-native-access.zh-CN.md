@@ -67,3 +67,23 @@ node tests/e2e/native-access-projection.mjs
 这是原生验证器/Operator 的隔离验收，不是完整业务验收：尚未覆盖员工生命周期写入、
 业务角色变更到该 Grant 的发布、DeerFlow 实际模型请求、企业许可证、Higress provider
 推理或 Redis 配额扣减。`Ready` 不伪造全副本采用结果，正式 `adoptionGate` 仍为 false。
+
+## 有效 Pod 边界（第一阶段）
+
+[#370](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/370) 的员工业务探针确认：
+删除 Pod 后，API Server 的新 TokenReview 已拒绝旧令牌，热身份缓存仍可能接受它。
+令牌未过期或 SA 未变化，不能证明原 Pod 仍然有效。
+
+`ModelAccessGrant.spec.workloadPodUids` 及规范快照的同名字段承载可信发布者观察到的
+有效 Pod UID 集合，最多 512 个。该字段可随新版本发布变化，位于不可变 binding 之外，
+不会改变员工身份、路由绑定或配额 Consumer。会话发布不得携带这份工作负载证据。
+快照要求排序、去重及有界 UID；relay 保留原样，并继续阻止同版本篡改与旧版本回放。
+
+原生、不缓存结果的 OPA 边界要求同一已认证 bearer 的 Pod UID 属于当前集合。集合变化
+只更新有绝对期限的外部策略，不重写 AuthConfig，也不清除身份或决策缓存；新 Pod 的新
+令牌仍需首次 TokenReview。缺失/空集合拒绝所有工作负载请求，不能回落到“非空 UID”。
+
+这是契约、relay 和执行器阶段；DB 证据登记、可信 Pod watch 及完整删除/替换业务验收
+仍需后续实现，不能据此关闭 #370 或开启采用。先更新 CRD，再更新执行器和证据生产链路；
+旧发布缺少该集合时会拒绝，实验入口应保持隔离。继续保留发布绝对期限、有界传播窗口及
+`adoptionGate=false`。隔离场景的人工 Grant 夹具不等于生产生命周期证据已接通。

@@ -79,3 +79,31 @@ This is verifier/Operator acceptance, not employee product acceptance. Lifecycle
 writing, business role-to-grant publication, DeerFlow calls, enterprise
 entitlements, Higress provider inference and Redis quota debit are not covered.
 Ready does not fabricate all-replica adoption; `adoptionGate` remains false.
+
+## Live Pod fencing (stage one)
+
+The employee business probe in [#370](https://github.com/rongxinzy/Agent-Enterprise-Protocol/issues/370)
+confirmed a deleted Pod's unexpired bearer remained accepted by warmed verifiers
+after the API Server rejected a fresh TokenReview. Token expiry and a stable SA
+alone do not prove that the original Pod remains live.
+
+`ModelAccessGrant.spec.workloadPodUids` and the same canonical-snapshot field
+carry at most 512 live Pod UIDs observed by a trusted publisher. This mutable
+evidence sits outside the immutable binding: changes retain employee identity,
+route binding and quota Consumer. Session publications cannot carry it. Canonical
+snapshots require sorted, unique, bounded UIDs; relay preserves the exact set and
+continues to fence same-version mutations and old-publication replays.
+
+The native uncached OPA bounds require the authenticated bearer's Pod UID to be
+in the current set. Changes update only the freshness-bounded external policy,
+without rewriting AuthConfig or evicting identity/decision caches. A new Pod's new
+bearer still needs its first TokenReview. Missing/empty evidence denies workload
+requests; there is no fallback to merely checking a nonempty Pod UID.
+
+This stage supplies the contract, relay and native guard, not database evidence,
+trusted Pod watches or complete deletion/replacement business acceptance. It does
+not close #370 or enable adoption. Install the CRD first, then the verifier and
+evidence-producing components. Old publications without the field will deny;
+keep experimental traffic isolated. Publication deadlines, bounded propagation
+and `adoptionGate=false` remain required. Test-written isolated Grants do not
+prove production lifecycle publication is connected.

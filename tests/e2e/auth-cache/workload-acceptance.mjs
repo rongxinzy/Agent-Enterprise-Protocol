@@ -46,6 +46,9 @@ export async function workloadAcceptance({kubectl, apply, forward, until, reques
   const b = accessGrant('employee-b', (await get('serviceaccount', 'employee-b')).metadata.uid, 'agent-b');
   const stale = accessGrant('employee-a', 'replaced-service-account-uid', 'agent-a');
   const grants = [a, b, stale];
+  for (const g of grants) {
+    g.spec.workloadPodUids = [(await get('pod', g.spec.binding.workload.serviceAccountName)).metadata.uid];
+  }
   await apply([{apiVersion: 'gateway.aep.zhiyuan.io/v1alpha1', kind: 'DeploymentConfig', metadata: {name: 'deployment', namespace},
     spec: {deploymentId: 'probe'}}, ...grants.map(g => g.grant())]);
   for (const g of grants) await until(() => get('configmap', 'access-' + g.binding));
@@ -118,6 +121,21 @@ export async function workloadAcceptance({kubectl, apply, forward, until, reques
   });
   assert.equal((await get('authconfig', 'access-' + a.binding)).metadata.resourceVersion, initial.metadata.resourceVersion);
   record('Workload renewal reaches both replicas without rewriting AuthConfig');
+  const observedPods = a.spec.workloadPodUids;
+  const beforePodChange = await reviewCount();
+  for (const pods of [b.spec.workloadPodUids, []]) {
+    a.spec.publication.sequence++; a.spec.publication.revision = 'pod-observation-' + a.spec.publication.sequence;
+    a.spec.workloadPodUids = pods; await apply([a.grant()]);
+    for (const port of ports) await until(async () => {
+      assert.equal((await call(port)).status, 403); assert.equal((await call(port, b, peer)).status, 200);
+    });
+    assert.equal((await get('authconfig', 'access-' + a.binding)).metadata.resourceVersion, initial.metadata.resourceVersion);
+  }
+  a.spec.publication.sequence++; a.spec.publication.revision = 'pod-observation-restored';
+  a.spec.workloadPodUids = observedPods; await apply([a.grant()]);
+  for (const port of ports) await until(async () => assert.equal((await call(port)).status, 200));
+  assert.equal(await reviewCount(), beforePodChange, 'Pod membership updates evicted warm identities');
+  record('Both warm replicas deny foreign/missing live Pod evidence and restore exact membership without TokenReview or peer eviction');
   a.spec.publication.sequence++; a.spec.publication.revision = 'model-revoked'; a.spec.models = [];
   await apply([a.grant()]);
   for (const port of ports) await until(async () => {
