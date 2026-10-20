@@ -242,22 +242,36 @@ func TestHandlerSeparatesLivenessAndReadiness(t *testing.T) {
 }
 
 // multipartBody builds an audio-transcription-shaped multipart payload with
-// the given form model and a fake audio file part.
-func multipartBody(t *testing.T, model string) (string, []byte) {
+// the given form model and a fake audio file part. modelLast puts the model
+// field after the file part — the OpenAI curl form (-F file=@... -F model=)
+// uses that order and extraction must not depend on part order.
+func multipartBody(t *testing.T, model string, modelLast bool) (string, []byte) {
 	t.Helper()
-	var buffer bytes.Buffer
-	writer := multipart.NewWriter(&buffer)
-	if model != "" {
+	writeModel := func(writer *multipart.Writer) {
+		if model == "" {
+			return
+		}
 		if err := writer.WriteField("model", model); err != nil {
 			t.Fatal(err)
 		}
 	}
-	part, err := writer.CreateFormFile("file", "audio.wav")
-	if err != nil {
-		t.Fatal(err)
+	writeFile := func(writer *multipart.Writer) {
+		part, err := writer.CreateFormFile("file", "audio.wav")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("RIFF-fake-audio-bytes")); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := part.Write([]byte("RIFF-fake-audio-bytes")); err != nil {
-		t.Fatal(err)
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	if modelLast {
+		writeFile(writer)
+		writeModel(writer)
+	} else {
+		writeModel(writer)
+		writeFile(writer)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
@@ -281,7 +295,7 @@ func TestHandlerForwardsMultipartTranscriptionWithFormModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contentType, body := multipartBody(t, "model-a")
+	contentType, body := multipartBody(t, "model-a", false)
 	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body))
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Authorization", "Bearer model-token")
@@ -308,7 +322,7 @@ func TestHandlerRejectsMultipartWithoutModelField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contentType, body := multipartBody(t, "")
+	contentType, body := multipartBody(t, "", false)
 	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body))
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Authorization", "Bearer model-token")
@@ -358,5 +372,21 @@ func TestHandlerPollingGetRequiresModelHeaderInScope(t *testing.T) {
 	handler.ServeHTTP(response, missing)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("header-less GET = %d, want 404", response.Code)
+	}
+}
+
+func TestHandlerReadsMultipartModelRegardlessOfPartOrder(t *testing.T) {
+	contentType, body := multipartBody(t, "model-a", true)
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	returnedBody, model, err := readModelRequest(request, 4096)
+	if err != nil {
+		t.Fatalf("model-after-file multipart = %v", err)
+	}
+	if model != "model-a" {
+		t.Fatalf("model = %q, want model-a", model)
+	}
+	if !bytes.Equal(returnedBody, body) {
+		t.Fatalf("multipart body was modified: %q", returnedBody)
 	}
 }

@@ -232,7 +232,7 @@ func readModelRequest(request *http.Request, limit int64) ([]byte, string, error
 		return nil, "", errRequestTooLarge
 	}
 	var model string
-	if mediaType, _, params, parseErr := parseContentType(request.Header.Get("Content-Type")); parseErr == nil && mediaType == "multipart/form-data" {
+	if mediaType, params, parseErr := mime.ParseMediaType(request.Header.Get("Content-Type")); parseErr == nil && mediaType == "multipart/form-data" {
 		model, err = multipartModelField(body, params["boundary"])
 	} else {
 		model, err = jsonModelField(body)
@@ -241,14 +241,6 @@ func readModelRequest(request *http.Request, limit int64) ([]byte, string, error
 		return nil, "", err
 	}
 	return body, model, nil
-}
-
-func parseContentType(value string) (string, string, map[string]string, error) {
-	mediaType, params, err := mime.ParseMediaType(value)
-	if err != nil {
-		return "", "", nil, err
-	}
-	return mediaType, "", params, nil
 }
 
 func jsonModelField(body []byte) (string, error) {
