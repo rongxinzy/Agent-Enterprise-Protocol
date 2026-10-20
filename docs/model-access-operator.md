@@ -169,6 +169,48 @@ service-issued human-session model JWTs; enterprise entitlements, trusted
 employee workloads, shared Higress ingress, provider inference, quota and
 NetworkPolicy enforcement remain outside its scope. `adoptionGate` stays false.
 
+### Optional real shared Higress ingress acceptance
+
+On top of business mode and HTTPS settings, set `AEP_NATIVE_ACCESS_HIGRESS=true`
+and `HELM`. `AEP_HIGRESS_CORE_CHART` may point to a local Higress core **2.2.4**
+chart; otherwise that fixed version is fetched from the official repository.
+Docker must cache matching `gateway`, `higress` and `pilot` images (full addresses
+in `tests/e2e/auth-cache/higress-install.mjs`). This mode installs real Higress
+CRDs/controllers instead of the schema fixture.
+
+Native Envoy gRPC `ext_authz` and per-binding route `context_extensions.host`
+map the untrusted, test-only `x-aep-access-binding` hint to an AuthConfig.
+Authorino still validates the actual JWT subject/session and request body model;
+the hint grants no permission and is not a published public contract. A
+credential-free echo upstream reports sensitive-header presence only, never
+tokens or body contents. The inference Host/path remain unchanged; bearer,
+binding and tested identity/Consumer/internal-observation headers are removed
+before upstream forwarding.
+
+Checks cover cross-session/missing/unknown hints, invalid bearer, forged
+identity, actual model escalation, malformed and oversized bodies. An independent
+upstream counter confirms denied requests never reach the upstream. Business
+role/team/model changes, session revocation and Control/relay outage expiry and
+recovery also pass through real Higress, alongside the existing per-Pod checks.
+Stopping every authorization process must fail closed, then recover on restart.
+
+An initial HTTP `ext_authz` formatter attempt was rejected by the real gateway
+with `:-prefixed or host headers may not be modified`. Formatter support does
+not establish support for that use. The gRPC fixture explicitly creates routes
+for actual sessions; production ownership, dynamic route publication/retirement,
+all-process adoption and capacity costs remain unimplemented/unverified.
+An explicit limitation check demonstrates that unlisted `x-aep-*` headers,
+including dynamic rate-limit headers, still reach the echo. This is recorded as
+a known limitation, not a security capability pass. Adoption requires sanitizing
+the entire reserved header namespace before deriving trusted quota identity;
+the fixture must not be adopted directly.
+
+This is isolated acceptance configuration, not a production default ingress.
+Provider inference, enterprise entitlements, employee workloads, trusted
+Consumer/Redis quota identity, NetworkPolicy and cache-hit evidence remain
+unverified; no trusted identity-header delivery is implemented here. These
+product adoption gates remain open and `adoptionGate=false`.
+
 Remaining adoption gates include:
 
 - Broader DB→outbox→relay→CR→Operator business coverage, including licenses,

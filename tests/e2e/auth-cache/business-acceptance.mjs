@@ -75,9 +75,18 @@ export async function businessAcceptance(context) {
     assert(test(value.spec), 'Business mutation has not reached its CR');
     return value;
   });
-  const enforcement = (person, status, id = model.id) => until(async () => fleet.check(person, id, status));
+  let gateway;
+  const enforcement = (person, status, id = model.id) => until(async () => {
+    const result = await fleet.check(person, id, status);
+    if (gateway) await gateway.check(person, status, id);
+    return result;
+  });
   const allowed = spec => !spec.disabled && spec.models.includes(model.id);
   await policy(alice, allowed); await policy(bob, allowed);
+  if (process.env.AEP_NATIVE_ACCESS_HIGRESS === 'true') {
+    const {higressAccess} = await import('./higress-access.mjs');
+    gateway = await higressAccess(context, alice, bob, model);
+  }
   const initial = await enforcement(alice, 200); await enforcement(bob, 200);
   assert.deepEqual((await alice.client.listModels()).models.map(m => m.id), [model.id]);
   record('Real SDK/API role grants, team defaults and password sessions reach both independently enumerated native processes', {processes: fleet.identities(), observations: initial});
@@ -190,4 +199,5 @@ WHERE s.deployment_id='probe'`;
   assert.notEqual(final.status?.conditions?.find(c => c.type === 'Ready')?.status, 'True');
   assert.equal(final.status?.replicas?.length ?? 0, 0);
   record('Rediscovery observes the new native process incarnation after restart; current allow/retired deny recover and no product Ready evidence is fabricated', {processes: fleet.identities()});
+  if (gateway) await gateway.outage(bob);
 }

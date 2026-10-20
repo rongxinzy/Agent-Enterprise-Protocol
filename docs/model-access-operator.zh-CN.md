@@ -128,6 +128,37 @@ Control Service，在自有 Kind 内部署一次性 PostgreSQL、对象存储和
 人类会话 model JWT，仍不覆盖企业 entitlement、可信员工 workload、共享 Higress
 入口、供应商推理、配额或 NetworkPolicy 执行。`adoptionGate` 继续为 false。
 
+### 可选真实 Higress 共享入口验收
+
+在业务模式和 HTTPS 参数基础上设置 `AEP_NATIVE_ACCESS_HIGRESS=true`，并配置
+`HELM`。可通过 `AEP_HIGRESS_CORE_CHART` 指向本地 Higress core **2.2.4** chart；
+不设置时从官方仓库获取该固定版本。Docker 需缓存同版本 `gateway`、`higress`、
+`pilot` 镜像，完整地址见 `tests/e2e/auth-cache/higress-install.mjs`。此模式安装真实
+Higress CRD 和控制器，不再安装 schema 夹具。
+
+共享入口使用原生 Envoy gRPC `ext_authz` 和逐绑定路由的 `context_extensions.host`，
+将测试专用、非可信的 `x-aep-access-binding` 提示映射为鉴权配置。Authorino 必须继续验证实际 JWT
+中的主体、会话及实际请求体模型；提示本身不授予权限，也不是已发布的公共契约。
+上游为不包含凭据的 echo，只返回敏感头存在性，不反射令牌或请求正文。原始推理
+Host/路径保留，bearer、提示及测试列出的身份/Consumer/内部观察头在转发前移除。
+
+测试覆盖跨会话/空/未知提示、错误 bearer、伪造身份、实际模型越权、异常或超大正文，
+并以独立上游计数器确认拒绝请求未到上游。业务模式中的角色/团队/模型变更、会话
+撤销、Control/relay 中断到期和恢复也通过真实 Higress 检查；另外停止全部鉴权进程，
+确认网关拒绝转发并在恢复后正常放行。原有逐 Pod 检查仍保留。
+
+实验先尝试了 HTTP `ext_authz` formatter 改写 Host/路径；真实网关以
+`:-prefixed or host headers may not be modified` 拒绝监听器配置。不能将 formatter
+存在视为该用途可用。当前 gRPC 方案由测试为实际会话建立显式路由；产品级独占 writer、
+路由动态发布/回收、全副本采用和容量成本尚待实现与验证。
+测试还明确检查精确头列表的边界：未列出的 `x-aep-*` 头（包括动态限流头）仍会到达
+echo。此项按已知限制记录，不是安全能力通过；正式接入必须清理整个保留头命名空间，
+再由可信鉴权结果生成配额身份，不能直接采用该测试夹具。
+
+这是隔离验收配置，不是生产默认入口：不验证供应商推理、企业 entitlement、员工
+workload、可信 Consumer/Redis 配额身份、NetworkPolicy 或缓存命中；没有新增可信
+身份头发布能力。完整产品采用仍需补齐这些门槛，`adoptionGate=false`。
+
 正式采用前还需完成：
 
 - 更广业务场景的 DB→outbox→relay→CR→Operator 覆盖，包括许可证、计划到期与 agent
