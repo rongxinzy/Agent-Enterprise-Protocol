@@ -81,8 +81,8 @@ assert(!JSON.stringify(remaining).includes("draft-profile"), "remaining GA gates
 const tokenStore = await readText("packages/aep-sdk-node/src/token-store.ts");
 assert(tokenStore.includes("ProtectedRefreshTokenStore"), "SDK protected refresh-token store is missing");
 assert(!tokenStore.includes("tokens.accessToken") && !tokenStore.includes("tokens.modelAccessToken"), "protected token store may not persist short-lived tokens");
-const sdkClient = await readText("packages/aep-sdk-node/src/client.ts");
-assert(sdkClient.includes("restoreSession()"), "SDK cold-start session restoration is missing");
+const sdkSessionClient = await readText("packages/aep-sdk-node/src/client-session.ts");
+assert(sdkSessionClient.includes("restoreSession()"), "SDK cold-start session restoration is missing");
 
 const goModule = await readText("go.mod");
 assert(/^go\s+1\.26\.9$/m.test(goModule), "patched Go 1.26.9 baseline is not pinned");
