@@ -11,6 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {namespace, sourceRevision, crdHash, image, resources, policy} from './auth-cache/resources.mjs';
 import {sharedGateway, gatewayImage} from './auth-cache/shared-gateway.mjs';
 import {aepJwt} from './auth-cache/aep-jwt.mjs';
+import {renewal} from './auth-cache/renewal.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const kind = process.env.KIND ?? 'kind';
@@ -106,6 +107,7 @@ try {
   await apply(resources(mock));
   console.log('Waiting for two independent component replicas');
   for (const name of ['introspection', 'authorino-a', 'authorino-b']) {
+    console.log('Waiting for deployment/' + name);
     await kubectl(['-n', namespace, 'rollout', 'status', 'deployment/' + name, '--timeout=120s']);
   }
   const ports = await Promise.all(['authorino-a', 'authorino-b'].map(name => forward('deployment/' + name, 5001)));
@@ -237,10 +239,19 @@ try {
   if (process.env.AEP_AUTH_CACHE_JWT === '1') {
     await aepJwt({command, publish, request, ports, statsPort, record, until});
   }
+  if (process.env.AEP_AUTH_CACHE_RENEWAL === '1') {
+    await renewal({publish, request, ports, statsPort, stats, kubectl, record, until});
+  }
   report.completed = true;
 } catch (error) {
   report.completed = false;
   report.error = error.message;
+  if (owned) {
+    // Only inspect the owned fixture namespace, never another cluster's logs
+    // or Secret data. Keep startup/pull failures distinguishable from assertions.
+    try {report.fixturePods = await kubectl(['-n', namespace, 'get', 'pods', '-o', 'wide'], {timeout: 10_000});}
+    catch {report.fixturePods = 'Unavailable';}
+  }
   throw error;
 } finally {
   for (const child of forwards) child.kill();

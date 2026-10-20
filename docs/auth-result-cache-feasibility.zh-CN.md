@@ -24,6 +24,8 @@ node tests/e2e/auth-result-cache.mjs
 
 设置 `AEP_AUTH_CACHE_GATEWAY=1` 可增加下述同一入口的原生 Envoy 外部鉴权验证；测试集群需要能从 Docker Hub 拉取镜像。Kind 仅用于本地临时测试，不是新增产品组件或生产依赖；生产 Kubernetes/k3s 的部署不依赖本脚本。
 
+设置 `AEP_AUTH_CACHE_RENEWAL=1` 可追加原生外部策略刷新验证，覆盖续期保留热结果、语义哈希隔离，以及 HTTP/策略编译失败后的到期拒绝与恢复。
+
 配合 JWT 扩展设置 `AEP_AUTH_CACHE_PRODUCT_DISCOVERY=1`，可把实际 AEP 公共 HTTP handler 输出的 discovery 与 JWKS 原样提供给组件，替代合成元数据。工作区须包含 [#342](https://github.com/rongxinzy/Agent-Enterprise-Protocol/pull/342) 的服务实现，缺少端点会拒绝继续；集群仅接收公开元数据。
 
 程序使用独立 kubeconfig，新建随机 `aep-auth-cache-*` 集群，只在该集群安装上游 CRD、两个 Authorino 副本及模拟 introspection 服务。副本启用原生 `--enable-leader-election`，以命名空间内 Lease 选出状态写入者，两个副本仍独立监听配置并服务。Node 辅助镜像使用当前平台归档导入，要求 Docker 支持 `docker image save --platform`；Authorino 由集群按固定 digest 拉取，避免 Docker/containerd 的 OCI 索引导入悬空引用问题。正常成功或失败均删除自建集群与临时文件；进程被强制结束时，按 Kind/Docker 名称清理本次自建集群，不删除其他集群。不调用云端模型、不读取 AEP 密钥、不更新既有预览集群。
@@ -98,6 +100,18 @@ JWT `jti` 不变只证明绑定，不证明跳过验签；原生授权时间戳�
 2026-10-19 同时启用两项可选扩展，完整运行十九项观察，含三项刻意复现的限制。直接 JWKS 在两副本均以 401 拒绝正式 AEP 模型令牌；声明 EdDSA 的 discovery 接受该令牌，每副本随后三次调用的完整允许范围决策时间戳不变。十四类错误令牌及实际请求模型越界均被拒绝，有效热决策不受影响。短令牌先成功预热，过期后拒绝；发布会话撤销和主体禁用后，两副本均拒绝有效模型令牌。报告 `completed: true`、`adoptionGate: false`、`cleaned: true`。
 
 首轮 JWT 测试因 access 配置漏写原生 `allValues`，下一层无法读取完整模型集合而正确返回 403；修正夹具后完整重跑，未删减拒绝断言。此为测试配置错误，不是产品缺陷。经 discovery 的 AEP JWT 兼容现已取得组件证据，但直接 JWKS 不兼容、产品没有 discovery 仍需解决；未修改公共 API、业务发布器或默认链路。
+
+## 续期不重建鉴权缓存
+
+[续期扩展](../tests/e2e/auth-cache/renewal.mjs)将稳定的逐绑定 AuthConfig 与变化的新鲜度策略分开。固定版本的[上游 OPA 实现](https://github.com/Kuadrant/authorino/blob/8232753b58bec6994f5d914d239cc410fcf5173f/pkg/evaluators/authorization/opa.go)支持 `externalPolicy.url` 和原生 TTL 刷新：原位重新编译外部策略，不调和 AuthConfig、不重建身份与授权缓存。外部边界检查自身不能缓存结果，否则旧 allow 会绕过新策略及绝对到期时间。
+
+夹具缓存完整允许模型范围和语义策略哈希，独立的原生边界检查逐请求核对实际模型、凭据到期、发布绝对有效期与缓存哈希。单纯续期只更新外部策略，不能修改 AuthConfig 的 metadata/spec；语义授权变化才更新受影响绑定的 AuthConfig。外部哈希与缓存不符时拒绝，不能靠新有效期延长旧权限。两个服务副本都单独检查，Alice 的续期和变更不能清除 Bob 的有效结果。
+
+断言要求原有效期内成功预热，两副本采用续期，超过原期限后身份和授权见证值仍不变、Alice introspection 不增加、AuthConfig resourceVersion/spec 不变。切换到另一个已允许模型仍复用完整范围，越界模型与跨主体请求拒绝。HTTP 503 与非法 Rego 各自验证：上游保留的最后良好模块仍按原绝对期限拒绝热许可，恢复新鲜的相同哈希后复用两类热结果。策略源拉取次数与 introspection 次数分别记录。
+
+这是组件机制实验，尚未接入业务发布系统。Node 可变策略端点仅为临时夹具，不能作为产品策略注册中心部署。产品静态内容交付、安全边界、单调版本/回放保护、全进程发布确认及 DB→CR→Operator 仍待实现。原生外部刷新按每个进程的每个 evaluator 定期拉取，一秒仅为实验参数，不代表生产建议或 watch 驱动。源故障会保留旧编译模块，必须靠模块中的绝对期限保证到期拒绝；本实验不证明吞吐、容量或采用门槛已完成。
+
+2026-10-20 同时启用网关、JWT、产品 discovery 与续期扩展，完整运行 **24 项观察**，含三项已记录的目标限制。两副本超过原有效期仍复用原身份和授权结果，Alice 语义哈希变化仅让 Alice 重新鉴权，Bob 保持热结果。HTTP 故障和非法 Rego 均不能延长最后良好期限，恢复相同哈希的新鲜模块后继续复用缓存。报告为 `completed: true`、`adoptionGate: false`、`cleaned: true`。此前一次启动在断言前超时并已清理；成功运行遇到镜像仓延迟/EOF，将已有的相同平台镜像导入本次独立集群以预载内容，固定引用与断言均保留，原三个本地集群未改动。
 
 ## 实际公共 handler 联验
 
